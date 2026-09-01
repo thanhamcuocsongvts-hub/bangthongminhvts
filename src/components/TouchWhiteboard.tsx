@@ -16,12 +16,14 @@ import {
   Type,
   Grid,
   Check,
+  X,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint } from '../types';
 
 interface TouchWhiteboardProps {
   id?: string;
   isOverlay?: boolean;
+  onCloseOverlay?: () => void;
   backgroundTheme?: 'blackboard' | 'slate' | 'graph' | 'white';
   onBackgroundChange?: (theme: 'blackboard' | 'slate' | 'graph' | 'white') => void;
   children?: React.ReactNode;
@@ -30,6 +32,7 @@ interface TouchWhiteboardProps {
 export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   id = 'interactive-whiteboard-area',
   isOverlay = false,
+  onCloseOverlay,
   backgroundTheme = 'blackboard',
   onBackgroundChange,
   children,
@@ -357,150 +360,179 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
       {/* Floating 75-Inch Touch Toolbar (Collapsible Sleek Interface) */}
       {isToolbarCollapsed ? (
-        <button
-          id="restore-touch-toolbar-btn"
-          onClick={() => setIsToolbarCollapsed(false)}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-full bg-slate-900/90 hover:bg-slate-950 text-white font-bold text-xs flex items-center gap-2 shadow-2xl backdrop-blur-md border border-slate-700/80 transition-all active:scale-95 animate-bounce hover:animate-none"
-          title="Mở thanh công cụ viết/vẽ"
-        >
-          <Pen className="w-4 h-4 text-amber-400" />
-          <span>Mở Hộp Bút Viết & Vẽ</span>
-        </button>
+        <div className="absolute bottom-3 right-4 z-30 pointer-events-auto animate-fade-in flex items-center gap-2">
+          <button
+            id="restore-touch-toolbar-btn"
+            onClick={() => setIsToolbarCollapsed(false)}
+            className="px-4 py-2.5 rounded-full bg-slate-950/90 hover:bg-indigo-600 text-white font-bold text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl border-2 border-white/40 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            title="Mở thanh công cụ viết/vẽ"
+          >
+            <Pen className="w-4 h-4 text-emerald-400" />
+            <span>Mở Thanh Bút Viết & Vẽ</span>
+          </button>
+          {isOverlay && onCloseOverlay && (
+            <button
+              onClick={onCloseOverlay}
+              className="px-3 py-2.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xl border border-white/30 transition-all active:scale-95 cursor-pointer"
+              title="Tắt chế độ vẽ đè"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Tắt Vẽ</span>
+            </button>
+          )}
+        </div>
       ) : (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-2xl bg-white/95 backdrop-blur-md border border-slate-200 shadow-2xl max-w-[96vw]">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-2xl md:rounded-3xl bg-slate-950/95 backdrop-blur-2xl border-2 border-white/25 shadow-2xl text-white max-w-[98vw] overflow-x-auto custom-scrollbar-none shrink-0">
           {/* Tool Pickers */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               id="tool-pen-btn"
               onClick={() => setActiveTool('pen')}
-              title="Bút vẽ (Pen)"
-              className={`p-2 rounded-lg transition-all flex items-center gap-1 text-xs font-bold ${
-                activeTool === 'pen' ? 'bg-indigo-600 text-white shadow-sm scale-105' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
+              title="Bút phấn viết tự do"
+              className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-bold shrink-0 ${
+                activeTool === 'pen' ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-400' : 'hover:bg-white/10 text-slate-300'
               }`}
             >
               <Pen className="w-4 h-4" />
-              <span className="hidden md:inline">Bút</span>
+              <span className="hidden lg:inline text-[11px]">Bút Viết</span>
             </button>
 
             <button
               id="tool-highlighter-btn"
               onClick={() => setActiveTool('highlighter')}
-              title="Bút dạ quang (Highlighter)"
-              className={`p-2 rounded-lg transition-all flex items-center gap-1 text-xs font-bold ${
-                activeTool === 'highlighter' ? 'bg-amber-500 text-white shadow-sm scale-105' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
+              title="Bút dạ quang đánh dấu"
+              className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-bold shrink-0 ${
+                activeTool === 'highlighter' ? 'bg-amber-500 text-white shadow-md ring-2 ring-amber-300' : 'hover:bg-white/10 text-slate-300'
               }`}
             >
               <Highlighter className="w-4 h-4" />
-              <span className="hidden md:inline">Dạ quang</span>
+              <span className="hidden lg:inline text-[11px]">Dạ Quang</span>
             </button>
 
             <button
               id="tool-laser-btn"
               onClick={() => setActiveTool('laser')}
               title="Con trỏ Laser chỉ điểm"
-              className={`p-2 rounded-lg transition-all flex items-center gap-1 text-xs font-bold ${
-                activeTool === 'laser' ? 'bg-red-600 text-white shadow-sm scale-105' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
+              className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-bold shrink-0 ${
+                activeTool === 'laser' ? 'bg-red-600 text-white shadow-md ring-2 ring-red-400' : 'hover:bg-white/10 text-slate-300'
               }`}
             >
               <Sparkles className="w-4 h-4 text-yellow-300" />
-              <span className="hidden md:inline">Laser</span>
+              <span className="hidden xl:inline text-[11px]">Laser</span>
             </button>
 
             <button
               id="tool-eraser-btn"
               onClick={() => setActiveTool('eraser')}
               title="Cục tẩy nét vẽ"
-              className={`p-2 rounded-lg transition-all flex items-center gap-1 text-xs font-bold ${
-                activeTool === 'eraser' ? 'bg-rose-600 text-white shadow-sm scale-105' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
+              className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-bold shrink-0 ${
+                activeTool === 'eraser' ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400' : 'hover:bg-white/10 text-slate-300'
               }`}
             >
               <Eraser className="w-4 h-4" />
-              <span className="hidden md:inline">Tẩy</span>
+              <span className="hidden lg:inline text-[11px]">Khăn Lau</span>
             </button>
           </div>
 
+          <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
+
           {/* Geometric Shapes */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               id="tool-line-btn"
               onClick={() => setActiveTool('line')}
               title="Đường thẳng"
-              className={`p-1.5 rounded-lg ${activeTool === 'line' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
+              className={`p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1 shrink-0 ${activeTool === 'line' ? 'bg-purple-600 text-white ring-2 ring-purple-400' : 'hover:bg-white/10 text-purple-300'}`}
             >
               <Minus className="w-4 h-4" />
+              <span className="hidden xl:inline text-[11px]">Thẳng</span>
             </button>
             <button
               id="tool-arrow-btn"
               onClick={() => setActiveTool('arrow')}
               title="Mũi tên chỉ dẫn"
-              className={`p-1.5 rounded-lg ${activeTool === 'arrow' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
+              className={`p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1 shrink-0 ${activeTool === 'arrow' ? 'bg-purple-600 text-white ring-2 ring-purple-400' : 'hover:bg-white/10 text-purple-300'}`}
             >
               <MoveUpRight className="w-4 h-4" />
+              <span className="hidden xl:inline text-[11px]">Mũi tên</span>
             </button>
             <button
               id="tool-rect-btn"
               onClick={() => setActiveTool('rect')}
               title="Hình chữ nhật"
-              className={`p-1.5 rounded-lg ${activeTool === 'rect' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
+              className={`p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1 shrink-0 ${activeTool === 'rect' ? 'bg-purple-600 text-white ring-2 ring-purple-400' : 'hover:bg-white/10 text-purple-300'}`}
             >
               <Square className="w-4 h-4" />
+              <span className="hidden xl:inline text-[11px]">Chữ nhật</span>
             </button>
             <button
               id="tool-circle-btn"
               onClick={() => setActiveTool('circle')}
               title="Hình tròn / Elip"
-              className={`p-1.5 rounded-lg ${activeTool === 'circle' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
+              className={`p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1 shrink-0 ${activeTool === 'circle' ? 'bg-purple-600 text-white ring-2 ring-purple-400' : 'hover:bg-white/10 text-purple-300'}`}
             >
               <Circle className="w-4 h-4" />
+              <span className="hidden xl:inline text-[11px]">Hình tròn</span>
             </button>
           </div>
 
-          {/* Color Palette (Large Touch Dots) */}
-          <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1.5 rounded-xl border border-slate-200">
+          <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
+
+          {/* Color Palette */}
+          <div className="flex items-center gap-1.5 shrink-0">
             {colors.map((c) => (
               <button
                 key={c.value}
                 id={`color-btn-${c.value.replace('#', '')}`}
-                onClick={() => setActiveColor(c.value)}
+                onClick={() => {
+                  setActiveColor(c.value);
+                  if (activeTool === 'eraser') setActiveTool('pen');
+                }}
                 title={c.label}
                 style={{ backgroundColor: c.value }}
                 className={`w-6 h-6 rounded-full transition-all border-2 ${
-                  activeColor === c.value ? 'scale-125 border-slate-900 ring-2 ring-indigo-400 shadow-sm' : 'border-slate-300 hover:scale-110'
+                  activeColor === c.value ? 'scale-125 border-white ring-2 ring-white/60 shadow-md' : 'border-white/40 hover:scale-110 opacity-80 hover:opacity-100'
                 }`}
               />
             ))}
           </div>
 
+          <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
+
           {/* Stroke Width Selector */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          <div className="flex items-center gap-1 shrink-0">
             {[2, 4, 8, 14].map((sz) => (
               <button
                 key={sz}
                 id={`stroke-sz-${sz}`}
                 onClick={() => setStrokeSize(sz)}
                 title={`Độ dày: ${sz}px`}
-                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-all ${
-                  strokeSize === sz ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                className={`w-7 h-7 rounded-xl flex items-center justify-center text-[10px] font-mono font-bold transition-all ${
+                  strokeSize === sz ? 'bg-white text-slate-900 shadow-md font-black' : 'hover:bg-white/10 text-slate-300'
                 }`}
               >
-                <div
-                  style={{ width: `${Math.min(sz * 1.5, 12)}px`, height: `${Math.min(sz * 1.5, 12)}px` }}
-                  className="bg-current rounded-full"
-                />
+                {sz}p
               </button>
             ))}
           </div>
 
+          <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
+
           {/* Canvas Actions: Undo, Redo, Clear */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               id="whiteboard-undo-btn"
               onClick={handleUndo}
               disabled={strokes.length === 0}
               title="Hoàn tác (Undo)"
-              className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-30 disabled:pointer-events-none border border-slate-200"
+              className={`p-2 rounded-xl flex items-center gap-1 font-bold text-xs transition-all ${
+                strokes.length > 0
+                  ? 'bg-white/15 hover:bg-white/25 text-amber-300 hover:scale-105 active:scale-95'
+                  : 'text-slate-500 opacity-40 cursor-not-allowed'
+              }`}
             >
               <RotateCcw className="w-4 h-4" />
+              <span className="text-[10px] hidden lg:inline">Undo</span>
             </button>
 
             <button
@@ -508,9 +540,14 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
               onClick={handleClear}
               disabled={strokes.length === 0}
               title="Xóa toàn bộ nét vẽ"
-              className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 disabled:opacity-30 disabled:pointer-events-none"
+              className={`p-2 rounded-xl flex items-center gap-1 font-bold text-xs transition-all ${
+                strokes.length > 0
+                  ? 'bg-rose-500/20 hover:bg-rose-600 text-rose-300 hover:text-white'
+                  : 'text-slate-500 opacity-40 cursor-not-allowed'
+              }`}
             >
               <Trash2 className="w-4 h-4" />
+              <span className="text-[10px] hidden lg:inline">Xóa Bảng</span>
             </button>
 
             {/* Blackboard Theme Switcher */}
@@ -525,23 +562,30 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
                   onBackgroundChange(nextTheme);
                 }}
                 title="Đổi nền bảng"
-                className="px-2 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1"
+                className="px-2 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold flex items-center gap-1"
               >
-                <Grid className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="hidden xl:inline">
+                <Grid className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden xl:inline text-[11px]">
                   {backgroundTheme === 'blackboard' ? 'Bảng xanh' : backgroundTheme === 'graph' ? 'Ô ly' : backgroundTheme === 'white' ? 'Trắng' : 'Tối'}
                 </span>
               </button>
             )}
 
-            {/* Collapse Toolbar Button */}
+            {/* Close / Collapse Toolbar Button */}
             <button
               id="collapse-touch-toolbar-btn"
-              onClick={() => setIsToolbarCollapsed(true)}
-              title="Thu gọn thanh công cụ để nhìn rộng bảng"
-              className="p-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-600 hover:text-slate-900 border border-slate-300"
+              onClick={() => {
+                if (isOverlay && onCloseOverlay) {
+                  onCloseOverlay();
+                } else {
+                  setIsToolbarCollapsed(true);
+                }
+              }}
+              title={isOverlay && onCloseOverlay ? "Tắt chế độ vẽ đè" : "Thu gọn thanh công cụ"}
+              className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 shadow-md transition-all ml-1 active:scale-95 cursor-pointer"
             >
-              <Eye className="w-4 h-4" />
+              <X className="w-4 h-4" />
+              <span className="text-[11px]">{isOverlay && onCloseOverlay ? "Tắt vẽ" : "Thu gọn"}</span>
             </button>
           </div>
         </div>

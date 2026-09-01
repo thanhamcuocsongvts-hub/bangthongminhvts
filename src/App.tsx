@@ -244,12 +244,12 @@ export default function App() {
     }
   };
 
-  // Send message to AI Backend
-  const handleSendAIMessage = async (text: string) => {
+  // Send message to AI Backend with specific Scope (Page, Slide, Chapter, or Full Document)
+  const handleSendAIMessage = async (text: string, customContext?: string, scopeTitle?: string) => {
     const userMsg: ChatMessage = {
       id: 'msg_' + Date.now(),
       sender: 'user',
-      text,
+      text: scopeTitle ? `[Phạm vi: ${scopeTitle}]\n${text}` : text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -262,8 +262,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: text,
-          contextText: currentLesson.rawText,
-          topic: currentLesson.title,
+          contextText: customContext || currentLesson.rawText,
+          topic: scopeTitle ? `${currentLesson.title} (${scopeTitle})` : currentLesson.title,
         }),
       });
 
@@ -338,9 +338,33 @@ export default function App() {
 
   // Update teacher data (e.g. from Gradebook)
   const handleUpdateActiveTeacher = (updatedTeacher: TeacherProfile) => {
-    setTeachers((prev) =>
-      prev.map((t) => (t.id === updatedTeacher.id ? updatedTeacher : t))
-    );
+    setTeachers((prev) => {
+      const next = prev.map((t) => (t.id === updatedTeacher.id ? updatedTeacher : t));
+      localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Delete Teacher (Admin)
+  const handleDeleteTeacher = (teacherId: string) => {
+    setTeachers((prev) => {
+      const next = prev.filter((t) => t.id !== teacherId);
+      localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      return next;
+    });
+    if (activeTeacherId === teacherId) {
+      setActiveTeacherId('');
+      localStorage.removeItem('smartboard_active_teacher');
+    }
+  };
+
+  // Reset Password for Teacher (Admin)
+  const handleResetPassword = (teacherId: string) => {
+    setTeachers((prev) => {
+      const next = prev.map((t) => (t.id === teacherId ? { ...t, password: '' } : t));
+      localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      return next;
+    });
   };
 
   // Logout Teacher
@@ -642,6 +666,13 @@ export default function App() {
         </AnimatePresence>
       </main>
 
+      {/* Persistent Bottom Teacher Attribution Footer */}
+      <footer className="py-1.5 px-4 bg-slate-900 border-t border-slate-800 text-center text-xs text-slate-300 select-none z-20 flex items-center justify-center gap-2 shrink-0">
+        <span>Được phát triển bởi <strong className="text-emerald-400 font-black">Thầy Trịnh Tuấn Kiệt</strong></span>
+        <span className="text-slate-600">•</span>
+        <span className="text-slate-400 font-medium">SmartBoard 75 Pro Giáo Dục Cảm Ứng</span>
+      </footer>
+
       {/* Teacher Authentication / Profile Switcher Modal */}
       {showTeacherAuthModal && (
         <EducationalAuthScreen
@@ -655,11 +686,17 @@ export default function App() {
             setShowTeacherAuthModal(false);
           }}
           onAddNewTeacher={(newT) => {
-            setTeachers((prev) => [...prev, newT]);
+            setTeachers((prev) => {
+              const next = [...prev, newT];
+              localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+              return next;
+            });
             setActiveTeacherId(newT.id);
             localStorage.setItem('smartboard_active_teacher', newT.id);
             setShowTeacherAuthModal(false);
           }}
+          onDeleteTeacher={handleDeleteTeacher}
+          onResetPassword={handleResetPassword}
           onLogout={handleLogout}
         />
       )}

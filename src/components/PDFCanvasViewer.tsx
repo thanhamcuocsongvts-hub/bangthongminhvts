@@ -46,6 +46,17 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderTaskRef = useRef<any>(null);
 
+  // Action state
+  const [internalZoom, setInternalZoom] = useState<number>(zoom);
+  const [viewMode, setViewMode] = useState<'single' | 'continuous'>('continuous');
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Sync prop zoom if updated from parent
+  useEffect(() => {
+    if (zoom) setInternalZoom(zoom);
+  }, [zoom]);
+
   // Load PDF Document
   useEffect(() => {
     let isMounted = true;
@@ -97,9 +108,9 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
     };
   }, [fileUrl]);
 
-  // Render Current Page to Canvas
+  // Render Current Page to Canvas (Single Mode)
   useEffect(() => {
-    if (!pdfDoc || !canvasRef.current) return;
+    if (!pdfDoc || !canvasRef.current || viewMode !== 'single') return;
 
     let isCurrent = true;
 
@@ -121,7 +132,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
         if (!ctx) return;
 
         // Base scale factor adjusted for user zoom and rotation
-        const scaleFactor = (zoom / 100) * 1.5; // High-DPI 1.5x sharp multiplier
+        const scaleFactor = (internalZoom / 100) * 1.5; // High-DPI 1.5x sharp multiplier
         const viewport = page.getViewport({ scale: scaleFactor, rotation });
 
         canvas.height = viewport.height;
@@ -147,14 +158,26 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
     return () => {
       isCurrent = false;
     };
-  }, [pdfDoc, currentPage, zoom, rotation]);
+  }, [pdfDoc, currentPage, internalZoom, rotation, viewMode]);
+
+  // Handle Fullscreen Toggle
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
+  };
 
   if (loading) {
     return (
       <div className="flex-1 w-full h-full flex flex-col items-center justify-center p-8 text-center space-y-3 bg-slate-950 text-white">
         <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
-        <p className="text-sm font-bold text-slate-300">Đang đọc dữ liệu PDF ({title})...</p>
-        <p className="text-xs text-slate-500">Khởi tạo bộ kết xuất Canvas chống chặn bảo mật</p>
+        <p className="text-sm font-bold text-slate-300">Đang tải và làm mịn trang PDF ({title})...</p>
+        <p className="text-xs text-slate-500">Khởi tạo chế độ đọc cuộn mượt mà chuẩn SmartBoard 75 Pro</p>
       </div>
     );
   }
@@ -193,64 +216,217 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   }
 
   return (
-    <div className="flex-1 w-full h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 relative">
-      {/* Top Page Navigator Strip */}
-      <div className="px-4 py-2 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2 text-xs shrink-0 select-none">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-slate-300 flex items-center gap-1.5">
-            <BookOpen className="w-4 h-4 text-indigo-400" />
-            Trang {currentPage} / {numPages}
+    <div
+      ref={containerRef}
+      className="flex-1 w-full h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 relative select-none"
+    >
+      {/* Top PDF Toolbar Strip */}
+      <div className="px-3 py-2 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between gap-2 text-xs shrink-0 select-none shadow-md z-10">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <span className="font-bold text-slate-200 flex items-center gap-1.5 truncate">
+            <BookOpen className="w-4 h-4 text-indigo-400 shrink-0" />
+            <span className="truncate">{title}</span>
+          </span>
+          <span className="text-[11px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-bold hidden sm:inline">
+            {numPages} trang
           </span>
         </div>
 
-        {/* Page navigation controls */}
-        <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-xl border border-slate-700">
+        {/* Zoom & View Controls */}
+        <div className="flex items-center gap-1.5">
+          {/* Zoom Out */}
           <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage <= 1}
-            className="p-1 rounded hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent text-slate-300"
-            title="Trang trước"
+            onClick={() => setInternalZoom((z) => Math.max(50, z - 15))}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+            title="Thu nhỏ (-15%)"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ZoomOut className="w-3.5 h-3.5" />
           </button>
-          
-          <span className="font-mono font-bold text-indigo-300 px-1">
-            {currentPage} / {numPages}
+
+          <span className="text-[11px] font-mono font-bold text-indigo-300 px-1 min-w-10 text-center">
+            {internalZoom}%
           </span>
 
+          {/* Zoom In */}
           <button
-            onClick={() => setCurrentPage((p) => Math.min(numPages, p + 1))}
-            disabled={currentPage >= numPages}
-            className="p-1 rounded hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent text-slate-300"
-            title="Trang tiếp"
+            onClick={() => setInternalZoom((z) => Math.min(250, z + 15))}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+            title="Phóng to (+15%)"
           >
-            <ChevronRight className="w-4 h-4" />
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Reset Zoom */}
+          <button
+            onClick={() => setInternalZoom(100)}
+            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-300 hover:text-white transition-colors hidden md:inline"
+            title="Đặt lại 100%"
+          >
+            100%
+          </button>
+
+          {/* View Mode Toggle: Continuous Scroll vs Single Page */}
+          <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700 ml-1">
+            <button
+              onClick={() => setViewMode('continuous')}
+              className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${
+                viewMode === 'continuous'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Chế độ cuộn liên tục các trang"
+            >
+              Cuộn
+            </button>
+            <button
+              onClick={() => setViewMode('single')}
+              className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${
+                viewMode === 'single'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Chế độ lật từng trang"
+            >
+              Trang
+            </button>
+          </div>
+
+          {/* Single Page Navigation (if single mode) */}
+          {viewMode === 'single' && (
+            <div className="flex items-center gap-1 bg-slate-800/90 px-2 py-1 rounded-lg border border-slate-700 ml-1">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="p-0.5 rounded hover:bg-white/10 disabled:opacity-30 text-slate-300"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="font-mono text-[11px] font-bold text-indigo-300 px-1">
+                {currentPage}/{numPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(numPages, p + 1))}
+                disabled={currentPage >= numPages}
+                className="p-0.5 rounded hover:bg-white/10 disabled:opacity-30 text-slate-300"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Fullscreen Button */}
+          <button
+            onClick={toggleFullscreen}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors ml-1"
+            title={isFullscreen ? 'Thu nhỏ cửa sổ' : 'Phóng to toàn màn hình'}
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
           </button>
         </div>
-
-        {/* Action Link to open original */}
-        <a
-          href={fileUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 transition-colors flex items-center gap-1 text-[11px]"
-          title="Mở tài liệu trong tab mới"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Cửa sổ mới</span>
-        </a>
       </div>
 
-      {/* Canvas Viewport */}
-      <div className="flex-1 w-full h-full overflow-auto p-4 flex items-center justify-center bg-slate-950/95">
+      {/* Main PDF Scrollable Reading Canvas Area */}
+      <div className="flex-1 w-full h-full overflow-y-auto overflow-x-auto p-4 flex flex-col items-center gap-6 bg-slate-950/95 scroll-smooth custom-scrollbar">
+        {viewMode === 'single' ? (
+          <div className="relative my-auto flex flex-col items-center">
+            <canvas
+              ref={canvasRef}
+              className="max-w-full rounded-xl shadow-2xl bg-white transition-transform"
+              style={{
+                boxShadow: '0 20px 50px rgba(0,0,0,0.85)',
+              }}
+            />
+            <div className="mt-3 text-xs text-slate-400 font-medium">
+              Trang {currentPage} trên tổng số {numPages}
+            </div>
+          </div>
+        ) : (
+          /* Continuous Scroll: Render all pages in high-resolution smooth column */
+          <div className="flex flex-col items-center gap-6 w-full max-w-4xl py-2">
+            {Array.from({ length: numPages }, (_, idx) => idx + 1).map((pNum) => (
+              <PDFPageItem
+                key={pNum}
+                pdfDoc={pdfDoc}
+                pageNumber={pNum}
+                zoom={internalZoom}
+                rotation={rotation}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Individual Page Item for Continuous Smooth Scrolling
+ */
+const PDFPageItem: React.FC<{
+  pdfDoc: any;
+  pageNumber: number;
+  zoom: number;
+  rotation: number;
+}> = ({ pdfDoc, pageNumber, zoom, rotation }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [rendered, setRendered] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!pdfDoc || !canvasRef.current) return;
+    let isCancelled = false;
+
+    const render = async () => {
+      try {
+        const page = await pdfDoc.getPage(pageNumber);
+        if (isCancelled || !canvasRef.current) return;
+
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const scaleFactor = (zoom / 100) * 1.4;
+        const viewport = page.getViewport({ scale: scaleFactor, rotation });
+
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({
+          canvasContext: ctx,
+          viewport,
+        }).promise;
+
+        if (!isCancelled) setRendered(true);
+      } catch (err) {
+        // Handled silently
+      }
+    };
+
+    render();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [pdfDoc, pageNumber, zoom, rotation]);
+
+  return (
+    <div className="flex flex-col items-center w-full group">
+      <div className="relative bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700/50 transition-all hover:border-indigo-500/50">
         <canvas
           ref={canvasRef}
-          className="max-w-full rounded-xl shadow-2xl bg-white transition-transform"
+          className="max-w-full block"
           style={{
-            margin: '0 auto',
-            boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+            boxShadow: '0 15px 35px rgba(0,0,0,0.6)',
           }}
         />
+        {!rendered && (
+          <div className="w-[600px] h-[800px] flex items-center justify-center bg-slate-900 text-slate-400 text-xs font-bold">
+            <Loader2 className="w-6 h-6 animate-spin text-indigo-400 mr-2" />
+            Đang tải trang {pageNumber}...
+          </div>
+        )}
+      </div>
+      <div className="mt-2 text-[11px] font-bold text-slate-500 group-hover:text-indigo-400 transition-colors">
+        Trang {pageNumber}
       </div>
     </div>
   );

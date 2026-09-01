@@ -19,23 +19,36 @@ import {
 import { ClassRoom, ClassStudent, ConductRecord } from '../types';
 
 interface StudentConductModalProps {
-  classroom: ClassRoom;
-  teacherName: string;
+  classroom?: ClassRoom;
+  classRoom?: ClassRoom;
+  teacherName?: string;
   initialStudentId?: string;
+  selectedStudentId?: string;
+  isOpen?: boolean;
   onClose: () => void;
-  onSaveRecord: (studentId: string, record: ConductRecord) => void;
+  onSaveRecord?: (studentId: string, record: ConductRecord) => void;
+  onSaveConduct?: (studentId: string, record: ConductRecord) => void;
 }
 
 export const StudentConductModal: React.FC<StudentConductModalProps> = ({
   classroom,
-  teacherName,
+  classRoom,
+  teacherName = 'Giáo viên bộ môn',
   initialStudentId,
+  selectedStudentId: propSelectedStudentId,
+  isOpen = true,
   onClose,
   onSaveRecord,
+  onSaveConduct,
 }) => {
+  if (isOpen === false) return null;
+
+  const targetClass = classroom || classRoom;
+  const studentsList: ClassStudent[] = targetClass?.students || [];
+
   const [activeType, setActiveType] = useState<'violation' | 'reward'>('violation');
   const [selectedStudentId, setSelectedStudentId] = useState<string>(
-    initialStudentId || classroom.students[0]?.id || ''
+    initialStudentId || propSelectedStudentId || studentsList[0]?.id || ''
   );
   const [selectedCategory, setSelectedCategory] = useState<string>('Không làm bài tập về nhà');
   const [points, setPoints] = useState<number>(-2);

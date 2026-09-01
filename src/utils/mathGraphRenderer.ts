@@ -187,35 +187,17 @@ function drawKeyPoint(
 }
 
 /**
- * Draws formula badge at the corner of graph
+ * Draws formula badge at the corner of graph (Disabled per user request)
  */
 function drawFormulaBadge(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  formula: string,
-  bgColor: string = 'rgba(15, 23, 42, 0.85)',
-  textColor: string = '#facc15'
+  _ctx: CanvasRenderingContext2D,
+  _x: number,
+  _y: number,
+  _formula: string,
+  _bgColor: string = 'rgba(15, 23, 42, 0.85)',
+  _textColor: string = '#facc15'
 ) {
-  ctx.save();
-  ctx.font = 'bold 11.5px "Be Vietnam Pro", sans-serif';
-  const metrics = ctx.measureText(formula);
-  const padX = 8;
-  const padY = 4;
-  const w = metrics.width + padX * 2;
-  const h = 20;
-
-  ctx.fillStyle = bgColor;
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.5)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect ? ctx.roundRect(x, y, w, h, 6) : ctx.rect(x, y, w, h);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.fillStyle = textColor;
-  ctx.fillText(formula, x + padX, y + 14);
-  ctx.restore();
+  // Title / formula badge removed per user request
 }
 
 /**

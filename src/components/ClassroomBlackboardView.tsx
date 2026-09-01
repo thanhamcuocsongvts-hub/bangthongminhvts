@@ -126,12 +126,18 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const [docToDelete, setDocToDelete] = useState<LessonDoc | null>(null);
 
   // Dock UI state & Screen Space Optimization
-  const [isTopBarCollapsed, setIsTopBarCollapsed] = useState<boolean>(false);
+  const [isTopBarCollapsed, setIsTopBarCollapsed] = useState<boolean>(true); // Default to collapsed for maximum blackboard space
   const [isDockCollapsed, setIsDockCollapsed] = useState<boolean>(false);
   const [isImmersiveMode, setIsImmersiveMode] = useState<boolean>(false); // 1-Click Clean Board Mode
   const [showColorPopover, setShowColorPopover] = useState<boolean>(false);
   const [showSizePopover, setShowSizePopover] = useState<boolean>(false);
   const [draggedVertexIdx, setDraggedVertexIdx] = useState<number | null>(null);
+
+  // Infinite Scroll & Continuous Blackboard State (Dọc & Ngang Không Giới Hạn)
+  const [boardScrollX, setBoardScrollX] = useState<number>(0);
+  const [boardScrollY, setBoardScrollY] = useState<number>(0);
+  const [boardExtraWidth, setBoardExtraWidth] = useState<number>(0);
+  const [boardExtraHeight, setBoardExtraHeight] = useState<number>(0);
 
   // Data / Document Feature State
   const [showDocumentModal, setShowDocumentModal] = useState<boolean>(false);
@@ -179,23 +185,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const [laserPos, setLaserPos] = useState<{ x: number; y: number } | null>(null);
   const laserTimeoutRef = useRef<any>(null);
 
-  // Multi-page chalkboard management (with initial text note for immediate interactive selection/movement)
+  // Multi-page chalkboard management
   const [pages, setPages] = useState<BlackboardPage[]>([
     {
       id: 'page_1',
       name: 'Bảng 1',
       strokes: [],
       redoStack: [],
-      texts: [
-        {
-          id: 'text_sample_ham_so',
-          x: 60,
-          y: 90,
-          text: 'HÀM SỐ & ĐỒ THỊ',
-          color: '#facc15',
-          size: 38,
-        },
-      ],
+      texts: [],
     },
   ]);
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
@@ -699,25 +696,42 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       ctx.stroke();
       ctx.setLineDash([]);
     } else {
-      // Freehand chalk stroke
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        const pt1 = points[i - 1];
-        const pt2 = points[i];
-        const midPoint = { x: (pt1.x + pt2.x) / 2, y: (pt1.y + pt2.y) / 2 };
-        ctx.quadraticCurveTo(pt1.x, pt1.y, midPoint.x, midPoint.y);
+      // Freehand chalk stroke with ultra-smooth Catmull-Rom / Midpoint Bezier interpolation
+      if (points.length === 1) {
+        ctx.beginPath();
+        ctx.arc(points[0].x, points[0].y, (tool === 'highlighter' ? size * 2.5 : size) / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (points.length === 2) {
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        ctx.lineTo(points[1].x, points[1].y);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length - 1; i++) {
+          const xc = (points[i].x + points[i + 1].x) / 2;
+          const yc = (points[i].y + points[i + 1].y) / 2;
+          ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+        }
+        // Connect smoothly to the last point
+        const last = points[points.length - 1];
+        const prev = points[points.length - 2];
+        ctx.quadraticCurveTo(prev.x, prev.y, last.x, last.y);
+        ctx.stroke();
       }
-      ctx.stroke();
     }
 
     ctx.restore();
   };
 
-  // Redraw all strokes & texts
+  // Redraw all strokes & texts with boardScrollX & boardScrollY viewport translation
   const redrawCanvas = useCallback(
     (ctx: CanvasRenderingContext2D) => {
       ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+      ctx.save();
+      ctx.translate(-boardScrollX, -boardScrollY);
 
       // Render all saved strokes
       strokes.forEach((stroke) => {
@@ -744,8 +758,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         ctx.fillText(item.text, item.x, item.y);
         ctx.restore();
       });
+
+      ctx.restore();
     },
-    [strokes, texts, selectedTextId]
+    [strokes, texts, selectedTextId, boardScrollX, boardScrollY]
   );
 
   // Automatically refresh canvas whenever strokes, texts, or selection state change
@@ -755,7 +771,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     redrawCanvas(ctx);
-  }, [redrawCanvas, strokes, texts, selectedTextId, selectedStrokeId, currentPageIndex]);
+  }, [redrawCanvas, strokes, texts, selectedTextId, selectedStrokeId, currentPageIndex, boardScrollX, boardScrollY]);
 
   // Ultra-smooth vertex dragging with parallel geometric constraints
   const handleVertexDrag = useCallback(
@@ -796,11 +812,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+    const x = canvasX + boardScrollX;
+    const y = canvasY + boardScrollY;
 
     if (activeTool === 'laser') {
-      setLaserPos({ x, y });
+      setLaserPos({ x: canvasX, y: canvasY });
       return;
     }
 
@@ -885,6 +903,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const ctx = canvas.getContext('2d');
     if (ctx && (activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'eraser')) {
       ctx.save();
+      ctx.translate(-boardScrollX, -boardScrollY);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       if (activeTool === 'eraser') {
@@ -906,11 +925,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+    const x = canvasX + boardScrollX;
+    const y = canvasY + boardScrollY;
 
     if (activeTool === 'laser') {
-      setLaserPos({ x, y });
+      setLaserPos({ x: canvasX, y: canvasY });
       clearTimeout(laserTimeoutRef.current);
       laserTimeoutRef.current = setTimeout(() => setLaserPos(null), 1200);
       return;
@@ -977,10 +998,17 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     if (activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'eraser') {
       // Incremental smooth bezier rendering for 120fps fluid drawing without clearing canvas
-      if (pts.length >= 2) {
+      if (pts.length >= 3) {
+        const p0 = pts[pts.length - 3];
         const p1 = pts[pts.length - 2];
         const p2 = pts[pts.length - 1];
+        const mid1X = (p0.x + p1.x) / 2;
+        const mid1Y = (p0.y + p1.y) / 2;
+        const mid2X = (p1.x + p2.x) / 2;
+        const mid2Y = (p1.y + p2.y) / 2;
+
         ctx.save();
+        ctx.translate(-boardScrollX, -boardScrollY);
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
@@ -994,15 +1022,38 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           }
         }
         ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
+        ctx.moveTo(mid1X, mid1Y);
+        ctx.quadraticCurveTo(p1.x, p1.y, mid2X, mid2Y);
+        ctx.stroke();
+        ctx.restore();
+      } else if (pts.length === 2) {
+        const p0 = pts[0];
+        const p1 = pts[1];
+        ctx.save();
+        ctx.translate(-boardScrollX, -boardScrollY);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
+        if (activeTool === 'eraser') {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.strokeStyle = '#000';
+        } else {
+          ctx.strokeStyle = activeColor;
+          if (activeTool === 'highlighter') ctx.globalAlpha = 0.45;
+        }
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
         ctx.stroke();
         ctx.restore();
       }
     } else {
       // For geometric 2D/3D shapes, preview shape with full redraw
       redrawCanvas(ctx);
+      ctx.save();
+      ctx.translate(-boardScrollX, -boardScrollY);
       renderSingleStroke(ctx, activeTool, pts, activeColor, strokeSize);
+      ctx.restore();
     }
   };
 
@@ -1620,7 +1671,27 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
       {/* LEFT CANVAS AREA (DRAWING BOARD) */}
       <div
-        className="relative h-full transition-all duration-300 overflow-hidden flex-1"
+        className="relative h-full transition-all duration-300 overflow-hidden flex-1 select-none"
+        onWheel={(e) => {
+          if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+            const dx = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+            setBoardScrollX((prev) => {
+              const next = Math.max(0, prev + dx * 0.85);
+              if (next > boardExtraWidth) {
+                setBoardExtraWidth((w) => w + 800);
+              }
+              return next;
+            });
+          } else {
+            setBoardScrollY((prev) => {
+              const next = Math.max(0, prev + e.deltaY * 0.85);
+              if (next > boardExtraHeight) {
+                setBoardExtraHeight((h) => h + 800);
+              }
+              return next;
+            });
+          }
+        }}
         style={{
           width: isSplitScreen
             ? splitRatio === '50/50'
@@ -1640,6 +1711,23 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           onPointerLeave={handlePointerUp}
           className={`absolute inset-0 w-full h-full touch-canvas z-10 ${getCanvasCursorClass()}`}
         />
+
+        {/* Floating Reset to Origin when scrolled (Unobtrusive & Minimal) */}
+        {(boardScrollX > 20 || boardScrollY > 20) && (
+          <button
+            onClick={() => {
+              setBoardScrollX(0);
+              setBoardScrollY(0);
+            }}
+            className="absolute right-4 top-4 z-30 px-3 py-1.5 rounded-full bg-slate-950/80 hover:bg-emerald-600 border border-emerald-400/50 text-emerald-300 hover:text-white text-[11px] font-black shadow-xl backdrop-blur-md transition-all active:scale-95 flex items-center gap-1.5"
+            title="Nhấp để cuộn về góc gốc ban đầu của bảng"
+          >
+            <span>Về Gốc Bảng</span>
+            <span className="font-mono text-[9px] opacity-75">
+              ({Math.round(boardScrollX)}, {Math.round(boardScrollY)})
+            </span>
+          </button>
+        )}
 
         {/* Laser Pointer Animated Glow */}
         {laserPos && (
@@ -1970,8 +2058,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           const curY = dragLivePos ? dragLivePos.y : selectedText.y;
           const textWidth = Math.max(selectedText.text.length * (selectedText.size * 0.65) + 24, 100);
           const boxHeight = selectedText.size * 1.35 + 16;
-          const boxLeft = curX - 10;
-          const boxTop = curY - selectedText.size - 8;
+          const boxLeft = curX - boardScrollX - 10;
+          const boxTop = curY - boardScrollY - selectedText.size - 8;
 
           return (
             <div
@@ -2205,8 +2293,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             <div
               className="absolute pointer-events-none z-40 animate-fade-in"
               style={{
-                left: `${bounds.minX}px`,
-                top: `${bounds.minY}px`,
+                left: `${bounds.minX - boardScrollX}px`,
+                top: `${bounds.minY - boardScrollY}px`,
                 width: `${bounds.width}px`,
                 height: `${bounds.height}px`,
               }}
@@ -2674,138 +2762,109 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
       {/* AUTHENTIC BOTTOM CHALK & TOOL DOCK (75 INCH TOUCH OPTIMIZED) */}
       {!isDockCollapsed && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto animate-fade-in">
-          <div className="bg-slate-950/90 backdrop-blur-xl px-4 py-2.5 rounded-3xl border-2 border-white/20 shadow-2xl flex items-center gap-2 md:gap-3 text-white">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] animate-fade-in flex justify-center">
+          <div className="bg-slate-950/95 backdrop-blur-2xl px-3.5 py-2 rounded-2xl md:rounded-3xl border-2 border-white/25 shadow-2xl flex items-center gap-1 sm:gap-2 text-white shrink-0">
           {/* Main Drawing Tools */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => setActiveTool('select')}
-              className={`p-2.5 rounded-2xl flex items-center gap-1.5 text-xs font-bold transition-all ${
+              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'select'
-                  ? 'bg-blue-600 text-white shadow-lg scale-105 ring-2 ring-blue-400'
+                  ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-400'
                   : 'hover:bg-white/10 text-slate-300'
               }`}
               title="Chọn và di chuyển đối tượng / chữ trên bảng"
             >
               <Move className="w-4 h-4" />
-              <span className="hidden sm:inline">Chọn & Di Chuyển</span>
+              <span className="hidden lg:inline text-[11px]">Chọn</span>
             </button>
 
             <button
               onClick={() => setActiveTool('pen')}
-              className={`p-2.5 rounded-2xl flex items-center gap-1.5 text-xs font-bold transition-all ${
+              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'pen'
-                  ? 'bg-emerald-600 text-white shadow-lg scale-105 ring-2 ring-emerald-400'
+                  ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-400'
                   : 'hover:bg-white/10 text-slate-300'
               }`}
               title="Bút phấn viết tự do"
             >
               <Pen className="w-4 h-4" />
-              <span className="hidden sm:inline">Phấn Viết</span>
+              <span className="hidden lg:inline text-[11px]">Phấn</span>
             </button>
 
             <button
               onClick={() => setActiveTool('highlighter')}
-              className={`p-2.5 rounded-2xl flex items-center gap-1.5 text-xs font-bold transition-all ${
+              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'highlighter'
-                  ? 'bg-amber-500 text-white shadow-lg scale-105 ring-2 ring-amber-300'
+                  ? 'bg-amber-500 text-white shadow-md ring-2 ring-amber-300'
                   : 'hover:bg-white/10 text-slate-300'
               }`}
               title="Bút dạ quang đánh dấu"
             >
               <Highlighter className="w-4 h-4" />
-              <span className="hidden sm:inline">Dạ Quang</span>
+              <span className="hidden lg:inline text-[11px]">Dạ Quang</span>
             </button>
 
             <button
               onClick={() => setActiveTool('eraser')}
-              className={`p-2.5 rounded-2xl flex items-center gap-1.5 text-xs font-bold transition-all ${
+              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'eraser'
-                  ? 'bg-rose-600 text-white shadow-lg scale-105 ring-2 ring-rose-400'
+                  ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400'
                   : 'hover:bg-white/10 text-slate-300'
               }`}
               title="Khăn lau bảng"
             >
               <Eraser className="w-4 h-4" />
-              <span className="hidden sm:inline">Khăn Lau</span>
+              <span className="hidden lg:inline text-[11px]">Khăn Lau</span>
             </button>
 
             <button
               onClick={() => setActiveTool('laser')}
-              className={`p-2.5 rounded-2xl flex items-center gap-1.5 text-xs font-bold transition-all ${
+              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'laser'
-                  ? 'bg-red-600 text-white shadow-lg scale-105 ring-2 ring-red-400'
+                  ? 'bg-red-600 text-white shadow-md ring-2 ring-red-400'
                   : 'hover:bg-white/10 text-slate-300'
               }`}
               title="Bút laser chỉ điểm"
             >
               <Sparkles className="w-4 h-4" />
-              <span className="hidden sm:inline">Laser</span>
+              <span className="hidden xl:inline text-[11px]">Laser</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTool('text')}
+              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
+                activeTool === 'text'
+                  ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-400'
+                  : 'hover:bg-white/10 text-slate-300'
+              }`}
+              title="Chèn chữ / Công thức lên bảng"
+            >
+              <Type className="w-4 h-4" />
+              <span className="hidden xl:inline text-[11px]">Chữ</span>
             </button>
           </div>
 
-          <div className="h-6 w-px bg-white/20 mx-1" />
+          <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
 
           {/* Geometric Shapes & Math Curves */}
-          <div className="relative flex items-center gap-1">
-            {/* Quick Primary Shape Buttons */}
-            <button
-              onClick={() => setActiveTool('line')}
-              className={`p-2 rounded-xl text-xs transition-all ${
-                activeTool === 'line' ? 'bg-indigo-600 text-white ring-2 ring-indigo-400' : 'hover:bg-white/10 text-slate-300'
-              }`}
-              title="Đường thẳng (Line)"
-            >
-              <Minus className="w-4 h-4" />
-            </button>
-
-            <button
-              onClick={() => setActiveTool('dashed_line')}
-              className={`p-2 rounded-xl text-xs transition-all ${
-                activeTool === 'dashed_line' ? 'bg-indigo-600 text-white ring-2 ring-indigo-400' : 'hover:bg-white/10 text-slate-300'
-              }`}
-              title="Đường nét đứt (Dashed Line)"
-            >
-              <span className="font-mono text-xs tracking-tighter font-black">---</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTool('arrow')}
-              className={`p-2 rounded-xl text-xs transition-all ${
-                activeTool === 'arrow' ? 'bg-indigo-600 text-white ring-2 ring-indigo-400' : 'hover:bg-white/10 text-slate-300'
-              }`}
-              title="Mũi tên chỉ dẫn (Arrow)"
-            >
-              <MoveUpRight className="w-4 h-4" />
-            </button>
-
-            <button
-              onClick={() => setActiveTool('rectangle')}
-              className={`p-2 rounded-xl text-xs transition-all ${
-                activeTool === 'rectangle' ? 'bg-indigo-600 text-white ring-2 ring-indigo-400' : 'hover:bg-white/10 text-slate-300'
-              }`}
-              title="Hình chữ nhật / vuông"
-            >
-              <Square className="w-4 h-4" />
-            </button>
-
-            <button
-              onClick={() => setActiveTool('circle')}
-              className={`p-2 rounded-xl text-xs transition-all ${
-                activeTool === 'circle' ? 'bg-indigo-600 text-white ring-2 ring-indigo-400' : 'hover:bg-white/10 text-slate-300'
-              }`}
-              title="Hình tròn"
-            >
-              <Circle className="w-4 h-4" />
-            </button>
-
+          <div className="relative flex items-center gap-1 shrink-0">
             {/* Shape Menu Toggle for 2D & 3D Geometry */}
             <button
-              onClick={() => setShowShapePicker((prev) => !prev)}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+              onClick={() => {
+                setShowShapePicker((prev) => !prev);
+                setShowFunctionPicker(false);
+                setShowColorPopover(false);
+                setShowSizePopover(false);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 shrink-0 ${
                 [
+                  'line',
                   'dashed_line',
+                  'arrow',
                   'dashed_arrow',
+                  'rectangle',
+                  'circle',
                   'ellipse',
                   'cube',
                   'cuboid',
@@ -2818,14 +2877,34 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               }`}
               title="Mở thư viện Hình học 2D & Hình học Không gian 3D"
             >
-              <Shapes className="w-4 h-4" />
-              <span className="hidden md:inline">Hình Học</span>
+              <Shapes className="w-4 h-4 text-purple-300" />
+              <span className="text-[11px]">Hình Học</span>
               <ChevronUp className={`w-3 h-3 transition-transform ${showShapePicker ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Function Graph Tool Toggle for Math Graphs */}
+            <button
+              onClick={() => {
+                setShowFunctionPicker((prev) => !prev);
+                setShowShapePicker(false);
+                setShowColorPopover(false);
+                setShowSizePopover(false);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 shrink-0 ${
+                isFunctionGraphTool(activeTool) || showFunctionPicker
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-md ring-2 ring-amber-300'
+                  : 'bg-white/10 hover:bg-white/20 text-amber-300'
+              }`}
+              title="Vẽ đồ thị hàm số chuẩn SGK Toán (Bậc 1, Bậc 2, Bậc 3, Nhất biến, Bậc 2/1, Mũ, Logarit)"
+            >
+              <TrendingUp className="w-4 h-4 text-amber-400" />
+              <span className="text-[11px]">Đồ Thị</span>
+              <ChevronUp className={`w-3 h-3 transition-transform ${showFunctionPicker ? 'rotate-180' : ''}`} />
             </button>
 
             {/* Shape Picker Popover Menu */}
             {showShapePicker && (
-              <div className="absolute bottom-12 left-0 z-50 p-4 rounded-3xl bg-slate-950/95 backdrop-blur-xl border-2 border-purple-500/60 shadow-2xl min-w-[320px] text-white flex flex-col gap-3 animate-fade-in">
+              <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 p-4 rounded-3xl bg-slate-950/95 backdrop-blur-xl border-2 border-purple-500/60 shadow-2xl w-[92vw] max-w-[420px] text-white flex flex-col gap-3 animate-fade-in max-h-[60vh] overflow-y-auto custom-scrollbar">
                 <div className="flex items-center justify-between pb-2 border-b border-white/10">
                   <span className="text-xs font-black uppercase text-purple-300 tracking-wider flex items-center gap-1.5">
                     <Shapes className="w-4 h-4" />
@@ -2835,7 +2914,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     onClick={() => setShowShapePicker(false)}
                     className="p-1 rounded-lg hover:bg-white/10 text-slate-400"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
 
@@ -3046,24 +3125,304 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               </div>
             )}
 
-            <button
-              onClick={() => setActiveTool('text')}
-              className={`p-2 rounded-xl text-xs transition-all ${
-                activeTool === 'text' ? 'bg-indigo-600 text-white ring-2 ring-indigo-400' : 'hover:bg-white/10 text-slate-300'
-              }`}
-              title="Chèn chữ / Công thức lên bảng"
-            >
-              <Type className="w-4 h-4" />
-            </button>
+            {/* Function Graph Picker Popover Menu */}
+            {showFunctionPicker && (
+              <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 p-4 rounded-3xl bg-slate-950/95 backdrop-blur-xl border-2 border-amber-500/80 shadow-2xl w-[92vw] max-w-[500px] text-white flex flex-col gap-3.5 animate-fade-in max-h-[60vh] overflow-y-auto custom-scrollbar">
+                <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                  <span className="text-xs font-black uppercase text-amber-300 tracking-wider flex items-center gap-1.5">
+                    <TrendingUp className="w-4 h-4 text-amber-400" />
+                    Thư Viện Đồ Thị Hàm Số Toán Học (SGK)
+                  </span>
+                  <button
+                    onClick={() => setShowFunctionPicker(false)}
+                    className="p-1 rounded-lg hover:bg-white/10 text-slate-400"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* 1. Linear & Quadratic */}
+                <div>
+                  <span className="text-[10px] font-black uppercase text-amber-300 mb-1.5 block tracking-wide">
+                    1. Hàm Bậc Nhất & Bậc Hai (Parabol)
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_linear');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2.5 rounded-2xl text-xs flex flex-col items-center gap-1 border transition-all ${
+                        activeTool === 'func_linear'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-xs text-amber-300">y = ax + b</span>
+                      <span className="text-[10px] text-slate-300 font-medium">Đường Thẳng</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_quadratic_up');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2.5 rounded-2xl text-xs flex flex-col items-center gap-1 border transition-all ${
+                        activeTool === 'func_quadratic_up'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-xs text-emerald-300">y = ax² (a&gt;0)</span>
+                      <span className="text-[10px] text-slate-300 font-medium">Parabol Lõm Lên</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_quadratic_down');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2.5 rounded-2xl text-xs flex flex-col items-center gap-1 border transition-all ${
+                        activeTool === 'func_quadratic_down'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-xs text-rose-300">y = ax² (a&lt;0)</span>
+                      <span className="text-[10px] text-slate-300 font-medium">Parabol Lõm Xuống</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Cubic Functions */}
+                <div>
+                  <span className="text-[10px] font-black uppercase text-amber-300 mb-1.5 block tracking-wide">
+                    2. Hàm Số Bậc Ba y = ax³ + bx² + cx + d (Đầy Đủ Các Dạng)
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_cubic_2extrema_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_cubic_2extrema_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-indigo-300">a &gt; 0 (2 Cực trị)</span>
+                      <span className="text-[9.5px] text-slate-300">Dạng chữ N chuẩn</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_cubic_2extrema_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_cubic_2extrema_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-indigo-300">a &lt; 0 (2 Cực trị)</span>
+                      <span className="text-[9.5px] text-slate-300">Dạng chữ N ngược</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_cubic_noextrema_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_cubic_noextrema_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-indigo-300">a &gt; 0 (Đơn điệu)</span>
+                      <span className="text-[9.5px] text-slate-300">Không có cực trị</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_cubic_noextrema_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_cubic_noextrema_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-indigo-300">a &lt; 0 (Đơn điệu)</span>
+                      <span className="text-[9.5px] text-slate-300">Nghịch biến R</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_cubic_inflection_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_cubic_inflection_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-indigo-300">a &gt; 0 (Tiếp tuyến //)</span>
+                      <span className="text-[9.5px] text-slate-300">Uốn tiếp tuyến ngang</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_cubic_inflection_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_cubic_inflection_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-indigo-300">a &lt; 0 (Tiếp tuyến //)</span>
+                      <span className="text-[9.5px] text-slate-300">Uốn tiếp tuyến ngang</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Rational Functions */}
+                <div>
+                  <span className="text-[10px] font-black uppercase text-amber-300 mb-1.5 block tracking-wide">
+                    3. Hàm Phân Thức Hữu Tỉ (Nhất Biến & Bậc 2 / Bậc 1)
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_rational_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_rational_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-cyan-300">(ax+b)/(cx+d)</span>
+                      <span className="text-[9.5px] text-slate-300">Đồng biến (ad-bc &gt; 0)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_rational_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_rational_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-cyan-300">(ax+b)/(cx+d)</span>
+                      <span className="text-[9.5px] text-slate-300">Nghịch biến (ad-bc &lt; 0)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_frac21');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_frac21'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-cyan-300">Bậc 2 / Bậc 1</span>
+                      <span className="text-[9.5px] text-slate-300">Tiệm Cận Xiên</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. Exponential & Logarithmic Functions */}
+                <div>
+                  <span className="text-[10px] font-black uppercase text-amber-300 mb-1.5 block tracking-wide">
+                    4. Hàm Số Mũ & Hàm Số Logarit
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_exp_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_exp_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-emerald-300">y = a^x (a &gt; 1)</span>
+                      <span className="text-[9.5px] text-slate-300">Mũ Đồng Biến</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_exp_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_exp_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-rose-300">y = a^x (a &lt; 1)</span>
+                      <span className="text-[9.5px] text-slate-300">Mũ Nghịch Biến</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_log_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_log_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-emerald-300">log_a(x) (a &gt; 1)</span>
+                      <span className="text-[9.5px] text-slate-300">Logarit Đồng Biến</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_log_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_log_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-rose-300">log_a(x) (a &lt; 1)</span>
+                      <span className="text-[9.5px] text-slate-300">Logarit Nghịch Biến</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="h-6 w-px bg-white/20 mx-1" />
+          <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
 
           {/* Chalk Color Picker (Compact with Popover Menu to save toolbar space) */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               onClick={() => setShowColorPopover((prev) => !prev)}
-              className="p-1.5 px-2.5 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center gap-2 text-xs font-bold text-white transition-all shadow-sm"
+              className="p-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white transition-all shadow-sm shrink-0"
               title="Bảng màu phấn (Nhấp để chọn màu khác)"
             >
               <div
@@ -3078,7 +3437,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
             {/* Color Palette Popover */}
             {showColorPopover && (
-              <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 p-3 rounded-3xl bg-slate-950/95 backdrop-blur-xl border-2 border-white/20 shadow-2xl min-w-[220px] text-white flex flex-col gap-2.5 select-none">
+              <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 p-3 rounded-3xl bg-slate-950/95 backdrop-blur-xl border-2 border-white/20 shadow-2xl min-w-[240px] text-white flex flex-col gap-2.5 select-none animate-fade-in">
                 <div className="flex items-center justify-between pb-1.5 border-b border-white/10">
                   <span className="text-[11px] font-black uppercase text-slate-300 tracking-wider">
                     MÀU PHẤN VIẾT BẢNG
@@ -3192,20 +3551,27 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             )}
             {/* Close / Collapse Toolbar Button */}
             <button
-              onClick={() => setIsDockCollapsed(true)}
-              className="p-2 rounded-xl bg-white/10 hover:bg-rose-600/80 text-slate-300 hover:text-white transition-all ml-1"
-              title="Thu gọn / Tắt thanh công cụ (Có thể mở lại bất cứ lúc nào)"
+              onClick={() => {
+                setIsDockCollapsed(true);
+                setShowShapePicker(false);
+                setShowFunctionPicker(false);
+                setShowColorPopover(false);
+                setShowSizePopover(false);
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition-all ml-1 flex items-center gap-1 text-xs font-black shadow-md active:scale-95 cursor-pointer"
+              title="Thu gọn / Tắt thanh công cụ (Bấm X)"
             >
               <X className="w-4 h-4" />
+              <span className="text-[11px]">Thu gọn</span>
             </button>
           </div>
         </div>
       </div>
       )}
 
-      {/* Floating Restore Toolbar Button when collapsed */}
+      {/* Floating Restore Toolbar Button when collapsed - Moved to Bottom Right */}
       {isDockCollapsed && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto animate-bounce-short">
+        <div className="absolute bottom-4 right-6 z-30 pointer-events-auto animate-fade-in">
           <button
             onClick={() => setIsDockCollapsed(false)}
             className="px-4 py-2.5 rounded-full bg-slate-950/90 hover:bg-indigo-600 border-2 border-white/40 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl transition-all hover:scale-105 active:scale-95 cursor-pointer"

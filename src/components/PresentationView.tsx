@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   FileText,
   Presentation as PresentationIcon,
+  Pen,
+  Edit3,
 } from 'lucide-react';
 import { LessonDoc, SlideItem, TextScale } from '../types';
 import { TouchWhiteboard } from './TouchWhiteboard';
@@ -351,7 +353,25 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             {/* Overlay Drawing Canvas when enabled */}
             {isOverlayAnnotation && (
               <div className="absolute inset-0 z-40 pointer-events-auto">
-                <TouchWhiteboard id="slide-overlay-whiteboard" isOverlay={true} />
+                <TouchWhiteboard
+                  id="slide-overlay-whiteboard"
+                  isOverlay={true}
+                  onCloseOverlay={() => setIsOverlayAnnotation(false)}
+                />
+              </div>
+            )}
+
+            {/* Quick Floating Draw Action in Presentation View when overlay is not yet active */}
+            {!isOverlayAnnotation && !isSplitMode && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex items-center gap-2 animate-fade-in">
+                <button
+                  onClick={() => setIsOverlayAnnotation(true)}
+                  className="px-4 py-2.5 rounded-full bg-slate-950/90 hover:bg-emerald-600 border-2 border-white/40 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="Bật thanh công cụ viết, vẽ trực tiếp lên bài giảng"
+                >
+                  <Pen className="w-4 h-4 text-emerald-400" />
+                  <span>Bật Bút Viết Lên Bài Giảng</span>
+                </button>
               </div>
             )}
           </div>
