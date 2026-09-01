@@ -1,0 +1,6 @@
+{
+  "name": "SmartBoard 75 Pro",
+  "description": "Ứng dụng tương tác cảm ứng cho tivi 75 inch, quản lý tài liệu, làm bài trắc nghiệm tức thì, biểu đồ phân tích và AI trợ lý lớp học.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

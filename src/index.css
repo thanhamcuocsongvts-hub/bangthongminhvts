@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+/* Custom scrollbars for TV touch displays - Sleek Interface Theme */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.95);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.6);
+  border-radius: 8px;
+  border: 2px solid rgba(241, 245, 249, 0.95);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(79, 70, 229, 0.9);
+}
+
+/* Custom fast smooth scroll class */
+.smooth-touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Touch Whiteboard Canvas */
+.touch-canvas {
+  touch-action: none;
+}
+
+/* Custom Cursors for SmartBoard Tools */
+.cursor-pen-chalk {
+  cursor: crosshair;
+}
+
+.cursor-pointer-select {
+  cursor: default;
+}
+
+.cursor-move-hand {
+  cursor: grab;
+}
+
+.cursor-highlighter-marker {
+  cursor: cell;
+}
+
+.cursor-eraser-duster {
+  cursor: no-drop;
+}
+
+.cursor-text-insert {
+  cursor: text;
+}
+
+/* Laser Pointer Animation */
+@keyframes laser-pulse {
+  0% { transform: scale(1); opacity: 0.9; box-shadow: 0 0 10px #ef4444, 0 0 20px #ef4444; }
+  50% { transform: scale(1.4); opacity: 0.6; box-shadow: 0 0 20px #ef4444, 0 0 40px #ef4444; }
+  100% { transform: scale(1); opacity: 0.9; box-shadow: 0 0 10px #ef4444, 0 0 20px #ef4444; }
+}
+
+.laser-dot {
+  animation: laser-pulse 1.2s infinite ease-in-out;
+}
+
+/* 1. Classroom Chalkboard Green (Truyền thống Sư Phạm) */
+.blackboard-bg {
+  background-color: #0b2e21;
+  background-image: 
+    radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 0),
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px, 60px 60px, 60px 60px;
+}
+
+/* 2. Vietnamese Primary / High School Grid Ô Ly Pattern */
+.oli-grid-bg {
+  background-color: #0b2e21;
+  background-size: 20px 20px, 100px 100px;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.12) 1.5px, transparent 1.5px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.12) 1.5px, transparent 1.5px);
+}
+
+/* 3. Classic Slate Dark Charcoal Velvet Blackboard (Bảng Đen Đá Cổ Điển) */
+.slate-board-bg {
+  background-color: #121820;
+  background-image: 
+    radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 0),
+    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 24px 24px, 72px 72px, 72px 72px;
+}
+
+/* 4. Royal Navy Blue Blackboard (Bảng Xanh Dương Hiện Đại / Phòng Lab) */
+.navy-board-bg {
+  background-color: #0f172a;
+  background-image: 
+    radial-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 0),
+    linear-gradient(to right, rgba(56, 189, 248, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px, 72px 72px, 72px 72px;
+}
+
+/* 5. Walnut Wood Blackboard (Bảng Gỗ Mun Sư Phạm Sang Trọng) */
+.wood-board-bg {
+  background-color: #29180d;
+  background-image: 
+    radial-gradient(rgba(251, 191, 36, 0.05) 1px, transparent 0),
+    linear-gradient(to right, rgba(251, 191, 36, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(251, 191, 36, 0.03) 1px, transparent 1px);
+  background-size: 24px 24px, 72px 72px, 72px 72px;
+}
+
+/* 6. Horizontal Lined Blackboard for Writing Practice */
+.lined-blackboard-bg {
+  background-color: #0b2e21;
+  background-size: 100% 48px;
+  background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+}
+
+/* 7. Grid graph paper background for math/science */
+.graph-paper-bg {
+  background-color: #0d1b2a;
+  background-size: 30px 30px;
+  background-image: 
+    linear-gradient(to right, rgba(56, 189, 248, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.08) 1px, transparent 1px);
+}
+
+/* 8. Modern Clean Whiteboard */
+.whiteboard-clean-bg {
+  background-color: #f8fafc;
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(203, 213, 225, 0.35) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(203, 213, 225, 0.35) 1px, transparent 1px);
+}
+
+
