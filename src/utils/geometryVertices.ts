@@ -722,21 +722,28 @@ export function drawShapeWithVertices(
     case 'circle':
       if (vertices.length >= 2) {
         const [O, R] = vertices;
-        const radius = Math.sqrt(Math.pow(R.x - O.x, 2) + Math.pow(R.y - O.y, 2));
-        ctx.beginPath();
-        ctx.arc(O.x, O.y, radius, 0, 2 * Math.PI);
-        ctx.stroke();
+        if (Number.isFinite(O.x) && Number.isFinite(O.y) && Number.isFinite(R.x) && Number.isFinite(R.y)) {
+          const rawDist = Math.hypot(R.x - O.x, R.y - O.y);
+          const radius = Math.max(4, Number.isFinite(rawDist) ? rawDist : 20);
+          ctx.beginPath();
+          ctx.arc(O.x, O.y, radius, 0, 2 * Math.PI);
+          ctx.stroke();
+        }
       }
       break;
 
     case 'ellipse':
       if (vertices.length >= 3) {
         const [O, Rx, Ry] = vertices;
-        const rx = Math.max(4, Math.abs(Rx.x - O.x));
-        const ry = Math.max(4, Math.abs(Ry.y - O.y));
-        ctx.beginPath();
-        ctx.ellipse(O.x, O.y, rx, ry, 0, 0, 2 * Math.PI);
-        ctx.stroke();
+        if (Number.isFinite(O.x) && Number.isFinite(O.y)) {
+          const diffRx = Number.isFinite(Rx.x) ? Math.abs(Rx.x - O.x) : 30;
+          const diffRy = Number.isFinite(Ry.y) ? Math.abs(Ry.y - O.y) : 20;
+          const rx = Math.max(4, Number.isFinite(diffRx) && diffRx > 0 ? diffRx : 30);
+          const ry = Math.max(4, Number.isFinite(diffRy) && diffRy > 0 ? diffRy : 20);
+          ctx.beginPath();
+          ctx.ellipse(O.x, O.y, rx, ry, 0, 0, 2 * Math.PI);
+          ctx.stroke();
+        }
       }
       break;
 

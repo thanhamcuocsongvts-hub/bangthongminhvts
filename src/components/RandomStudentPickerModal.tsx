@@ -55,6 +55,7 @@ export type GameType =
   | 'sprint_race'
   | 'ocean_fishing'
   | 'archery_target'
+  | 'swimming_race'
   | 'magic_hat';
 
 interface MysteryBoxItem {
@@ -108,6 +109,17 @@ interface SwimmingFish {
   bgGrad: string;
   size: number;
   isCaught: boolean;
+  assignedStudent: ClassStudent;
+}
+
+interface SwimmerLane {
+  id: number;
+  lane: number;
+  name: string;
+  emoji: string;
+  color: string;
+  laneBg: string;
+  progress: number;
   assignedStudent: ClassStudent;
 }
 
@@ -190,7 +202,12 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   const [arrowScore, setArrowScore] = useState<number>(10);
   const [arrowPos, setArrowPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
 
-  // Game 10: Magician Magic Hat State
+  // Game 10: Swimming Race State (Cuộc thi bơi lội vui nhộn)
+  const [swimmers, setSwimmers] = useState<SwimmerLane[]>([]);
+  const [swimmingStage, setSwimmingStage] = useState<'idle' | 'countdown' | 'swimming' | 'finish'>('idle');
+  const [swimmingCountdown, setSwimmingCountdown] = useState<number | null>(null);
+
+  // Legacy Game 10: Magician Magic Hat State (kept for fallback)
   const [hatStage, setHatStage] = useState<'idle' | 'casting' | 'revealed'>('idle');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -221,6 +238,69 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
       gain.connect(audioCtx.destination);
       osc.start();
       osc.stop(audioCtx.currentTime + duration);
+    } catch (e) {}
+  };
+
+  // Rocket Engine Rumbling Sound (Tiếng gầm rú "hụ... hụ... hụ... WHOOOOSH" tên lửa vũ trụ)
+  const playRocketEngineSound = (durationSeconds = 2.4) => {
+    if (!soundEnabled) return;
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const now = audioCtx.currentTime;
+
+      // 1. Rumbling engine oscillator
+      const osc1 = audioCtx.createOscillator();
+      const gain1 = audioCtx.createGain();
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(65, now);
+      osc1.frequency.exponentialRampToValueAtTime(220, now + durationSeconds);
+
+      // 2. Heavy low engine rumble (hụ hụ) via LFO pulsation
+      const lfo = audioCtx.createOscillator();
+      const lfoGain = audioCtx.createGain();
+      lfo.frequency.setValueAtTime(9, now); // 9 Hz "hụ... hụ... hụ..." engine pulses
+      lfo.frequency.linearRampToValueAtTime(25, now + durationSeconds);
+      lfoGain.gain.setValueAtTime(35, now);
+      lfo.connect(lfoGain);
+      lfoGain.connect(osc1.frequency);
+
+      // 3. Noise for whooshing rocket plume
+      const bufferSize = Math.floor(audioCtx.sampleRate * durationSeconds);
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(220, now);
+      filter.frequency.exponentialRampToValueAtTime(1600, now + durationSeconds);
+
+      const noiseGain = audioCtx.createGain();
+      noiseGain.gain.setValueAtTime(0.09, now);
+      noiseGain.gain.linearRampToValueAtTime(0.28, now + durationSeconds * 0.7);
+      noiseGain.gain.exponentialRampToValueAtTime(0.005, now + durationSeconds);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(audioCtx.destination);
+
+      gain1.gain.setValueAtTime(0.15, now);
+      gain1.gain.linearRampToValueAtTime(0.32, now + durationSeconds * 0.75);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + durationSeconds);
+      osc1.connect(gain1);
+      gain1.connect(audioCtx.destination);
+
+      lfo.start(now);
+      osc1.start(now);
+      noise.start(now);
+
+      lfo.stop(now + durationSeconds);
+      osc1.stop(now + durationSeconds);
+      noise.stop(now + durationSeconds);
     } catch (e) {}
   };
 
@@ -265,6 +345,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     initializeChests();
     initializeRunners();
     initializeFishes();
+    initializeSwimmers();
   }, [isOpen, classroom, excludeCalled]);
 
   const initializeBoxes = () => {
@@ -397,7 +478,31 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     setCaughtFish(null);
   };
 
-  // Canvas Drawing for Game 1: Lucky Wheel
+  const initializeSwimmers = () => {
+    const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
+    const swimmerPresets = [
+      { name: 'Kình Ngư Tia Chớp', emoji: '🏊‍♂️', color: 'from-cyan-500 to-blue-600', laneBg: 'bg-cyan-500/20' },
+      { name: 'Cá Heo Siêu Tốc', emoji: '🐬', color: 'from-amber-400 to-orange-500', laneBg: 'bg-amber-500/20' },
+      { name: 'Nữ Thần Làn Đua', emoji: '🏊‍♀️', color: 'from-rose-500 to-pink-600', laneBg: 'bg-rose-500/20' },
+      { name: 'Thợ Lặn Vui Tính', emoji: '🤿', color: 'from-emerald-400 to-teal-600', laneBg: 'bg-emerald-500/20' },
+    ];
+    setSwimmers(
+      swimmerPresets.map((sp, idx) => ({
+        id: idx + 1,
+        lane: idx + 1,
+        name: sp.name,
+        emoji: sp.emoji,
+        color: sp.color,
+        laneBg: sp.laneBg,
+        progress: 0,
+        assignedStudent: shuffled[idx % shuffled.length],
+      }))
+    );
+    setSwimmingStage('idle');
+    setSwimmingCountdown(null);
+  };
+
+  // Canvas Drawing for Game 1: Chiếc Nón Kỳ Diệu (VTV3 Game Show Style - Luôn hiển thị rực rỡ)
   useEffect(() => {
     if (activeGame !== 'wheel' || !canvasRef.current) return;
     const canvas = canvasRef.current;
@@ -408,67 +513,142 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     const height = canvas.height;
     const centerX = width / 2;
     const centerY = height / 2;
-    const radius = Math.min(centerX, centerY) - 15;
+    const outerRimRadius = Math.min(centerX, centerY) - 8;
+    const wheelRadius = outerRimRadius - 16;
 
     ctx.clearRect(0, 0, width, height);
 
-    const count = Math.min(validStudents.length, 24);
-    const sliceAngle = (2 * Math.PI) / count;
-
-    const colors = [
-      '#4F46E5', '#059669', '#D97706', '#DC2626', '#7C3AED',
-      '#0284C7', '#DB2777', '#EA580C', '#16A34A', '#2563EB',
-      '#9333EA', '#CA8A04',
-    ];
-
+    // 1. Draw Outer Golden Bezel with TV Studio Light Bulbs
     ctx.save();
     ctx.translate(centerX, centerY);
+
+    // Outer gold rim
+    const goldGrad = ctx.createRadialGradient(0, 0, wheelRadius, 0, 0, outerRimRadius + 6);
+    goldGrad.addColorStop(0, '#D97706');
+    goldGrad.addColorStop(0.5, '#FDE047');
+    goldGrad.addColorStop(1, '#92400E');
+
+    ctx.beginPath();
+    ctx.arc(0, 0, outerRimRadius, 0, 2 * Math.PI);
+    ctx.fillStyle = goldGrad;
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#78350F';
+    ctx.stroke();
+
+    // 24 Glowing Studio Lights around the outer bezel
+    const numBulbs = 24;
+    for (let b = 0; b < numBulbs; b++) {
+      const bulbAngle = (b * 2 * Math.PI) / numBulbs;
+      const bx = Math.cos(bulbAngle) * (outerRimRadius - 8);
+      const by = Math.sin(bulbAngle) * (outerRimRadius - 8);
+
+      ctx.beginPath();
+      ctx.arc(bx, by, 4.5, 0, 2 * Math.PI);
+      ctx.fillStyle = b % 2 === 0 ? '#FEF08A' : '#FFFFFF';
+      ctx.shadowColor = '#FBBF24';
+      ctx.shadowBlur = 6;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#B45309';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // 2. Draw Wheel Slices with Rotation
+    ctx.save();
     ctx.rotate(currentRotation);
 
+    const fallbackLabels = [
+      'May Mắn', '100 Điểm', '200 Điểm', 'Phần Thưởng',
+      'Ngôi Sao', '500 Điểm', 'Cơ Hội', 'Nhân Đôi',
+      'Về Đích', 'Bí Ẩn', 'Thử Thách', 'Vô Địch'
+    ];
+
+    const displayStudents = validStudents.length > 0 ? validStudents : [];
+    const count = Math.max(displayStudents.length > 0 ? Math.min(displayStudents.length, 24) : 12, 6);
+    const sliceAngle = (2 * Math.PI) / count;
+
+    // Chiếc Nón Kỳ Diệu rainbow palette
+    const sliceColors = [
+      '#EF4444', '#F97316', '#F59E0B', '#10B981', '#06B6D4',
+      '#3B82F6', '#6366F1', '#8B5CF6', '#EC4899', '#14B8A6',
+      '#84CC16', '#E11D48',
+    ];
+
     for (let i = 0; i < count; i++) {
-      const student = validStudents[i];
       const startAngle = i * sliceAngle;
       const endAngle = startAngle + sliceAngle;
 
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.arc(0, 0, radius, startAngle, endAngle);
+      ctx.arc(0, 0, wheelRadius, startAngle, endAngle);
       ctx.closePath();
-      ctx.fillStyle = colors[i % colors.length];
+      ctx.fillStyle = sliceColors[i % sliceColors.length];
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.stroke();
+
+      // Pin pegs near edge of slice
+      const pegX = Math.cos(startAngle) * (wheelRadius - 6);
+      const pegY = Math.sin(startAngle) * (wheelRadius - 6);
+      ctx.beginPath();
+      ctx.arc(pegX, pegY, 3, 0, 2 * Math.PI);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
+      ctx.strokeStyle = '#78350F';
+      ctx.lineWidth = 1;
       ctx.stroke();
 
       // Text label
       ctx.save();
       ctx.rotate(startAngle + sliceAngle / 2);
       ctx.textAlign = 'right';
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 12px Plus Jakarta Sans, sans-serif';
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-      ctx.shadowBlur = 3;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 12px "Plus Jakarta Sans", sans-serif';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowBlur = 4;
 
-      const displayName = student.name.length > 15 ? student.name.substring(0, 14) + '…' : student.name;
-      ctx.fillText(displayName, radius - 18, 4);
+      const rawLabel = displayStudents[i]?.name || fallbackLabels[i % fallbackLabels.length];
+      const displayName = rawLabel.length > 14 ? rawLabel.substring(0, 13) + '…' : rawLabel;
+      ctx.fillText(displayName, wheelRadius - 16, 4);
       ctx.restore();
     }
 
-    // Wheel Center Cap
+    // 3. Center Cap: Chiếc Nón Kỳ Diệu Golden Medallion
     ctx.beginPath();
-    ctx.arc(0, 0, 24, 0, 2 * Math.PI);
-    ctx.fillStyle = '#ffffff';
+    ctx.arc(0, 0, 36, 0, 2 * Math.PI);
+    ctx.fillStyle = '#FFFFFF';
     ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = '#312E81';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#D97706';
     ctx.stroke();
 
-    ctx.beginPath();
-    ctx.arc(0, 0, 10, 0, 2 * Math.PI);
-    ctx.fillStyle = '#4F46E5';
-    ctx.fill();
+    const centerGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, 32);
+    centerGrad.addColorStop(0, '#FEF08A');
+    centerGrad.addColorStop(0.7, '#F59E0B');
+    centerGrad.addColorStop(1, '#B45309');
 
-    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(0, 0, 32, 0, 2 * Math.PI);
+    ctx.fillStyle = centerGrad;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#78350F';
+    ctx.stroke();
+
+    // Star icon in center
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = 3;
+    ctx.fillText('⭐', 0, 1);
+
+    ctx.restore(); // restore wheel rotation
+    ctx.restore(); // restore center translate
   }, [activeGame, currentRotation, validStudents]);
 
   // Spin Wheel Handler
@@ -590,7 +770,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         if (prev === null || prev <= 1) {
           clearInterval(interval);
           setRocketStage('launching');
-          playSound(250, 0.5, 'sawtooth');
+          playRocketEngineSound(2.5);
 
           // Spin names in cosmic cockpit
           let count = 0;
@@ -797,7 +977,71 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     }, 800);
   };
 
-  // Game 10: Magician Magic Hat
+  // Game 10: Swimming Race (Cuộc thi bơi lội vui nhộn)
+  const handleStartSwimming = () => {
+    if (swimmingStage === 'countdown' || swimmingStage === 'swimming' || validStudents.length === 0) return;
+    setSelectedStudent(null);
+    setSwimmingStage('countdown');
+    setSwimmingCountdown(3);
+    playSound(600, 0.1, 'triangle');
+
+    // Reset progress
+    setSwimmers((prev) => prev.map((s) => ({ ...s, progress: 0 })));
+
+    const countInterval = setInterval(() => {
+      setSwimmingCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(countInterval);
+          setSwimmingStage('swimming');
+          playSound(920, 0.4, 'sawtooth'); // Whistle!
+
+          const winnerIndex = Math.floor(Math.random() * 4);
+          let currentProgress = [0, 0, 0, 0];
+
+          const swimStepInterval = setInterval(() => {
+            let reachedEnd = false;
+            currentProgress = currentProgress.map((p, idx) => {
+              const boost = idx === winnerIndex ? Math.random() * 11 + 6 : Math.random() * 8 + 4;
+              const next = Math.min(p + boost, 100);
+              if (next >= 100 && idx === winnerIndex) reachedEnd = true;
+              return next;
+            });
+
+            // Splash sound
+            playSound(360 + Math.random() * 260, 0.04, 'sine');
+            setSwimmers((prev) =>
+              prev.map((s, i) => ({
+                ...s,
+                progress: currentProgress[i] || 0,
+              }))
+            );
+
+            if (reachedEnd) {
+              clearInterval(swimStepInterval);
+              setTimeout(() => {
+                setSwimmers((prev) => {
+                  const winnerSwimmer = prev[winnerIndex];
+                  if (winnerSwimmer) {
+                    setSelectedStudent(winnerSwimmer.assignedStudent);
+                  }
+                  return prev;
+                });
+                setSwimmingStage('finish');
+                playVictorySound();
+                confetti({ particleCount: 160, spread: 90, origin: { y: 0.55 } });
+              }, 400);
+            }
+          }, 130);
+
+          return 0;
+        }
+        playSound(550 + (3 - prev) * 120, 0.1, 'triangle');
+        return prev - 1;
+      });
+    }, 700);
+  };
+
+  // Legacy Game 10: Magician Magic Hat
   const handleCastMagic = () => {
     if (hatStage === 'casting' || validStudents.length === 0) return;
     setSelectedStudent(null);
@@ -906,7 +1150,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         {/* 10 FUN GAMES SELECTOR TABS */}
         <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 bg-slate-100 rounded-2xl border border-slate-200 smooth-touch-scroll">
           {[
-            { id: 'wheel' as GameType, icon: '🎡', label: '1. Vòng Quay' },
+            { id: 'wheel' as GameType, icon: '🎡', label: '1. Nón Kỳ Diệu' },
             { id: 'mystery_box' as GameType, icon: '🎁', label: '2. Hộp Quà' },
             { id: 'space_rocket' as GameType, icon: '🚀', label: '3. Tên Lửa' },
             { id: 'magic_cards' as GameType, icon: '🃏', label: '4. Thẻ Bài' },
@@ -915,7 +1159,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
             { id: 'sprint_race' as GameType, icon: '🏃‍♂️', label: '7. Chạy Đua' },
             { id: 'ocean_fishing' as GameType, icon: '🎣', label: '8. Câu Cá' },
             { id: 'archery_target' as GameType, icon: '🎯', label: '9. Bắn Cung' },
-            { id: 'magic_hat' as GameType, icon: '🎩', label: '10. Nón Ảo Thuật' },
+            { id: 'swimming_race' as GameType, icon: '🏊‍♂️', label: '10. Bơi Lội' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -990,34 +1234,38 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
           </label>
         </div>
 
-        {/* 1. GAME 1: LUCKY WHEEL */}
+        {/* 1. GAME 1: CHIẾC NÓN KỲ DIỆU (VTV3 GAME SHOW) */}
         {activeGame === 'wheel' && (
           <div className="flex flex-col items-center justify-center space-y-5">
-            <div className="relative">
-              {/* Pointer Indicator */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-2 z-20 pointer-events-none">
-                <div className="w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[26px] border-t-rose-600 drop-shadow-md" />
+            <div className="relative p-3 rounded-full bg-gradient-to-br from-amber-400 via-yellow-200 to-amber-500 shadow-2xl ring-8 ring-amber-400/20">
+              {/* Pointer Indicator (Kim chỉ Chiếc Nón Kỳ Diệu) */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-3.5 z-30 pointer-events-none flex flex-col items-center">
+                <div className="w-6 h-6 rounded-full bg-red-600 border-2 border-white shadow-lg flex items-center justify-center text-[10px] text-white font-black">
+                  ⭐
+                </div>
+                <div className="w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[24px] border-t-red-600 drop-shadow-md -mt-1" />
               </div>
 
               <canvas
                 ref={canvasRef}
-                width={360}
-                height={360}
-                className="rounded-full shadow-2xl border-4 border-slate-800 bg-slate-900"
+                width={380}
+                height={380}
+                className="rounded-full shadow-inner bg-amber-50 cursor-pointer"
+                onClick={handleSpinWheel}
               />
             </div>
 
             <button
               onClick={handleSpinWheel}
               disabled={isSpinning}
-              className={`px-8 py-3.5 rounded-2xl font-black text-base md:text-lg flex items-center gap-2.5 transition-all cursor-pointer shadow-lg active:scale-95 ${
+              className={`px-8 py-3.5 rounded-2xl font-black text-base md:text-lg flex items-center gap-2.5 transition-all cursor-pointer shadow-xl active:scale-95 ${
                 isSpinning
                   ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white shadow-indigo-600/30'
+                  : 'bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-600 hover:to-red-700 text-white shadow-amber-500/30'
               }`}
             >
               <RotateCw className={`w-5 h-5 ${isSpinning ? 'animate-spin' : ''}`} />
-              <span>{isSpinning ? 'Đang quay...' : 'QUAY NGAY 🎯'}</span>
+              <span>{isSpinning ? 'Đang quay nón kỳ diệu...' : 'QUAY CHIẾC NÓN KỲ DIỆU 🎡'}</span>
             </button>
 
             {renderResultCard()}
@@ -1381,13 +1629,13 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
           </div>
         )}
 
-        {/* 8. GAME 8: OCEAN FISHING (CÂU CÁ BIỂN SÂU ĐẠI DƯƠNG) */}
+        {/* 8. GAME 8: OCEAN FISHING (CÂU CÁ BIỂN SÂU - CÓ NGƯỜI QUĂNG CẦN CÂU) */}
         {activeGame === 'ocean_fishing' && (
           <div className="space-y-5">
             <div className="flex items-center justify-between">
               <div className="text-xs font-bold text-slate-600 uppercase flex items-center gap-1.5">
                 <Fish className="w-4 h-4 text-cyan-600" />
-                <span>Chạm vào chú cá đang bơi hoặc bấm thả cần câu để bắt cá may mắn:</span>
+                <span>Người câu cá quăng cần xuống biển để câu 1 chú cá may mắn trong đàn cá:</span>
               </div>
               <button
                 onClick={() => {
@@ -1398,177 +1646,336 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                 className="px-3.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 text-cyan-900 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5 text-cyan-600" />
-                <span>Thả Cá Lại Biển</span>
+                <span>Thả Đàn Cá Lại Biển</span>
               </button>
             </div>
 
-            {/* Ocean Tank */}
-            <div className="p-6 rounded-3xl bg-gradient-to-b from-sky-900 via-blue-950 to-indigo-950 border-2 border-cyan-500/30 shadow-2xl relative min-h-[290px] overflow-hidden space-y-4">
-              {/* Animated Floating Bubbles */}
-              <div className="absolute top-2 left-6 text-xl opacity-40 animate-bounce">🫧</div>
-              <div className="absolute top-8 right-12 text-2xl opacity-40 animate-pulse">🫧</div>
-              <div className="absolute bottom-4 left-1/3 text-lg opacity-30 animate-bounce">🫧</div>
+            {/* Ocean Fishing Stage */}
+            <div className="p-5 md:p-6 rounded-3xl bg-gradient-to-b from-sky-800 via-blue-900 to-indigo-950 border-2 border-cyan-400/40 shadow-2xl relative min-h-[360px] overflow-hidden space-y-4 select-none">
+              {/* Floating Bubbles */}
+              <div className="absolute top-12 left-10 text-xl opacity-30 animate-bounce">🫧</div>
+              <div className="absolute bottom-10 right-16 text-2xl opacity-30 animate-pulse">🫧</div>
+              <div className="absolute bottom-20 left-1/2 text-lg opacity-25 animate-bounce">🫧</div>
 
               {/* Status Header */}
-              <div className="flex items-center justify-between text-cyan-200 text-xs font-bold border-b border-cyan-500/20 pb-2">
-                <div className="flex items-center gap-1.5">
-                  <span>🌊 Vịnh Biển Hoàng Gia</span>
+              <div className="flex items-center justify-between text-cyan-200 text-xs font-bold border-b border-cyan-500/30 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">🎣</span>
+                  <span>Bến Tàu Câu Cá Hoàng Gia</span>
                 </div>
-                <span>
-                  {fishingStage === 'casting' && '🎣 Đang thả dây câu xuống biển...'}
-                  {fishingStage === 'hooked' && '🐟 Cá đã cắn câu! Đang kéo lên...'}
-                  {fishingStage === 'caught' && '🎉 Đã kéo được cá may mắn!'}
-                  {fishingStage === 'idle' && 'Bấm chọn một chú cá bất kỳ'}
+                <span className="bg-cyan-950/60 px-3 py-1 rounded-full border border-cyan-500/30 text-cyan-300 font-bold">
+                  {fishingStage === 'casting' && '🎣 Người câu đang vung cần quăng dây câu xuống biển...'}
+                  {fishingStage === 'hooked' && '🐟 CÁ ĐÃ CẮN CÂU! Cần câu đang uốn cong...'}
+                  {fishingStage === 'caught' && '🎉 Đã kéo được chú cá may mắn lên bờ!'}
+                  {fishingStage === 'idle' && 'Bấm "Quăng Cần Câu" hoặc chạm vào 1 chú cá bất kỳ'}
                 </span>
               </div>
 
-              {/* Swimming Fish Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 relative z-10">
-                {fishes.map((f) => (
-                  <div
-                    key={f.id}
-                    onClick={() => handleCastFishing(f.id)}
-                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center gap-3 select-none active:scale-95 ${
-                      f.isCaught
-                        ? 'bg-amber-400/20 border-amber-400 text-amber-200 shadow-lg scale-105'
-                        : `bg-gradient-to-r ${f.bgGrad} border-white/10 hover:border-cyan-400 hover:scale-102 hover:shadow-lg text-white`
-                    }`}
-                  >
-                    <div className="text-3xl animate-bounce" style={{ animationDuration: `${2 + (f.id % 3) * 0.4}s` }}>
-                      {f.icon}
+              {/* Fisherman on the Dock (Cầu gỗ câu cá) */}
+              <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-sky-950/50 border border-cyan-500/20 backdrop-blur-xs">
+                <div className="flex items-center gap-3">
+                  {/* Fisherman Character */}
+                  <div className="relative">
+                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-700 via-amber-600 to-yellow-500 border-2 border-amber-300 flex items-center justify-center text-3xl shadow-lg">
+                      {fishingStage === 'caught' ? '🧑‍🌾' : fishingStage === 'hooked' ? '😮' : '🎣'}
                     </div>
-                    <div className="space-y-0.5">
-                      <div className="text-xs font-black tracking-wide">{f.name}</div>
-                      <div className="text-[10px] text-cyan-300/80 font-bold">
-                        {f.isCaught ? '✅ Đã bắt được' : 'Bơi tung tăng'}
+                    {/* Fishing Rod */}
+                    <div className={`absolute -top-3 -right-2 text-2xl transition-transform duration-300 ${
+                      fishingStage === 'casting' ? 'rotate-45 scale-110' : fishingStage === 'hooked' ? '-rotate-12 animate-pulse' : ''
+                    }`}>
+                      🎋
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-black text-sm text-cyan-100 flex items-center gap-1.5">
+                      <span>Bác Ngư Dân Tài Ba</span>
+                      <span className="text-xs text-amber-300">⭐</span>
+                    </div>
+                    <p className="text-[11px] text-cyan-300/80 font-medium">
+                      {fishingStage === 'caught'
+                        ? 'Đã câu thành công chú cá may mắn!'
+                        : 'Sẵn sàng quăng cần xuống đàn cá đại dương'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Cast Fishing Rod Button */}
+                <button
+                  onClick={() => handleCastFishing()}
+                  disabled={fishingStage === 'casting' || fishingStage === 'hooked'}
+                  className="px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <Fish className="w-4 h-4 text-slate-900" />
+                  <span>{fishingStage === 'caught' ? 'QUĂNG CẦN LẦN NỮA 🎣' : 'QUĂNG CẦN CÂU XUỐNG BIỂN 🎣'}</span>
+                </button>
+              </div>
+
+              {/* Caught Fish Display Banner */}
+              {fishingStage === 'caught' && caughtFish && selectedStudent && (
+                <div className="relative z-10 p-4 rounded-2xl bg-gradient-to-r from-amber-500/30 via-yellow-400/30 to-amber-500/30 border-2 border-amber-400 backdrop-blur-md animate-fade-in flex items-center justify-center gap-3 text-center shadow-xl">
+                  <div className="text-4xl animate-bounce">{caughtFish.icon}</div>
+                  <div>
+                    <div className="text-xs font-black text-amber-300 uppercase tracking-wider">
+                      🎉 BẮT ĐƯỢC CHÚ CÁ MAY MẮN: {caughtFish.name}
+                    </div>
+                    <div className="text-2xl md:text-3xl font-black text-white mt-0.5">
+                      {selectedStudent.name}
+                    </div>
+                  </div>
+                  <div className="text-4xl animate-bounce">{caughtFish.icon}</div>
+                </div>
+              )}
+
+              {/* The Ocean with School of Fish (Đàn cá bơi lội) */}
+              <div className="relative z-10 space-y-2">
+                <div className="text-[11px] font-bold text-cyan-300/80 flex items-center gap-1.5">
+                  <span>🌊 ĐÀN CÁ ĐANG BƠI LỘI TRONG VỊNH (Chạm vào con cá muốn câu):</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {fishes.map((f) => (
+                    <div
+                      key={f.id}
+                      onClick={() => handleCastFishing(f.id)}
+                      className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center gap-2.5 active:scale-95 ${
+                        f.isCaught
+                          ? 'bg-amber-400/25 border-amber-400 text-amber-100 shadow-lg ring-2 ring-amber-400/40'
+                          : `bg-gradient-to-r ${f.bgGrad} border-white/10 hover:border-cyan-300 hover:scale-102 hover:shadow-lg text-white`
+                      }`}
+                    >
+                      <div className="text-3xl animate-bounce" style={{ animationDuration: `${2 + (f.id % 3) * 0.4}s` }}>
+                        {f.icon}
+                      </div>
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="text-xs font-black tracking-wide truncate">{f.name}</div>
+                        <div className="text-[10px] text-cyan-300/80 font-bold">
+                          {f.isCaught ? '✅ Đã cắn câu' : 'Đang bơi tung tăng'}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {renderResultCard()}
+          </div>
+        )}
+
+        {/* 9. GAME 9: ARCHERY TARGET (BẮN CUNG - CÓ NGƯỜI GIƯƠNG CUNG BẮN TRÚNG HỌ VÀ TÊN) */}
+        {activeGame === 'archery_target' && (
+          <div className="space-y-5 text-center">
+            <div className="max-w-2xl mx-auto p-5 md:p-6 rounded-3xl bg-gradient-to-b from-slate-900 via-indigo-950 to-slate-950 border-2 border-amber-500/40 shadow-2xl space-y-4 select-none">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-white/10 pb-2.5 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                <div className="flex items-center gap-1.5">
+                  <Crosshair className="w-4 h-4 text-amber-400" />
+                  <span>Trường Bắn Cung Olympic Hoàng Gia</span>
+                </div>
+                <span>
+                  {archeryStage === 'aiming' && '🎯 Xạ thủ đang giương cung căng dây...'}
+                  {archeryStage === 'shooting' && '🏹 Mũi tên xé gió phóng đi! VÚT!'}
+                  {archeryStage === 'hit' && '💥 ĐÃ BẮN TRÚNG HỒNG TÂM 10 ĐIỂM!'}
+                  {archeryStage === 'idle' && 'Bấm "Giương Cung Bắn Tên"'}
+                </span>
+              </div>
+
+              {/* Archer vs Target Arena */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center py-2">
+                {/* Left: The Archer (Người giương cung) */}
+                <div className="p-4 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center justify-center space-y-2 relative overflow-hidden">
+                  <div className="relative">
+                    {/* Archer Avatar */}
+                    <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-amber-500 border-2 border-amber-300 flex items-center justify-center text-5xl shadow-xl">
+                      {archeryStage === 'hit' ? '🏆' : archeryStage === 'shooting' ? '⚡' : '🧑‍🏹'}
+                    </div>
+
+                    {/* Bow & Arrow Pose */}
+                    <div className={`absolute -right-3 top-1/2 -translate-y-1/2 text-3xl transition-transform duration-200 ${
+                      archeryStage === 'aiming' ? 'scale-125 rotate-12' : archeryStage === 'shooting' ? 'translate-x-6 opacity-80' : ''
+                    }`}>
+                      🏹
+                    </div>
+                  </div>
+
+                  <div className="text-center">
+                    <div className="font-black text-sm text-white flex items-center justify-center gap-1">
+                      <span>Xạ Thủ Vô Địch</span>
+                      <span className="text-amber-400 text-xs">🥇</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 font-medium mt-0.5">
+                      {archeryStage === 'aiming'
+                        ? 'Căng hết cỡ dây cung, ngắm thẳng hồng tâm...'
+                        : archeryStage === 'hit'
+                        ? 'Bách phát bách trúng tuyệt đỉnh!'
+                        : 'Sẵn sàng giương cung bắn trúng tên học sinh'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Right: The Olympic Target (Bia bắn cung) */}
+                <div className="flex flex-col items-center justify-center space-y-2">
+                  <div
+                    onClick={() => handleShootArchery(10)}
+                    className="relative w-52 h-52 rounded-full shadow-2xl flex items-center justify-center cursor-pointer transition-transform hover:scale-105 active:scale-95 border-4 border-amber-400/40"
+                    style={{
+                      background: 'radial-gradient(circle, #f59e0b 0%, #ef4444 35%, #3b82f6 60%, #1e293b 80%, #f8fafc 100%)',
+                    }}
+                  >
+                    {/* Target Rings */}
+                    <div className="w-40 h-40 rounded-full border-4 border-white/20 flex items-center justify-center">
+                      <div className="w-28 h-28 rounded-full border-4 border-white/30 flex items-center justify-center">
+                        <div className="w-16 h-16 rounded-full border-4 border-white/50 flex items-center justify-center bg-amber-400 text-slate-950 font-black text-lg shadow-inner">
+                          🎯 10
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Arrow Stuck in Bullseye */}
+                    {archeryStage === 'hit' && (
+                      <div className="absolute inset-0 flex items-center justify-center animate-bounce">
+                        <div className="text-3xl drop-shadow-lg">🏹</div>
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-bold">Chạm vào bia hoặc bấm nút để bắn tên</span>
+                </div>
+              </div>
+
+              {/* Hit Student Banner Announcement */}
+              {archeryStage === 'hit' && selectedStudent && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/30 via-emerald-500/30 to-amber-500/30 border-2 border-emerald-400 backdrop-blur-md animate-fade-in space-y-1 shadow-xl">
+                  <div className="text-xs text-amber-300 font-black tracking-wider flex items-center justify-center gap-1.5">
+                    <span>🎯 MŨI TÊN BẮN TRÚNG HỌ VÀ TÊN HỌC SINH:</span>
+                  </div>
+                  <div className="text-3xl md:text-4xl font-black text-emerald-300">
+                    🎉 {selectedStudent.name}
+                  </div>
+                  <div className="text-xs font-mono font-bold text-slate-300">
+                    Mã số: {selectedStudent.code} • Điểm bắn trúng: 10/10 điểm
+                  </div>
+                </div>
+              )}
+
+              {/* Shoot Button */}
+              <button
+                onClick={() => handleShootArchery(10)}
+                disabled={archeryStage === 'aiming' || archeryStage === 'shooting'}
+                className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-600 hover:to-red-700 text-white font-black text-sm shadow-xl shadow-amber-500/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <Target className="w-5 h-5 text-yellow-200" />
+                <span>{archeryStage === 'hit' ? 'GIƯƠNG CUNG BẮN LẠI 🏹' : 'GIƯƠNG CUNG BẮN TÊN 🏹'}</span>
+              </button>
+            </div>
+
+            {renderResultCard()}
+          </div>
+        )}
+
+        {/* 10. GAME 10: SWIMMING RACE (CUỘC THI BƠI LỘI VUI NHỘN) */}
+        {activeGame === 'swimming_race' && (
+          <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-bold text-slate-600 uppercase flex items-center gap-1.5">
+                <span className="text-sm">🏊‍♂️</span>
+                <span>Cuộc thi bơi lội vui nhộn 4 làn đua - Kình ngư về đích đầu tiên sẽ chọn học sinh:</span>
+              </div>
+              <button
+                onClick={() => {
+                  initializeSwimmers();
+                  setSelectedStudent(null);
+                  playSound(600, 0.1, 'sine');
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 text-cyan-900 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-cyan-600" />
+                <span>Xếp Lại Đội Bơi</span>
+              </button>
+            </div>
+
+            {/* Olympic Pool Container */}
+            <div className="p-5 md:p-6 rounded-3xl bg-gradient-to-b from-sky-900 via-blue-950 to-indigo-950 border-2 border-cyan-400/40 shadow-2xl space-y-3.5 relative overflow-hidden select-none">
+              {/* Countdown Overlay */}
+              {swimmingStage === 'countdown' && swimmingCountdown !== null && (
+                <div className="absolute inset-0 bg-black/75 backdrop-blur-xs z-20 flex flex-col items-center justify-center animate-fade-in">
+                  <div className="text-7xl font-black text-amber-400 animate-ping">
+                    {swimmingCountdown > 0 ? swimmingCountdown : 'GO! 🏊'}
+                  </div>
+                  <span className="text-cyan-200 font-bold text-sm mt-3 tracking-wider uppercase">
+                    Kình ngư sẵn sàng trên bục xuất phát...
+                  </span>
+                </div>
+              )}
+
+              {/* Pool Header */}
+              <div className="flex items-center justify-between text-cyan-200 text-xs font-bold border-b border-cyan-500/20 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <span>🏊 Hồ Bơi Thi Đấu Quốc Tế</span>
+                </div>
+                <span>
+                  {swimmingStage === 'swimming' && '💦 Các kình ngư đang rẽ sóng so tài tốc độ...'}
+                  {swimmingStage === 'finish' && '🏆 Đã tìm ra kình ngư về đích quán quân!'}
+                  {swimmingStage === 'idle' && 'Bấm "Bắt Đầu Cuộc Thi Bơi Lội"'}
+                </span>
+              </div>
+
+              {/* 4 Swimming Lanes */}
+              <div className="space-y-2.5 relative">
+                {swimmers.map((swimmer) => (
+                  <div
+                    key={swimmer.id}
+                    className={`relative p-2.5 rounded-2xl border border-cyan-500/20 ${swimmer.laneBg} flex items-center gap-3 overflow-hidden bg-sky-900/30`}
+                  >
+                    {/* Starting Block Badge */}
+                    <div className="w-8 h-8 rounded-xl bg-cyan-600/60 border border-cyan-300/40 flex items-center justify-center font-black text-white text-xs shrink-0 shadow-xs">
+                      #{swimmer.lane}
+                    </div>
+
+                    {/* Water Swimming Lane */}
+                    <div className="flex-1 relative h-11 bg-gradient-to-r from-sky-800/80 via-blue-900/80 to-indigo-900/80 rounded-xl border border-cyan-400/30 overflow-hidden flex items-center px-2">
+                      {/* Touchpad Finish Line on right */}
+                      <div className="absolute right-2 top-1 bottom-1 w-4 rounded-sm bg-yellow-400 border border-amber-500 z-0 flex items-center justify-center shadow-md">
+                        <span className="text-[7px] font-black text-slate-900 rotate-90 tracking-tighter">FINISH</span>
+                      </div>
+
+                      {/* Animated Swimmer moving forward */}
+                      <div
+                        className="absolute flex items-center gap-2 transition-all duration-100 ease-linear z-10"
+                        style={{
+                          left: `calc(${swimmer.progress}% * 0.84)`,
+                        }}
+                      >
+                        <div
+                          className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${swimmer.color} flex items-center justify-center text-xl shadow-lg border border-white/40 ${
+                            swimmingStage === 'swimming' ? 'animate-bounce' : ''
+                          }`}
+                        >
+                          {swimmer.emoji}
+                        </div>
+                        <div className="flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded-md backdrop-blur-xs shadow-xs">
+                          <span className="text-[11px] font-black text-white whitespace-nowrap">
+                            {swimmer.name}
+                          </span>
+                          {swimmingStage === 'swimming' && (
+                            <span className="text-[10px] text-cyan-300">💦</span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* Fishing Rod Cast Button */}
+              {/* Start Swimming Button */}
               <div className="pt-2 flex items-center justify-center">
                 <button
-                  onClick={() => handleCastFishing()}
-                  disabled={fishingStage === 'casting' || fishingStage === 'hooked'}
-                  className="px-7 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-black text-sm shadow-xl shadow-cyan-500/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  onClick={handleStartSwimming}
+                  disabled={swimmingStage === 'countdown' || swimmingStage === 'swimming'}
+                  className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-600 hover:to-indigo-700 text-white font-black text-sm shadow-xl shadow-cyan-500/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  <Fish className="w-5 h-5 text-cyan-100" />
-                  <span>THẢ CẦN CÂU BIỂN SÂU 🎣</span>
+                  <span className="text-lg">🏊‍♂️</span>
+                  <span>{swimmingStage === 'finish' ? 'BƠI LẠI CHẶNG MỚI 🏊‍♂️' : 'BẮT ĐẦU CUỘC THI BƠI LỘI 🏊‍♂️'}</span>
                 </button>
               </div>
-            </div>
-
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 9. GAME 9: ARCHERY TARGET BULLSEYE (BẮN CUNG BÁCH PHÁT BÁCH TRÚNG) */}
-        {activeGame === 'archery_target' && (
-          <div className="space-y-5 text-center">
-            <div className="max-w-lg mx-auto p-6 rounded-3xl bg-gradient-to-b from-slate-900 via-indigo-950 to-slate-950 border-2 border-amber-500/40 shadow-2xl space-y-4">
-              <div className="flex items-center justify-center gap-2 text-amber-400 font-black tracking-wider text-xs uppercase">
-                <Crosshair className="w-4 h-4 text-amber-400" />
-                <span>Trường Bắn Cung Thi Đấu Olympic</span>
-                <Crosshair className="w-4 h-4 text-amber-400" />
-              </div>
-
-              {/* Target Board */}
-              <div
-                onClick={() => handleShootArchery(10)}
-                className="relative w-56 h-56 mx-auto rounded-full shadow-2xl flex items-center justify-center cursor-pointer transition-transform hover:scale-105 active:scale-95 select-none"
-                style={{
-                  background: 'radial-gradient(circle, #f59e0b 0%, #ef4444 35%, #3b82f6 60%, #1e293b 80%, #f8fafc 100%)',
-                }}
-              >
-                {/* Target Rings */}
-                <div className="w-44 h-44 rounded-full border-4 border-white/20 flex items-center justify-center">
-                  <div className="w-32 h-32 rounded-full border-4 border-white/30 flex items-center justify-center">
-                    <div className="w-20 h-20 rounded-full border-4 border-white/40 flex items-center justify-center bg-amber-400/90 text-slate-950 font-black text-xl shadow-inner">
-                      🎯 10
-                    </div>
-                  </div>
-                </div>
-
-                {/* Arrow Stuck in Bullseye Animation */}
-                {archeryStage === 'hit' && (
-                  <div className="absolute inset-0 flex items-center justify-center animate-ping pointer-events-none">
-                    <div className="w-8 h-8 rounded-full bg-yellow-300/60" />
-                  </div>
-                )}
-              </div>
-
-              {/* Status Display */}
-              <div className="p-3.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10 min-h-[50px] flex items-center justify-center">
-                {archeryStage === 'aiming' && (
-                  <div className="text-amber-300 font-bold text-sm flex items-center gap-1.5 animate-pulse">
-                    <Crosshair className="w-4 h-4 animate-spin" />
-                    <span>Đang ngắm chuẩn hồng tâm 10 điểm...</span>
-                  </div>
-                )}
-                {archeryStage === 'shooting' && (
-                  <div className="text-cyan-300 font-black text-base animate-bounce">
-                    🏹 Mũi tên xé gió lao đi... VÚT!
-                  </div>
-                )}
-                {archeryStage === 'hit' && selectedStudent && (
-                  <div className="space-y-0.5 animate-fade-in">
-                    <div className="text-xs text-amber-300 font-black tracking-wide">🎯 TRÚNG HỒNG TÂM 10 ĐIỂM!</div>
-                    <div className="text-2xl font-black text-emerald-300">🎉 {selectedStudent.name}</div>
-                  </div>
-                )}
-                {archeryStage === 'idle' && (
-                  <span className="text-slate-300 text-xs font-bold">Chạm vào bia bắn hoặc bấm nút bên dưới để giương cung</span>
-                )}
-              </div>
-
-              <button
-                onClick={() => handleShootArchery(10)}
-                disabled={archeryStage === 'aiming' || archeryStage === 'shooting'}
-                className="px-7 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-600 hover:to-red-700 text-white font-black text-sm shadow-xl shadow-amber-500/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                <Target className="w-5 h-5 text-yellow-200" />
-                <span>GIƯƠNG CUNG BẮN TÊN 🏹</span>
-              </button>
-            </div>
-
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 10. GAME 10: MAGIC HAT (NÓN ẢO THUẬT THỎ TRẮNG) */}
-        {activeGame === 'magic_hat' && (
-          <div className="space-y-5 text-center">
-            <div className="max-w-md mx-auto p-6 rounded-3xl bg-gradient-to-b from-purple-950 via-slate-900 to-slate-950 border border-purple-700 shadow-2xl space-y-4">
-              <div className="text-5xl">🎩 ✨ 🐰</div>
-              <h3 className="text-lg font-black text-white">NÓN ẢO THUẬT BÍ ẨN</h3>
-
-              <div className="p-5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 min-h-[90px] flex items-center justify-center">
-                {hatStage === 'casting' && (
-                  <div className="text-purple-300 font-bold animate-pulse text-base">
-                    ✨ Đang vung đũa phép niệm chú...
-                  </div>
-                )}
-                {hatStage === 'revealed' && selectedStudent && (
-                  <div className="space-y-1 animate-fade-in">
-                    <div className="text-3xl">🐰 🌟</div>
-                    <div className="text-2xl font-black text-purple-300">{selectedStudent.name}</div>
-                  </div>
-                )}
-                {hatStage === 'idle' && (
-                  <span className="text-slate-300 text-xs font-bold">Chạm nút để vung đũa phép gọi chú thỏ xuất hiện</span>
-                )}
-              </div>
-
-              <button
-                onClick={handleCastMagic}
-                disabled={hatStage === 'casting'}
-                className="px-6 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-sm shadow-lg shadow-purple-600/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer"
-              >
-                <Wand2 className={`w-4 h-4 ${hatStage === 'casting' ? 'animate-spin' : ''}`} />
-                <span>VUNG ĐŨA PHÉP THUẬT 🪄</span>
-              </button>
             </div>
 
             {renderResultCard()}
@@ -1603,30 +2010,59 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
           </div>
 
           {/* Quick Grading Action Buttons */}
-          <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-center gap-2">
-            <button
-              onClick={() => onAddBonusPoint(selectedStudent.id, 1)}
-              className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-            >
-              <Star className="w-3.5 h-3.5" />
-              <span>+1 Điểm Thưởng</span>
-            </button>
+          <div className="pt-2.5 border-t border-slate-200 flex flex-col items-center gap-2">
+            <div className="text-xs font-bold text-slate-600 flex items-center justify-center gap-1.5">
+              <span>Điểm thi đua hiện có:</span>
+              <span className={`px-2 py-0.5 rounded-full font-black text-xs ${
+                (selectedStudent.bonusPoints || 0) > 0
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : (selectedStudent.bonusPoints || 0) < 0
+                  ? 'bg-rose-100 text-rose-800'
+                  : 'bg-slate-100 text-slate-700'
+              }`}>
+                {(selectedStudent.bonusPoints || 0) > 0 ? `+${selectedStudent.bonusPoints}` : (selectedStudent.bonusPoints || 0)}đ
+              </span>
+            </div>
 
-            <button
-              onClick={() => onAddBonusPoint(selectedStudent.id, 2)}
-              className="px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-            >
-              <Flame className="w-3.5 h-3.5" />
-              <span>+2 Điểm Thưởng</span>
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={() => onAddBonusPoint(selectedStudent.id, 1)}
+                className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                <Star className="w-3.5 h-3.5" />
+                <span>+1 Điểm Thưởng</span>
+              </button>
 
-            <button
-              onClick={() => onSetOralScore(selectedStudent.id, 10)}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-            >
-              <Award className="w-3.5 h-3.5" />
-              <span>Cho 10đ Miệng</span>
-            </button>
+              <button
+                onClick={() => onAddBonusPoint(selectedStudent.id, 2)}
+                className="px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                <Flame className="w-3.5 h-3.5" />
+                <span>+2 Điểm Thưởng</span>
+              </button>
+
+              <button
+                onClick={() => onAddBonusPoint(selectedStudent.id, -1)}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                <span>-1 Điểm Trừ</span>
+              </button>
+
+              <button
+                onClick={() => onAddBonusPoint(selectedStudent.id, -2)}
+                className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                <span>-2 Điểm Trừ</span>
+              </button>
+
+              <button
+                onClick={() => onSetOralScore(selectedStudent.id, 10)}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                <Award className="w-3.5 h-3.5" />
+                <span>Cho 10đ Miệng</span>
+              </button>
+            </div>
           </div>
         </div>
       );

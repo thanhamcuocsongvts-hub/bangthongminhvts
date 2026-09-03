@@ -24,6 +24,9 @@ import { DocumentLibrary } from './components/DocumentLibrary';
 import { AITeacherAssistant } from './components/AITeacherAssistant';
 import { ExportModal } from './components/ExportModal';
 import { EducationalAuthScreen } from './components/EducationalAuthScreen';
+import { EducationalGamesHub } from './components/EducationalGamesHub';
+import { ExternalContentEmbedder } from './components/ExternalContentEmbedder';
+import { AIQuizCreatorModal } from './components/AIQuizCreatorModal';
 import { RandomStudentPickerModal } from './components/RandomStudentPickerModal';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { QRCodeSVG } from 'qrcode.react';
@@ -61,6 +64,45 @@ export default function App() {
 
   const activeTeacher =
     (teachers || []).find((t) => t.id === activeTeacherId) || null;
+
+  // Sync teachers across devices (PC <-> Mobile)
+  useEffect(() => {
+    // 1. Push local teachers to server if any exist
+    if (teachers && teachers.length > 0) {
+      fetch('/api/teachers/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teachers }),
+      }).catch((e) => console.warn('Sync teachers to server warning:', e));
+    }
+    // 2. Fetch server teachers so mobile gets all accounts registered from PC
+    fetch('/api/teachers')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.teachers && Array.isArray(data.teachers) && data.teachers.length > 0) {
+          setTeachers((prev) => {
+            const map = new Map<string, TeacherProfile>();
+            prev.forEach((t) => map.set(t.id, t));
+            data.teachers.forEach((t: TeacherProfile) => {
+              if (!map.has(t.id)) {
+                map.set(t.id, t);
+              } else {
+                const existing = map.get(t.id)!;
+                map.set(t.id, {
+                  ...existing,
+                  ...t,
+                  classes: (t.classes && t.classes.length > 0) ? t.classes : existing.classes,
+                });
+              }
+            });
+            const merged = Array.from(map.values());
+            localStorage.setItem('smartboard_teachers', JSON.stringify(merged));
+            return merged;
+          });
+        }
+      })
+      .catch((e) => console.warn('Fetch teachers error:', e));
+  }, []);
 
   // Lessons State & Persistence
   const [lessons, setLessons] = useState<LessonDoc[]>(() => {
@@ -103,7 +145,7 @@ export default function App() {
   const emptyFallbackLesson: LessonDoc = {
     id: 'empty_lesson',
     title: 'Chưa có tài liệu bài giảng',
-    subject: activeTeacher?.subject || 'Môn học',
+    subject: activeTeacher?.subject || 'Khác',
     grade: 'Lớp 10',
     lastModified: new Date().toISOString(),
     syncedToCloud: true,
@@ -128,6 +170,7 @@ export default function App() {
   const [pickerClassroom, setPickerClassroom] = useState<ClassRoom | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isGeneratingAIQuiz, setIsGeneratingAIQuiz] = useState<boolean>(false);
+  const [showAIQuizModal, setShowAIQuizModal] = useState<boolean>(false);
 
   // AI Chat Messages
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -454,7 +497,16 @@ export default function App() {
           setActiveTab('whiteboard');
         }}
         onAddNewTeacher={(newT) => {
-          setTeachers((prev) => [...prev, newT]);
+          setTeachers((prev) => {
+            const next = [...prev, newT];
+            localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+            return next;
+          });
+          fetch('/api/teachers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newT),
+          }).catch((e) => console.warn('Sync new teacher error:', e));
           setActiveTeacherId(newT.id);
           localStorage.setItem('smartboard_active_teacher', newT.id);
           setActiveTab('whiteboard');
@@ -601,9 +653,23 @@ export default function App() {
                   });
                   fetchRoom(roomState?.pin || '758899');
                 }}
-                onCreateAIQuiz={handleCreateAIQuiz}
+                onCreateAIQuiz={() => setShowAIQuizModal(true)}
                 isLoadingAIQuiz={isGeneratingAIQuiz}
               />
+            )}
+
+            {/* Tab: Educational Games Arena (Gamification 4-in-1: Grand Prix, Lucky Wheel, Mystery Puzzle, Millionaire) */}
+            {activeTab === 'games' && (
+              <EducationalGamesHub
+                questions={currentLesson.quizzes}
+                classroom={activeTeacher?.classes?.[0] || null}
+                onOpenAIQuizCreator={() => setShowAIQuizModal(true)}
+              />
+            )}
+
+            {/* Tab: Educational Simulation / External Embed (GeoGebra 3D, PhET, YouTube) */}
+            {activeTab === 'embed' && (
+              <ExternalContentEmbedder />
             )}
 
             {/* Tab 5: Analytics Dashboard & Learning Insights */}
@@ -666,13 +732,6 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* Persistent Bottom Teacher Attribution Footer */}
-      <footer className="py-1.5 px-4 bg-slate-900 border-t border-slate-800 text-center text-xs text-slate-300 select-none z-20 flex items-center justify-center gap-2 shrink-0">
-        <span>Được phát triển bởi <strong className="text-emerald-400 font-black">Thầy Trịnh Tuấn Kiệt</strong></span>
-        <span className="text-slate-600">•</span>
-        <span className="text-slate-400 font-medium">SmartBoard 75 Pro Giáo Dục Cảm Ứng</span>
-      </footer>
-
       {/* Teacher Authentication / Profile Switcher Modal */}
       {showTeacherAuthModal && (
         <EducationalAuthScreen
@@ -691,6 +750,11 @@ export default function App() {
               localStorage.setItem('smartboard_teachers', JSON.stringify(next));
               return next;
             });
+            fetch('/api/teachers', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newT),
+            }).catch((e) => console.warn('Sync new teacher error:', e));
             setActiveTeacherId(newT.id);
             localStorage.setItem('smartboard_active_teacher', newT.id);
             setShowTeacherAuthModal(false);
@@ -715,6 +779,42 @@ export default function App() {
           onSelectClassroom={(cls) => setPickerClassroom(cls)}
           onAddBonusPoint={handleAddBonusPointFromPicker}
           onSetOralScore={handleSetOralScoreFromPicker}
+        />
+      )}
+
+      {/* AI Quiz Creator Modal */}
+      {showAIQuizModal && (
+        <AIQuizCreatorModal
+          currentLesson={currentLesson}
+          onClose={() => setShowAIQuizModal(false)}
+          onApplyQuestions={async (newQuestions, quizTitle) => {
+            if (!newQuestions || newQuestions.length === 0) return;
+            const updatedQuizzes = [...currentLesson.quizzes, ...newQuestions];
+            const updatedLessons = lessons.map((l) =>
+              l.id === currentLesson.id
+                ? {
+                    ...l,
+                    title: quizTitle || l.title,
+                    quizzes: updatedQuizzes,
+                    lastModified: new Date().toISOString(),
+                  }
+                : l
+            );
+            setLessons(updatedLessons);
+
+            await fetch('/api/rooms', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                pin: '758899',
+                title: quizTitle || currentLesson.title,
+                questions: updatedQuizzes,
+              }),
+            }).catch((e) => console.warn('Sync room error', e));
+
+            fetchRoom('758899');
+            setShowAIQuizModal(false);
+          }}
         />
       )}
 

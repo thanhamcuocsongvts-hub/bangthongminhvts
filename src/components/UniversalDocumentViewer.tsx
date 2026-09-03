@@ -20,11 +20,13 @@ import {
   Eye,
   Sliders,
   Printer,
+  Pen,
 } from 'lucide-react';
 import { LessonDoc } from '../types';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { cleanDocumentText } from '../utils/fileParser';
 import { PDFCanvasViewer } from './PDFCanvasViewer';
+import { TouchWhiteboard } from './TouchWhiteboard';
 
 interface UniversalDocumentViewerProps {
   lesson: LessonDoc;
@@ -50,6 +52,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   const [tableSearch, setTableSearch] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg' | 'xl'>('md');
+  const [isAnnotating, setIsAnnotating] = useState<boolean>(false);
 
   const fileType = lesson.fileType || 'other';
 
@@ -180,6 +183,24 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
             </div>
           )}
 
+          {/* Annotation Drawing Overlay Button for Presentations/Documents */}
+          <button
+            onClick={() => setIsAnnotating(!isAnnotating)}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              isAnnotating
+                ? 'bg-amber-500 text-white ring-2 ring-amber-300 shadow-md animate-pulse'
+                : 'bg-white/10 hover:bg-white/20 text-amber-300'
+            }`}
+            title={
+              isAnnotating
+                ? 'Đang bật thanh công cụ vẽ lên bài giảng (nhấn để tắt)'
+                : 'Bật thanh công cụ: Viết, vẽ, dạ quang, thước kẻ, tẩy xóa trực tiếp lên tài liệu'
+            }
+          >
+            <Pen className="w-3.5 h-3.5" />
+            <span>{isAnnotating ? 'Đang Vẽ Chú Thích' : 'Bút Vẽ Lên File'}</span>
+          </button>
+
           {/* Copy Text */}
           <button
             onClick={handleCopyText}
@@ -205,8 +226,58 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         </div>
       </div>
 
-      {/* Main Content Area Based On Type */}
-      <div className="flex-1 w-full h-full overflow-auto bg-slate-950 relative flex flex-col">
+      {/* Main Content Area Based On Type with Smooth Touch Pinch-to-Zoom */}
+      <div
+        className="flex-1 w-full h-full overflow-auto bg-slate-950 relative flex flex-col custom-scrollbar"
+        onTouchStart={(e) => {
+          if (e.touches.length === 2) {
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            (e.currentTarget as any)._pinchStartDist = Math.hypot(
+              touch1.clientX - touch2.clientX,
+              touch1.clientY - touch2.clientY
+            );
+            (e.currentTarget as any)._pinchStartZoom = zoom;
+          }
+        }}
+        onTouchMove={(e) => {
+          if (e.touches.length === 2 && (e.currentTarget as any)._pinchStartDist) {
+            e.preventDefault();
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            const dist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
+            const startDist = (e.currentTarget as any)._pinchStartDist;
+            const startZoom = (e.currentTarget as any)._pinchStartZoom || 100;
+            if (startDist > 10) {
+              const scale = dist / startDist;
+              setZoom(Math.round(Math.min(300, Math.max(40, startZoom * scale))));
+            }
+          }
+        }}
+        onTouchEnd={(e) => {
+          if (e.touches.length < 2) {
+            delete (e.currentTarget as any)._pinchStartDist;
+            delete (e.currentTarget as any)._pinchStartZoom;
+          }
+        }}
+        onWheel={(e) => {
+          if (e.ctrlKey) {
+            e.preventDefault();
+            const delta = -e.deltaY * 0.5;
+            setZoom((z) => Math.min(300, Math.max(40, Math.round(z + delta))));
+          }
+        }}
+      >
+        {/* Interactive Annotation Drawing Layer with Full Toolbar, Fluorescent Colors & Shapes */}
+        {isAnnotating && (
+          <div className="absolute inset-0 z-40 pointer-events-auto">
+            <TouchWhiteboard
+              id={`doc-whiteboard-${lesson.id}`}
+              isOverlay={true}
+              onCloseOverlay={() => setIsAnnotating(false)}
+            />
+          </div>
+        )}
         {/* ========================================================= */}
         {/* 1. EXCEL SPREADSHEET VIEWER (.XLSX, .XLS, .CSV)            */}
         {/* ========================================================= */}

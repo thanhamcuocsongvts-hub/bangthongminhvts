@@ -85,23 +85,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         exportGradebookToExcel(classroom, teacher);
       } else {
         // Fallback demo quiz analytics
-        exportQuizAnalyticsToExcel(
-          roomState || {
-            roomPin: '8899',
-            activeLessonId: lesson.id,
-            activeSlideIndex: 0,
-            activeQuestionIndex: 0,
-            isQuizActive: false,
-            activeStudents: [
-              { id: 'st1', name: 'Nguyễn Văn An', score: 10, joinedAt: '' },
-              { id: 'st2', name: 'Trần Thị Bình', score: 8, joinedAt: '' },
-              { id: 'st3', name: 'Lê Hoàng Cường', score: 10, joinedAt: '' },
-            ],
-            submissions: {},
-            questions: lesson.quizzes || [],
-          },
-          lesson
-        );
+        const fallbackRoom: RoomState = {
+          pin: '758899',
+          title: lesson.title,
+          activeQuestionIndex: 0,
+          isLive: false,
+          startedAt: new Date().toISOString(),
+          activeStudents: [
+            { id: 'st1', name: 'Nguyễn Văn An', joinedAt: new Date().toISOString() },
+            { id: 'st2', name: 'Trần Thị Bình', joinedAt: new Date().toISOString() },
+            { id: 'st3', name: 'Lê Hoàng Cường', joinedAt: new Date().toISOString() },
+          ],
+          submissions: {},
+          questions: lesson.quizzes || [],
+        };
+        exportQuizAnalyticsToExcel(roomState || fallbackRoom, lesson);
       }
       setSuccessType('excel');
       setTimeout(() => setSuccessType(null), 3000);

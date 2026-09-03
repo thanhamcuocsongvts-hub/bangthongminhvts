@@ -18,6 +18,8 @@ import {
   UserCheck,
   LogOut,
   LogIn,
+  Trophy,
+  Globe,
 } from 'lucide-react';
 import { TextScale, TeacherProfile } from '../types';
 
@@ -26,6 +28,8 @@ export type ActiveTab =
   | 'reader'
   | 'whiteboard'
   | 'quiz'
+  | 'games'
+  | 'embed'
   | 'analytics'
   | 'gradebook'
   | 'documents'
@@ -72,6 +76,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     { id: 'presentation', label: 'Slide Trình Chiếu', icon: <Presentation className="w-5 h-5 text-indigo-600" /> },
     { id: 'reader', label: 'Mở Tài Liệu', icon: <BookOpen className="w-5 h-5 text-blue-600" /> },
     { id: 'quiz', label: 'Trắc Nghiệm Tức Thì', icon: <CheckSquare className="w-5 h-5 text-amber-500" /> },
+    { id: 'games', label: 'Trò Chơi Ôn Tập', icon: <Trophy className="w-5 h-5 text-rose-500" /> },
+    { id: 'embed', label: 'Nhúng Web/YouTube', icon: <Globe className="w-5 h-5 text-purple-600" /> },
     { id: 'analytics', label: 'Biểu Đồ Phân Tích', icon: <BarChart3 className="w-5 h-5 text-teal-600" /> },
     { id: 'documents', label: 'Kho Bài Giảng', icon: <FolderOpen className="w-5 h-5 text-amber-600" /> },
     { id: 'ai_chat', label: 'Trợ Lý AI', icon: <Bot className="w-5 h-5 text-purple-600" /> },

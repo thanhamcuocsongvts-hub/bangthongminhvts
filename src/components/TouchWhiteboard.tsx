@@ -53,15 +53,27 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   const [laserPos, setLaserPos] = useState<{ x: number; y: number } | null>(null);
   const laserTimeoutRef = useRef<any>(null);
 
-  // Quick palette colors optimized for high-contrast visibility on 75" TV
+  // Quick palette colors (17 màu - gồm 3 màu dạ quang siêu sáng phát sáng trên bảng)
   const colors = [
-    { label: 'Trắng tinh', value: '#ffffff' },
-    { label: 'Vàng neon', value: '#facc15' },
-    { label: 'Xanh lục neon', value: '#4ade80' },
-    { label: 'Cyan sáng', value: '#38bdf8' },
-    { label: 'Đỏ cam', value: '#f87171' },
-    { label: 'Tím hồng', value: '#c084fc' },
-    { label: 'Cam rực rỡ', value: '#fb923c' },
+    // 3 Màu dạ quang siêu sáng
+    { label: '🌟 Dạ Quang Vàng Chanh', value: '#ccff00', isFluorescent: true },
+    { label: '🌟 Dạ Quang Hồng Neon', value: '#ff007f', isFluorescent: true },
+    { label: '🌟 Dạ Quang Xanh Ngọc', value: '#00ffff', isFluorescent: true },
+    // 14 Màu tiêu chuẩn & mở rộng
+    { label: 'Trắng Tinh Khôi', value: '#ffffff' },
+    { label: 'Vàng Hoàng Yến', value: '#facc15' },
+    { label: 'Vàng Hổ Phách Gold', value: '#f59e0b' },
+    { label: 'Cam Rực Rỡ', value: '#fb923c' },
+    { label: 'Cam San Hô Đào', value: '#fb7185' },
+    { label: 'Đỏ Cờ Tươi', value: '#ef4444' },
+    { label: 'Đỏ Hồng Phấn', value: '#f87171' },
+    { label: 'Tím Mộng Mơ', value: '#c084fc' },
+    { label: 'Tím Tử Đinh Hương', value: '#8b5cf6' },
+    { label: 'Xanh Lam Hoàng Gia', value: '#2563eb' },
+    { label: 'Cyan Sáng', value: '#38bdf8' },
+    { label: 'Xanh Bạc Hà Tươi', value: '#2dd4bf' },
+    { label: 'Xanh Non Tươi', value: '#4ade80' },
+    { label: 'Xanh Lục Bảo', value: '#10b981' },
   ];
 
   // Adjust canvas size to match container
@@ -113,14 +125,24 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
+        const isFluo = stroke.color === '#ccff00' || stroke.color === '#ff007f' || stroke.color === '#00ffff';
+
         if (stroke.tool === 'highlighter') {
-          ctx.globalAlpha = stroke.opacity || 0.4;
+          ctx.globalAlpha = isFluo ? 0.65 : (stroke.opacity || 0.4);
           ctx.lineWidth = stroke.size * 2.5;
+          if (isFluo) {
+            ctx.shadowColor = stroke.color;
+            ctx.shadowBlur = 12;
+          }
         } else if (stroke.tool === 'eraser') {
           ctx.globalCompositeOperation = 'destination-out';
           ctx.lineWidth = stroke.size * 3;
         } else {
           ctx.globalAlpha = 1;
+          if (isFluo) {
+            ctx.shadowColor = stroke.color;
+            ctx.shadowBlur = 8;
+          }
         }
 
         const pts = stroke.points;
@@ -223,12 +245,21 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
+    const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
+
     if (activeTool === 'highlighter') {
-      ctx.globalAlpha = 0.4;
+      ctx.globalAlpha = isLiveFluo ? 0.65 : 0.4;
       ctx.lineWidth = strokeSize * 2.5;
+      if (isLiveFluo) {
+        ctx.shadowColor = activeColor;
+        ctx.shadowBlur = 12;
+      }
     } else if (activeTool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.lineWidth = strokeSize * 3;
+    } else if (isLiveFluo) {
+      ctx.shadowColor = activeColor;
+      ctx.shadowBlur = 8;
     }
 
     if (activeTool === 'line' && newPoints.length >= 2) {
@@ -478,8 +509,8 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
           <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
 
-          {/* Color Palette */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          {/* Color Palette (17 màu - gồm 3 màu dạ quang siêu sáng) */}
+          <div className="flex items-center gap-1.5 shrink-0 max-w-[260px] sm:max-w-[360px] md:max-w-[440px] overflow-x-auto py-1 custom-scrollbar-none">
             {colors.map((c) => (
               <button
                 key={c.value}
@@ -489,10 +520,15 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
                   if (activeTool === 'eraser') setActiveTool('pen');
                 }}
                 title={c.label}
-                style={{ backgroundColor: c.value }}
-                className={`w-6 h-6 rounded-full transition-all border-2 ${
-                  activeColor === c.value ? 'scale-125 border-white ring-2 ring-white/60 shadow-md' : 'border-white/40 hover:scale-110 opacity-80 hover:opacity-100'
-                }`}
+                style={{
+                  backgroundColor: c.value,
+                  boxShadow: c.isFluorescent ? `0 0 8px ${c.value}` : undefined,
+                }}
+                className={`w-6 h-6 rounded-full transition-all border-2 shrink-0 ${
+                  activeColor === c.value
+                    ? 'scale-125 border-white ring-2 ring-white/80 shadow-md'
+                    : 'border-white/40 hover:scale-110 opacity-85 hover:opacity-100'
+                } ${c.isFluorescent ? 'ring-1 ring-amber-300' : ''}`}
               />
             ))}
           </div>

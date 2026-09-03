@@ -22,6 +22,7 @@ import {
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import { ClassStudent, ClassRoom, SubjectType } from '../types';
+import { isEvaluationOrSummaryRow } from '../utils/studentFilter';
 
 interface ImportStudentsModalProps {
   isOpen?: boolean;
@@ -89,7 +90,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
   const [customClassName, setCustomClassName] = useState<string>(
     targetClassName || classRoom?.name || '10A1'
   );
-  const [replaceExisting, setReplaceExisting] = useState<boolean>(false);
+  const [replaceExisting, setReplaceExisting] = useState<boolean>(true);
 
   // Direct Paste textarea
   const [pastedText, setPastedText] = useState<string>('');
@@ -362,14 +363,22 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
       const row = matrix[r];
       if (!Array.isArray(row) || row.length === 0) continue;
 
-      // Skip summary / signature rows
+      // Skip summary / signature / statistics / evaluation rows (e.g. "KẾT QUẢ XẾP LOẠI", "THỐNG KÊ HỌC KỲ 2", "TỔNG CỘNG", "XẾP LOẠI")
       const rowStr = row.join(' ').toLowerCase();
       if (
+        isEvaluationOrSummaryRow('', rowStr) ||
         rowStr.includes('tổng cộng') ||
+        rowStr.includes('thống kê') ||
         rowStr.includes('trung bình chung') ||
+        rowStr.includes('tổng hợp') ||
+        rowStr.includes('tổng số') ||
+        rowStr.includes('kết quả xếp loại') ||
+        rowStr.includes('xếp loại') ||
         rowStr.includes('giáo viên chủ nhiệm') ||
+        rowStr.includes('giáo viên bộ môn') ||
         rowStr.includes('chữ ký') ||
-        rowStr.includes('ban giám hiệu')
+        rowStr.includes('ban giám hiệu') ||
+        rowStr.includes('hiệu trưởng')
       ) {
         continue;
       }
@@ -552,7 +561,10 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
         }
       }
 
-      if (finalName && finalName.length >= 2) {
+      const isNonStudentRow =
+        isEvaluationOrSummaryRow(finalName) ||
+        /thống\s*kê|tổng\s*số|tổng\s*cộng|tổng\s*kết|tổng\s*hợp|giáo\s*viên|gvcn|hiệu\s*trưởng|bgh|người\s*lập|chữ\s*ký|ký\s*tên|học\s*sinh\s*giỏi|học\s*sinh\s*khá|ngày.*tháng/i.test(finalName);
+      if (finalName && finalName.length >= 2 && !isNonStudentRow) {
         // Calculate semester 1 DTB if components are provided
         const txScores = [tx1, tx2, tx3, tx4, tx5].filter((s): s is number => typeof s === 'number' && !isNaN(s));
         let semesterDtb = dtb;

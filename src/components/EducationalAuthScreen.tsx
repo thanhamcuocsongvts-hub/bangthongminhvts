@@ -91,27 +91,65 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Handle Standard Login
-  const handleLogin = (e: React.FormEvent) => {
+  // Cross-device sync: fetch server accounts on mount so accounts created on PC appear on mobile
+  React.useEffect(() => {
+    fetch('/api/teachers')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.teachers && Array.isArray(d.teachers)) {
+          d.teachers.forEach((t: TeacherProfile) => {
+            if (!teacherList.some((existing) => existing.id === t.id)) {
+              onAddNewTeacher(t);
+            }
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Handle Standard Login with Cross-Device Sync (PC <-> Mobile)
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
 
     const identifier = loginIdentifier.trim().toLowerCase();
+    const cleanPassword = loginPassword.trim();
     if (!identifier) {
       setLoginError('Vui lòng nhập tên đăng nhập hoặc địa chỉ email');
       return;
     }
 
-    // Find teacher matching username or email
-    const matched = teacherList.find(
+    // Find teacher matching username or email in local state
+    let matched = teacherList.find(
       (t) =>
-        (t.username && t.username.toLowerCase() === identifier) ||
-        (t.email && t.email.toLowerCase() === identifier) ||
-        t.name.toLowerCase() === identifier
+        (t.username && t.username.trim().toLowerCase() === identifier) ||
+        (t.email && t.email.trim().toLowerCase() === identifier) ||
+        (t.name && t.name.trim().toLowerCase() === identifier)
     );
 
+    // If not found in local state (e.g. registered on PC, now logging in on Mobile), check server store!
     if (!matched) {
-      // If no teacher registered yet, prompt to register
+      try {
+        const res = await fetch('/api/teachers');
+        const data = await res.json();
+        if (data.teachers && Array.isArray(data.teachers)) {
+          const found = data.teachers.find(
+            (t: TeacherProfile) =>
+              (t.username && t.username.trim().toLowerCase() === identifier) ||
+              (t.email && t.email.trim().toLowerCase() === identifier) ||
+              (t.name && t.name.trim().toLowerCase() === identifier)
+          );
+          if (found) {
+            matched = found;
+            onAddNewTeacher(found);
+          }
+        }
+      } catch (err) {
+        console.warn('Check server teachers error:', err);
+      }
+    }
+
+    if (!matched) {
       if (teacherList.length === 0) {
         setLoginError('Hệ thống chưa có tài khoản giáo viên nào. Vui lòng chọn tab "Đăng Ký Tài Khoản" bên cạnh.');
       } else {
@@ -120,9 +158,10 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
       return;
     }
 
-    // If teacher has a password, check it (optional demo forgiveness if blank)
-    if (matched.password && matched.password !== loginPassword && loginPassword !== '') {
-      setLoginError('Mật khẩu không chính xác. Vui lòng thử lại.');
+    // Check password (ignoring accidental leading/trailing spaces)
+    const savedPassword = (matched.password || '').trim();
+    if (savedPassword && savedPassword !== cleanPassword && cleanPassword !== '') {
+      setLoginError('Mật khẩu không chính xác. Lưu ý kiểm tra bàn phím điện thoại có tự động viết hoa chữ cái đầu không.');
       return;
     }
 
@@ -218,7 +257,7 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
   };
 
   const content = (
-    <div className={`w-full ${isModal ? 'max-w-4xl' : 'max-w-5xl my-auto'} bg-white rounded-3xl border border-slate-200/90 shadow-2xl overflow-hidden flex flex-col md:flex-row select-none transition-all`}>
+    <div className={`w-full ${isModal ? 'max-w-4xl' : 'max-w-6xl w-full min-h-[85vh]'} bg-white rounded-3xl border border-slate-200/90 shadow-2xl overflow-hidden flex flex-col md:flex-row select-none transition-all`}>
       {/* Left Educational Branding Column */}
       <div className="md:w-5/12 bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 p-8 text-white flex flex-col justify-between relative overflow-hidden">
         {/* Subtle decorative background circles */}
@@ -494,6 +533,9 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                   <input
                     type="text"
                     required
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     value={loginIdentifier}
                     onChange={(e) => setLoginIdentifier(e.target.value)}
                     placeholder="Ví dụ: thanhamcuocsong.vts@gmail.com hoặc vothanhson"
@@ -511,6 +553,9 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type={showLoginPassword ? 'text' : 'password'}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                     placeholder="••••••••"
@@ -1077,8 +1122,13 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
 
   // Full Screen Educational Portal Layout
   return (
-    <div className="min-h-screen w-full bg-slate-900/5 flex flex-col items-center justify-center p-4 md:p-8 relative">
-      {content}
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 flex flex-col justify-between p-3 sm:p-6 md:p-8 relative overflow-x-hidden">
+      <div className="w-full flex-1 flex items-center justify-center my-auto py-2">
+        {content}
+      </div>
+      <footer className="w-full py-3 px-4 bg-slate-950/85 backdrop-blur-md border-t border-white/10 text-center text-xs text-slate-300 select-none flex items-center justify-center shrink-0 mt-4 rounded-2xl">
+        <span>Được phát triển bởi <strong className="text-emerald-400 font-black">Thầy Trịnh Tuấn Kiệt</strong></span>
+      </footer>
     </div>
   );
 };

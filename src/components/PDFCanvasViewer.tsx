@@ -325,24 +325,81 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
         </div>
       </div>
 
-      {/* Main PDF Scrollable Reading Canvas Area */}
-      <div className="flex-1 w-full h-full overflow-y-auto overflow-x-auto p-4 flex flex-col items-center gap-6 bg-slate-950/95 scroll-smooth custom-scrollbar">
+      {/* Main PDF Scrollable Reading Canvas Area with Touch Pinch-To-Zoom */}
+      <div
+        className="flex-1 w-full h-full overflow-y-auto overflow-x-auto p-4 flex flex-col items-center bg-slate-950/95 scroll-smooth custom-scrollbar relative touch-none select-none"
+        onTouchStart={(e) => {
+          if (e.touches.length === 2 && containerRef.current) {
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            const dist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
+            (containerRef.current as any)._pinchStartDist = dist;
+            (containerRef.current as any)._pinchStartZoom = internalZoom;
+          }
+        }}
+        onTouchMove={(e) => {
+          if (e.touches.length === 2 && (containerRef.current as any)?._pinchStartDist) {
+            e.preventDefault();
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            const dist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
+            const startDist = (containerRef.current as any)._pinchStartDist;
+            const startZoom = (containerRef.current as any)._pinchStartZoom || 100;
+            if (startDist > 10) {
+              const scale = dist / startDist;
+              const newZoom = Math.round(Math.min(300, Math.max(40, startZoom * scale)));
+              setInternalZoom(newZoom);
+            }
+          }
+        }}
+        onTouchEnd={(e) => {
+          if (e.touches.length < 2) {
+            if (containerRef.current) {
+              delete (containerRef.current as any)._pinchStartDist;
+              delete (containerRef.current as any)._pinchStartZoom;
+            }
+          }
+        }}
+        onWheel={(e) => {
+          if (e.ctrlKey) {
+            e.preventDefault();
+            const delta = -e.deltaY * 0.5;
+            setInternalZoom((z) => Math.min(300, Math.max(40, Math.round(z + delta))));
+          }
+        }}
+      >
         {viewMode === 'single' ? (
-          <div className="relative my-auto flex flex-col items-center">
-            <canvas
-              ref={canvasRef}
-              className="max-w-full rounded-xl shadow-2xl bg-white transition-transform"
+          <div className="relative my-auto flex flex-col items-center transition-transform duration-100 ease-out">
+            <div
+              className="rounded-xl shadow-2xl bg-white overflow-hidden"
               style={{
                 boxShadow: '0 20px 50px rgba(0,0,0,0.85)',
+                width: 'fit-content',
               }}
-            />
+            >
+              <canvas
+                ref={canvasRef}
+                className="block transition-all"
+                style={{
+                  width: `${(internalZoom / 100) * 750}px`,
+                  height: 'auto',
+                  maxWidth: 'none',
+                }}
+              />
+            </div>
             <div className="mt-3 text-xs text-slate-400 font-medium">
-              Trang {currentPage} trên tổng số {numPages}
+              Trang {currentPage} trên tổng số {numPages} • Thu phóng: {internalZoom}%
             </div>
           </div>
         ) : (
           /* Continuous Scroll: Render all pages in high-resolution smooth column */
-          <div className="flex flex-col items-center gap-6 w-full max-w-4xl py-2">
+          <div
+            className="flex flex-col items-center gap-6 py-2 transition-all duration-100 ease-out"
+            style={{
+              width: 'fit-content',
+              minWidth: 'min(100%, 750px)',
+            }}
+          >
             {Array.from({ length: numPages }, (_, idx) => idx + 1).map((pNum) => (
               <PDFPageItem
                 key={pNum}
@@ -409,11 +466,17 @@ const PDFPageItem: React.FC<{
   }, [pdfDoc, pageNumber, zoom, rotation]);
 
   return (
-    <div className="flex flex-col items-center w-full group">
-      <div className="relative bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700/50 transition-all hover:border-indigo-500/50">
+    <div className="flex flex-col items-center group" style={{ width: 'fit-content' }}>
+      <div
+        className="relative bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700/50 transition-all hover:border-indigo-500/50"
+        style={{
+          width: `${Math.max(300, (zoom / 100) * 750)}px`,
+          maxWidth: 'none',
+        }}
+      >
         <canvas
           ref={canvasRef}
-          className="max-w-full block"
+          className="w-full h-auto block"
           style={{
             boxShadow: '0 15px 35px rgba(0,0,0,0.6)',
           }}
@@ -426,7 +489,7 @@ const PDFPageItem: React.FC<{
         )}
       </div>
       <div className="mt-2 text-[11px] font-bold text-slate-500 group-hover:text-indigo-400 transition-colors">
-        Trang {pageNumber}
+        Trang {pageNumber} • {zoom}%
       </div>
     </div>
   );

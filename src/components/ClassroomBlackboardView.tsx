@@ -51,14 +51,12 @@ import {
   Sparkle,
   TrendingUp,
 } from 'lucide-react';
-import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile } from '../types';
+import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile, BlackboardBackground } from '../types';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
 import { computeDefaultVertices, updateVertexWithConstraints, drawShapeWithVertices } from '../utils/geometryVertices';
 import { isFunctionGraphTool, drawFunctionGraph } from '../utils/mathGraphRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
-
-export type BlackboardBackground = 'blackboard' | 'oli' | 'lined' | 'graph' | 'slate' | 'white';
 
 interface BlackboardPage {
   id: string;
@@ -172,6 +170,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     startMouseX: number;
     startMouseY: number;
     origPoints: StrokePoint[];
+    origVertices?: StrokeVertex[];
     centerX: number;
     centerY: number;
     origRotation: number;
@@ -210,15 +209,27 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       `Tài liệu: ${currentLesson.title}\nLoại tệp: ${currentLesson.fileType?.toUpperCase() || 'Tài liệu'} (${currentLesson.fileSize || 'Sẵn sàng'})\nĐã sẵn sàng hiển thị trực tiếp trên SmartBoard 75 Pro.`
     : '';
 
-  // Chalk Palette Colors
+  // Chalk Palette Colors (Tổng cộng 17 màu - gồm 3 màu dạ quang siêu sáng cực nét)
   const chalkPalette = [
+    // 3 MÀU DẠ QUANG SIÊU SÁNG PHÁT SÁNG TRÊN BẢNG (FLUORESCENT / NEON)
+    { label: 'Dạ Quang Vàng Chanh', value: '#ccff00', isFluorescent: true, desc: 'Dạ quang siêu sáng chói' },
+    { label: 'Dạ Quang Hồng Neon', value: '#ff007f', isFluorescent: true, desc: 'Dạ quang hồng phát sáng' },
+    { label: 'Dạ Quang Xanh Ngọc', value: '#00ffff', isFluorescent: true, desc: 'Dạ quang lân tinh rực rỡ' },
+    // 14 MÀU PHẤN & BÚT BẢNG TIÊU CHUẨN & MỞ RỘNG
     { label: 'Phấn Trắng', value: '#ffffff' },
     { label: 'Phấn Vàng Hoàng Yến', value: '#facc15' },
-    { label: 'Phấn Xanh Non', value: '#4ade80' },
-    { label: 'Phấn Cyan Sáng', value: '#38bdf8' },
-    { label: 'Phấn Đỏ Hồng', value: '#f87171' },
+    { label: 'Vàng Hổ Phách Gold', value: '#f59e0b' },
     { label: 'Phấn Cam Rực Rỡ', value: '#fb923c' },
+    { label: 'Cam San Hô Đào', value: '#fb7185' },
+    { label: 'Đỏ Cờ Thuần Khiết', value: '#ef4444' },
+    { label: 'Phấn Đỏ Hồng', value: '#f87171' },
     { label: 'Phấn Tím Mộng Mơ', value: '#c084fc' },
+    { label: 'Tím Tử Đinh Hương', value: '#8b5cf6' },
+    { label: 'Xanh Lam Hoàng Gia', value: '#2563eb' },
+    { label: 'Phấn Cyan Sáng', value: '#38bdf8' },
+    { label: 'Xanh Bạc Hà Tươi', value: '#2dd4bf' },
+    { label: 'Phấn Xanh Non', value: '#4ade80' },
+    { label: 'Xanh Lục Bảo Đậm', value: '#10b981' },
   ];
 
   // Chalk Stroke Sizes
@@ -385,15 +396,21 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
+    const isFluo = color === '#ccff00' || color === '#ff007f' || color === '#00ffff';
+
     if (tool === 'highlighter') {
-      ctx.globalAlpha = 0.35;
+      ctx.globalAlpha = isFluo ? 0.65 : 0.35;
+      if (isFluo) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 12;
+      }
     } else if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.globalAlpha = 1.0;
     } else {
       ctx.globalAlpha = 0.95;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 1;
+      ctx.shadowBlur = isFluo ? 8 : 1;
     }
 
     // Check if custom vertices are available for parallel geometry rendering
@@ -735,18 +752,22 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
       // Render all saved strokes
       strokes.forEach((stroke) => {
-        renderSingleStroke(
-          ctx,
-          stroke.tool,
-          stroke.points,
-          stroke.color,
-          stroke.size,
-          stroke.rotation || 0,
-          stroke.centerX,
-          stroke.centerY,
-          stroke.scale || 1,
-          stroke.customVertices
-        );
+        try {
+          renderSingleStroke(
+            ctx,
+            stroke.tool,
+            stroke.points,
+            stroke.color,
+            stroke.size,
+            stroke.rotation || 0,
+            stroke.centerX,
+            stroke.centerY,
+            stroke.scale || 1,
+            stroke.customVertices
+          );
+        } catch (err) {
+          console.warn('Safe catch in renderSingleStroke:', err);
+        }
       });
 
       // Render inserted chalkboard texts (skip currently selected text as it is rendered inside the interactive DOM overlay)
@@ -864,7 +885,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         dragStrokeStartRef.current = {
           startMouseX: e.clientX,
           startMouseY: e.clientY,
-          origPoints: hitStroke.points.map((p) => ({ ...p })),
+          origPoints: hitStroke.points ? hitStroke.points.map((p) => ({ ...p })) : [],
+          origVertices: hitStroke.customVertices ? hitStroke.customVertices.map((v) => ({ ...v })) : undefined,
           centerX: bounds.centerX,
           centerY: bounds.centerY,
           origRotation: hitStroke.rotation || 0,
@@ -958,6 +980,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       const deltaX = e.clientX - dragStrokeStartRef.current.startMouseX;
       const deltaY = e.clientY - dragStrokeStartRef.current.startMouseY;
       const origPts = dragStrokeStartRef.current.origPoints;
+      const origVerts = dragStrokeStartRef.current.origVertices;
 
       setPages((prev) => {
         const updated = [...prev];
@@ -970,11 +993,19 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               x: p.x + deltaX,
               y: p.y + deltaY,
             }));
+            const movedVertices = origVerts
+              ? origVerts.map((v) => ({
+                  ...v,
+                  x: v.x + deltaX,
+                  y: v.y + deltaY,
+                }))
+              : s.customVertices;
             const newCenterX = dragStrokeStartRef.current!.centerX + deltaX;
             const newCenterY = dragStrokeStartRef.current!.centerY + deltaY;
             return {
               ...s,
               points: movedPoints,
+              customVertices: movedVertices,
               centerX: newCenterX,
               centerY: newCenterY,
             };
@@ -1007,6 +1038,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         const mid2X = (p1.x + p2.x) / 2;
         const mid2Y = (p1.y + p2.y) / 2;
 
+        const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
+
         ctx.save();
         ctx.translate(-boardScrollX, -boardScrollY);
         ctx.lineCap = 'round';
@@ -1018,7 +1051,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         } else {
           ctx.strokeStyle = activeColor;
           if (activeTool === 'highlighter') {
-            ctx.globalAlpha = 0.45;
+            ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
+            if (isLiveFluo) {
+              ctx.shadowColor = activeColor;
+              ctx.shadowBlur = 12;
+            }
+          } else if (isLiveFluo) {
+            ctx.shadowColor = activeColor;
+            ctx.shadowBlur = 8;
           }
         }
         ctx.beginPath();
@@ -1029,6 +1069,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       } else if (pts.length === 2) {
         const p0 = pts[0];
         const p1 = pts[1];
+        const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
         ctx.save();
         ctx.translate(-boardScrollX, -boardScrollY);
         ctx.lineCap = 'round';
@@ -1039,7 +1080,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           ctx.strokeStyle = '#000';
         } else {
           ctx.strokeStyle = activeColor;
-          if (activeTool === 'highlighter') ctx.globalAlpha = 0.45;
+          if (activeTool === 'highlighter') {
+            ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
+            if (isLiveFluo) {
+              ctx.shadowColor = activeColor;
+              ctx.shadowBlur = 12;
+            }
+          } else if (isLiveFluo) {
+            ctx.shadowColor = activeColor;
+            ctx.shadowBlur = 8;
+          }
         }
         ctx.beginPath();
         ctx.moveTo(p0.x, p0.y);
@@ -2144,7 +2194,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 <div className="h-4 w-px bg-white/20 mx-0.5" />
 
                 {/* Change color palette */}
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 max-w-[260px] sm:max-w-[340px] overflow-x-auto py-0.5 custom-scrollbar-none">
                   {chalkPalette.map((cp) => (
                     <button
                       key={cp.value}
@@ -2160,12 +2210,15 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                           return updated;
                         });
                       }}
-                      className={`w-4 h-4 rounded-full border transition-transform ${
+                      className={`w-4 h-4 rounded-full border transition-transform shrink-0 ${
                         selectedText.color === cp.value
                           ? 'border-white scale-125 ring-2 ring-cyan-400'
                           : 'border-transparent hover:scale-110'
                       }`}
-                      style={{ backgroundColor: cp.value }}
+                      style={{
+                        backgroundColor: cp.value,
+                        boxShadow: cp.isFluorescent ? `0 0 6px ${cp.value}` : undefined,
+                      }}
                       title={cp.label}
                     />
                   ))}
@@ -2299,9 +2352,29 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 height: `${bounds.height}px`,
               }}
             >
+              {/* Interactive Inner Drag Area allowing easy grabbing & movement of the entire shape */}
+              <div
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setIsDraggingStroke(true);
+                  setIsDraggingText(false);
+                  dragStrokeStartRef.current = {
+                    startMouseX: e.clientX,
+                    startMouseY: e.clientY,
+                    origPoints: selectedStroke.points ? selectedStroke.points.map((p) => ({ ...p })) : [],
+                    origVertices: selectedStroke.customVertices ? selectedStroke.customVertices.map((v) => ({ ...v })) : undefined,
+                    centerX: bounds.centerX,
+                    centerY: bounds.centerY,
+                    origRotation: selectedStroke.rotation || 0,
+                  };
+                }}
+                className="absolute inset-0 cursor-move pointer-events-auto bg-cyan-400/5 hover:bg-cyan-400/15 rounded-2xl transition-colors border border-cyan-400/30"
+                title="Kéo thả để di chuyển toàn bộ hình vẽ"
+              />
+
               {/* Draggable Vertex Handles for Geometric Shapes (preserves parallel sides) */}
               {activeVertices && activeVertices.length > 0 && (
-                <div className="absolute inset-0 pointer-events-auto">
+                <div className="absolute inset-0 pointer-events-none">
                   {activeVertices.map((vertex, vIdx) => {
                     // Position relative to bounds container
                     const relX = vertex.x - bounds.minX;
@@ -2325,8 +2398,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                             const canvas = canvasRef.current;
                             if (!canvas) return;
                             const rect = canvas.getBoundingClientRect();
-                            const vx = e.clientX - rect.left;
-                            const vy = e.clientY - rect.top;
+                            const vx = e.clientX - rect.left + boardScrollX;
+                            const vy = e.clientY - rect.top + boardScrollY;
                             handleVertexDrag(vIdx, vx, vy);
                           }
                         }}
@@ -2349,7 +2422,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                           top: `${relY}px`,
                           touchAction: 'none',
                         }}
-                        className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing flex items-center justify-center group z-50 select-none ${
+                        className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing flex items-center justify-center group z-50 select-none pointer-events-auto ${
                           isBeingDragged ? 'scale-125' : 'hover:scale-115'
                         } transition-transform`}
                         title={`Kéo để di chuyển đỉnh ${vertexLabel} (bảo toàn tính song song)`}
@@ -2529,7 +2602,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 <div className="h-5 w-px bg-white/20 mx-1" />
 
                 {/* Change Color Palette */}
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 max-w-[260px] sm:max-w-[340px] overflow-x-auto py-0.5 custom-scrollbar-none">
                   {chalkPalette.map((cp) => (
                     <button
                       key={cp.value}
@@ -2545,12 +2618,15 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                           return updated;
                         });
                       }}
-                      className={`w-4 h-4 rounded-full border transition-transform ${
+                      className={`w-4 h-4 rounded-full border transition-transform shrink-0 ${
                         selectedStroke.color === cp.value
                           ? 'border-white scale-125 ring-2 ring-cyan-400'
                           : 'border-transparent hover:scale-110'
                       }`}
-                      style={{ backgroundColor: cp.value }}
+                      style={{
+                        backgroundColor: cp.value,
+                        boxShadow: cp.isFluorescent ? `0 0 6px ${cp.value}` : undefined,
+                      }}
                       title={cp.label}
                     />
                   ))}
@@ -2762,7 +2838,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
       {/* AUTHENTIC BOTTOM CHALK & TOOL DOCK (75 INCH TOUCH OPTIMIZED) */}
       {!isDockCollapsed && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] animate-fade-in flex justify-center">
+        <div className="absolute bottom-6 md:bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] animate-fade-in flex justify-center">
           <div className="bg-slate-950/95 backdrop-blur-2xl px-3.5 py-2 rounded-2xl md:rounded-3xl border-2 border-white/25 shadow-2xl flex items-center gap-1 sm:gap-2 text-white shrink-0">
           {/* Main Drawing Tools */}
           <div className="flex items-center gap-1 shrink-0">
@@ -3422,12 +3498,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           <div className="relative shrink-0">
             <button
               onClick={() => setShowColorPopover((prev) => !prev)}
-              className="p-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white transition-all shadow-sm shrink-0"
-              title="Bảng màu phấn (Nhấp để chọn màu khác)"
+              className="p-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white transition-all shadow-sm shrink-0 cursor-pointer"
+              title="Bảng màu phấn & dạ quang (Nhấp để chọn màu khác)"
             >
               <div
-                className="w-5 h-5 rounded-full border-2 border-white shadow-md ring-2 ring-white/30 shrink-0"
-                style={{ backgroundColor: activeColor }}
+                className="w-5 h-5 rounded-full border-2 border-white shadow-md ring-2 shrink-0 transition-all"
+                style={{
+                  backgroundColor: activeColor,
+                  boxShadow: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? `0 0 10px ${activeColor}` : undefined,
+                  borderColor: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? '#ffffff' : 'rgba(255,255,255,0.8)',
+                }}
               />
               <span className="hidden xl:inline text-[11px] font-semibold text-slate-200">
                 {chalkPalette.find((c) => c.value === activeColor)?.label || 'Màu phấn'}
@@ -3437,41 +3517,95 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
             {/* Color Palette Popover */}
             {showColorPopover && (
-              <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 p-3 rounded-3xl bg-slate-950/95 backdrop-blur-xl border-2 border-white/20 shadow-2xl min-w-[240px] text-white flex flex-col gap-2.5 select-none animate-fade-in">
-                <div className="flex items-center justify-between pb-1.5 border-b border-white/10">
-                  <span className="text-[11px] font-black uppercase text-slate-300 tracking-wider">
-                    MÀU PHẤN VIẾT BẢNG
-                  </span>
+              <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 p-3.5 rounded-3xl bg-slate-950/98 backdrop-blur-2xl border-2 border-white/25 shadow-2xl w-[320px] sm:w-[360px] text-white flex flex-col gap-3 select-none animate-fade-in">
+                <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                  <div className="flex items-center gap-1.5">
+                    <Palette className="w-4 h-4 text-amber-400" />
+                    <span className="text-[11px] font-black uppercase text-slate-200 tracking-wider">
+                      BẢNG MÀU PHẤN & DẠ QUANG (17 MÀU)
+                    </span>
+                  </div>
                   <button
                     onClick={() => setShowColorPopover(false)}
-                    className="p-1 rounded-lg hover:bg-white/10 text-slate-400"
+                    className="p-1 rounded-lg hover:bg-white/10 text-slate-400 cursor-pointer"
                   >
-                    <X className="w-3 h-3" />
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2">
-                  {chalkPalette.map((cp) => (
-                    <button
-                      key={cp.value}
-                      onClick={() => {
-                        setActiveColor(cp.value);
-                        if (activeTool === 'eraser') setActiveTool('pen');
-                        setShowColorPopover(false);
-                      }}
-                      className={`p-2 rounded-2xl flex flex-col items-center gap-1 transition-all ${
-                        activeColor === cp.value
-                          ? 'bg-white/20 ring-2 ring-white scale-105 shadow-md'
-                          : 'hover:bg-white/10'
-                      }`}
-                    >
-                      <div
-                        className="w-6 h-6 rounded-full border-2 border-white shadow-inner"
-                        style={{ backgroundColor: cp.value }}
-                      />
-                      <span className="text-[10px] font-bold text-slate-200">{cp.label}</span>
-                    </button>
-                  ))}
+                {/* 3 MÀU DẠ QUANG SIÊU SÁNG PHÁT SÁNG CỰC ĐẸP TRÊN BẢNG */}
+                <div className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-cyan-500/15 border border-amber-400/40 space-y-1.5 shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-amber-300 tracking-wider flex items-center gap-1">
+                      <span>✨</span> 3 MÀU DẠ QUANG SIÊU SÁNG
+                    </span>
+                    <span className="text-[8.5px] px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 font-bold border border-amber-400/30">
+                      Glow Luminescent
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {chalkPalette.filter((cp) => cp.isFluorescent).map((cp) => (
+                      <button
+                        key={cp.value}
+                        onClick={() => {
+                          setActiveColor(cp.value);
+                          if (activeTool === 'eraser') setActiveTool('pen');
+                          setShowColorPopover(false);
+                        }}
+                        className={`p-2 rounded-2xl flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                          activeColor === cp.value
+                            ? 'bg-white/25 ring-2 ring-white scale-105 shadow-lg'
+                            : 'hover:bg-white/10 hover:scale-102'
+                        }`}
+                      >
+                        <div
+                          className="w-7 h-7 rounded-full border-2 border-white shadow-lg relative flex items-center justify-center"
+                          style={{
+                            backgroundColor: cp.value,
+                            boxShadow: `0 0 10px ${cp.value}, inset 0 0 4px #ffffff`,
+                          }}
+                        >
+                          <span className="text-[9px] drop-shadow-md">✨</span>
+                        </div>
+                        <span className="text-[9.5px] font-black text-center text-white leading-tight">
+                          {cp.label.replace('Dạ Quang ', '')}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 14 MÀU PHẤN TIÊU CHUẨN */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                    MÀU PHẤN BẢNG TIÊU CHUẨN (14 MÀU)
+                  </span>
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-[190px] overflow-y-auto pr-1 custom-scrollbar-none">
+                    {chalkPalette.filter((cp) => !cp.isFluorescent).map((cp) => (
+                      <button
+                        key={cp.value}
+                        onClick={() => {
+                          setActiveColor(cp.value);
+                          if (activeTool === 'eraser') setActiveTool('pen');
+                          setShowColorPopover(false);
+                        }}
+                        title={cp.label}
+                        className={`p-1.5 rounded-xl flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                          activeColor === cp.value
+                            ? 'bg-white/20 ring-2 ring-white scale-105 shadow-md'
+                            : 'hover:bg-white/10'
+                        }`}
+                      >
+                        <div
+                          className="w-5 h-5 rounded-full border border-white/70 shadow-inner"
+                          style={{ backgroundColor: cp.value }}
+                        />
+                        <span className="text-[8.5px] font-bold text-slate-300 truncate max-w-[52px] text-center">
+                          {cp.label.replace('Phấn ', '')}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -3571,7 +3705,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
       {/* Floating Restore Toolbar Button when collapsed - Moved to Bottom Right */}
       {isDockCollapsed && (
-        <div className="absolute bottom-4 right-6 z-30 pointer-events-auto animate-fade-in">
+        <div className="absolute bottom-6 md:bottom-8 right-6 z-30 pointer-events-auto animate-fade-in">
           <button
             onClick={() => setIsDockCollapsed(false)}
             className="px-4 py-2.5 rounded-full bg-slate-950/90 hover:bg-indigo-600 border-2 border-white/40 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl transition-all hover:scale-105 active:scale-95 cursor-pointer"

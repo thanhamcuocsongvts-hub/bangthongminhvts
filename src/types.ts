@@ -25,7 +25,7 @@ export interface QuizQuestion {
   explanation: string;
   timeLimit: number; // in seconds
   subject?: SubjectType;
-  difficulty?: 'Dễ' | 'Trung bình' | 'Vận dụng cao';
+  difficulty?: 'Dễ' | 'Trung bình' | 'Vận dụng cao' | 'Cơ bản' | 'Thông hiểu' | 'Vận dụng' | string;
 }
 
 export interface StudentSubmission {
@@ -219,7 +219,9 @@ export interface ClassStudent {
   conductRecords?: ConductRecord[]; // Lịch sử các lần cộng/trừ điểm thi đua
   notes?: string;
   isCalled?: boolean; // Đã được gọi phát biểu trong buổi học hôm nay chưa
+  semester1Details?: Record<string, any>;
   customFields?: Record<string, string | number | null | undefined>; // Lưu trữ tất cả các cột mở rộng từ file Excel đã nhập
+  [key: string]: any;
 }
 
 export interface ClassRoom {
@@ -231,6 +233,9 @@ export interface ClassRoom {
   students: ClassStudent[];
   customColumns?: string[]; // Danh sách các cột mở rộng được nhập từ file Excel hoặc tạo thêm
 }
+
+export type Student = ClassStudent;
+export type ClassroomGroup = ClassRoom;
 
 export interface TeacherProfile {
   id: string;

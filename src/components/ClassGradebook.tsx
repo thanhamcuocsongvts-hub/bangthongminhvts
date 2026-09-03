@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Users,
   Plus,
@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { ClassRoom, ClassStudent, TeacherProfile, ConductRecord, SemesterScoreDetail } from '../types';
 import { exportGradebookToExcel } from '../utils/exportUtils';
+import { isEvaluationOrSummaryRow } from '../utils/studentFilter';
 import { ImportStudentsModal } from './ImportStudentsModal';
 import { StudentConductModal } from './StudentConductModal';
 
@@ -99,6 +100,10 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   const [showDeleteClassModal, setShowDeleteClassModal] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showConductModal, setShowConductModal] = useState<boolean>(false);
+  const [showAccumulateModal, setShowAccumulateModal] = useState<boolean>(false);
+  const [accumulateTargetCol, setAccumulateTargetCol] = useState<'tx1' | 'tx2' | 'tx3' | 'gk'>('tx1');
+  const [accumulateRatio, setAccumulateRatio] = useState<number>(0.5);
+  const [resetBonusAfterApply, setResetBonusAfterApply] = useState<boolean>(false);
   const [showAddColumnModal, setShowAddColumnModal] = useState<boolean>(false);
   const [newColumnName, setNewColumnName] = useState<string>('');
   const [conductStudentId, setConductStudentId] = useState<string | undefined>(undefined);
@@ -125,13 +130,36 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   const currentClass =
     classes.find((c) => c.id === activeClassId) || classes[0] || null;
 
-  // Filter students based on search term
+  const [isExpandedView, setIsExpandedView] = useState<boolean>(true);
+
+  // Auto-cleanup any stray summary or evaluation rows (e.g. "KẾT QUẢ XẾP LOẠI", "Tốt", "Khá", "Đạt", "Chưa đạt", "THỐNG KÊ") from existing class data
+  useEffect(() => {
+    if (!currentClass) return;
+    const hasStraySummary = currentClass.students.some((st) =>
+      isEvaluationOrSummaryRow(st.name) || isEvaluationOrSummaryRow(st.code)
+    );
+    if (hasStraySummary) {
+      const cleaned = currentClass.students.filter(
+        (st) => !isEvaluationOrSummaryRow(st.name) && !isEvaluationOrSummaryRow(st.code)
+      );
+      const updatedClasses = classes.map((c) =>
+        c.id === currentClass.id ? { ...c, students: cleaned } : c
+      );
+      onUpdateTeacher({ ...teacher, classes: updatedClasses });
+    }
+  }, [currentClass, classes, teacher, onUpdateTeacher]);
+
+  // Filter students based on search term and eliminate any stray summary/evaluation rows
   const filteredStudents = useMemo(() => {
     if (!currentClass) return [];
-    const q = searchTerm.toLowerCase().trim();
-    if (!q) return currentClass.students || [];
+    const validStudents = (currentClass.students || []).filter(
+      (st) => !isEvaluationOrSummaryRow(st.name) && !isEvaluationOrSummaryRow(st.code)
+    );
 
-    return (currentClass.students || []).filter((st) => {
+    const q = searchTerm.toLowerCase().trim();
+    if (!q) return validStudents;
+
+    return validStudents.filter((st) => {
       return (
         st.name.toLowerCase().includes(q) ||
         st.code.toLowerCase().includes(q) ||
@@ -372,7 +400,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
       name: newClassName.trim().toUpperCase(),
       grade: newClassGrade,
       academicYear: '2026 - 2027',
-      subject: teacher?.subject || 'Môn học',
+      subject: teacher?.subject || 'Khác',
       students: [],
       customColumns: [],
     };
@@ -420,7 +448,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
         name: newClassName.trim().toUpperCase(),
         grade: 'Lớp 10',
         academicYear: '2026 - 2027',
-        subject: teacher?.subject || 'Môn học',
+        subject: teacher?.subject || 'Khác',
         students: imported,
         customColumns: customColumns || [],
       };
@@ -548,7 +576,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   };
 
   return (
-    <div className="space-y-5 pb-12 select-none text-slate-800 animate-fade-in">
+    <div className="w-full h-full overflow-y-auto overflow-x-auto p-3 md:p-5 space-y-5 pb-16 select-none text-slate-800 animate-fade-in custom-scrollbar">
       {/* Top Banner & Quick Class Actions */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-5 md:p-6 rounded-3xl border border-slate-200 shadow-xs">
         <div className="flex items-center gap-4">
@@ -583,6 +611,17 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
             >
               <AlertTriangle className="w-4 h-4 text-amber-300" />
               <span>Ghi Nhận Thi Đua</span>
+            </button>
+          )}
+
+          {currentClass && (
+            <button
+              onClick={() => setShowAccumulateModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
+              title="Tổng kết điểm thi đua nề nếp cộng dồn vào cột điểm"
+            >
+              <TrendingUp className="w-4 h-4 text-emerald-200" />
+              <span>Tổng Kết Thi Đua Vào Điểm</span>
             </button>
           )}
 
@@ -794,8 +833,38 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
         )}
       </div>
 
+      {/* Table controls toolbar: Full page toggle & horizontal scroll helper */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-slate-800 text-sm">
+            Danh Sách: {filteredStudents.length} Học Sinh
+          </span>
+          <span className="text-xs text-slate-500 hidden sm:inline">
+            • Đã hỗ trợ cuộn dọc toàn bộ trang & cuộn ngang xem tất cả các cột điểm
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsExpandedView((v) => !v)}
+            className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+              isExpandedView
+                ? 'bg-indigo-600 text-white shadow-xs ring-2 ring-indigo-400/30'
+                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+            }`}
+            title="Chuyển chế độ xem bao quát toàn bộ học sinh không giới hạn chiều cao"
+          >
+            <Columns className="w-3.5 h-3.5" />
+            <span>{isExpandedView ? 'Chế Độ: Xem Bao Quát Toàn Bộ' : 'Chế Độ: Cố Định Khung Bảng'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Main Gradebook Touch Table with Full 2D Scrolling & Sticky Headers */}
-      <div className="max-h-[calc(100vh-250px)] overflow-x-auto overflow-y-auto relative rounded-2xl border border-slate-200 bg-white shadow-xs smooth-touch-scroll custom-scrollbar">
+      <div
+        className={`${
+          isExpandedView ? 'min-h-[500px]' : 'max-h-[calc(100vh-250px)]'
+        } overflow-x-auto overflow-y-auto relative rounded-2xl border border-slate-200 bg-white shadow-xs smooth-touch-scroll custom-scrollbar`}
+      >
         <table className="w-full text-left text-xs md:text-sm border-collapse min-w-[1200px]">
           {/* STICKY HEADER */}
           <thead className="sticky top-0 z-30 bg-slate-100 shadow-xs">
@@ -1725,6 +1794,156 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
             });
           }}
         />
+      )}
+
+      {/* Accumulate Conduct Points Modal */}
+      {showAccumulateModal && currentClass && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in select-none">
+          <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-white/10 text-amber-300">
+                  <TrendingUp className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black">Tổng Kết Điểm Thi Đua Vào Cột Điểm</h2>
+                  <p className="text-xs text-emerald-100 font-medium">
+                    Cộng / trừ điểm nề nếp thi đua vào sổ điểm của Lớp {currentClass.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAccumulateModal(false)}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-slate-800">
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase mb-1.5">
+                  Chọn Cột Điểm Cần Cộng Dồn <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={accumulateTargetCol}
+                  onChange={(e) => setAccumulateTargetCol(e.target.value as any)}
+                  className="w-full px-4 py-2.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                >
+                  <option value="tx1">Điểm Thường Xuyên 1 (TX1 / Miệng)</option>
+                  <option value="tx2">Điểm Thường Xuyên 2 (TX2 / 15 phút)</option>
+                  <option value="tx3">Điểm Thường Xuyên 3 (TX3)</option>
+                  <option value="gk">Điểm Giữa Kỳ (GK)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase mb-1.5">
+                  Tỷ Lệ Quy Đổi Điểm
+                </label>
+                <select
+                  value={accumulateRatio}
+                  onChange={(e) => setAccumulateRatio(Number(e.target.value))}
+                  className="w-full px-4 py-2.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                >
+                  <option value={1.0}>1 điểm thi đua = 1.0 điểm số (1:1)</option>
+                  <option value={0.5}>1 điểm thi đua = 0.5 điểm số (2 thi đua = 1 điểm)</option>
+                  <option value={0.2}>1 điểm thi đua = 0.2 điểm số (5 thi đua = 1 điểm)</option>
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  * Điểm sau cộng luôn được giới hạn an toàn từ 0.0 đến 10.0.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-amber-600" />
+                  <span>Xem trước ({currentClass.students.filter(s => (s.bonusPoints || 0) !== 0).length} học sinh có điểm thi đua):</span>
+                </div>
+                <div className="max-h-36 overflow-y-auto custom-scrollbar space-y-1 pt-1">
+                  {currentClass.students.filter(s => (s.bonusPoints || 0) !== 0).map((st) => {
+                    const currentScore = (st as any)[accumulateTargetCol] ?? 0;
+                    const delta = Math.round((st.bonusPoints || 0) * accumulateRatio * 10) / 10;
+                    const nextScore = Math.max(0, Math.min(10, Math.round((currentScore + delta) * 10) / 10));
+                    return (
+                      <div key={st.id} className="flex items-center justify-between bg-white px-2.5 py-1 rounded-lg border border-amber-200/60 text-[11px]">
+                        <span className="font-bold text-slate-800">{st.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={st.bonusPoints! > 0 ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>
+                            {st.bonusPoints! > 0 ? `+${st.bonusPoints}` : st.bonusPoints}đ thi đua
+                          </span>
+                          <span className="text-slate-400">➔</span>
+                          <span className="font-black text-indigo-700">
+                            {currentScore} ➔ {nextScore}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={resetBonusAfterApply}
+                  onChange={(e) => setResetBonusAfterApply(e.target.checked)}
+                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                />
+                <span>Đặt lại điểm thi đua về 0 sau khi cộng dồn thành công</span>
+              </label>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAccumulateModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const updatedStudents = currentClass.students.map((st) => {
+                      const bonus = st.bonusPoints || 0;
+                      if (bonus === 0) return st;
+
+                      const scoreDelta = Math.round(bonus * accumulateRatio * 10) / 10;
+                      const currentScore = (st as any)[accumulateTargetCol] ?? 0;
+                      const newScore = Math.max(0, Math.min(10, Math.round((currentScore + scoreDelta) * 10) / 10));
+
+                      const updatedSemesterDetail = {
+                        ...(st.semester1Details || {}),
+                        [accumulateTargetCol]: newScore,
+                      };
+
+                      return {
+                        ...st,
+                        [accumulateTargetCol]: newScore,
+                        semester1Details: updatedSemesterDetail,
+                        bonusPoints: resetBonusAfterApply ? 0 : st.bonusPoints,
+                      };
+                    });
+
+                    const updatedClasses = classes.map((c) =>
+                      c.id === currentClass.id ? { ...c, students: updatedStudents } : c
+                    );
+
+                    onUpdateTeacher({
+                      ...teacher,
+                      classes: updatedClasses,
+                    });
+
+                    setShowAccumulateModal(false);
+                  }}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-md cursor-pointer transition-all active:scale-95"
+                >
+                  Xác Nhận Cộng Vào Cột Điểm
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

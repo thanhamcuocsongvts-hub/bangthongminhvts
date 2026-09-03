@@ -27,8 +27,9 @@ interface LiveQuizHubProps {
   onRefreshRoom: () => void;
   onControlRoom: (activeQuestionIndex: number, isLive: boolean) => void;
   onResetRoom: () => void;
-  onCreateAIQuiz: (promptTopic?: string) => Promise<void>;
+  onCreateAIQuiz: (promptTopic?: string) => Promise<void> | void;
   isLoadingAIQuiz?: boolean;
+  onOpenAIQuizCreator?: () => void;
 }
 
 export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
@@ -39,6 +40,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   onResetRoom,
   onCreateAIQuiz,
   isLoadingAIQuiz = false,
+  onOpenAIQuizCreator,
 }) => {
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
   const [isRevealed, setIsRevealed] = useState<boolean>(false);
@@ -209,20 +211,32 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     return (
       <div className="w-full h-[calc(100vh-100px)] flex flex-col items-center justify-center p-8 bg-white rounded-3xl border border-slate-200 text-center shadow-md">
         <div className="w-20 h-20 rounded-3xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600 mb-6 shadow-xs">
-          <HelpCircle className="w-10 h-10" />
+          <Sparkles className="w-10 h-10 text-amber-500 animate-pulse" />
         </div>
-        <h2 className="text-3xl font-black text-slate-900 mb-3">Chưa có câu hỏi trắc nghiệm nào</h2>
-        <p className="text-slate-600 text-lg max-w-md mb-6">
-          Bạn có thể để Trí tuệ nhân tạo AI tự động tạo trắc nghiệm từ tài liệu bài giảng hiện tại.
+        <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3">
+          Sẵn Sàng Tạo Đề Trắc Nghiệm Ôn Tập
+        </h2>
+        <p className="text-slate-600 text-base max-w-lg mb-6">
+          Bạn có thể để Trí tuệ nhân tạo (AI) tự động soạn đề kiểm tra trắc nghiệm 4 đáp án theo chuẩn giáo dục Việt Nam hoặc tự nhập câu hỏi.
         </p>
-        <button
-          onClick={() => onCreateAIQuiz()}
-          disabled={isLoadingAIQuiz}
-          className="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-lg flex items-center gap-3 shadow-md shadow-indigo-600/20 transition-all"
-        >
-          <Sparkles className="w-6 h-6 text-yellow-300" />
-          <span>{isLoadingAIQuiz ? 'AI đang tạo câu hỏi...' : 'Tạo Trắc Nghiệm Tự Động Bằng AI'}</span>
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={() => (onOpenAIQuizCreator ? onOpenAIQuizCreator() : onCreateAIQuiz())}
+            disabled={isLoadingAIQuiz}
+            className="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-base flex items-center gap-3 shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
+          >
+            <Sparkles className="w-5 h-5 text-yellow-300" />
+            <span>Soạn Đề Trắc Nghiệm Bằng AI</span>
+          </button>
+          <button
+            onClick={() => onCreateAIQuiz()}
+            disabled={isLoadingAIQuiz}
+            className="px-5 py-3.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-base flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <Zap className="w-4 h-4 text-amber-500" />
+            <span>Tạo Nhanh 1-Chạm</span>
+          </button>
+        </div>
       </div>
     );
   }
