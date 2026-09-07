@@ -562,7 +562,9 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
       }
 
       const isNonStudentRow =
-        isEvaluationOrSummaryRow(finalName) ||
+        isEvaluationOrSummaryRow(finalName, rowStr) ||
+        isEvaluationOrSummaryRow(code) ||
+        /^(tốt|khá|đạt|chưa\s*đạt|giỏi|xuất\s*sắc|trung\s*bình|yếu|kém)/i.test(finalName) ||
         /thống\s*kê|tổng\s*số|tổng\s*cộng|tổng\s*kết|tổng\s*hợp|giáo\s*viên|gvcn|hiệu\s*trưởng|bgh|người\s*lập|chữ\s*ký|ký\s*tên|học\s*sinh\s*giỏi|học\s*sinh\s*khá|ngày.*tháng/i.test(finalName);
       if (finalName && finalName.length >= 2 && !isNonStudentRow) {
         // Calculate semester 1 DTB if components are provided

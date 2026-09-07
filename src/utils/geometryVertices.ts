@@ -141,22 +141,24 @@ export function computeDefaultVertices(
     }
 
     case 'circle': {
-      const radius = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+      const radius = Math.max(8, Math.hypot(p2.x - p1.x, p2.y - p1.y));
       return [
-        { name: 'O', x: p1.x, y: p1.y, role: 'base' },
-        { name: 'R', x: p1.x + radius, y: p1.y, role: 'radius' },
+        { name: 'O (Tâm)', x: p1.x, y: p1.y, role: 'base' },
+        { name: 'R (Bán kính)', x: p1.x + radius, y: p1.y, role: 'radius' },
+        { name: 'Đỉnh trên', x: p1.x, y: p1.y - radius, role: 'top' },
       ];
     }
 
     case 'ellipse': {
       const cx = (p1.x + p2.x) / 2;
       const cy = (p1.y + p2.y) / 2;
-      const rx = Math.max(4, Math.abs(p2.x - p1.x) / 2);
-      const ry = Math.max(4, Math.abs(p2.y - p1.y) / 2);
+      const rx = Math.max(8, Math.abs(p2.x - p1.x) / 2);
+      const ry = Math.max(8, Math.abs(p2.y - p1.y) / 2);
       return [
-        { name: 'O', x: cx, y: cy, role: 'base' },
-        { name: 'Rx', x: cx + rx, y: cy, role: 'radius' },
-        { name: 'Ry', x: cx, y: cy + ry, role: 'radius' },
+        { name: 'O (Tâm)', x: cx, y: cy, role: 'base' },
+        { name: 'Rx (Trục lớn)', x: cx + rx, y: cy, role: 'radius' },
+        { name: 'Ry (Trục bé)', x: cx, y: cy + ry, role: 'radius' },
+        { name: 'Đỉnh trên', x: cx, y: cy - ry, role: 'top' },
       ];
     }
 
@@ -432,35 +434,61 @@ export function updateVertexWithConstraints(
 
     case 'circle': {
       if (draggedIdx === 0) {
+        // Dragging center O: smoothly shifts center and all perimeter handles
         const shiftX = dx;
         const shiftY = dy;
-        verts[0].x += shiftX;
-        verts[0].y += shiftY;
-        verts[1].x += shiftX;
-        verts[1].y += shiftY;
+        verts.forEach((v) => {
+          v.x += shiftX;
+          v.y += shiftY;
+        });
       } else {
-        verts[1].x = newX;
-        verts[1].y = newY;
+        // Dragging perimeter handle: update radius smoothly in all directions
+        const O = verts[0];
+        const newRadius = Math.max(8, Math.hypot(newX - O.x, newY - O.y));
+        if (verts[1]) {
+          verts[1].x = O.x + newRadius;
+          verts[1].y = O.y;
+        }
+        if (verts[2]) {
+          verts[2].x = O.x;
+          verts[2].y = O.y - newRadius;
+        }
       }
       return verts;
     }
 
     case 'ellipse': {
       if (draggedIdx === 0) {
+        // Center O: shifts all handles
         const shiftX = dx;
         const shiftY = dy;
-        verts[0].x += shiftX;
-        verts[0].y += shiftY;
-        verts[1].x += shiftX;
-        verts[1].y += shiftY;
-        verts[2].x += shiftX;
-        verts[2].y += shiftY;
+        verts.forEach((v) => {
+          v.x += shiftX;
+          v.y += shiftY;
+        });
       } else if (draggedIdx === 1) {
-        const rx = Math.max(6, Math.abs(newX - verts[0].x));
+        // Horizontal radius Rx
+        const rx = Math.max(8, Math.abs(newX - verts[0].x));
         verts[1].x = verts[0].x + rx;
+        verts[1].y = verts[0].y;
       } else if (draggedIdx === 2) {
-        const ry = Math.max(6, Math.abs(newY - verts[0].y));
+        // Vertical radius Ry (bottom)
+        const ry = Math.max(8, Math.abs(newY - verts[0].y));
+        verts[2].x = verts[0].x;
         verts[2].y = verts[0].y + ry;
+        if (verts[3]) {
+          verts[3].x = verts[0].x;
+          verts[3].y = verts[0].y - ry;
+        }
+      } else if (draggedIdx === 3) {
+        // Vertical radius Ry (top)
+        const ry = Math.max(8, Math.abs(newY - verts[0].y));
+        verts[3].x = verts[0].x;
+        verts[3].y = verts[0].y - ry;
+        if (verts[2]) {
+          verts[2].x = verts[0].x;
+          verts[2].y = verts[0].y + ry;
+        }
       }
       return verts;
     }

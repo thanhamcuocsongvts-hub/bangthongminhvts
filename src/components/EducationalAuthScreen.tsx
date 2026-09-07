@@ -21,6 +21,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { TeacherProfile, SubjectType } from '../types';
+import { ADMIN_TEACHER } from '../data/defaultTeachers';
 
 interface EducationalAuthScreenProps {
   isModal?: boolean;
@@ -30,7 +31,7 @@ interface EducationalAuthScreenProps {
   onSelectTeacher: (teacher: TeacherProfile) => void;
   onAddNewTeacher: (newTeacher: TeacherProfile) => void;
   onDeleteTeacher?: (teacherId: string) => void;
-  onResetPassword?: (teacherId: string) => void;
+  onResetPassword?: (teacherId: string, newPassword?: string) => void;
   onLogout: () => void;
 }
 
@@ -54,6 +55,7 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
   const [adminPin, setAdminPin] = useState<string>('');
   const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
   const [adminError, setAdminError] = useState<string | null>(null);
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
 
   // Login form state
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
@@ -117,6 +119,26 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
     if (!identifier) {
       setLoginError('Vui lòng nhập tên đăng nhập hoặc địa chỉ email');
       return;
+    }
+
+    // Explicit Admin Account Check (Password 123456)
+    if (identifier === 'admin' || identifier === 'admin@smartboard.edu.vn') {
+      if (cleanPassword === '123456') {
+        let adminAccount = teacherList.find(
+          (t) => t.id === 'teacher_admin_root' || t.username === 'admin' || t.role === 'admin'
+        );
+        if (!adminAccount) {
+          adminAccount = ADMIN_TEACHER;
+          onAddNewTeacher(adminAccount);
+        }
+        onSelectTeacher(adminAccount);
+        showToast('Đăng nhập thành công với Quyền Quản Trị Viên (Admin)!');
+        if (onClose) setTimeout(onClose, 600);
+        return;
+      } else {
+        setLoginError('Mật khẩu tài khoản Quản Trị Viên (Admin) không chính xác. Mặc định là 123456.');
+        return;
+      }
     }
 
     // Find teacher matching username or email in local state
@@ -601,6 +623,24 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 <ArrowRight className="w-4 h-4" />
               </button>
 
+              {/* Admin Quick Tip */}
+              <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/90 text-amber-900 text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Tài khoản Admin: <code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-950 font-mono">admin</code> | Mật khẩu: <code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-950 font-mono">123456</code></span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginIdentifier('admin');
+                    setLoginPassword('123456');
+                  }}
+                  className="px-2 py-0.5 rounded-md bg-amber-200/70 hover:bg-amber-200 text-amber-950 text-[10px] font-black shrink-0 transition-colors"
+                >
+                  Điền Nhanh
+                </button>
+              </div>
+
               {/* Guest Mode Direct Access Button */}
               <button
                 type="button"
@@ -980,8 +1020,12 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
               ) : (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <div className="text-xs font-black text-slate-900 uppercase">
-                      Danh Sách Tài Khoản Giáo Viên ({teacherList.length})
+                    <div>
+                      <div className="text-xs font-black text-slate-900 uppercase flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-amber-500" />
+                        <span>Danh Sách Giáo Viên Đăng Ký ({teacherList.length})</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">Quản trị viên có thể xem mật khẩu, reset mật khẩu và quản lý tài khoản</p>
                     </div>
                     <button
                       type="button"
@@ -992,62 +1036,131 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                     </button>
                   </div>
 
+                  {/* Direct Admin Login Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let adminAccount = teacherList.find(
+                        (t) => t.id === 'teacher_admin_root' || t.username === 'admin' || t.role === 'admin'
+                      );
+                      if (!adminAccount) {
+                        adminAccount = ADMIN_TEACHER;
+                        onAddNewTeacher(adminAccount);
+                      }
+                      onSelectTeacher(adminAccount);
+                      showToast('Đã đăng nhập vào phòng học với Quyền Quản Trị Viên (Admin)!');
+                      if (onClose) setTimeout(onClose, 500);
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>ĐĂNG NHẬP VỚI TƯ CÁCH QUẢN TRỊ VIÊN (ADMIN)</span>
+                  </button>
+
                   <div className="max-h-[50vh] overflow-y-auto space-y-2 pr-1">
-                    {teacherList.map((t) => (
-                      <div
-                        key={t.id}
-                        className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="flex items-center gap-2.5 overflow-hidden">
-                          <span className="text-xl">{t.avatar || '👨‍🏫'}</span>
-                          <div className="overflow-hidden">
-                            <div className="font-black text-slate-900 truncate flex items-center gap-1.5">
-                              <span>{t.name}</span>
-                              {activeTeacher?.id === t.id && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-100 text-emerald-700 font-bold">
-                                  Đang dùng
+                    {teacherList.map((t) => {
+                      const isRevealed = !!revealedPasswords[t.id];
+                      const pwd = t.password || '123456';
+                      return (
+                        <div
+                          key={t.id}
+                          className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="flex items-center gap-2.5 overflow-hidden">
+                            <span className="text-xl">{t.avatar || '👨‍🏫'}</span>
+                            <div className="overflow-hidden">
+                              <div className="font-black text-slate-900 truncate flex items-center gap-1.5">
+                                <span>{t.name}</span>
+                                {t.role === 'admin' && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] bg-amber-200 text-amber-900 font-black">
+                                    ADMIN
+                                  </span>
+                                )}
+                                {activeTeacher?.id === t.id && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-100 text-emerald-700 font-bold">
+                                    Đang dùng
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-500 truncate">
+                                User: <span className="font-mono text-slate-700 font-bold">{t.username || t.email}</span> • {t.subject}
+                              </div>
+
+                              {/* Password Display */}
+                              <div className="flex items-center gap-1.5 mt-1">
+                                <span className="text-[10px] font-bold text-slate-400">MK:</span>
+                                <span className="font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50/80 px-1.5 py-0.2 rounded border border-indigo-200/50">
+                                  {isRevealed ? pwd : '••••••'}
                                 </span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-slate-500 truncate">
-                              {t.email || t.username} • {t.subject}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRevealedPasswords((prev) => ({ ...prev, [t.id]: !prev[t.id] }))
+                                  }
+                                  className="text-slate-400 hover:text-slate-700 p-0.5"
+                                  title={isRevealed ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                                >
+                                  {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (onResetPassword) {
-                                onResetPassword(t.id);
-                              }
-                              showToast(`Đã đặt lại mật khẩu tài khoản ${t.name} về mặc định 123456!`);
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 border border-amber-300 font-bold text-[10px] transition-colors"
-                            title="Đặt lại mật khẩu về 123456"
-                          >
-                            Reset MK
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (window.confirm(`Thầy/Cô có chắc chắn muốn xóa tài khoản "${t.name}"?`)) {
-                                if (onDeleteTeacher) {
-                                  onDeleteTeacher(t.id);
+                          <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onResetPassword) {
+                                  onResetPassword(t.id, '123456');
                                 }
-                                showToast(`Đã xóa tài khoản ${t.name}.`);
-                              }
-                            }}
-                            className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 border border-rose-300 transition-colors"
-                            title="Xóa tài khoản này"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
+                                fetch('/api/teachers/reset-password', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ teacherId: t.id, newPassword: '123456' }),
+                                }).catch(() => {});
+                                showToast(`Đã reset mật khẩu tài khoản ${t.name} về mặc định 123456!`);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 border border-amber-300 font-bold text-[10px] transition-colors flex items-center gap-1"
+                              title="Đặt lại mật khẩu về 123456"
+                            >
+                              <Lock className="w-3 h-3 text-amber-600" />
+                              <span>Reset MK (123456)</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectTeacher(t);
+                                showToast(`Đã chuyển sang tài khoản ${t.name}!`);
+                                if (onClose) setTimeout(onClose, 400);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[10px] transition-colors"
+                              title="Đăng nhập ngay với tài khoản này"
+                            >
+                              Đăng Nhập
+                            </button>
+
+                            {t.role !== 'admin' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm(`Thầy/Cô có chắc chắn muốn xóa tài khoản "${t.name}"?`)) {
+                                    if (onDeleteTeacher) {
+                                      onDeleteTeacher(t.id);
+                                    }
+                                    showToast(`Đã xóa tài khoản ${t.name}.`);
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 border border-rose-300 transition-colors"
+                                title="Xóa tài khoản này"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

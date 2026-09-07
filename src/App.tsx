@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DEFAULT_LESSONS } from './data/defaultLessons';
-import { DEFAULT_TEACHERS } from './data/defaultTeachers';
+import { DEFAULT_TEACHERS, ADMIN_TEACHER } from './data/defaultTeachers';
 import {
   LessonDoc,
   RoomState,
@@ -28,6 +28,9 @@ import { EducationalGamesHub } from './components/EducationalGamesHub';
 import { ExternalContentEmbedder } from './components/ExternalContentEmbedder';
 import { AIQuizCreatorModal } from './components/AIQuizCreatorModal';
 import { RandomStudentPickerModal } from './components/RandomStudentPickerModal';
+import { TeacherProfileModal } from './components/TeacherProfileModal';
+import { AdminManagementModal } from './components/AdminManagementModal';
+import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadLessonsFromDB, saveLessonsToDB } from './utils/storageUtils';
@@ -50,7 +53,19 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.map((t) => ({
+            ...t,
+            classes: (t.classes || []).map((c: any) => ({
+              ...c,
+              students: cleanStudentList(c.students || []),
+            })),
+          }));
+          if (!sanitized.some((t: TeacherProfile) => t.id === 'teacher_admin_root' || t.username === 'admin')) {
+            sanitized.unshift(ADMIN_TEACHER);
+          }
+          return sanitized;
+        }
       } catch (e) {
         console.error('Failed to parse saved teachers', e);
       }
@@ -84,14 +99,19 @@ export default function App() {
             const map = new Map<string, TeacherProfile>();
             prev.forEach((t) => map.set(t.id, t));
             data.teachers.forEach((t: TeacherProfile) => {
+              const rawClasses = (t.classes && t.classes.length > 0) ? t.classes : (map.get(t.id)?.classes || []);
+              const cleanedClasses = rawClasses.map((c: any) => ({
+                ...c,
+                students: cleanStudentList(c.students || []),
+              }));
               if (!map.has(t.id)) {
-                map.set(t.id, t);
+                map.set(t.id, { ...t, classes: cleanedClasses });
               } else {
                 const existing = map.get(t.id)!;
                 map.set(t.id, {
                   ...existing,
                   ...t,
-                  classes: (t.classes && t.classes.length > 0) ? t.classes : existing.classes,
+                  classes: cleanedClasses,
                 });
               }
             });
@@ -166,6 +186,8 @@ export default function App() {
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
   const [showTeacherAuthModal, setShowTeacherAuthModal] = useState<boolean>(false);
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
   const [showRandomPickerModal, setShowRandomPickerModal] = useState<boolean>(false);
   const [pickerClassroom, setPickerClassroom] = useState<ClassRoom | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -183,7 +205,7 @@ export default function App() {
   ]);
   const [isAILoading, setIsAILoading] = useState<boolean>(false);
 
-  // Load lessons from high-capacity IndexedDB on mount
+  // Load lessons from Cloud Server & high-capacity IndexedDB on mount
   useEffect(() => {
     loadLessonsFromDB()
       .then((dbLessons) => {
@@ -193,6 +215,27 @@ export default function App() {
       })
       .catch((err) => {
         console.warn('IndexedDB initial load note:', err);
+      });
+
+    // Cross-device sync: Fetch lessons stored on the cloud server (accessible from PC, TV 75", Mobile)
+    fetch('/api/lessons')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.lessons && Array.isArray(data.lessons) && data.lessons.length > 0) {
+          setLessons((prev) => {
+            const map = new Map<string, LessonDoc>();
+            prev.forEach((l) => map.set(l.id, l));
+            data.lessons.forEach((l: LessonDoc) => {
+              map.set(l.id, { ...l, syncedToCloud: true });
+            });
+            const merged = Array.from(map.values());
+            saveLessonsToDB(merged).catch(() => {});
+            return merged;
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not fetch cloud lessons:', err);
       });
   }, []);
 
@@ -270,18 +313,24 @@ export default function App() {
     }
   }, [activeLessonId, currentLesson]);
 
-  // Cloud Sync Simulation
+  // Real Cloud Sync to Server
   const handleSyncToCloud = async () => {
     setIsSyncingCloud(true);
     try {
-      await new Promise((r) => setTimeout(r, 1200));
-      setLessons((prev) =>
-        prev.map((l) => ({
-          ...l,
-          syncedToCloud: true,
-          lastModified: new Date().toISOString(),
-        }))
-      );
+      const res = await fetch('/api/lessons/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lessons }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.lessons && Array.isArray(data.lessons)) {
+          setLessons(data.lessons);
+          saveLessonsToDB(data.lessons).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.error('Cloud sync error:', err);
     } finally {
       setIsSyncingCloud(false);
     }
@@ -402,12 +451,17 @@ export default function App() {
   };
 
   // Reset Password for Teacher (Admin)
-  const handleResetPassword = (teacherId: string) => {
+  const handleResetPassword = (teacherId: string, newPassword: string = '123456') => {
     setTeachers((prev) => {
-      const next = prev.map((t) => (t.id === teacherId ? { ...t, password: '' } : t));
+      const next = prev.map((t) => (t.id === teacherId ? { ...t, password: newPassword } : t));
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
       return next;
     });
+    fetch('/api/teachers/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teacherId, newPassword }),
+    }).catch((e) => console.warn('Reset password error', e));
   };
 
   // Logout Teacher
@@ -530,6 +584,8 @@ export default function App() {
         onOpenQR={() => setShowQRModal(true)}
         onOpenExport={() => setShowExportModal(true)}
         onOpenTeacherAuth={() => setShowTeacherAuthModal(true)}
+        onOpenProfile={() => setShowProfileModal(true)}
+        onOpenAdmin={() => setShowAdminModal(true)}
         onOpenRandomPicker={() => {
           setPickerClassroom(activeTeacher?.classes?.[0] || null);
           setShowRandomPickerModal(true);
@@ -609,11 +665,21 @@ export default function App() {
                 onAddLesson={(newDoc) => {
                   setLessons((prev) => [newDoc, ...prev]);
                   setActiveLessonId(newDoc.id);
+                  fetch('/api/lessons', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newDoc),
+                  }).catch((e) => console.warn('Sync new lesson to cloud error:', e));
                 }}
                 onUpdateLesson={(updatedDoc) => {
                   setLessons((prev) =>
                     prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
                   );
+                  fetch('/api/lessons', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedDoc),
+                  }).catch((e) => console.warn('Sync updated lesson to cloud error:', e));
                 }}
                 onDeleteLesson={(id) => {
                   setLessons((prev) => {
@@ -623,6 +689,7 @@ export default function App() {
                     }
                     return next;
                   });
+                  fetch(`/api/lessons/${id}`, { method: 'DELETE' }).catch(() => {});
                 }}
                 onSwitchToPresentation={() => setActiveTab('presentation')}
                 onSwitchToReader={() => setActiveTab('reader')}
@@ -655,6 +722,32 @@ export default function App() {
                 }}
                 onCreateAIQuiz={() => setShowAIQuizModal(true)}
                 isLoadingAIQuiz={isGeneratingAIQuiz}
+                currentLesson={currentLesson}
+                onApplyQuestions={async (newQuestions, quizTitle) => {
+                  const updatedLessons = lessons.map((l) =>
+                    l.id === currentLesson.id
+                      ? {
+                          ...l,
+                          title: quizTitle || l.title,
+                          quizzes: newQuestions,
+                          lastModified: new Date().toISOString(),
+                        }
+                      : l
+                  );
+                  setLessons(updatedLessons);
+
+                  await fetch('/api/rooms', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      pin: roomState?.pin || '758899',
+                      title: quizTitle || currentLesson.title,
+                      questions: newQuestions,
+                    }),
+                  }).catch((e) => console.warn('Sync room error', e));
+
+                  await fetchRoom(roomState?.pin || '758899');
+                }}
               />
             )}
 
@@ -662,8 +755,26 @@ export default function App() {
             {activeTab === 'games' && (
               <EducationalGamesHub
                 questions={currentLesson.quizzes}
+                lessonTitle={currentLesson.title}
+                lessonSubject={currentLesson.subject}
+                lessonContent={currentLesson.rawText}
                 classroom={activeTeacher?.classes?.[0] || null}
                 onOpenAIQuizCreator={() => setShowAIQuizModal(true)}
+                onUpdateQuestions={(newQuestions) => {
+                  const updatedLessons = lessons.map((l) =>
+                    l.id === currentLesson.id ? { ...l, quizzes: newQuestions } : l
+                  );
+                  setLessons(updatedLessons);
+                  fetch('/api/rooms', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      pin: '758899',
+                      title: currentLesson.title,
+                      questions: newQuestions,
+                    }),
+                  }).catch((e) => console.warn('Sync room error', e));
+                }}
               />
             )}
 
@@ -709,9 +820,15 @@ export default function App() {
                 onAddLesson={(newDoc) => {
                   setLessons((prev) => [newDoc, ...prev]);
                   setActiveLessonId(newDoc.id);
+                  fetch('/api/lessons', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newDoc),
+                  }).catch((e) => console.warn('Sync new lesson to cloud error:', e));
                 }}
                 onDeleteLesson={(id) => {
                   setLessons((prev) => prev.filter((l) => l.id !== id));
+                  fetch(`/api/lessons/${id}`, { method: 'DELETE' }).catch(() => {});
                 }}
                 onSyncToCloud={handleSyncToCloud}
                 isSyncing={isSyncingCloud}
@@ -765,6 +882,63 @@ export default function App() {
         />
       )}
 
+      {/* Teacher Profile & Self Password Change Modal */}
+      {showProfileModal && (
+        <TeacherProfileModal
+          isOpen={showProfileModal}
+          onClose={() => setShowProfileModal(false)}
+          teacher={activeTeacher}
+          onUpdateTeacher={handleUpdateActiveTeacher}
+          onLogout={handleLogout}
+          onOpenAccountSwitcher={() => {
+            setShowProfileModal(false);
+            setShowTeacherAuthModal(true);
+          }}
+          onOpenAdminPanel={() => {
+            setShowProfileModal(false);
+            setShowAdminModal(true);
+          }}
+        />
+      )}
+
+      {/* Full Admin Management Panel Modal */}
+      {showAdminModal && (
+        <AdminManagementModal
+          isOpen={showAdminModal}
+          onClose={() => setShowAdminModal(false)}
+          teachers={teachers}
+          activeTeacher={activeTeacher}
+          onUpdateTeacher={(updated) => {
+            setTeachers((prev) =>
+              prev.map((t) => (t.id === updated.id ? updated : t))
+            );
+            localStorage.setItem(
+              'smartboard_teachers',
+              JSON.stringify(teachers.map((t) => (t.id === updated.id ? updated : t)))
+            );
+          }}
+          onAddNewTeacher={(newT) => {
+            setTeachers((prev) => {
+              const next = [...prev, newT];
+              localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+              return next;
+            });
+            fetch('/api/teachers', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newT),
+            }).catch((e) => console.warn('Sync new teacher error:', e));
+          }}
+          onResetPassword={handleResetPassword}
+          onDeleteTeacher={handleDeleteTeacher}
+          onSelectTeacher={(t) => {
+            setActiveTeacherId(t.id);
+            localStorage.setItem('smartboard_active_teacher', t.id);
+            setShowAdminModal(false);
+          }}
+        />
+      )}
+
       {/* Lucky Random Student Picker Game Modal */}
       {(pickerClassroom || activeTeacher?.classes?.[0]) && (
         <RandomStudentPickerModal
@@ -787,9 +961,9 @@ export default function App() {
         <AIQuizCreatorModal
           currentLesson={currentLesson}
           onClose={() => setShowAIQuizModal(false)}
-          onApplyQuestions={async (newQuestions, quizTitle) => {
+          onApplyQuestions={async (newQuestions, quizTitle, replace) => {
             if (!newQuestions || newQuestions.length === 0) return;
-            const updatedQuizzes = [...currentLesson.quizzes, ...newQuestions];
+            const updatedQuizzes = replace ? newQuestions : [...currentLesson.quizzes, ...newQuestions];
             const updatedLessons = lessons.map((l) =>
               l.id === currentLesson.id
                 ? {
@@ -812,8 +986,11 @@ export default function App() {
               }),
             }).catch((e) => console.warn('Sync room error', e));
 
-            fetchRoom('758899');
+            await fetchRoom('758899');
             setShowAIQuizModal(false);
+            if (activeTab !== 'games') {
+              setActiveTab('quiz');
+            }
           }}
         />
       )}

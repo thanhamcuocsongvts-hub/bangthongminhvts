@@ -26,6 +26,8 @@ export interface QuizQuestion {
   timeLimit: number; // in seconds
   subject?: SubjectType;
   difficulty?: 'Dễ' | 'Trung bình' | 'Vận dụng cao' | 'Cơ bản' | 'Thông hiểu' | 'Vận dụng' | string;
+  diagramType?: string;
+  diagramData?: any;
 }
 
 export interface StudentSubmission {
@@ -245,6 +247,7 @@ export interface TeacherProfile {
   email: string;
   phone?: string;
   avatar?: string;
+  role?: 'admin' | 'teacher';
   subject: SubjectType;
   school: string;
   classes: ClassRoom[];

@@ -20,14 +20,26 @@ import {
   Eye,
   Star,
   Check,
+  X,
+  ListChecks,
+  BookOpen,
+  Layers,
+  Loader2,
+  Trash2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QuizQuestion, Student, ClassroomGroup } from '../types';
+import { QuizRichContentRenderer } from './QuizRichContentRenderer';
+import { MathFormulaRenderer } from './MathFormulaRenderer';
 
 interface EducationalGamesHubProps {
   classroom?: ClassroomGroup | null;
   questions?: QuizQuestion[];
+  lessonTitle?: string;
+  lessonSubject?: string;
+  lessonContent?: string;
   onOpenAIQuizCreator?: () => void;
+  onUpdateQuestions?: (questions: QuizQuestion[]) => void;
 }
 
 type ActiveGame = 'race' | 'wheel' | 'puzzle' | 'millionaire';
@@ -103,23 +115,109 @@ const DEFAULT_GAME_QUESTIONS: QuizQuestion[] = [
 export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   classroom,
   questions = [],
+  lessonTitle = '',
+  lessonSubject = 'Toán học',
+  lessonContent = '',
   onOpenAIQuizCreator,
+  onUpdateQuestions,
 }) => {
   const [activeGame, setActiveGame] = useState<ActiveGame>('race');
+  const [localQuestions, setLocalQuestions] = useState<QuizQuestion[] | null>(null);
+
+  // In-Game AI Generation Modal state
+  const [showAIMakerModal, setShowAIMakerModal] = useState<boolean>(false);
+  const [showQuestionsListModal, setShowQuestionsListModal] = useState<boolean>(false);
+  const [gameTopic, setGameTopic] = useState<string>(lessonTitle || '');
+  const [gameSubject, setGameSubject] = useState<string>(lessonSubject || 'Toán học');
+  const [gameGrade, setGameGrade] = useState<string>('Lớp 12');
+  const [gameDifficulty, setGameDifficulty] = useState<string>('Thông hiểu');
+  const [gameCount, setGameCount] = useState<number>(6);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
+
+  // Sync gameTopic when lessonTitle changes if not customized
+  useEffect(() => {
+    if (lessonTitle && (!gameTopic || gameTopic === '')) {
+      setGameTopic(lessonTitle);
+    }
+    if (lessonSubject) {
+      setGameSubject(lessonSubject);
+    }
+  }, [lessonTitle, lessonSubject]);
 
   const activeQuestions =
-    questions && questions.length > 0 ? questions : DEFAULT_GAME_QUESTIONS;
+    localQuestions && localQuestions.length > 0
+      ? localQuestions
+      : questions && questions.length > 0
+      ? questions
+      : DEFAULT_GAME_QUESTIONS;
+
+  const isUsingDefault = (!localQuestions || localQuestions.length === 0) && (!questions || questions.length === 0);
+
+  const handleGenerateGameQuestions = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!gameTopic.trim()) {
+      setStatusNotice('Vui lòng nhập chủ đề hoặc yêu cầu cụ thể của bài học.');
+      return;
+    }
+    setIsGenerating(true);
+    setStatusNotice(null);
+    try {
+      const res = await fetch('/api/ai/generate-quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: gameTopic.trim(),
+          content: lessonContent || '',
+          count: gameCount,
+          subject: gameSubject,
+          grade: gameGrade,
+          difficulty: gameDifficulty,
+        }),
+      });
+      const data = await res.json();
+      if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
+        const formatted: QuizQuestion[] = data.questions.map((q: QuizQuestion, idx: number) => ({
+          ...q,
+          id: `game_q_${Date.now()}_${idx + 1}`,
+          timeLimit: q.timeLimit || 30,
+        }));
+        setLocalQuestions(formatted);
+        onUpdateQuestions?.(formatted);
+        setShowAIMakerModal(false);
+        confetti({
+          particleCount: 120,
+          spread: 90,
+          origin: { y: 0.5 },
+        });
+      } else {
+        setStatusNotice('Không thể tạo câu hỏi từ AI. Vui lòng thử lại với chủ đề chi tiết hơn.');
+      }
+    } catch (err: any) {
+      setStatusNotice('Lỗi kết nối máy chủ AI: ' + (err?.message || 'Vui lòng kiểm tra kết nối mạng'));
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDeleteQuestion = (qIndex: number) => {
+    const updated = activeQuestions.filter((_, idx) => idx !== qIndex);
+    if (updated.length > 0) {
+      setLocalQuestions(updated);
+      onUpdateQuestions?.(updated);
+    }
+  };
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-950 text-white rounded-3xl overflow-hidden shadow-2xl border border-slate-800 select-none">
+    <div className="w-full h-full flex flex-col bg-slate-950 text-white rounded-3xl overflow-hidden shadow-2xl border border-slate-800 select-none relative">
       {/* Top Game Selection Header Bar */}
-      <div className="p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
+      <div className="p-3 md:p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400">
             <Trophy className="w-6 h-6 animate-bounce" />
           </div>
           <div>
-            <h2 className="text-lg md:text-xl font-black text-white tracking-tight flex items-center gap-2">
+            <h2 className="text-base md:text-lg font-black text-white tracking-tight flex items-center gap-2">
               <span>Đấu Trường Trò Chơi Củng Cố Tri Thức</span>
               <span className="text-[10px] uppercase font-black px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
                 Gamification 4-in-1
@@ -182,18 +280,51 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
           </button>
         </div>
 
-        {/* AI Quiz Generator Quick Action */}
-        {onOpenAIQuizCreator && (
+        {/* Action Buttons: Question Inspector & AI Quiz Maker */}
+        <div className="flex items-center gap-2">
           <button
-            onClick={onOpenAIQuizCreator}
-            className="px-4 py-2 rounded-2xl font-bold text-xs bg-linear-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:opacity-95 text-white shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all cursor-pointer border border-white/20 active:scale-95"
-            title="Soạn bộ câu hỏi trắc nghiệm trò chơi mới bằng AI theo chủ đề"
+            onClick={() => setShowQuestionsListModal(true)}
+            className="px-3 py-2 rounded-2xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            title="Xem danh sách câu hỏi game hiện tại"
+          >
+            <ListChecks className="w-4 h-4 text-cyan-400" />
+            <span>Đề câu hỏi ({activeQuestions.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setGameTopic(lessonTitle || gameTopic || '');
+              setShowAIMakerModal(true);
+            }}
+            className="px-4 py-2 rounded-2xl font-black text-xs bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:opacity-95 text-white shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all cursor-pointer border border-white/20 active:scale-95"
+            title="Soạn đề Game đúng theo chủ đề bài học bằng AI"
           >
             <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
             <span>Soạn đề Game bằng AI</span>
           </button>
-        )}
+        </div>
       </div>
+
+      {/* Notice Banner if using default questions */}
+      {isUsingDefault && (
+        <div className="px-4 py-2 bg-gradient-to-r from-amber-900/40 via-purple-900/40 to-slate-900 border-b border-amber-500/30 flex items-center justify-between gap-3 text-xs text-amber-200">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-400 text-sm">💡</span>
+            <span>
+              Game đang dùng 5 câu hỏi kiến thức chung. Thầy cô hãy nhấn <strong>&quot;Soạn đề Game bằng AI&quot;</strong> để tạo ngay bộ câu hỏi bám sát 100% đúng chuyên đề bài học <strong>&quot;{lessonTitle || 'bài giảng này'}&quot;</strong>!
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setGameTopic(lessonTitle || '');
+              setShowAIMakerModal(true);
+            }}
+            className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] shrink-0 transition-all cursor-pointer shadow-md"
+          >
+            Tạo đề bám sát bài ngay
+          </button>
+        </div>
+      )}
 
       {/* Main Game Arena */}
       <div className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-radial from-slate-900 to-slate-950 flex flex-col custom-scrollbar">
@@ -210,6 +341,284 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
           <MillionaireGame questions={activeQuestions} />
         )}
       </div>
+
+      {/* Modal 1: Dedicated AI Game Quiz Generator (Strictly on-topic) */}
+      {showAIMakerModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-fade-in">
+          <div className="bg-slate-900 rounded-3xl w-full max-w-xl flex flex-col shadow-2xl border border-slate-700 overflow-hidden text-white">
+            {/* Header */}
+            <div className="px-6 py-4 bg-gradient-to-r from-purple-700 via-indigo-700 to-emerald-700 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
+                  <Sparkles className="w-6 h-6 text-amber-300 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-black tracking-tight">
+                    Soạn Đề Game Bằng AI Chuẩn Theo Yêu Cầu
+                  </h3>
+                  <p className="text-xs text-purple-200">
+                    Tạo câu hỏi thi đấu trắc nghiệm bám sát 100% chuyên đề bài học &amp; công thức
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAIMakerModal(false)}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleGenerateGameQuestions} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                  Chủ Đề / Nội Dung / Yêu Cầu Cụ Thể Cần Soạn:
+                </label>
+                <textarea
+                  value={gameTopic}
+                  onChange={(e) => setGameTopic(e.target.value)}
+                  placeholder="Ví dụ: Cực trị của hàm số bậc ba, Định luật Ôm trong đoạn mạch nối tiếp, Phản ứng este hóa môn Hóa 12, Chiến dịch Điện Biên Phủ 1954..."
+                  rows={3}
+                  required
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-sm text-white placeholder-slate-500 resize-none outline-none"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  AI sẽ bám sát tuyệt đối nội dung này để soạn các câu hỏi bài tập cụ thể, không soạn chung chung.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1">
+                    Môn Học
+                  </label>
+                  <select
+                    value={gameSubject}
+                    onChange={(e) => setGameSubject(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white outline-none cursor-pointer"
+                  >
+                    <option value="Toán học">Toán học</option>
+                    <option value="Vật lý">Vật lý</option>
+                    <option value="Hóa học">Hóa học</option>
+                    <option value="Sinh học">Sinh học</option>
+                    <option value="Lịch sử">Lịch sử</option>
+                    <option value="Địa lý">Địa lý</option>
+                    <option value="Tiếng Anh">Tiếng Anh</option>
+                    <option value="Tin học">Tin học</option>
+                    <option value="Ngữ văn">Ngữ văn</option>
+                    <option value="GDCD">GDCD</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1">
+                    Khối Lớp
+                  </label>
+                  <select
+                    value={gameGrade}
+                    onChange={(e) => setGameGrade(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white outline-none cursor-pointer"
+                  >
+                    <option value="Lớp 6">Lớp 6</option>
+                    <option value="Lớp 7">Lớp 7</option>
+                    <option value="Lớp 8">Lớp 8</option>
+                    <option value="Lớp 9">Lớp 9</option>
+                    <option value="Lớp 10">Lớp 10</option>
+                    <option value="Lớp 11">Lớp 11</option>
+                    <option value="Lớp 12">Lớp 12</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1">
+                    Số Câu Hỏi
+                  </label>
+                  <select
+                    value={gameCount}
+                    onChange={(e) => setGameCount(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white outline-none cursor-pointer"
+                  >
+                    <option value={4}>4 câu</option>
+                    <option value={5}>5 câu</option>
+                    <option value={6}>6 câu (Chuẩn)</option>
+                    <option value={8}>8 câu</option>
+                    <option value={10}>10 câu</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1">
+                    Mức Độ
+                  </label>
+                  <select
+                    value={gameDifficulty}
+                    onChange={(e) => setGameDifficulty(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white outline-none cursor-pointer"
+                  >
+                    <option value="Nhận biết">Nhận biết</option>
+                    <option value="Thông hiểu">Thông hiểu</option>
+                    <option value="Vận dụng">Vận dụng</option>
+                    <option value="Vận dụng cao">Vận dụng cao</option>
+                  </select>
+                </div>
+              </div>
+
+              {statusNotice && (
+                <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-bold">
+                  {statusNotice}
+                </div>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAIMakerModal(false)}
+                  disabled={isGenerating}
+                  className="px-5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isGenerating}
+                  className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:opacity-90 text-white font-black text-xs shadow-lg flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>AI đang soạn câu hỏi game...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                      <span>Tạo Đề Game Bám Sát Ngay</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Question List Inspector (Review active questions, math formulas, answers) */}
+      {showQuestionsListModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-fade-in">
+          <div className="bg-slate-900 rounded-3xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl border border-slate-700 overflow-hidden text-white">
+            <div className="px-6 py-4 bg-slate-800 border-b border-slate-700 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400">
+                  <ListChecks className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">
+                    Danh Sách Câu Hỏi Trò Chơi Hiện Tại ({activeQuestions.length} câu)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Kiểm tra nội dung câu hỏi, công thức toán lý hóa và đáp án đúng cho game
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowQuestionsListModal(false)}
+                className="p-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+              {activeQuestions.map((q, idx) => (
+                <div
+                  key={q.id || `q_${idx}`}
+                  className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-slate-700 transition-colors space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-xl bg-indigo-600 text-white font-black text-xs flex items-center justify-center">
+                        #{idx + 1}
+                      </span>
+                      <span className="text-xs font-mono text-slate-400">
+                        {q.timeLimit ? `${q.timeLimit}s` : '30s'}
+                      </span>
+                    </div>
+                    {activeQuestions.length > 2 && (
+                      <button
+                        onClick={() => handleDeleteQuestion(idx)}
+                        className="p-1.5 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                        title="Xóa câu hỏi này khỏi game"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="text-sm font-bold text-white leading-relaxed">
+                    <QuizRichContentRenderer
+                      content={q.question}
+                      diagramType={q.diagramType}
+                      diagramData={q.diagramData}
+                      textClassName="text-white"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {q.options.map((opt) => {
+                      const isCorrect = opt.key === q.correctAnswer;
+                      return (
+                        <div
+                          key={opt.key}
+                          className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
+                            isCorrect
+                              ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-200'
+                              : 'bg-slate-900 border-slate-800 text-slate-300'
+                          }`}
+                        >
+                          <span
+                            className={`w-5 h-5 rounded-md font-bold font-mono text-xs flex items-center justify-center ${
+                              isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {opt.key}
+                          </span>
+                          <span className="flex-1">
+                            <MathFormulaRenderer content={opt.text} />
+                          </span>
+                          {isCorrect && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {q.explanation && (
+                    <div className="p-2.5 rounded-xl bg-indigo-950/40 border border-indigo-900/60 text-xs text-indigo-300">
+                      <strong>Giải thích: </strong>
+                      <MathFormulaRenderer content={q.explanation} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="p-4 bg-slate-800/80 border-t border-slate-700 flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                Tổng cộng: <strong>{activeQuestions.length} câu hỏi</strong> đang được áp dụng cho toàn bộ 4 trò chơi
+              </span>
+              <button
+                onClick={() => {
+                  setShowQuestionsListModal(false);
+                  setShowAIMakerModal(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-md"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span>Soạn bộ câu hỏi mới</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -413,9 +822,14 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
             )}
           </div>
 
-          <p className="text-base md:text-lg font-bold text-white leading-relaxed">
-            {currentQ.question}
-          </p>
+          <div className="text-base md:text-lg font-bold text-white leading-relaxed">
+            <QuizRichContentRenderer
+              content={currentQ.question}
+              diagramType={currentQ.diagramType}
+              diagramData={currentQ.diagramData}
+              textClassName="text-white"
+            />
+          </div>
 
           {/* 4 Options */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
@@ -443,7 +857,9 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
                   >
                     {opt.key}
                   </span>
-                  <span>{opt.text}</span>
+                  <span className="flex-1">
+                    <MathFormulaRenderer content={opt.text} />
+                  </span>
                 </button>
               );
             })}
@@ -451,8 +867,8 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
 
           {revealed && currentQ.explanation && (
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-2">
-              <span className="font-bold shrink-0">💡 Giải thích:</span>
-              <span>{currentQ.explanation}</span>
+              <span className="font-bold shrink-0">Giải thích:</span>
+              <MathFormulaRenderer content={currentQ.explanation} />
             </div>
           )}
         </div>
@@ -820,7 +1236,14 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
               )}
             </div>
 
-            <p className="text-base font-bold text-white leading-relaxed">{currentQ.question}</p>
+            <div className="text-base font-bold text-white leading-relaxed">
+              <QuizRichContentRenderer
+                content={currentQ.question}
+                diagramType={currentQ.diagramType}
+                diagramData={currentQ.diagramData}
+                textClassName="text-white"
+              />
+            </div>
 
             <div className="space-y-2">
               {currentQ.options.map((opt) => {
@@ -844,7 +1267,9 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
                     <span className="w-6 h-6 rounded-lg bg-slate-700 text-slate-200 font-mono text-xs flex items-center justify-center font-bold">
                       {opt.key}
                     </span>
-                    <span>{opt.text}</span>
+                    <span className="flex-1">
+                      <MathFormulaRenderer content={opt.text} />
+                    </span>
                   </button>
                 );
               })}
@@ -989,9 +1414,14 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
           <div className="text-xs font-mono font-black text-amber-400">
             CÂU HỎI MỐC SỐ {level} • {LADDER.find((l) => l.level === level)?.reward}
           </div>
-          <h3 className="text-lg md:text-xl font-black text-white leading-relaxed">
-            {currentQ.question}
-          </h3>
+          <div className="text-lg md:text-xl font-black text-white leading-relaxed">
+            <QuizRichContentRenderer
+              content={currentQ.question}
+              diagramType={currentQ.diagramType}
+              diagramData={currentQ.diagramData}
+              textClassName="text-white"
+            />
+          </div>
         </div>
 
         {/* 4 Diamond-style options */}
@@ -1018,7 +1448,9 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
                 <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white font-mono text-xs flex items-center justify-center font-bold shrink-0">
                   {opt.key}
                 </span>
-                <span>{opt.text}</span>
+                <span className="flex-1">
+                  <MathFormulaRenderer content={opt.text} />
+                </span>
               </button>
             );
           })}

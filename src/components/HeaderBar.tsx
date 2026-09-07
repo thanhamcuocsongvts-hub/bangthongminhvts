@@ -20,6 +20,9 @@ import {
   LogIn,
   Trophy,
   Globe,
+  ShieldCheck,
+  KeyRound,
+  RefreshCw,
 } from 'lucide-react';
 import { TextScale, TeacherProfile } from '../types';
 
@@ -44,6 +47,8 @@ interface HeaderBarProps {
   onOpenQR: () => void;
   onOpenExport: () => void;
   onOpenTeacherAuth: () => void;
+  onOpenProfile?: () => void;
+  onOpenAdmin?: () => void;
   onOpenRandomPicker: () => void;
   onSwitchToStudentView: () => void;
   isFullscreen: boolean;
@@ -62,6 +67,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenQR,
   onOpenExport,
   onOpenTeacherAuth,
+  onOpenProfile,
+  onOpenAdmin,
   onOpenRandomPicker,
   onSwitchToStudentView,
   isFullscreen,
@@ -88,11 +95,11 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       {/* Brand & Teacher Profile Status */}
       <div className="flex items-center gap-2 shrink-0">
         {activeTeacher ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
-              onClick={onOpenTeacherAuth}
+              onClick={onOpenProfile || onOpenTeacherAuth}
               className="flex items-center gap-2 p-1.5 rounded-2xl hover:bg-slate-100 transition-all text-left group"
-              title="Bấm để chuyển đổi tài khoản giáo viên hoặc xem thông tin hồ sơ"
+              title="Bấm để xem & chỉnh sửa thông tin cá nhân hoặc đổi mật khẩu"
             >
               <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-xl shadow-xs group-hover:scale-105 transition-transform">
                 {activeTeacher.avatar || '👨‍🏫'}
@@ -102,9 +109,15 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                   <span className="font-black text-sm text-slate-900 leading-tight">
                     {activeTeacher.name}
                   </span>
-                  <span className="px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 text-[10px] font-extrabold uppercase">
-                    {activeTeacher.subject}
-                  </span>
+                  {activeTeacher.role === 'admin' ? (
+                    <span className="px-1.5 py-0.5 rounded-md bg-amber-400 text-slate-950 text-[10px] font-black uppercase">
+                      Admin
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 text-[10px] font-extrabold uppercase">
+                      {activeTeacher.subject}
+                    </span>
+                  )}
                 </div>
                 <div className="text-[11px] text-slate-500 font-medium truncate max-w-[150px]">
                   {activeTeacher.school}
@@ -112,8 +125,42 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               </div>
             </button>
 
+            {/* Admin Management Button if Admin */}
+            {activeTeacher.role === 'admin' && (
+              <button
+                type="button"
+                onClick={onOpenAdmin || onOpenTeacherAuth}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-98"
+                title="Mở bảng quản trị tài khoản giáo viên toàn hệ thống"
+              >
+                <ShieldCheck className="w-4 h-4 text-slate-950" />
+                <span className="hidden sm:inline">Quản Trị Admin</span>
+              </button>
+            )}
+
+            {/* Edit Info & Password Button */}
+            <button
+              type="button"
+              onClick={onOpenProfile || onOpenTeacherAuth}
+              className="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-all"
+              title="Chỉnh sửa thông tin & Đổi mật khẩu cá nhân"
+            >
+              <KeyRound className="w-4 h-4" />
+            </button>
+
+            {/* Switch Account Button */}
+            <button
+              type="button"
+              onClick={onOpenTeacherAuth}
+              className="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-all"
+              title="Chuyển đổi tài khoản giáo viên khác"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+
             {/* Quick Logout Button */}
             <button
+              type="button"
               onClick={onLogout}
               className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all"
               title="Đăng xuất tài khoản giáo viên"

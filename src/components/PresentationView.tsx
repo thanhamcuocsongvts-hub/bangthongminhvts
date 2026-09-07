@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -46,6 +46,28 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   const [whiteboardTheme, setWhiteboardTheme] = useState<'blackboard' | 'slate' | 'graph' | 'white'>('blackboard');
   // Support displaying either the authentic original file or the extracted slides
   const [presentationMode, setPresentationMode] = useState<'original' | 'slides'>('original');
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  // Fullscreen listener for presentation viewport
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const togglePresentationFullscreen = () => {
+    const el = document.getElementById('presentation-viewport');
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
+  };
 
   const slides = lesson.slides || [];
   const currentSlide = slides[currentSlideIndex] || {
@@ -102,7 +124,12 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   const scaleClasses = getScaleClasses();
 
   return (
-    <div id="presentation-viewport" className="relative w-full h-[calc(100vh-100px)] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200/90 shadow-md">
+    <div
+      id="presentation-viewport"
+      className={`relative w-full ${
+        isFullscreen ? 'h-screen rounded-none' : 'h-[calc(100vh-100px)] rounded-3xl'
+      } flex flex-col bg-white overflow-hidden border border-slate-200/90 shadow-md transition-all`}
+    >
       {/* Top Slide Control Strip */}
       <div className="flex items-center justify-between px-6 py-3 bg-slate-50/90 border-b border-slate-200 z-20 flex-wrap gap-2">
         <div className="flex items-center gap-3">
@@ -208,11 +235,30 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
           <button
             id="quick-launch-quiz-btn"
             onClick={onLaunchQuiz}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold flex items-center gap-2 shadow-md shadow-indigo-600/20 transition-all"
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold flex items-center gap-2 shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
             title="Cho học sinh làm trắc nghiệm tức thì"
           >
             <PlayCircle className="w-5 h-5" />
             <span>Phát trắc nghiệm</span>
+          </button>
+
+          {/* Fullscreen Toggle Button */}
+          <button
+            id="toggle-presentation-fullscreen-btn"
+            onClick={togglePresentationFullscreen}
+            className={`p-2 rounded-xl border text-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              isFullscreen
+                ? 'bg-slate-900 text-amber-300 border-slate-700 shadow-md ring-2 ring-indigo-400'
+                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 hover:text-indigo-600'
+            }`}
+            title={isFullscreen ? 'Thu nhỏ cửa sổ bài giảng (Phím Esc)' : 'Phóng toàn màn hình 75 inch bài giảng'}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-5 h-5 text-amber-400" />
+            ) : (
+              <Maximize2 className="w-5 h-5" />
+            )}
+            <span className="hidden xl:inline">{isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}</span>
           </button>
         </div>
       </div>

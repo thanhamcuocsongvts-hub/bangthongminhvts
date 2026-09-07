@@ -17,6 +17,9 @@ import {
   Grid,
   Check,
   X,
+  ChevronDown,
+  ChevronUp,
+  Pipette,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint } from '../types';
 
@@ -48,6 +51,25 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [currentPoints, setCurrentPoints] = useState<StrokePoint[]>([]);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState<boolean>(false);
+  const [showColorPopover, setShowColorPopover] = useState<boolean>(false);
+  const colorPopoverRef = useRef<HTMLDivElement | null>(null);
+
+  // Close color popover on outside click/tap
+  useEffect(() => {
+    const handlePointerDownOutside = (e: MouseEvent | TouchEvent) => {
+      if (colorPopoverRef.current && !colorPopoverRef.current.contains(e.target as Node)) {
+        setShowColorPopover(false);
+      }
+    };
+    if (showColorPopover) {
+      document.addEventListener('mousedown', handlePointerDownOutside);
+      document.addEventListener('touchstart', handlePointerDownOutside);
+      return () => {
+        document.removeEventListener('mousedown', handlePointerDownOutside);
+        document.removeEventListener('touchstart', handlePointerDownOutside);
+      };
+    }
+  }, [showColorPopover]);
 
   // Laser pointer position state
   const [laserPos, setLaserPos] = useState<{ x: number; y: number } | null>(null);
@@ -360,12 +382,16 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     <div
       id={id}
       ref={containerRef}
-      className={`relative w-full h-full min-h-[500px] rounded-3xl overflow-hidden flex flex-col ${getBgClass()}`}
+      className={`relative w-full h-full ${
+        isOverlay ? 'rounded-none min-h-0 bg-transparent' : `min-h-[500px] rounded-3xl ${getBgClass()}`
+      } overflow-hidden flex flex-col`}
     >
       {/* Underlying Content or Blackboard Grid */}
-      <div className="absolute inset-0 pointer-events-auto overflow-y-auto">
-        {children}
-      </div>
+      {children && (
+        <div className="absolute inset-0 pointer-events-auto overflow-y-auto">
+          {children}
+        </div>
+      )}
 
       {/* Drawing Canvas Layer */}
       <canvas
@@ -391,23 +417,31 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
       {/* Floating 75-Inch Touch Toolbar (Collapsible Sleek Interface) */}
       {isToolbarCollapsed ? (
-        <div className="absolute bottom-3 right-4 z-30 pointer-events-auto animate-fade-in flex items-center gap-2">
+        <div className="absolute bottom-3 right-4 z-40 pointer-events-auto animate-fade-in flex items-center gap-2">
           <button
             id="restore-touch-toolbar-btn"
             onClick={() => setIsToolbarCollapsed(false)}
-            className="px-4 py-2.5 rounded-full bg-slate-950/90 hover:bg-indigo-600 text-white font-bold text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl border-2 border-white/40 transition-all hover:scale-105 active:scale-95 cursor-pointer"
-            title="Mở thanh công cụ viết/vẽ"
+            className="px-4 py-2.5 rounded-2xl bg-slate-950/95 hover:bg-indigo-600 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl border-2 border-indigo-400/80 transition-all hover:scale-105 active:scale-95 cursor-pointer ring-4 ring-indigo-500/20"
+            title="Mở toàn bộ thanh công cụ viết/vẽ"
           >
+            <div
+              className="w-3.5 h-3.5 rounded-full border border-white shrink-0"
+              style={{
+                backgroundColor: activeColor,
+                boxShadow: ['#ccff00', '#ff007f', '#00ffff'].includes(activeColor) ? `0 0 8px ${activeColor}` : undefined,
+              }}
+            />
             <Pen className="w-4 h-4 text-emerald-400" />
-            <span>Mở Thanh Bút Viết & Vẽ</span>
+            <span>Mở Thanh Công Cụ</span>
+            <ChevronUp className="w-4 h-4 text-amber-300" />
           </button>
           {isOverlay && onCloseOverlay && (
             <button
               onClick={onCloseOverlay}
-              className="px-3 py-2.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xl border border-white/30 transition-all active:scale-95 cursor-pointer"
-              title="Tắt chế độ vẽ đè"
+              className="px-3.5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xl border border-white/30 transition-all active:scale-95 cursor-pointer"
+              title="Tắt chế độ vẽ đè trên tài liệu"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
               <span>Tắt Vẽ</span>
             </button>
           )}
@@ -509,28 +543,200 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
           <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
 
-          {/* Color Palette (17 màu - gồm 3 màu dạ quang siêu sáng) */}
-          <div className="flex items-center gap-1.5 shrink-0 max-w-[260px] sm:max-w-[360px] md:max-w-[440px] overflow-x-auto py-1 custom-scrollbar-none">
-            {colors.map((c) => (
+          {/* Compact Color Palette (Thu gọn bảng màu, khi chọn thì hiển thị popover & có thêm chọn màu RGB/Hex) */}
+          <div className="relative shrink-0" ref={colorPopoverRef}>
+            <div className="flex items-center gap-1">
               <button
-                key={c.value}
-                id={`color-btn-${c.value.replace('#', '')}`}
-                onClick={() => {
-                  setActiveColor(c.value);
-                  if (activeTool === 'eraser') setActiveTool('pen');
-                }}
-                title={c.label}
-                style={{
-                  backgroundColor: c.value,
-                  boxShadow: c.isFluorescent ? `0 0 8px ${c.value}` : undefined,
-                }}
-                className={`w-6 h-6 rounded-full transition-all border-2 shrink-0 ${
-                  activeColor === c.value
-                    ? 'scale-125 border-white ring-2 ring-white/80 shadow-md'
-                    : 'border-white/40 hover:scale-110 opacity-85 hover:opacity-100'
-                } ${c.isFluorescent ? 'ring-1 ring-amber-300' : ''}`}
-              />
-            ))}
+                id="open-color-popover-btn"
+                onClick={() => setShowColorPopover((prev) => !prev)}
+                title="Bảng màu phấn & dạ quang (Nhấn để mở chọn màu)"
+                className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all text-xs font-bold border cursor-pointer ${
+                  showColorPopover
+                    ? 'bg-white text-slate-900 border-white shadow-lg ring-2 ring-white/60 font-black'
+                    : 'bg-white/10 hover:bg-white/20 text-white border-white/25'
+                }`}
+              >
+                <div
+                  className="w-4 h-4 rounded-full border border-white/90 shadow-sm shrink-0 transition-all"
+                  style={{
+                    backgroundColor: activeColor,
+                    boxShadow: ['#ccff00', '#ff007f', '#00ffff'].includes(activeColor)
+                      ? `0 0 8px ${activeColor}`
+                      : undefined,
+                  }}
+                />
+                <Palette className="w-3.5 h-3.5 text-amber-300" />
+                <span className="text-[11px] hidden sm:inline">Màu</span>
+                <ChevronUp className={`w-3.5 h-3.5 transition-transform ${showColorPopover ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* 3 Nút tắt nhanh màu phấn cốt lõi (Trắng, Vàng, Dạ quang chanh) */}
+              <div className="hidden sm:flex items-center gap-1 shrink-0 pl-0.5">
+                {[
+                  { val: '#ffffff', title: 'Phấn trắng' },
+                  { val: '#facc15', title: 'Phấn vàng' },
+                  { val: '#ccff00', title: 'Dạ quang chanh', isGlow: true },
+                ].map((sw) => (
+                  <button
+                    key={sw.val}
+                    onClick={() => {
+                      setActiveColor(sw.val);
+                      if (activeTool === 'eraser') setActiveTool('pen');
+                    }}
+                    title={sw.title}
+                    className={`w-5 h-5 rounded-full border transition-all cursor-pointer ${
+                      activeColor === sw.val
+                        ? 'scale-125 border-white ring-2 ring-white shadow-md'
+                        : 'border-white/40 opacity-75 hover:opacity-100 hover:scale-110'
+                    }`}
+                    style={{
+                      backgroundColor: sw.val,
+                      boxShadow: sw.isGlow ? `0 0 6px ${sw.val}` : undefined,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Popover Bảng Màu Phấn, Dạ Quang & Chọn Màu Tùy Thích */}
+            {showColorPopover && (
+              <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 sm:left-0 sm:translate-x-0 z-50 p-4 rounded-3xl bg-slate-950/98 backdrop-blur-2xl border-2 border-white/30 shadow-2xl w-[320px] sm:w-[360px] text-white flex flex-col gap-3 select-none animate-fade-in">
+                {/* Header */}
+                <div className="flex items-center justify-between pb-2 border-b border-white/15">
+                  <div className="flex items-center gap-2">
+                    <Palette className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-black uppercase text-slate-200 tracking-wider">
+                      BẢNG MÀU PHẤN & DẠ QUANG
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowColorPopover(false)}
+                    className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Tính Năng Chọn Màu Tự Do / Color Wheel Picker */}
+                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/15 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-cyan-300 tracking-wider flex items-center gap-1.5">
+                      <Pipette className="w-3.5 h-3.5 text-cyan-400" />
+                      TÙY CHỌN MÀU BẤT KỲ (DẢI RGB)
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-300 bg-white/10 px-1.5 py-0.5 rounded-md font-bold">
+                      {activeColor.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative w-9 h-9 rounded-xl overflow-hidden border-2 border-white/50 shadow-md shrink-0 cursor-pointer">
+                      <input
+                        type="color"
+                        id="custom-color-picker-input"
+                        value={activeColor.startsWith('#') && activeColor.length === 7 ? activeColor : '#ffffff'}
+                        onChange={(e) => {
+                          setActiveColor(e.target.value);
+                          if (activeTool === 'eraser') setActiveTool('pen');
+                        }}
+                        className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 bg-transparent"
+                        title="Bấm để chọn màu bất kỳ từ dải màu RGB"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-[10.5px] font-medium text-slate-300 leading-snug">
+                        Bấm ô vuông bên trái để mở dải màu sắc tự do hoặc nhập mã Hex:
+                      </div>
+                      <input
+                        type="text"
+                        value={activeColor}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setActiveColor(val);
+                          if (activeTool === 'eraser') setActiveTool('pen');
+                        }}
+                        placeholder="#ffffff"
+                        className="mt-1 w-full px-2 py-1 rounded-lg bg-black/40 border border-white/20 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3 MÀU DẠ QUANG PHÁT SÁNG CỰC ĐẸP TRÊN BẢNG */}
+                <div className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-cyan-500/15 border border-amber-400/40 space-y-1.5 shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-amber-300 tracking-wider flex items-center gap-1">
+                      <span>✨</span> 3 MÀU DẠ QUANG SIÊU SÁNG
+                    </span>
+                    <span className="text-[8.5px] px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 font-bold border border-amber-400/30">
+                      Glow Neon
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {colors.filter((cp) => cp.isFluorescent).map((cp) => (
+                      <button
+                        key={cp.value}
+                        onClick={() => {
+                          setActiveColor(cp.value);
+                          if (activeTool === 'eraser') setActiveTool('pen');
+                          setShowColorPopover(false);
+                        }}
+                        className={`p-2 rounded-2xl flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                          activeColor === cp.value
+                            ? 'bg-white/25 ring-2 ring-white scale-105 shadow-lg'
+                            : 'hover:bg-white/10 hover:scale-102'
+                        }`}
+                      >
+                        <div
+                          className="w-7 h-7 rounded-full border-2 border-white shadow-lg relative flex items-center justify-center"
+                          style={{
+                            backgroundColor: cp.value,
+                            boxShadow: `0 0 10px ${cp.value}, inset 0 0 4px #ffffff`,
+                          }}
+                        >
+                          <span className="text-[9px] drop-shadow-md">✨</span>
+                        </div>
+                        <span className="text-[9px] font-black text-center text-white leading-tight">
+                          {cp.label.replace('🌟 Dạ Quang ', '')}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 14 MÀU PHẤN TIÊU CHUẨN */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                    MÀU PHẤN BẢNG TIÊU CHUẨN (14 MÀU)
+                  </span>
+                  <div className="grid grid-cols-5 sm:grid-cols-7 gap-1.5 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar-none">
+                    {colors.filter((cp) => !cp.isFluorescent).map((cp) => (
+                      <button
+                        key={cp.value}
+                        onClick={() => {
+                          setActiveColor(cp.value);
+                          if (activeTool === 'eraser') setActiveTool('pen');
+                          setShowColorPopover(false);
+                        }}
+                        title={cp.label}
+                        className={`p-1.5 rounded-xl flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                          activeColor === cp.value
+                            ? 'bg-white/25 ring-2 ring-white scale-105 shadow-md'
+                            : 'hover:bg-white/10'
+                        }`}
+                      >
+                        <div
+                          className="w-5 h-5 rounded-full border border-white/70 shadow-inner"
+                          style={{ backgroundColor: cp.value }}
+                        />
+                        <span className="text-[8px] font-bold text-slate-300 truncate max-w-[42px] text-center">
+                          {cp.label.split(' ')[0]}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
@@ -543,7 +749,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
                 id={`stroke-sz-${sz}`}
                 onClick={() => setStrokeSize(sz)}
                 title={`Độ dày: ${sz}px`}
-                className={`w-7 h-7 rounded-xl flex items-center justify-center text-[10px] font-mono font-bold transition-all ${
+                className={`w-7 h-7 rounded-xl flex items-center justify-center text-[10px] font-mono font-bold transition-all cursor-pointer ${
                   strokeSize === sz ? 'bg-white text-slate-900 shadow-md font-black' : 'hover:bg-white/10 text-slate-300'
                 }`}
               >
@@ -561,7 +767,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
               onClick={handleUndo}
               disabled={strokes.length === 0}
               title="Hoàn tác (Undo)"
-              className={`p-2 rounded-xl flex items-center gap-1 font-bold text-xs transition-all ${
+              className={`p-2 rounded-xl flex items-center gap-1 font-bold text-xs transition-all cursor-pointer ${
                 strokes.length > 0
                   ? 'bg-white/15 hover:bg-white/25 text-amber-300 hover:scale-105 active:scale-95'
                   : 'text-slate-500 opacity-40 cursor-not-allowed'
@@ -576,7 +782,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
               onClick={handleClear}
               disabled={strokes.length === 0}
               title="Xóa toàn bộ nét vẽ"
-              className={`p-2 rounded-xl flex items-center gap-1 font-bold text-xs transition-all ${
+              className={`p-2 rounded-xl flex items-center gap-1 font-bold text-xs transition-all cursor-pointer ${
                 strokes.length > 0
                   ? 'bg-rose-500/20 hover:bg-rose-600 text-rose-300 hover:text-white'
                   : 'text-slate-500 opacity-40 cursor-not-allowed'
@@ -598,7 +804,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
                   onBackgroundChange(nextTheme);
                 }}
                 title="Đổi nền bảng"
-                className="px-2 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold flex items-center gap-1"
+                className="px-2 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
               >
                 <Grid className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="hidden xl:inline text-[11px]">
@@ -607,22 +813,32 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
               </button>
             )}
 
-            {/* Close / Collapse Toolbar Button */}
+            {/* Nút Thu Gọn Toàn Thanh Công Cụ (Bên Phải) */}
             <button
               id="collapse-touch-toolbar-btn"
               onClick={() => {
-                if (isOverlay && onCloseOverlay) {
-                  onCloseOverlay();
-                } else {
-                  setIsToolbarCollapsed(true);
-                }
+                setIsToolbarCollapsed(true);
+                setShowColorPopover(false);
               }}
-              title={isOverlay && onCloseOverlay ? "Tắt chế độ vẽ đè" : "Thu gọn thanh công cụ"}
-              className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 shadow-md transition-all ml-1 active:scale-95 cursor-pointer"
+              title="Thu gọn toàn bộ thanh công cụ"
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-amber-300 hover:text-white font-bold text-xs flex items-center gap-1 border border-white/20 shadow-md transition-all active:scale-95 cursor-pointer ml-1 shrink-0"
             >
-              <X className="w-4 h-4" />
-              <span className="text-[11px]">{isOverlay && onCloseOverlay ? "Tắt vẽ" : "Thu gọn"}</span>
+              <ChevronDown className="w-4 h-4 text-amber-400" />
+              <span className="text-[11px] font-bold">Thu Gọn</span>
             </button>
+
+            {/* Tắt Chế Độ Vẽ Đè (Nếu là Overlay) */}
+            {isOverlay && onCloseOverlay && (
+              <button
+                id="close-overlay-touch-btn"
+                onClick={onCloseOverlay}
+                title="Tắt chế độ vẽ đè trên tài liệu"
+                className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 shadow-md transition-all ml-1 active:scale-95 cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+                <span className="text-[11px]">Tắt Vẽ</span>
+              </button>
+            )}
           </div>
         </div>
       )}

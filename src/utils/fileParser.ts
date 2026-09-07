@@ -45,6 +45,9 @@ export function cleanDocumentText(text: string): string {
 export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> {
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
   const title = file.name.replace(/\.[^/.]+$/, '');
+  const sizeFormatted = file.size > 1024 * 1024
+    ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.round(file.size / 1024)} KB`;
   
   // Read file as persistent Base64 Data URL or Blob URL for large files (> 20MB)
   const readAsDataUrl = (): Promise<string> => {
@@ -60,6 +63,40 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
   };
 
   const fileDataUrl = await readAsDataUrl();
+
+  // Cross-device Cloud Persistence: Upload file to server cloud storage for permanent access on any PC / TV
+  let serverFileUrl = '';
+  try {
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string) || '');
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    if (base64Data) {
+      const uploadRes = await fetch('/api/documents/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: ext,
+          fileSize: sizeFormatted,
+          base64Data,
+        }),
+      });
+      if (uploadRes.ok) {
+        const uploadData = await uploadRes.json();
+        if (uploadData.fileUrl) {
+          serverFileUrl = uploadData.fileUrl;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Auto cloud upload notice:', err);
+  }
+
+  const effectiveFileUrl = serverFileUrl || fileDataUrl;
 
   let rawText = '';
   let detectedSubject: SubjectType = 'Toán học';
@@ -87,9 +124,6 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
   else if (fnLower.includes('9') || fnLower.includes('lop 9')) detectedGrade = 'Lớp 9';
 
   let fileType: 'pdf' | 'docx' | 'image' | 'xlsx' | 'pptx' | 'text' | 'other' = 'other';
-  const sizeFormatted = file.size > 1024 * 1024 
-    ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` 
-    : `${(file.size / 1024).toFixed(0)} KB`;
 
   let htmlContent: string | undefined = undefined;
   let sheetData: { sheetNames: string[]; sheets: Record<string, any[][]> } | undefined = undefined;
@@ -212,7 +246,7 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
           id: 'lesson_' + Date.now(),
           lastModified: new Date().toISOString(),
           syncedToCloud: true,
-          fileUrl: fileDataUrl,
+          fileUrl: effectiveFileUrl,
           fileType: 'text',
           fileName: file.name,
           fileSize: sizeFormatted,
@@ -239,7 +273,7 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
     rawText,
     slides,
     quizzes,
-    fileUrl: fileDataUrl,
+    fileUrl: effectiveFileUrl,
     fileType,
     fileName: file.name,
     fileSize: sizeFormatted,

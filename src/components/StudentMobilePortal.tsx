@@ -12,6 +12,8 @@ import {
   LogOut,
 } from 'lucide-react';
 import { QuizQuestion, RoomState } from '../types';
+import { QuizRichContentRenderer } from './QuizRichContentRenderer';
+import { MathFormulaRenderer } from './MathFormulaRenderer';
 
 interface StudentMobilePortalProps {
   initialPin?: string;
@@ -256,9 +258,13 @@ export const StudentMobilePortal: React.FC<StudentMobilePortalProps> = ({
               <div className="text-xs uppercase font-extrabold tracking-widest text-indigo-600">
                 CÂU HỎI {activeQIndex + 1}/{roomState?.questions.length || 1}
               </div>
-              <h2 className="text-xl md:text-2xl font-black text-slate-900 leading-snug">
-                {currentQ.question}
-              </h2>
+              <div className="text-xl md:text-2xl font-black text-slate-900 leading-snug">
+                <QuizRichContentRenderer
+                  content={currentQ.question}
+                  diagramType={currentQ.diagramType}
+                  diagramData={currentQ.diagramData}
+                />
+              </div>
             </div>
 
             {/* 4 Huge Tap Buttons (A, B, C, D) */}
@@ -288,7 +294,7 @@ export const StudentMobilePortal: React.FC<StudentMobilePortalProps> = ({
                       {opt.key}
                     </div>
                     <div className="font-bold text-base md:text-lg flex-1">
-                      {opt.text}
+                      <MathFormulaRenderer content={opt.text} />
                     </div>
                   </button>
                 );

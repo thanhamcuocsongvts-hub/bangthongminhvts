@@ -38,6 +38,7 @@ import {
   ZoomOut,
   Sigma,
   ExternalLink,
+  Pipette,
   HelpCircle,
   BookmarkCheck,
   CheckSquare,
@@ -50,6 +51,14 @@ import {
   AlertTriangle,
   Sparkle,
   TrendingUp,
+  MousePointer2,
+  FoldVertical,
+  Hand,
+  PenLine,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile, BlackboardBackground } from '../types';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
@@ -57,13 +66,14 @@ import { computeDefaultVertices, updateVertexWithConstraints, drawShapeWithVerti
 import { isFunctionGraphTool, drawFunctionGraph } from '../utils/mathGraphRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
+import { BlackboardWordTextBox, BlackboardTextBox } from './BlackboardWordTextBox';
 
 interface BlackboardPage {
   id: string;
   name: string;
   strokes: WhiteboardStroke[];
   redoStack: WhiteboardStroke[];
-  texts: Array<{ id: string; x: number; y: number; text: string; color: string; size: number }>;
+  texts: BlackboardTextBox[];
 }
 
 interface ClassroomBlackboardViewProps {
@@ -110,12 +120,24 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const [splitRatio, setSplitRatio] = useState<'50/50' | '60/40' | '40/60'>('50/50');
   const [splitDocZoom, setSplitDocZoom] = useState<number>(100);
 
-  // Active Tool & Chalk Styling
+  // Active Tool & Chalk Styling (Mặc định nét 2p, riêng khăn lau là 50p)
   const [activeTool, setActiveTool] = useState<WhiteboardTool>('pen');
   const [activeColor, setActiveColor] = useState<string>('#ffffff');
-  const [strokeSize, setStrokeSize] = useState<number>(4);
+  const [strokeSize, setStrokeSize] = useState<number>(2);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [currentPoints, setCurrentPoints] = useState<StrokePoint[]>([]);
+
+  // Chuyển đổi công cụ vẽ: tất cả về mặc định 2p, riêng Khăn Lau là 50p
+  const handleToolChange = (tool: WhiteboardTool) => {
+    setActiveTool(tool);
+    if (tool === 'eraser') {
+      setStrokeSize(50);
+    } else {
+      if (strokeSize === 50) {
+        setStrokeSize(2);
+      }
+    }
+  };
 
   // Modals & Shape Popovers
   const [showShapePicker, setShowShapePicker] = useState<boolean>(false);
@@ -154,18 +176,26 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const [isCornerAIExtracting, setIsCornerAIExtracting] = useState<boolean>(false);
   const [cornerExtractedData, setCornerExtractedData] = useState<any>(null);
 
-  // Text insertion & Select/Move Object state
-  const [isAddingText, setIsAddingText] = useState<boolean>(false);
-  const [textInputPos, setTextInputPos] = useState<{ x: number; y: number } | null>(null);
-  const [textInputValue, setTextInputValue] = useState<string>('');
+  // Word-style Text Box insertion & Drag selection state
+  const [newTextBoxDrag, setNewTextBoxDrag] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [isDraggingText, setIsDraggingText] = useState<boolean>(false);
   const [dragLivePos, setDragLivePos] = useState<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<{ startMouseX: number; startMouseY: number; origX: number; origY: number } | null>(null);
 
-  // Selected Stroke & 360-Degree Rotation State
+  // Selected Stroke & 360-Degree Rotation & Smooth Scaling State
   const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
+  const [isStrokeToolbarExpanded, setIsStrokeToolbarExpanded] = useState<boolean>(false);
   const [isDraggingStroke, setIsDraggingStroke] = useState<boolean>(false);
+  const [isResizingStroke, setIsResizingStroke] = useState<boolean>(false);
+  const resizeStrokeStartRef = useRef<{
+    startMouseX: number;
+    startMouseY: number;
+    origScale: number;
+    origBounds: { centerX: number; centerY: number; width: number; height: number };
+    direction: string;
+  } | null>(null);
+  const strokeRafRef = useRef<number | null>(null);
   const dragStrokeStartRef = useRef<{
     startMouseX: number;
     startMouseY: number;
@@ -175,6 +205,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     centerY: number;
     origRotation: number;
   } | null>(null);
+
+  // Dedicated movement speed and continuous hold-to-move timer for drawn shapes & graphs
+  const [moveSpeed, setMoveSpeed] = useState<number>(15);
+  const continuousNudgeIntervalRef = useRef<any>(null);
 
   // Active stroke refs for high-fps smooth drawing without React re-render lags
   const activePointsRef = useRef<StrokePoint[]>([]);
@@ -234,11 +268,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
   // Chalk Stroke Sizes
   const chalkSizes = [
-    { label: 'Nét Thanh', size: 2 },
-    { label: 'Nét Vừa (Chuẩn)', size: 4 },
-    { label: 'Nét Đậm Tiêu Đề', size: 8 },
-    { label: 'Nét Rất Đậm', size: 14 },
-    { label: 'Xóa Bảng Rộng', size: 36 },
+    { label: 'Nét Thanh (2p)', size: 2 },
+    { label: 'Nét Vừa (4p)', size: 4 },
+    { label: 'Nét Đậm (8p)', size: 8 },
+    { label: 'Nét Rất Đậm (14p)', size: 14 },
+    { label: 'Khăn Lau Bảng Nhanh (50p)', size: 50 },
   ];
 
   // Resize canvas according to container dimensions
@@ -278,6 +312,70 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
   // Helper to calculate accurate bounding box and center of any whiteboard stroke
   const getStrokeBounds = useCallback((stroke: WhiteboardStroke) => {
+    // 1. Dedicated precise calculation for Circle
+    if (stroke.tool === 'circle') {
+      let cx = 0, cy = 0, radius = 20;
+      if (stroke.customVertices && stroke.customVertices.length >= 2) {
+        const [O, R] = stroke.customVertices;
+        cx = O.x;
+        cy = O.y;
+        radius = Math.max(10, Math.hypot(R.x - O.x, R.y - O.y));
+      } else if (stroke.points && stroke.points.length >= 2) {
+        const p1 = stroke.points[0];
+        const p2 = stroke.points[stroke.points.length - 1];
+        cx = p1.x;
+        cy = p1.y;
+        radius = Math.max(10, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+      }
+      const padding = 12;
+      return {
+        minX: cx - radius - padding,
+        maxX: cx + radius + padding,
+        minY: cy - radius - padding,
+        maxY: cy + radius + padding,
+        centerX: cx,
+        centerY: cy,
+        width: (radius + padding) * 2,
+        height: (radius + padding) * 2,
+        radius,
+      };
+    }
+
+    // 2. Dedicated precise calculation for Ellipse
+    if (stroke.tool === 'ellipse') {
+      let cx = 0, cy = 0, rx = 30, ry = 20;
+      if (stroke.customVertices && stroke.customVertices.length >= 2) {
+        const O = stroke.customVertices[0];
+        const Rx = stroke.customVertices[1];
+        const Ry = stroke.customVertices[2] || { x: O.x, y: O.y + 20 };
+        cx = O.x;
+        cy = O.y;
+        rx = Math.max(10, Math.abs(Rx.x - O.x));
+        ry = Math.max(10, Math.abs(Ry.y - O.y));
+      } else if (stroke.points && stroke.points.length >= 2) {
+        const p1 = stroke.points[0];
+        const p2 = stroke.points[stroke.points.length - 1];
+        cx = (p1.x + p2.x) / 2;
+        cy = (p1.y + p2.y) / 2;
+        rx = Math.max(10, Math.abs(p2.x - p1.x) / 2);
+        ry = Math.max(10, Math.abs(p2.y - p1.y) / 2);
+      }
+      const padding = 12;
+      return {
+        minX: cx - rx - padding,
+        maxX: cx + rx + padding,
+        minY: cy - ry - padding,
+        maxY: cy + ry + padding,
+        centerX: cx,
+        centerY: cy,
+        width: (rx + padding) * 2,
+        height: (ry + padding) * 2,
+        rx,
+        ry,
+      };
+    }
+
+    // 3. Calculation for 3D and 2D shapes with custom vertices
     if (stroke.customVertices && stroke.customVertices.length > 0) {
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       stroke.customVertices.forEach((v) => {
@@ -770,15 +868,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         }
       });
 
-      // Render inserted chalkboard texts (skip currently selected text as it is rendered inside the interactive DOM overlay)
-      texts.forEach((item) => {
-        if (item.id === selectedTextId) return;
-        ctx.save();
-        ctx.fillStyle = item.color;
-        ctx.font = `bold ${item.size}px "Be Vietnam Pro", sans-serif`;
-        ctx.fillText(item.text, item.x, item.y);
-        ctx.restore();
-      });
+      // Text boxes are rendered as high-fidelity interactive DOM overlays with full Word formatting & KaTeX support
 
       ctx.restore();
     },
@@ -827,6 +917,104 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     [selectedStrokeId, currentPageIndex, getStrokeBounds]
   );
 
+  // Nudge selected stroke smoothly up, down, left, or right
+  const handleNudgeStroke = useCallback((deltaX: number, deltaY: number) => {
+    if (!selectedStrokeId) return;
+    setPages((prev) => {
+      const updated = [...prev];
+      const curr = updated[currentPageIndex];
+      if (!curr) return prev;
+      const newStrokes = curr.strokes.map((s) => {
+        if (s.id === selectedStrokeId) {
+          const movedPoints = s.points ? s.points.map((p) => ({ ...p, x: p.x + deltaX, y: p.y + deltaY })) : [];
+          const movedVertices = s.customVertices ? s.customVertices.map((v) => ({ ...v, x: v.x + deltaX, y: v.y + deltaY })) : undefined;
+          return {
+            ...s,
+            points: movedPoints,
+            customVertices: movedVertices,
+            centerX: s.centerX ? s.centerX + deltaX : undefined,
+            centerY: s.centerY ? s.centerY + deltaY : undefined,
+          };
+        }
+        return s;
+      });
+      updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+      return updated;
+    });
+  }, [selectedStrokeId, currentPageIndex]);
+
+  // Continuous hold-to-move controller for 4-way navigation buttons (Up, Down, Left, Right)
+  const startContinuousNudge = useCallback((deltaXRatio: number, deltaYRatio: number) => {
+    handleNudgeStroke(deltaXRatio * moveSpeed, deltaYRatio * moveSpeed);
+    if (continuousNudgeIntervalRef.current) clearInterval(continuousNudgeIntervalRef.current);
+    continuousNudgeIntervalRef.current = setInterval(() => {
+      handleNudgeStroke(deltaXRatio * moveSpeed, deltaYRatio * moveSpeed);
+    }, 60);
+  }, [handleNudgeStroke, moveSpeed]);
+
+  const stopContinuousNudge = useCallback(() => {
+    if (continuousNudgeIntervalRef.current) {
+      clearInterval(continuousNudgeIntervalRef.current);
+      continuousNudgeIntervalRef.current = null;
+    }
+  }, []);
+
+  // Center selected stroke to the current visible viewport
+  const handleCenterStroke = useCallback(() => {
+    if (!selectedStrokeId) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const curr = pages[currentPageIndex];
+    if (!curr) return;
+    const targetStroke = curr.strokes.find((s) => s.id === selectedStrokeId);
+    if (!targetStroke) return;
+    const bounds = getStrokeBounds(targetStroke);
+    if (!bounds) return;
+
+    const visibleCenterX = canvas.width / 2 + boardScrollX;
+    const visibleCenterY = canvas.height / 2 + boardScrollY;
+    const deltaX = Math.round(visibleCenterX - bounds.centerX);
+    const deltaY = Math.round(visibleCenterY - bounds.centerY);
+    handleNudgeStroke(deltaX, deltaY);
+  }, [selectedStrokeId, pages, currentPageIndex, boardScrollX, boardScrollY, getStrokeBounds, handleNudgeStroke]);
+
+  // Clean up continuous interval when unmounting or stroke changes
+  useEffect(() => {
+    return () => {
+      if (continuousNudgeIntervalRef.current) {
+        clearInterval(continuousNudgeIntervalRef.current);
+        continuousNudgeIntervalRef.current = null;
+      }
+    };
+  }, [selectedStrokeId]);
+
+  // Keyboard arrow keys for smooth movement
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedStrokeId) return;
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      const step = e.shiftKey ? moveSpeed * 2.5 : moveSpeed;
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleNudgeStroke(0, -step);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleNudgeStroke(0, step);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handleNudgeStroke(-step, 0);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNudgeStroke(step, 0);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedStrokeId, handleNudgeStroke, moveSpeed]);
+
   // Pointer Event Handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -846,12 +1034,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     if (activeTool === 'select') {
       // 1. Hit-test on text elements from top to bottom
       const hitText = texts.slice().reverse().find((t) => {
-        const textWidth = Math.max(t.text.length * (t.size * 0.65), 40);
-        const left = t.x - 12;
-        const right = t.x + textWidth + 12;
-        const top = t.y - t.size - 10;
-        const bottom = t.y + 14;
-        return x >= left && x <= right && y >= top && y <= bottom;
+        const textWidth = t.width || Math.max(t.text.length * (t.size * 0.65), 140);
+        const textHeight = t.height || (t.size * 2 + 20);
+        return x >= t.x && x <= t.x + textWidth && y >= t.y && y <= t.y + textHeight;
       });
 
       if (hitText) {
@@ -869,15 +1054,27 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         return;
       }
 
-      // 2. Hit-test on drawn strokes & geometric shapes
+      // 2. Hit-test on drawn strokes & geometric shapes (with accurate radial math for circles & ellipses)
       const hitStroke = strokes.slice().reverse().find((s) => {
         const bounds = getStrokeBounds(s);
         if (!bounds) return false;
-        return x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY;
+        if (s.tool === 'circle') {
+          const dist = Math.hypot(x - bounds.centerX, y - bounds.centerY);
+          return dist <= (bounds.radius || bounds.width / 2) + 20;
+        }
+        if (s.tool === 'ellipse') {
+          const rx = (bounds.rx || bounds.width / 2) + 15;
+          const ry = (bounds.ry || bounds.height / 2) + 15;
+          const normX = (x - bounds.centerX) / rx;
+          const normY = (y - bounds.centerY) / ry;
+          return normX * normX + normY * normY <= 1.0;
+        }
+        return x >= bounds.minX - 10 && x <= bounds.maxX + 10 && y >= bounds.minY - 10 && y <= bounds.maxY + 10;
       });
 
       if (hitStroke) {
         setSelectedStrokeId(hitStroke.id);
+        setIsStrokeToolbarExpanded(false);
         setSelectedTextId(null);
         setIsDraggingStroke(true);
         setIsDraggingText(false);
@@ -897,6 +1094,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       // If clicked on empty space, deselect both
       setSelectedTextId(null);
       setSelectedStrokeId(null);
+      setIsStrokeToolbarExpanded(false);
       setDragLivePos(null);
       return;
     }
@@ -905,13 +1103,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     if (selectedTextId || selectedStrokeId) {
       setSelectedTextId(null);
       setSelectedStrokeId(null);
+      setIsStrokeToolbarExpanded(false);
       setDragLivePos(null);
     }
 
+    // Word Text Box marquee drag initiation
     if (activeTool === 'text') {
-      setTextInputPos({ x, y });
-      setIsAddingText(true);
-      setTextInputValue('');
+      setNewTextBoxDrag({ startX: x, startY: y, curX: x, curY: y });
       return;
     }
 
@@ -959,6 +1157,40 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return;
     }
 
+    // Live marquee dragging for creating new Word Text Box
+    if (newTextBoxDrag) {
+      setNewTextBoxDrag((prev) => (prev ? { ...prev, curX: x, curY: y } : null));
+      return;
+    }
+
+    // Live scaling of selected geometric shape via corner handles
+    if (isResizingStroke && resizeStrokeStartRef.current && selectedStrokeId) {
+      const { startMouseX, startMouseY, origScale, origBounds, direction } = resizeStrokeStartRef.current;
+      const dx = e.clientX - startMouseX;
+      const dy = e.clientY - startMouseY;
+      const signX = direction.includes('e') ? 1 : direction.includes('w') ? -1 : 0;
+      const signY = direction.includes('s') ? 1 : direction.includes('n') ? -1 : 0;
+      const factorX = signX !== 0 ? (dx * signX) / Math.max(origBounds.width, 60) : 0;
+      const factorY = signY !== 0 ? (dy * signY) / Math.max(origBounds.height, 60) : 0;
+      const factor = Math.max(factorX, factorY) || factorX || factorY;
+      const newScale = Math.max(0.15, Math.min(5.0, Number((origScale * (1 + factor)).toFixed(2))));
+
+      if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
+      strokeRafRef.current = requestAnimationFrame(() => {
+        setPages((prev) => {
+          const updated = [...prev];
+          const curr = updated[currentPageIndex];
+          if (!curr) return prev;
+          const newStrokes = curr.strokes.map((s) =>
+            s.id === selectedStrokeId ? { ...s, scale: newScale } : s
+          );
+          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+          return updated;
+        });
+      });
+      return;
+    }
+
     // Live dragging of a vertex on a geometric shape (with parallel constraints)
     if (draggedVertexIdx !== null && selectedStrokeId) {
       handleVertexDrag(draggedVertexIdx, x, y);
@@ -975,45 +1207,48 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return;
     }
 
-    // Live dragging of selected stroke / drawn shape
+    // Live dragging of selected stroke / drawn shape with 120fps requestAnimationFrame
     if (isDraggingStroke && dragStrokeStartRef.current && selectedStrokeId) {
       const deltaX = e.clientX - dragStrokeStartRef.current.startMouseX;
       const deltaY = e.clientY - dragStrokeStartRef.current.startMouseY;
       const origPts = dragStrokeStartRef.current.origPoints;
       const origVerts = dragStrokeStartRef.current.origVertices;
 
-      setPages((prev) => {
-        const updated = [...prev];
-        const curr = updated[currentPageIndex];
-        if (!curr) return prev;
-        const newStrokes = curr.strokes.map((s) => {
-          if (s.id === selectedStrokeId) {
-            const movedPoints = origPts.map((p) => ({
-              ...p,
-              x: p.x + deltaX,
-              y: p.y + deltaY,
-            }));
-            const movedVertices = origVerts
-              ? origVerts.map((v) => ({
-                  ...v,
-                  x: v.x + deltaX,
-                  y: v.y + deltaY,
-                }))
-              : s.customVertices;
-            const newCenterX = dragStrokeStartRef.current!.centerX + deltaX;
-            const newCenterY = dragStrokeStartRef.current!.centerY + deltaY;
-            return {
-              ...s,
-              points: movedPoints,
-              customVertices: movedVertices,
-              centerX: newCenterX,
-              centerY: newCenterY,
-            };
-          }
-          return s;
+      if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
+      strokeRafRef.current = requestAnimationFrame(() => {
+        setPages((prev) => {
+          const updated = [...prev];
+          const curr = updated[currentPageIndex];
+          if (!curr) return prev;
+          const newStrokes = curr.strokes.map((s) => {
+            if (s.id === selectedStrokeId) {
+              const movedPoints = origPts.map((p) => ({
+                ...p,
+                x: p.x + deltaX,
+                y: p.y + deltaY,
+              }));
+              const movedVertices = origVerts
+                ? origVerts.map((v) => ({
+                    ...v,
+                    x: v.x + deltaX,
+                    y: v.y + deltaY,
+                  }))
+                : s.customVertices;
+              const newCenterX = dragStrokeStartRef.current!.centerX + deltaX;
+              const newCenterY = dragStrokeStartRef.current!.centerY + deltaY;
+              return {
+                ...s,
+                points: movedPoints,
+                customVertices: movedVertices,
+                centerX: newCenterX,
+                centerY: newCenterY,
+              };
+            }
+            return s;
+          });
+          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+          return updated;
         });
-        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
-        return updated;
       });
       return;
     }
@@ -1107,7 +1342,81 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
   };
 
+  const handleShapeResizePointerDown = (e: React.PointerEvent, direction: string) => {
+    e.stopPropagation();
+    if (!selectedStrokeId) return;
+    const selectedStroke = strokes.find((s) => s.id === selectedStrokeId);
+    if (!selectedStroke) return;
+    const bounds = getStrokeBounds(selectedStroke);
+    if (!bounds) return;
+
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (_) {}
+
+    setIsResizingStroke(true);
+    resizeStrokeStartRef.current = {
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      origScale: selectedStroke.scale || 1,
+      origBounds: { centerX: bounds.centerX, centerY: bounds.centerY, width: bounds.width, height: bounds.height },
+      direction,
+    };
+  };
+
   const handlePointerUp = () => {
+    // 1. Finalize Word Text Box marquee drag
+    if (newTextBoxDrag) {
+      const minX = Math.min(newTextBoxDrag.startX, newTextBoxDrag.curX);
+      const minY = Math.min(newTextBoxDrag.startY, newTextBoxDrag.curY);
+      const dragW = Math.abs(newTextBoxDrag.curX - newTextBoxDrag.startX);
+      const dragH = Math.abs(newTextBoxDrag.curY - newTextBoxDrag.startY);
+
+      const finalWidth = dragW > 40 ? Math.round(dragW) : 260;
+      const finalHeight = dragH > 30 ? Math.round(dragH) : 90;
+
+      const newTextBox: BlackboardTextBox = {
+        id: `txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        x: minX,
+        y: minY,
+        width: finalWidth,
+        height: finalHeight,
+        text: '',
+        color: activeColor,
+        size: 28,
+        fontFamily: 'sans',
+        bold: false,
+        italic: false,
+        underline: false,
+        align: 'left',
+        bgColor: 'transparent',
+        borderStyle: 'dashed',
+      };
+
+      setPages((prev) => {
+        const updated = [...prev];
+        const curr = updated[currentPageIndex];
+        if (!curr) return prev;
+        updated[currentPageIndex] = {
+          ...curr,
+          texts: [...(curr.texts || []), newTextBox],
+        };
+        return updated;
+      });
+
+      setSelectedTextId(newTextBox.id);
+      setSelectedStrokeId(null);
+      setNewTextBoxDrag(null);
+      return;
+    }
+
+    // 2. Finalize Shape Resizing
+    if (isResizingStroke) {
+      setIsResizingStroke(false);
+      resizeStrokeStartRef.current = null;
+      return;
+    }
+
     if (draggedVertexIdx !== null) {
       setDraggedVertexIdx(null);
       return;
@@ -1156,9 +1465,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       });
 
       const initialVertices = computeDefaultVertices(activeTool, completedPoints);
-
-      const newStroke: WhiteboardStroke = {
-        id: `stroke_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      const tempStroke: WhiteboardStroke = {
+        id: 'temp',
         points: completedPoints,
         color: activeColor,
         size: strokeSize,
@@ -1169,6 +1477,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         centerY: (minY + maxY) / 2,
         scale: 1,
         customVertices: initialVertices && initialVertices.length > 0 ? initialVertices : undefined,
+      };
+      const bounds = getStrokeBounds(tempStroke);
+
+      const newStroke: WhiteboardStroke = {
+        ...tempStroke,
+        id: `stroke_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        centerX: bounds ? bounds.centerX : (minX + maxX) / 2,
+        centerY: bounds ? bounds.centerY : (minY + maxY) / 2,
       };
 
       setPages((prev) => {
@@ -1279,39 +1595,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return updated;
     });
     setShowClearBoardModal(false);
-  };
-
-  // Text insertion
-  const handleConfirmAddText = () => {
-    if (!textInputValue.trim() || !textInputPos) {
-      setIsAddingText(false);
-      setTextInputPos(null);
-      return;
-    }
-
-    setPages((prev) => {
-      const updated = [...prev];
-      const curr = updated[currentPageIndex];
-      updated[currentPageIndex] = {
-        ...curr,
-        texts: [
-          ...curr.texts,
-          {
-            id: `text_${Date.now()}`,
-            x: textInputPos.x,
-            y: textInputPos.y,
-            text: textInputValue.trim(),
-            color: activeColor,
-            size: strokeSize * 6 + 12,
-          },
-        ],
-      };
-      return updated;
-    });
-
-    setIsAddingText(false);
-    setTextInputPos(null);
-    setTextInputValue('');
   };
 
   // Export board screenshot
@@ -1427,10 +1710,39 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
   };
 
+  // Custom visual cursors inside the green blackboard (Bàn tay viết, Mũi tên chọn, Chiếc khăn lau)
+  const getCanvasCursorStyle = (): React.CSSProperties => {
+    switch (activeTool) {
+      case 'select':
+        // 1. Mũi tên chỉ chọn sắc nét trên nền bảng xanh
+        return {
+          cursor: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M3 2 L3 21 L8 16 L12 24 L15 22 L11 15 L17 15 Z' fill='%23ffffff' stroke='%230f172a' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E") 2 2, default`,
+        };
+      case 'pen':
+        // 2. Biểu tượng bàn tay cầm phấn đang viết trên bảng
+        return {
+          cursor: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 36 36'%3E%3Cpolygon points='2,2 8,1 15,13 9,14' fill='%23ffffff' stroke='%230f172a' stroke-width='1.5' stroke-linejoin='round'/%3E%3Ccircle cx='2' cy='2' r='2' fill='%2338bdf8'/%3E%3Cpath d='M10,11 C9,7 13,6 16,9 C18,7 22,8 22,11 C24,10 27,11 26,14 C27,16 26,19 23,21 L18,24 C14,25 11,23 9,19 Z' fill='%23fef08a' stroke='%23ca8a04' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M14,12 L18,18' stroke='%23ca8a04' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E") 2 2, crosshair`,
+        };
+      case 'eraser':
+        // 3. Biểu tượng giống chiếc khăn lau bảng
+        return {
+          cursor: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 36 36'%3E%3Crect x='3' y='5' width='28' height='22' rx='5' fill='%23ffffff' stroke='%230f172a' stroke-width='1.6'/%3E%3Cpath d='M6 11 Q17 14 28 11' stroke='%2338bdf8' stroke-width='2.2' stroke-linecap='round' fill='none'/%3E%3Cpath d='M6 16 Q17 19 28 16' stroke='%230284c7' stroke-width='2.2' stroke-linecap='round' fill='none'/%3E%3Cpath d='M6 21 Q17 24 28 21' stroke='%2338bdf8' stroke-width='2.2' stroke-linecap='round' fill='none'/%3E%3Cpath d='M22 5 L31 14 L22 14 Z' fill='%23cbd5e1' stroke='%230f172a' stroke-width='1.4'/%3E%3C/svg%3E") 16 16, pointer`,
+        };
+      case 'text':
+        return { cursor: 'text' };
+      case 'highlighter':
+        return { cursor: 'cell' };
+      case 'laser':
+        return { cursor: 'none' };
+      default:
+        return { cursor: 'crosshair' };
+    }
+  };
+
   const getCanvasCursorClass = () => {
     switch (activeTool) {
       case 'select':
-        return 'cursor-move';
+        return 'cursor-default';
       case 'pen':
         return 'cursor-crosshair';
       case 'text':
@@ -1759,6 +2071,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
+          style={getCanvasCursorStyle()}
           className={`absolute inset-0 w-full h-full touch-canvas z-10 ${getCanvasCursorClass()}`}
         />
 
@@ -2100,231 +2413,63 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           </div>
         )}
 
-        {/* Selected Chalk Text Interactive Bounding Box & Floating Action Toolbar */}
-        {(() => {
-          const selectedText = texts.find((t) => t.id === selectedTextId);
-          if (!selectedText) return null;
-          const curX = dragLivePos ? dragLivePos.x : selectedText.x;
-          const curY = dragLivePos ? dragLivePos.y : selectedText.y;
-          const textWidth = Math.max(selectedText.text.length * (selectedText.size * 0.65) + 24, 100);
-          const boxHeight = selectedText.size * 1.35 + 16;
-          const boxLeft = curX - boardScrollX - 10;
-          const boxTop = curY - boardScrollY - selectedText.size - 8;
+        {/* Live Word Text Box Marquee Drag Box Preview */}
+        {newTextBoxDrag && (
+          <div
+            className="absolute pointer-events-none border-2 border-dashed border-cyan-400 bg-cyan-400/15 rounded-xl z-50 flex items-center justify-center shadow-2xl backdrop-blur-[1px]"
+            style={{
+              left: `${Math.min(newTextBoxDrag.startX, newTextBoxDrag.curX) - boardScrollX}px`,
+              top: `${Math.min(newTextBoxDrag.startY, newTextBoxDrag.curY) - boardScrollY}px`,
+              width: `${Math.max(160, Math.abs(newTextBoxDrag.curX - newTextBoxDrag.startX))}px`,
+              height: `${Math.max(50, Math.abs(newTextBoxDrag.curY - newTextBoxDrag.startY))}px`,
+            }}
+          >
+            <span className="text-xs font-bold text-cyan-300 bg-slate-950/85 px-2.5 py-1 rounded-lg font-mono border border-cyan-500/40 shadow">
+              Hộp văn bản Word ({Math.round(Math.abs(newTextBoxDrag.curX - newTextBoxDrag.startX))} × {Math.round(Math.abs(newTextBoxDrag.curY - newTextBoxDrag.startY))})
+            </span>
+          </div>
+        )}
 
-          return (
-            <div
-              className="absolute pointer-events-auto select-none border-2 border-dashed border-cyan-400 bg-cyan-400/10 rounded-xl shadow-2xl z-40 transition-none flex items-center px-2.5"
-              style={{
-                left: `${boxLeft}px`,
-                top: `${boxTop}px`,
-                width: `${textWidth}px`,
-                height: `${boxHeight}px`,
-                cursor: isDraggingText ? 'grabbing' : 'grab',
-                touchAction: 'none',
-              }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                e.currentTarget.setPointerCapture(e.pointerId);
-                setIsDraggingText(true);
-                setDragLivePos({ x: selectedText.x, y: selectedText.y });
-                dragStartRef.current = {
-                  startMouseX: e.clientX,
-                  startMouseY: e.clientY,
-                  origX: selectedText.x,
-                  origY: selectedText.y,
+        {/* All Blackboard Word Text Boxes (Crisp HTML + KaTeX rendering + Word Formatting Toolbar + 8-Point Resizing) */}
+        {currentPage?.texts?.map((tb) => (
+          <BlackboardWordTextBox
+            key={tb.id}
+            textBox={tb}
+            isSelected={selectedTextId === tb.id}
+            boardScrollX={boardScrollX}
+            boardScrollY={boardScrollY}
+            chalkPalette={chalkPalette}
+            onSelect={() => {
+              setSelectedTextId(tb.id);
+              setSelectedStrokeId(null);
+            }}
+            onChange={(updated) => {
+              setPages((prev) => {
+                const up = [...prev];
+                const curr = up[currentPageIndex];
+                if (!curr) return prev;
+                up[currentPageIndex] = {
+                  ...curr,
+                  texts: curr.texts.map((t) => (t.id === updated.id ? updated : t)),
                 };
-              }}
-              onPointerMove={(e) => {
-                if (!isDraggingText || !dragStartRef.current) return;
-                const deltaX = e.clientX - dragStartRef.current.startMouseX;
-                const deltaY = e.clientY - dragStartRef.current.startMouseY;
-                const newX = Math.max(10, Math.round(dragStartRef.current.origX + deltaX));
-                const newY = Math.max(30, Math.round(dragStartRef.current.origY + deltaY));
-                setDragLivePos({ x: newX, y: newY });
-              }}
-              onPointerUp={() => {
-                if (isDraggingText && dragLivePos) {
-                  setPages((prev) => {
-                    const updated = [...prev];
-                    const curr = updated[currentPageIndex];
-                    if (!curr) return prev;
-                    const newTexts = curr.texts.map((t) =>
-                      t.id === selectedText.id ? { ...t, x: dragLivePos.x, y: dragLivePos.y } : t
-                    );
-                    updated[currentPageIndex] = { ...curr, texts: newTexts };
-                    return updated;
-                  });
-                }
-                setIsDraggingText(false);
-                setDragLivePos(null);
-                dragStartRef.current = null;
-              }}
-            >
-              {/* Text content rendered seamlessly inside the container so it moves 100% in lockstep */}
-              <div
-                style={{
-                  color: selectedText.color,
-                  fontSize: `${selectedText.size}px`,
-                  fontFamily: '"Be Vietnam Pro", sans-serif',
-                  fontWeight: 700,
-                  lineHeight: 1,
-                  whiteSpace: 'nowrap',
-                  pointerEvents: 'none',
-                  textShadow: '0 0 1px rgba(255,255,255,0.4)',
-                }}
-              >
-                {selectedText.text}
-              </div>
-
-              {/* 4 Corner Anchors */}
-              <div className="absolute -top-2 -left-2 w-4 h-4 bg-cyan-400 border-2 border-white rounded-full shadow-lg pointer-events-none" />
-              <div className="absolute -top-2 -right-2 w-4 h-4 bg-cyan-400 border-2 border-white rounded-full shadow-lg pointer-events-none" />
-              <div className="absolute -bottom-2 -left-2 w-4 h-4 bg-cyan-400 border-2 border-white rounded-full shadow-lg pointer-events-none" />
-              <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-cyan-400 border-2 border-white rounded-full shadow-lg pointer-events-none" />
-
-              {/* Floating Toolbar above the selected text */}
-              <div
-                className="absolute -top-14 left-0 flex items-center gap-1.5 bg-slate-950/95 backdrop-blur-md px-3 py-1.5 rounded-2xl border-2 border-cyan-400/80 shadow-2xl text-white pointer-events-auto whitespace-nowrap z-50 select-none"
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <span className="text-[11px] font-black text-cyan-300 flex items-center gap-1">
-                  <Move className="w-3.5 h-3.5" />
-                  Kéo di chuyển
-                </span>
-                <div className="h-4 w-px bg-white/20 mx-0.5" />
-
-                {/* Change color palette */}
-                <div className="flex items-center gap-1 max-w-[260px] sm:max-w-[340px] overflow-x-auto py-0.5 custom-scrollbar-none">
-                  {chalkPalette.map((cp) => (
-                    <button
-                      key={cp.value}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPages((prev) => {
-                          const updated = [...prev];
-                          const curr = updated[currentPageIndex];
-                          const newTexts = curr.texts.map((t) =>
-                            t.id === selectedText.id ? { ...t, color: cp.value } : t
-                          );
-                          updated[currentPageIndex] = { ...curr, texts: newTexts };
-                          return updated;
-                        });
-                      }}
-                      className={`w-4 h-4 rounded-full border transition-transform shrink-0 ${
-                        selectedText.color === cp.value
-                          ? 'border-white scale-125 ring-2 ring-cyan-400'
-                          : 'border-transparent hover:scale-110'
-                      }`}
-                      style={{
-                        backgroundColor: cp.value,
-                        boxShadow: cp.isFluorescent ? `0 0 6px ${cp.value}` : undefined,
-                      }}
-                      title={cp.label}
-                    />
-                  ))}
-                </div>
-
-                <div className="h-4 w-px bg-white/20 mx-0.5" />
-
-                {/* Font size +/- */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPages((prev) => {
-                      const updated = [...prev];
-                      const curr = updated[currentPageIndex];
-                      const newTexts = curr.texts.map((t) =>
-                        t.id === selectedText.id ? { ...t, size: Math.max(16, t.size - 6) } : t
-                      );
-                      updated[currentPageIndex] = { ...curr, texts: newTexts };
-                      return updated;
-                    });
-                  }}
-                  className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold"
-                  title="Thu nhỏ cỡ chữ"
-                >
-                  A-
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPages((prev) => {
-                      const updated = [...prev];
-                      const curr = updated[currentPageIndex];
-                      const newTexts = curr.texts.map((t) =>
-                        t.id === selectedText.id ? { ...t, size: Math.min(96, t.size + 6) } : t
-                      );
-                      updated[currentPageIndex] = { ...curr, texts: newTexts };
-                      return updated;
-                    });
-                  }}
-                  className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold"
-                  title="Phóng to cỡ chữ"
-                >
-                  A+
-                </button>
-
-                <div className="h-4 w-px bg-white/20 mx-0.5" />
-
-                {/* Edit text value */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const newText = prompt('Chỉnh sửa nội dung chữ trên bảng:', selectedText.text);
-                    if (newText !== null && newText.trim()) {
-                      setPages((prev) => {
-                        const updated = [...prev];
-                        const curr = updated[currentPageIndex];
-                        const newTexts = curr.texts.map((t) =>
-                          t.id === selectedText.id ? { ...t, text: newText.trim() } : t
-                        );
-                        updated[currentPageIndex] = { ...curr, texts: newTexts };
-                        return updated;
-                      });
-                    }
-                  }}
-                  className="px-2 py-0.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
-                  title="Sửa nội dung chữ"
-                >
-                  Sửa chữ
-                </button>
-
-                {/* Delete */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPages((prev) => {
-                      const updated = [...prev];
-                      const curr = updated[currentPageIndex];
-                      const newTexts = curr.texts.filter((t) => t.id !== selectedText.id);
-                      updated[currentPageIndex] = { ...curr, texts: newTexts };
-                      return updated;
-                    });
-                    setSelectedTextId(null);
-                  }}
-                  className="p-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors flex items-center gap-1 text-xs px-2"
-                  title="Xóa chữ này khỏi bảng (Phím Delete)"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Xóa</span>
-                </button>
-
-                {/* Close Floating Toolbar / Deselect */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedTextId(null);
-                    setDragLivePos(null);
-                  }}
-                  className="p-1 rounded-lg hover:bg-white/20 text-slate-300 hover:text-white transition-colors"
-                  title="Tắt thanh công cụ / Bỏ chọn (Giữ nguyên chữ trên bảng)"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+                return up;
+              });
+            }}
+            onDelete={() => {
+              setPages((prev) => {
+                const up = [...prev];
+                const curr = up[currentPageIndex];
+                if (!curr) return prev;
+                up[currentPageIndex] = {
+                  ...curr,
+                  texts: curr.texts.filter((t) => t.id !== tb.id),
+                };
+                return up;
+              });
+              if (selectedTextId === tb.id) setSelectedTextId(null);
+            }}
+          />
+        ))}
 
         {/* INTERACTIVE BOUNDING BOX & 360-DEGREE ROTATION CONTROLLER FOR SELECTED STROKE / DRAWN SHAPE */}
         {selectedStrokeId && (() => {
@@ -2356,6 +2501,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <div
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  try {
+                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  } catch (_) {}
                   setIsDraggingStroke(true);
                   setIsDraggingText(false);
                   dragStrokeStartRef.current = {
@@ -2368,9 +2516,73 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     origRotation: selectedStroke.rotation || 0,
                   };
                 }}
-                className="absolute inset-0 cursor-move pointer-events-auto bg-cyan-400/5 hover:bg-cyan-400/15 rounded-2xl transition-colors border border-cyan-400/30"
-                title="Kéo thả để di chuyển toàn bộ hình vẽ"
-              />
+                onPointerMove={(e) => {
+                  if (!isDraggingStroke || !dragStrokeStartRef.current || !selectedStrokeId) return;
+                  e.stopPropagation();
+                  const deltaX = e.clientX - dragStrokeStartRef.current.startMouseX;
+                  const deltaY = e.clientY - dragStrokeStartRef.current.startMouseY;
+                  const origPts = dragStrokeStartRef.current.origPoints;
+                  const origVerts = dragStrokeStartRef.current.origVertices;
+                  const origCenterX = dragStrokeStartRef.current.centerX;
+                  const origCenterY = dragStrokeStartRef.current.centerY;
+
+                  if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
+                  strokeRafRef.current = requestAnimationFrame(() => {
+                    setPages((prev) => {
+                      const updated = [...prev];
+                      const curr = updated[currentPageIndex];
+                      if (!curr) return prev;
+                      const newStrokes = curr.strokes.map((s) => {
+                        if (s.id === selectedStrokeId) {
+                          const movedPoints = origPts.map((p) => ({
+                            ...p,
+                            x: p.x + deltaX,
+                            y: p.y + deltaY,
+                          }));
+                          const movedVertices = origVerts
+                            ? origVerts.map((v) => ({
+                                ...v,
+                                x: v.x + deltaX,
+                                y: v.y + deltaY,
+                              }))
+                            : s.customVertices;
+                          return {
+                            ...s,
+                            points: movedPoints,
+                            customVertices: movedVertices,
+                            centerX: origCenterX + deltaX,
+                            centerY: origCenterY + deltaY,
+                          };
+                        }
+                        return s;
+                      });
+                      updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                      return updated;
+                    });
+                  });
+                }}
+                onPointerUp={(e) => {
+                  e.stopPropagation();
+                  try {
+                    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                  } catch (_) {}
+                  setIsDraggingStroke(false);
+                }}
+                onPointerCancel={(e) => {
+                  e.stopPropagation();
+                  try {
+                    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                  } catch (_) {}
+                  setIsDraggingStroke(false);
+                }}
+                className="absolute inset-0 cursor-move pointer-events-auto bg-cyan-400/10 hover:bg-cyan-400/20 active:bg-cyan-400/30 rounded-2xl transition-colors border-2 border-cyan-400/40 touch-none select-none flex items-center justify-center group"
+                title="Chạm và kéo để di chuyển hình mượt mà (hoặc dùng 4 nút điều hướng / phím mũi tên)"
+              >
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-slate-950/85 px-2.5 py-1 rounded-full text-cyan-300 text-[11px] font-bold shadow-lg flex items-center gap-1.5 pointer-events-none">
+                  <Move className="w-3.5 h-3.5" />
+                  Kéo di chuyển hình
+                </div>
+              </div>
 
               {/* Draggable Vertex Handles for Geometric Shapes (preserves parallel sides) */}
               {activeVertices && activeVertices.length > 0 && (
@@ -2449,7 +2661,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 </div>
               )}
 
-              {/* Bounding box outline with rotation visual styling */}
+              {/* Bounding box outline with rotation visual styling & active draggable corner handles */}
               <div
                 className="w-full h-full border-2 border-dashed border-cyan-400/90 rounded-2xl relative shadow-lg ring-2 ring-cyan-400/30 pointer-events-none"
                 style={{
@@ -2457,28 +2669,264 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   transformOrigin: 'center center',
                 }}
               >
-                {/* 4 Corner handles */}
-                <div className="absolute -top-2 -left-2 w-3.5 h-3.5 bg-cyan-400 border-2 border-white rounded-full shadow" />
-                <div className="absolute -top-2 -right-2 w-3.5 h-3.5 bg-cyan-400 border-2 border-white rounded-full shadow" />
-                <div className="absolute -bottom-2 -left-2 w-3.5 h-3.5 bg-cyan-400 border-2 border-white rounded-full shadow" />
-                <div className="absolute -bottom-2 -right-2 w-3.5 h-3.5 bg-cyan-400 border-2 border-white rounded-full shadow" />
+                {/* 4 Active Draggable Corner Handles for Direct Interactive Shape Scaling */}
+                <div
+                  onPointerDown={(e) => handleShapeResizePointerDown(e, 'nw')}
+                  className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30"
+                  title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+                >
+                  <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+                </div>
+                <div
+                  onPointerDown={(e) => handleShapeResizePointerDown(e, 'ne')}
+                  className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30"
+                  title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+                >
+                  <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+                </div>
+                <div
+                  onPointerDown={(e) => handleShapeResizePointerDown(e, 'sw')}
+                  className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30"
+                  title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+                >
+                  <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+                </div>
+                <div
+                  onPointerDown={(e) => handleShapeResizePointerDown(e, 'se')}
+                  className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30"
+                  title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+                >
+                  <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+                </div>
 
                 {/* Center crosshair */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 border border-cyan-300 rounded-full flex items-center justify-center">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 border border-cyan-300 rounded-full flex items-center justify-center pointer-events-none">
                   <div className="w-1 h-1 bg-cyan-300 rounded-full" />
                 </div>
               </div>
 
-              {/* Floating Toolbar & 360-degree Rotation Controls */}
-              <div
-                className="absolute -top-20 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-slate-950/95 backdrop-blur-md px-3.5 py-2 rounded-2xl border-2 border-cyan-400/80 shadow-2xl text-white pointer-events-auto whitespace-nowrap z-50 select-none"
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                {/* Drag to move info */}
-                <span className="text-[11px] font-black text-cyan-300 flex items-center gap-1">
-                  <Move className="w-3.5 h-3.5" />
-                  Kéo di chuyển
-                </span>
+              {/* Floating Toolbar: Collapsed by Default (Thu gọn) & Expandable (Mở rộng khi bấm vào) */}
+              {!isStrokeToolbarExpanded ? (
+                /* DẠNG THU GỌN (Collapsed Compact Mode) */
+                <div
+                  className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-slate-950/95 backdrop-blur-md px-2.5 py-1.5 rounded-2xl border-2 border-cyan-400/80 shadow-2xl text-white pointer-events-auto whitespace-nowrap z-50 select-none animate-fade-in"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  {/* Mini Directional Movement */}
+                  <div className="flex items-center gap-1 bg-white/10 px-1.5 py-1 rounded-xl">
+                    <button
+                      onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(-1, 0); }}
+                      onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                      onPointerLeave={stopContinuousNudge}
+                      onPointerCancel={stopContinuousNudge}
+                      className="p-1 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                      title="Dời sang TRÁI"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(0, -1); }}
+                      onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                      onPointerLeave={stopContinuousNudge}
+                      onPointerCancel={stopContinuousNudge}
+                      className="p-1 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                      title="Dời lên TRÊN"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(0, 1); }}
+                      onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                      onPointerLeave={stopContinuousNudge}
+                      onPointerCancel={stopContinuousNudge}
+                      className="p-1 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                      title="Dời xuống DƯỚI"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(1, 0); }}
+                      onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                      onPointerLeave={stopContinuousNudge}
+                      onPointerCancel={stopContinuousNudge}
+                      className="p-1 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                      title="Dời sang PHẢI"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCenterStroke(); }}
+                      className="px-1.5 py-0.5 bg-white/10 hover:bg-cyan-500/30 rounded-lg text-[10px] font-bold text-cyan-200 hover:text-white transition-colors cursor-pointer ml-0.5"
+                      title="Đưa hình về giữa bảng"
+                    >
+                      🎯 Giữa
+                    </button>
+                  </div>
+
+                  {/* Color Dot indicator */}
+                  <div
+                    className="w-4 h-4 rounded-full border border-white/80 shadow-xs shrink-0"
+                    style={{ backgroundColor: selectedStroke.color || '#ffffff' }}
+                    title="Màu sắc hiện tại"
+                  />
+
+                  {/* Delete Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPages((prev) => {
+                        const updated = [...prev];
+                        const curr = updated[currentPageIndex];
+                        if (!curr) return prev;
+                        const newStrokes = curr.strokes.filter((s) => s.id !== selectedStroke.id);
+                        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                        return updated;
+                      });
+                      setSelectedStrokeId(null);
+                    }}
+                    className="p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors flex items-center justify-center text-xs"
+                    title="Xóa hình này"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Expand Full Toolbar Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsStrokeToolbarExpanded(true);
+                    }}
+                    className="px-2.5 py-1 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 hover:text-white font-bold text-[11px] flex items-center gap-1.5 border border-cyan-400/50 transition-all cursor-pointer shadow-xs"
+                    title="Bấm để mở đầy đủ thanh công cụ: Xoay 360°, chọn màu, phóng to/thu nhỏ"
+                  >
+                    <Sliders className="w-3.5 h-3.5 text-cyan-300" />
+                    <span>Mở rộng ▾</span>
+                  </button>
+
+                  {/* Close button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedStrokeId(null);
+                    }}
+                    className="p-1 rounded-lg hover:bg-white/20 text-slate-300 hover:text-white transition-colors"
+                    title="Bỏ chọn"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                /* DẠNG MỞ RỘNG ĐẦY ĐỦ (Expanded Full Mode) */
+                <div
+                  className="absolute -top-20 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-slate-950/98 backdrop-blur-md px-3.5 py-2 rounded-2xl border-2 border-cyan-400/90 shadow-2xl text-white pointer-events-auto whitespace-nowrap z-50 select-none animate-fade-in"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  {/* Collapse Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsStrokeToolbarExpanded(false);
+                    }}
+                    className="px-2 py-1 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 rounded-xl text-[10.5px] font-black flex items-center gap-1 border border-cyan-400/40 cursor-pointer mr-0.5"
+                    title="Thu gọn thanh công cụ lại"
+                  >
+                    <ChevronUp className="w-3.5 h-3.5 text-cyan-300" />
+                    <span>Thu gọn ▴</span>
+                  </button>
+                {/* 4-Way Smooth Directional Movement (Press or Hold to Move Continuously) */}
+                <div className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 rounded-xl">
+                  <span className="text-[11px] font-black text-cyan-300 flex items-center gap-1 mr-0.5">
+                    <Move className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Di chuyển:</span>
+                  </span>
+
+                  {/* Left */}
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(-1, 0); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1.5 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời sang TRÁI (Nhấn hoặc Giữ để di chuyển mượt, hoặc phím mũi tên Trái)"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Up */}
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(0, -1); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1.5 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời lên TRÊN (Nhấn hoặc Giữ để di chuyển mượt, hoặc phím mũi tên Lên)"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Down */}
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(0, 1); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1.5 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời xuống DƯỚI (Nhấn hoặc Giữ để di chuyển mượt, hoặc phím mũi tên Xuống)"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Right */}
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(1, 0); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1.5 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời sang PHẢI (Nhấn hoặc Giữ để di chuyển mượt, hoặc phím mũi tên Phải)"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Speed toggle presets */}
+                  <div className="flex items-center gap-0.5 bg-slate-900/90 p-0.5 rounded-lg border border-white/10 ml-1">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMoveSpeed(5); }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${moveSpeed === 5 ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                      title="Bước tinh chỉnh 5px"
+                    >
+                      5px
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMoveSpeed(15); }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${moveSpeed === 15 ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                      title="Bước tiêu chuẩn 15px"
+                    >
+                      15px
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMoveSpeed(35); }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${moveSpeed === 35 ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                      title="Bước nhanh 35px"
+                    >
+                      35px
+                    </button>
+                  </div>
+
+                  {/* Center to Viewport Button */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCenterStroke(); }}
+                    className="px-2 py-1 bg-white/10 hover:bg-cyan-500/30 rounded-lg text-[10.5px] font-bold text-cyan-200 hover:text-white transition-colors flex items-center gap-1 cursor-pointer"
+                    title="Đưa hình vẽ về ngay giữa tầm nhìn bảng"
+                  >
+                    <span>🎯 Giữa</span>
+                  </button>
+
+                  {/* Coordinates Badge */}
+                  <span className="text-[10px] font-mono text-cyan-400/90 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-500/30 hidden md:inline">
+                    X:{Math.round(bounds.centerX)} Y:{Math.round(bounds.centerY)}
+                  </span>
+                </div>
 
                 <div className="h-5 w-px bg-white/20 mx-1" />
 
@@ -2714,51 +3162,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-            </div>
+            )}
+          </div>
           );
         })()}
-
-        {/* Text Note Input Dialog / Popover */}
-        {isAddingText && textInputPos && (
-          <div
-            className="absolute z-40 p-3 rounded-2xl bg-white border-2 border-indigo-500 shadow-2xl flex flex-col gap-2 min-w-[260px] -translate-x-1/2 -translate-y-1/2"
-            style={{ left: textInputPos.x, top: textInputPos.y }}
-          >
-            <span className="text-xs font-black text-slate-800 uppercase">Nhập chữ / Công thức lên bảng:</span>
-            <input
-              type="text"
-              autoFocus
-              value={textInputValue}
-              onChange={(e) => setTextInputValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleConfirmAddText();
-                if (e.key === 'Escape') {
-                  setIsAddingText(false);
-                  setTextInputPos(null);
-                }
-              }}
-              placeholder="Gõ tiêu đề, định lý..."
-              className="px-3 py-1.5 rounded-xl border border-slate-300 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => {
-                  setIsAddingText(false);
-                  setTextInputPos(null);
-                }}
-                className="px-2 py-1 rounded-lg text-xs text-slate-500 hover:bg-slate-100"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={handleConfirmAddText}
-                className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
-              >
-                Đính Lên Bảng
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* RIGHT SIDE: LIVE SPLIT-SCREEN DOCUMENT VIEWER (WHEN SPLIT-SCREEN IS ACTIVE) */}
@@ -2842,35 +3249,41 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           <div className="bg-slate-950/95 backdrop-blur-2xl px-3.5 py-2 rounded-2xl md:rounded-3xl border-2 border-white/25 shadow-2xl flex items-center gap-1 sm:gap-2 text-white shrink-0">
           {/* Main Drawing Tools */}
           <div className="flex items-center gap-1 shrink-0">
+            {/* 1. Chọn (Select) - Always visible label */}
             <button
-              onClick={() => setActiveTool('select')}
-              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
+              onClick={() => handleToolChange('select')}
+              className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'select'
                   ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-400'
                   : 'hover:bg-white/10 text-slate-300'
               }`}
               title="Chọn và di chuyển đối tượng / chữ trên bảng"
             >
-              <Move className="w-4 h-4" />
-              <span className="hidden lg:inline text-[11px]">Chọn</span>
+              <MousePointer2 className="w-4 h-4" />
+              <span className="text-[11px] font-bold">Chọn</span>
             </button>
 
+            {/* 2. Phấn (Chalk) - Biểu tượng bàn tay viết */}
             <button
-              onClick={() => setActiveTool('pen')}
-              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
+              onClick={() => handleToolChange('pen')}
+              className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'pen'
                   ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-400'
                   : 'hover:bg-white/10 text-slate-300'
               }`}
-              title="Bút phấn viết tự do"
+              title="Bút phấn viết tự do (Biểu tượng bàn tay viết)"
             >
-              <Pen className="w-4 h-4" />
-              <span className="hidden lg:inline text-[11px]">Phấn</span>
+              <div className="relative w-4 h-4 flex items-center justify-center">
+                <Hand className="w-3.5 h-3.5 rotate-[-15deg] text-emerald-200" />
+                <PenLine className="w-2.5 h-2.5 absolute -top-0.5 -right-0.5 text-amber-300" />
+              </div>
+              <span className="text-[11px] font-bold">Phấn</span>
             </button>
 
+            {/* 3. Bút Dạ Quang */}
             <button
-              onClick={() => setActiveTool('highlighter')}
-              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
+              onClick={() => handleToolChange('highlighter')}
+              className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'highlighter'
                   ? 'bg-amber-500 text-white shadow-md ring-2 ring-amber-300'
                   : 'hover:bg-white/10 text-slate-300'
@@ -2878,24 +3291,31 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               title="Bút dạ quang đánh dấu"
             >
               <Highlighter className="w-4 h-4" />
-              <span className="hidden lg:inline text-[11px]">Dạ Quang</span>
+              <span className="hidden sm:inline text-[11px] font-bold">Dạ Quang</span>
             </button>
 
+            {/* 4. Khăn Lau Bảng (Towel icon & 50p fast erase) */}
             <button
-              onClick={() => setActiveTool('eraser')}
-              className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
+              onClick={() => handleToolChange('eraser')}
+              className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'eraser'
                   ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400'
                   : 'hover:bg-white/10 text-slate-300'
               }`}
-              title="Khăn lau bảng"
+              title="Khăn lau bảng (Tự động chuyển nét 50p để lau sạch cực nhanh)"
             >
-              <Eraser className="w-4 h-4" />
-              <span className="hidden lg:inline text-[11px]">Khăn Lau</span>
+              {/* Biểu tượng chiếc khăn lau bảng */}
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+                <path d="M5 10v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9" />
+                <path d="M9 14h6" />
+                <path d="M9 17h4" />
+              </svg>
+              <span className="text-[11px] font-bold">Khăn Lau</span>
             </button>
 
             <button
-              onClick={() => setActiveTool('laser')}
+              onClick={() => handleToolChange('laser')}
               className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'laser'
                   ? 'bg-red-600 text-white shadow-md ring-2 ring-red-400'
@@ -2908,7 +3328,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             </button>
 
             <button
-              onClick={() => setActiveTool('text')}
+              onClick={() => handleToolChange('text')}
               className={`p-2 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 ${
                 activeTool === 'text'
                   ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-400'
@@ -3494,26 +3914,55 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
           <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
 
-          {/* Chalk Color Picker (Compact with Popover Menu to save toolbar space) */}
+          {/* Chalk Color Picker (Compact with Popover Menu & Custom Color Picker) */}
           <div className="relative shrink-0">
-            <button
-              onClick={() => setShowColorPopover((prev) => !prev)}
-              className="p-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white transition-all shadow-sm shrink-0 cursor-pointer"
-              title="Bảng màu phấn & dạ quang (Nhấp để chọn màu khác)"
-            >
-              <div
-                className="w-5 h-5 rounded-full border-2 border-white shadow-md ring-2 shrink-0 transition-all"
-                style={{
-                  backgroundColor: activeColor,
-                  boxShadow: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? `0 0 10px ${activeColor}` : undefined,
-                  borderColor: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? '#ffffff' : 'rgba(255,255,255,0.8)',
-                }}
-              />
-              <span className="hidden xl:inline text-[11px] font-semibold text-slate-200">
-                {chalkPalette.find((c) => c.value === activeColor)?.label || 'Màu phấn'}
-              </span>
-              <ChevronUp className={`w-3.5 h-3.5 text-slate-300 transition-transform ${showColorPopover ? 'rotate-180' : ''}`} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowColorPopover((prev) => !prev)}
+                className="p-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white transition-all shadow-sm shrink-0 cursor-pointer"
+                title="Bảng màu phấn & dạ quang (Nhấp để chọn màu khác)"
+              >
+                <div
+                  className="w-5 h-5 rounded-full border-2 border-white shadow-md ring-2 shrink-0 transition-all"
+                  style={{
+                    backgroundColor: activeColor,
+                    boxShadow: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? `0 0 10px ${activeColor}` : undefined,
+                    borderColor: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? '#ffffff' : 'rgba(255,255,255,0.8)',
+                  }}
+                />
+                <span className="hidden xl:inline text-[11px] font-semibold text-slate-200">
+                  {chalkPalette.find((c) => c.value === activeColor)?.label || 'Màu phấn'}
+                </span>
+                <ChevronUp className={`w-3.5 h-3.5 text-slate-300 transition-transform ${showColorPopover ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* 3 Nút tắt nhanh màu phấn cốt lõi (Trắng, Vàng, Dạ quang chanh) */}
+              <div className="hidden sm:flex items-center gap-1 shrink-0 pl-0.5">
+                {[
+                  { val: '#ffffff', title: 'Phấn trắng' },
+                  { val: '#facc15', title: 'Phấn vàng' },
+                  { val: '#ccff00', title: 'Dạ quang chanh', isGlow: true },
+                ].map((sw) => (
+                  <button
+                    key={sw.val}
+                    onClick={() => {
+                      setActiveColor(sw.val);
+                      if (activeTool === 'eraser') setActiveTool('pen');
+                    }}
+                    title={sw.title}
+                    className={`w-5 h-5 rounded-full border transition-all cursor-pointer ${
+                      activeColor === sw.val
+                        ? 'scale-125 border-white ring-2 ring-white shadow-md'
+                        : 'border-white/40 opacity-75 hover:opacity-100 hover:scale-110'
+                    }`}
+                    style={{
+                      backgroundColor: sw.val,
+                      boxShadow: sw.isGlow ? `0 0 6px ${sw.val}` : undefined,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
 
             {/* Color Palette Popover */}
             {showColorPopover && (
@@ -3531,6 +3980,50 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
+                </div>
+
+                {/* Tính Năng Chọn Màu Tự Do / Color Wheel Picker */}
+                <div className="p-2.5 rounded-2xl bg-white/5 border border-white/15 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-cyan-300 tracking-wider flex items-center gap-1.5">
+                      <Pipette className="w-3.5 h-3.5 text-cyan-400" />
+                      TÙY CHỌN MÀU BẤT KỲ (DẢI RGB)
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-300 bg-white/10 px-1.5 py-0.5 rounded-md font-bold">
+                      {activeColor.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative w-9 h-9 rounded-xl overflow-hidden border-2 border-white/50 shadow-md shrink-0 cursor-pointer">
+                      <input
+                        type="color"
+                        id="blackboard-custom-color-input"
+                        value={activeColor.startsWith('#') && activeColor.length === 7 ? activeColor : '#ffffff'}
+                        onChange={(e) => {
+                          setActiveColor(e.target.value);
+                          if (activeTool === 'eraser') setActiveTool('pen');
+                        }}
+                        className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 bg-transparent"
+                        title="Bấm để chọn màu bất kỳ từ dải màu RGB"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-[10.5px] font-medium text-slate-300 leading-snug">
+                        Bấm ô vuông bên trái để mở dải màu sắc tự do hoặc nhập mã Hex:
+                      </div>
+                      <input
+                        type="text"
+                        value={activeColor}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setActiveColor(val);
+                          if (activeTool === 'eraser') setActiveTool('pen');
+                        }}
+                        placeholder="#ffffff"
+                        className="mt-1 w-full px-2 py-1 rounded-lg bg-black/40 border border-white/20 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* 3 MÀU DẠ QUANG SIÊU SÁNG PHÁT SÁNG CỰC ĐẸP TRÊN BẢNG */}
@@ -3613,7 +4106,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
           <div className="h-6 w-px bg-white/20 mx-1" />
 
-          {/* Stroke Size Selector */}
+          {/* Stroke Size Selector - Mặc định các nét viết là 2p, riêng Khăn lau là 50p */}
           <div className="flex items-center gap-1">
             {chalkSizes.slice(0, 4).map((cs) => (
               <button
@@ -3621,7 +4114,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 onClick={() => setStrokeSize(cs.size)}
                 className={`w-7 h-7 rounded-xl flex items-center justify-center text-[10px] font-mono font-bold transition-all ${
                   strokeSize === cs.size
-                    ? 'bg-white text-slate-900 shadow-md font-black'
+                    ? 'bg-white text-slate-900 shadow-md font-black ring-2 ring-white/50'
                     : 'hover:bg-white/10 text-slate-300'
                 }`}
                 title={cs.label}
@@ -3629,6 +4122,19 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 {cs.size}p
               </button>
             ))}
+            {activeTool === 'eraser' && (
+              <button
+                onClick={() => setStrokeSize(50)}
+                className={`px-2 h-7 rounded-xl flex items-center justify-center text-[10px] font-mono font-bold transition-all ${
+                  strokeSize === 50
+                    ? 'bg-rose-500 text-white shadow-md font-black ring-2 ring-rose-300'
+                    : 'hover:bg-white/10 text-rose-200'
+                }`}
+                title="Khăn lau bảng siêu tốc 50p"
+              >
+                50p
+              </button>
+            )}
           </div>
 
           <div className="h-6 w-px bg-white/20 mx-1" />
@@ -3692,11 +4198,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 setShowColorPopover(false);
                 setShowSizePopover(false);
               }}
-              className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition-all ml-1 flex items-center gap-1 text-xs font-black shadow-md active:scale-95 cursor-pointer"
-              title="Thu gọn / Tắt thanh công cụ (Bấm X)"
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-amber-300 hover:text-white transition-all ml-1 flex items-center gap-1 text-xs font-bold border border-white/20 shadow-md active:scale-95 cursor-pointer shrink-0"
+              title="Thu gọn toàn bộ thanh công cụ viết bảng"
             >
-              <X className="w-4 h-4" />
-              <span className="text-[11px]">Thu gọn</span>
+              <ChevronDown className="w-4 h-4 text-amber-400" />
+              <span className="text-[11px] font-bold">Thu Gọn</span>
             </button>
           </div>
         </div>
@@ -3705,15 +4211,22 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
       {/* Floating Restore Toolbar Button when collapsed - Moved to Bottom Right */}
       {isDockCollapsed && (
-        <div className="absolute bottom-6 md:bottom-8 right-6 z-30 pointer-events-auto animate-fade-in">
+        <div className="absolute bottom-6 md:bottom-8 right-6 z-40 pointer-events-auto animate-fade-in">
           <button
             onClick={() => setIsDockCollapsed(false)}
-            className="px-4 py-2.5 rounded-full bg-slate-950/90 hover:bg-indigo-600 border-2 border-white/40 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl transition-all hover:scale-105 active:scale-95 cursor-pointer"
-            title="Nhấp để hiển thị lại thanh công cụ viết bảng"
+            className="px-4 py-2.5 rounded-2xl bg-slate-950/95 hover:bg-indigo-600 border-2 border-indigo-400/80 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl transition-all hover:scale-105 active:scale-95 cursor-pointer ring-4 ring-indigo-500/20"
+            title="Nhấp để hiển thị lại toàn bộ thanh công cụ viết bảng"
           >
+            <div
+              className="w-3.5 h-3.5 rounded-full border border-white shrink-0"
+              style={{
+                backgroundColor: activeColor,
+                boxShadow: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? `0 0 8px ${activeColor}` : undefined,
+              }}
+            />
             <Pen className="w-4 h-4 text-emerald-400" />
-            <span>Hiện Thanh Công Cụ Viết Bảng</span>
-            <ChevronUp className="w-4 h-4" />
+            <span>Mở Thanh Công Cụ Viết Bảng</span>
+            <ChevronUp className="w-4 h-4 text-amber-300" />
           </button>
         </div>
       )}
