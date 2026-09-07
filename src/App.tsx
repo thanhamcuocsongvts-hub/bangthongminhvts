@@ -613,7 +613,18 @@ export default function App() {
             {activeTab === 'presentation' && (
               <PresentationView
                 lesson={currentLesson}
+                allLessons={lessons}
                 textScale={textScale}
+                onSelectLesson={(doc) => setActiveLessonId(doc.id)}
+                onAddLesson={(newDoc) => {
+                  setLessons((prev) => [newDoc, ...prev]);
+                  setActiveLessonId(newDoc.id);
+                }}
+                onUpdateLesson={(updatedDoc) => {
+                  setLessons((prev) =>
+                    prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
+                  );
+                }}
                 onLaunchQuiz={() => setActiveTab('quiz')}
                 onAskAIAboutSlide={(slide) => {
                   setActiveTab('ai_chat');

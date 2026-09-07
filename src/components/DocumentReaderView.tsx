@@ -29,12 +29,14 @@ import {
   ListOrdered,
   Sigma,
   Trash2,
+  Compass,
 } from 'lucide-react';
 import { LessonDoc, TextScale, ExtractedDocSummary, SlideItem, QuizQuestion } from '../types';
 import { exportLessonToWord } from '../utils/exportUtils';
 import { cleanDocumentText } from '../utils/fileParser';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
+import { ScopeConstraintModal, ScopeActionType } from './ScopeConstraintModal';
 
 interface DocumentReaderViewProps {
   lesson: LessonDoc;
@@ -76,6 +78,10 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
   const [extractedSummary, setExtractedSummary] = useState<any>(lesson.extractedSummary || null);
   const [aiAnswers, setAiAnswers] = useState<Array<{ q: string; a: string; time: string }>>([]);
 
+  // Scope Constraint State for Targeted AI Execution
+  const [scopeModalAction, setScopeModalAction] = useState<ScopeActionType | null>(null);
+  const [appliedScope, setAppliedScope] = useState<string>('');
+
   // Notes & Draft
   const [notesDraft, setNotesDraft] = useState<string>(
     cleanDocumentText(lesson.rawText) || `Ghi chú bài giảng: ${lesson.title}`
@@ -96,10 +102,11 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
     huge: 'text-xl md:text-2xl leading-loose',
   };
 
-  // 1. ON-DEMAND AI: Extract Formulas & Theorems
-  const handleExtractFormulas = async () => {
+  // 1. ON-DEMAND AI: Extract Formulas & Theorems with Scope
+  const handleExtractFormulas = async (scopeConstraint?: string) => {
     try {
       setIsExtractingFormulas(true);
+      if (scopeConstraint) setAppliedScope(scopeConstraint);
       const res = await fetch('/api/ai/extract-specific', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -107,6 +114,7 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
           target: 'formulas',
           title: lesson.title,
           content: displaySafeText,
+          scopeConstraint: scopeConstraint || undefined,
         }),
       });
 
@@ -122,10 +130,11 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
     }
   };
 
-  // 2. ON-DEMAND AI: Extract 2-Min Summary
-  const handleExtractSummary = async () => {
+  // 2. ON-DEMAND AI: Extract 2-Min Summary with Scope
+  const handleExtractSummary = async (scopeConstraint?: string) => {
     try {
       setIsExtractingSummary(true);
+      if (scopeConstraint) setAppliedScope(scopeConstraint);
       const res = await fetch('/api/ai/extract-specific', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -133,6 +142,7 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
           target: 'summary',
           title: lesson.title,
           content: displaySafeText,
+          scopeConstraint: scopeConstraint || undefined,
         }),
       });
 
@@ -146,10 +156,11 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
     }
   };
 
-  // 3. ON-DEMAND AI: Convert Document to Slides
-  const handleConvertDocToSlides = async () => {
+  // 3. ON-DEMAND AI: Convert Document to Slides with Scope & Count
+  const handleConvertDocToSlides = async (scopeConstraint?: string, count?: number) => {
     try {
       setIsConvertingSlides(true);
+      if (scopeConstraint) setAppliedScope(scopeConstraint);
       const res = await fetch('/api/ai/doc-to-slides', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -157,7 +168,8 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
           title: lesson.title,
           content: displaySafeText,
           subject: lesson.subject,
-          count: 5,
+          count: count || 5,
+          scopeConstraint: scopeConstraint || undefined,
         }),
       });
 
@@ -179,17 +191,20 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
     }
   };
 
-  // 4. ON-DEMAND AI: Generate Instant Quiz
-  const handleGenerateInstantQuiz = async () => {
+  // 4. ON-DEMAND AI: Generate Instant Quiz with Scope & Count
+  const handleGenerateInstantQuiz = async (scopeConstraint?: string, count?: number) => {
     try {
       setIsGeneratingQuiz(true);
+      if (scopeConstraint) setAppliedScope(scopeConstraint);
       const res = await fetch('/api/ai/generate-quiz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           content: displaySafeText,
+          topic: lesson.title,
           subject: lesson.subject,
-          count: 5,
+          count: count || 5,
+          scopeConstraint: scopeConstraint || undefined,
         }),
       });
 
@@ -208,6 +223,21 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
       alert('Không thể tạo bộ câu hỏi trắc nghiệm tự động.');
     } finally {
       setIsGeneratingQuiz(false);
+    }
+  };
+
+  // Handle confirm from Scope Constraint Modal
+  const handleScopeConfirm = (scopeConstraint: string, count?: number) => {
+    const action = scopeModalAction;
+    setScopeModalAction(null);
+    if (action === 'formulas') {
+      handleExtractFormulas(scopeConstraint);
+    } else if (action === 'summary') {
+      handleExtractSummary(scopeConstraint);
+    } else if (action === 'slides') {
+      handleConvertDocToSlides(scopeConstraint, count);
+    } else if (action === 'quiz') {
+      handleGenerateInstantQuiz(scopeConstraint, count);
     }
   };
 
@@ -394,40 +424,40 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
         {/* Right: On-Demand Actions Bar */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <button
-            onClick={handleExtractFormulas}
+            onClick={() => setScopeModalAction('formulas')}
             disabled={isExtractingFormulas}
-            className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:border-indigo-400 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-indigo-50/50"
-            title="Chỉ trích xuất các định lý, công thức Toán/Lý/Hóa"
+            className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:border-indigo-400 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-indigo-50/50 cursor-pointer"
+            title="Trích xuất các định lý, công thức theo phạm vi kiến thức"
           >
             <Sigma className={`w-3.5 h-3.5 text-indigo-600 ${isExtractingFormulas ? 'animate-spin' : ''}`} />
             <span>{isExtractingFormulas ? 'Đang trích xuất...' : 'Trích Xuất Công Thức'}</span>
           </button>
 
           <button
-            onClick={handleExtractSummary}
+            onClick={() => setScopeModalAction('summary')}
             disabled={isExtractingSummary}
-            className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:border-indigo-400 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-indigo-50/50"
-            title="Tóm tắt ngắn gọn các ý cốt lõi bài học"
+            className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:border-indigo-400 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-indigo-50/50 cursor-pointer"
+            title="Tóm tắt ngắn gọn theo phạm vi kiến thức"
           >
             <BookmarkCheck className={`w-3.5 h-3.5 text-emerald-600 ${isExtractingSummary ? 'animate-spin' : ''}`} />
             <span>{isExtractingSummary ? 'Đang tóm tắt...' : 'Tóm Tắt 2 Phút'}</span>
           </button>
 
           <button
-            onClick={handleConvertDocToSlides}
+            onClick={() => setScopeModalAction('slides')}
             disabled={isConvertingSlides}
-            className="px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-200 hover:bg-purple-100 text-purple-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs"
-            title="Tạo các slide giảng dạy từ tài liệu"
+            className="px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-200 hover:bg-purple-100 text-purple-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            title="Tạo các slide giảng dạy theo phạm vi kiến thức yêu cầu"
           >
             <Layers className="w-3.5 h-3.5 text-purple-600" />
             <span>{isConvertingSlides ? 'Đang tạo...' : 'Tạo Slide'}</span>
           </button>
 
           <button
-            onClick={handleGenerateInstantQuiz}
+            onClick={() => setScopeModalAction('quiz')}
             disabled={isGeneratingQuiz}
-            className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1.5 shadow-2xs"
-            title="Tạo bộ câu hỏi trắc nghiệm kiểm tra"
+            className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            title="Tạo bộ câu hỏi trắc nghiệm theo phạm vi kiến thức yêu cầu"
           >
             <CheckSquare className="w-3.5 h-3.5 text-amber-600" />
             <span>{isGeneratingQuiz ? 'Đang ra đề...' : 'Tạo Trắc Nghiệm'}</span>
@@ -471,6 +501,25 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
               <span>{isAskingAI ? 'Đang hỏi...' : 'Hỏi AI'}</span>
             </button>
           </form>
+
+          {/* Active Scope Badge */}
+          {appliedScope && (
+            <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 text-xs text-indigo-950 flex items-center justify-between gap-2 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>
+                  <span className="font-bold text-slate-600 uppercase text-[10px] block">Phạm vi kiến thức giới hạn đã yêu cầu:</span>
+                  <span className="font-black text-indigo-900">{appliedScope}</span>
+                </span>
+              </div>
+              <button
+                onClick={() => setAppliedScope('')}
+                className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-500 hover:bg-indigo-100 hover:text-slate-800 transition-colors"
+              >
+                Đặt lại phạm vi
+              </button>
+            </div>
+          )}
 
           {/* AI Answers History */}
           {aiAnswers.length > 0 && (
@@ -620,6 +669,24 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
             placeholder="Nhập ghi chú sư phạm hoặc nội dung bài giảng..."
           />
         </div>
+      )}
+
+      {/* Scope Constraint Modal: Requirements for Slides, Formulas, Summary, Quiz */}
+      {scopeModalAction && (
+        <ScopeConstraintModal
+          isOpen={true}
+          onClose={() => setScopeModalAction(null)}
+          actionType={scopeModalAction}
+          documentTitle={lesson.title}
+          subject={lesson.subject}
+          onConfirm={handleScopeConfirm}
+          isProcessing={
+            isExtractingFormulas ||
+            isExtractingSummary ||
+            isConvertingSlides ||
+            isGeneratingQuiz
+          }
+        />
       )}
     </div>
   );

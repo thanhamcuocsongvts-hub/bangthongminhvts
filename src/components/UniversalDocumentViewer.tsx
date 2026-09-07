@@ -34,6 +34,9 @@ interface UniversalDocumentViewerProps {
   initialZoom?: number;
   onLaunchSlides?: () => void;
   onLaunchQuiz?: () => void;
+  isAnnotating?: boolean;
+  onToggleAnnotating?: () => void;
+  onFullscreenRequest?: () => void;
 }
 
 export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = ({
@@ -42,6 +45,9 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   initialZoom = 100,
   onLaunchSlides,
   onLaunchQuiz,
+  isAnnotating: propIsAnnotating,
+  onToggleAnnotating,
+  onFullscreenRequest,
 }) => {
   const [zoom, setZoom] = useState<number>(initialZoom);
   const [rotation, setRotation] = useState<number>(0);
@@ -52,7 +58,10 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   const [tableSearch, setTableSearch] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg' | 'xl'>('md');
-  const [isAnnotating, setIsAnnotating] = useState<boolean>(false);
+  const [internalAnnotating, setInternalAnnotating] = useState<boolean>(false);
+
+  const effectiveAnnotating = propIsAnnotating !== undefined ? propIsAnnotating : internalAnnotating;
+  const toggleAnnotating = onToggleAnnotating || (() => setInternalAnnotating((prev) => !prev));
 
   const fileType = lesson.fileType || 'other';
 
@@ -185,20 +194,20 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
 
           {/* Annotation Drawing Overlay Button for Presentations/Documents */}
           <button
-            onClick={() => setIsAnnotating(!isAnnotating)}
+            onClick={toggleAnnotating}
             className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              isAnnotating
+              effectiveAnnotating
                 ? 'bg-amber-500 text-white ring-2 ring-amber-300 shadow-md animate-pulse'
                 : 'bg-white/10 hover:bg-white/20 text-amber-300'
             }`}
             title={
-              isAnnotating
+              effectiveAnnotating
                 ? 'Đang bật thanh công cụ vẽ lên bài giảng (nhấn để tắt)'
                 : 'Bật thanh công cụ: Viết, vẽ, dạ quang, thước kẻ, tẩy xóa trực tiếp lên tài liệu'
             }
           >
             <Pen className="w-3.5 h-3.5" />
-            <span>{isAnnotating ? 'Đang Vẽ Chú Thích' : 'Bút Vẽ Lên File'}</span>
+            <span>{effectiveAnnotating ? 'Đang Vẽ Chú Thích' : 'Bút Vẽ Lên File'}</span>
           </button>
 
           {/* Copy Text */}
@@ -268,13 +277,13 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
           }
         }}
       >
-        {/* Interactive Annotation Drawing Layer with Full Toolbar, Fluorescent Colors & Shapes */}
-        {isAnnotating && fileType !== 'pdf' && (
+        {/* Interactive Annotation Drawing Layer with Full Toolbar, Fluorescent Colors & Shapes (when standalone) */}
+        {effectiveAnnotating && fileType !== 'pdf' && !onToggleAnnotating && (
           <div className="absolute inset-0 z-40 pointer-events-none">
             <TouchWhiteboard
               id={`doc-whiteboard-${lesson.id}`}
               isOverlay={true}
-              onCloseOverlay={() => setIsAnnotating(false)}
+              onCloseOverlay={toggleAnnotating}
             />
           </div>
         )}
@@ -429,8 +438,9 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
             zoom={zoom}
             rotation={rotation}
             compact={compact}
-            isAnnotating={isAnnotating}
-            onToggleAnnotating={() => setIsAnnotating((prev) => !prev)}
+            isAnnotating={effectiveAnnotating}
+            onToggleAnnotating={toggleAnnotating}
+            onFullscreenRequest={onFullscreenRequest}
           />
         )}
 

@@ -136,7 +136,7 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
         if (onClose) setTimeout(onClose, 600);
         return;
       } else {
-        setLoginError('Mật khẩu tài khoản Quản Trị Viên (Admin) không chính xác. Mặc định là 123456.');
+        setLoginError('Mật khẩu Quản trị viên (Admin) không chính xác.');
         return;
       }
     }
@@ -479,23 +479,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
               </svg>
               <span>Google</span>
             </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setTab('admin');
-                setAdminError(null);
-              }}
-              className={`px-3 py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                tab === 'admin'
-                  ? 'bg-slate-900 text-amber-400 shadow-xs border border-slate-800'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="Quản trị viên (Xóa tài khoản, đặt lại mật khẩu)"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
-              <span className="hidden sm:inline">Quản Trị</span>
-            </button>
           </div>
 
           {/* TAB 1: LOGIN FORM */}
@@ -505,43 +488,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{loginError}</span>
-                </div>
-              )}
-
-              {/* Saved accounts quick selector (if any teachers registered) */}
-              {teacherList.length > 0 && (
-                <div className="space-y-2 pb-2">
-                  <div className="text-[11px] font-bold uppercase text-slate-500">
-                    TÀI KHOẢN GIÁO VIÊN ĐÃ LƯU TRÊN MÁY:
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-y-auto pr-1">
-                    {teacherList.map((t) => (
-                      <div
-                        key={t.id}
-                        onClick={() => {
-                          onSelectTeacher(t);
-                          showToast(`Đã chọn tài khoản ${t.name}!`);
-                          if (onClose) setTimeout(onClose, 500);
-                        }}
-                        className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                          activeTeacher?.id === t.id
-                            ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-400'
-                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 overflow-hidden">
-                          <span className="text-lg">{t.avatar || '👨‍🏫'}</span>
-                          <div className="overflow-hidden text-left">
-                            <div className="text-xs font-bold text-slate-900 truncate">{t.name}</div>
-                            <div className="text-[10px] text-slate-500 truncate">{t.subject}</div>
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-extrabold text-indigo-600 bg-white px-2 py-0.5 rounded-md border border-indigo-200 shrink-0">
-                          Chọn
-                        </span>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               )}
 
@@ -622,24 +568,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 <span>ĐĂNG NHẬP HỆ THỐNG</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
-
-              {/* Admin Quick Tip */}
-              <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/90 text-amber-900 text-xs flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 font-bold">
-                  <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>Tài khoản Admin: <code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-950 font-mono">admin</code> | Mật khẩu: <code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-950 font-mono">123456</code></span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLoginIdentifier('admin');
-                    setLoginPassword('123456');
-                  }}
-                  className="px-2 py-0.5 rounded-md bg-amber-200/70 hover:bg-amber-200 text-amber-950 text-[10px] font-black shrink-0 transition-colors"
-                >
-                  Điền Nhanh
-                </button>
-              </div>
 
               {/* Guest Mode Direct Access Button */}
               <button

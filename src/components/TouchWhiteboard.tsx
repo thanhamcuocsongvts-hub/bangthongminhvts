@@ -152,7 +152,20 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     if (containerRef.current) {
       observer.observe(containerRef.current);
     }
-    return () => observer.disconnect();
+    const handleFsOrResize = () => {
+      resizeCanvas();
+      setTimeout(resizeCanvas, 50);
+      setTimeout(resizeCanvas, 200);
+    };
+    window.addEventListener('resize', handleFsOrResize);
+    document.addEventListener('fullscreenchange', handleFsOrResize);
+    document.addEventListener('webkitfullscreenchange', handleFsOrResize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', handleFsOrResize);
+      document.removeEventListener('fullscreenchange', handleFsOrResize);
+      document.removeEventListener('webkitfullscreenchange', handleFsOrResize);
+    };
   }, [resizeCanvas]);
 
   // Redraw all strokes on canvas

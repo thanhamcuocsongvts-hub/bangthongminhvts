@@ -37,16 +37,18 @@ interface PDFCanvasViewerProps {
   compact?: boolean;
   isAnnotating?: boolean;
   onToggleAnnotating?: () => void;
+  onFullscreenRequest?: () => void;
 }
 
 export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   fileUrl,
-  title,
+  title = 'Tài liệu PDF',
   zoom = 100,
   rotation = 0,
   compact = false,
   isAnnotating: propIsAnnotating,
   onToggleAnnotating,
+  onFullscreenRequest,
 }) => {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -274,6 +276,10 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
 
   // Handle Fullscreen Toggle
   const toggleFullscreen = () => {
+    if (onFullscreenRequest) {
+      onFullscreenRequest();
+      return;
+    }
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
       containerRef.current.requestFullscreen().catch(() => {});
@@ -586,8 +592,8 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
         )}
       </div>
 
-      {/* Floating Pen Action button when drawing overlay is inactive */}
-      {!effectiveAnnotating && (
+      {/* Floating Pen Action button when drawing overlay is inactive (standalone mode) */}
+      {!effectiveAnnotating && !onToggleAnnotating && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto animate-fade-in flex items-center gap-2">
           <button
             onClick={toggleAnnotating}
@@ -600,8 +606,8 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
         </div>
       )}
 
-      {/* Interactive Overlay Touch Whiteboard (Rendered INSIDE container so it works 100% in Fullscreen) */}
-      {effectiveAnnotating && (
+      {/* Interactive Overlay Touch Whiteboard in standalone mode (if parent does not manage overlay) */}
+      {effectiveAnnotating && !onToggleAnnotating && (
         <div className="absolute inset-0 z-50 pointer-events-none">
           <TouchWhiteboard
             id={`pdf-whiteboard-overlay-${title.replace(/[^a-zA-Z0-9]/g, '_')}`}

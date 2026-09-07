@@ -706,7 +706,7 @@ function generateSmartCurriculumQuestions(targetTopic: string, subject: string, 
 
 // AI Generate Quiz from Document Content or Custom Topic
 app.post("/api/ai/generate-quiz", async (req, res) => {
-  const { content, topic, count = 5, subject = "Toán học", difficulty = "Thông hiểu", grade = "Lớp 12" } = req.body;
+  const { content, topic, count = 5, subject = "Toán học", difficulty = "Thông hiểu", grade = "Lớp 12", scopeConstraint } = req.body;
   const rawTopic = (topic || content || "Hàm số và đồ thị").trim();
   const targetTopic = rawTopic.replace(/^(?:Chủ\s*đề|Môn|Khối\s*lớp|Số\s*lượng\s*câu\s*hỏi|Mức\s*độ)[\:\s\-]+/gi, "").trim() || "Hàm số và đồ thị";
   const numQuestions = Math.min(Math.max(Number(count) || 5, 1), 20);
@@ -714,12 +714,16 @@ app.post("/api/ai/generate-quiz", async (req, res) => {
   try {
     const ai = getGeminiClient();
 
+    const scopeInstruction = scopeConstraint && scopeConstraint.trim()
+      ? `\n- PHẠM VI KIẾN THỨC BẮT BUỘC THEO YÊU CẦU CỦA GIÁO VIÊN: "${scopeConstraint.trim()}". Toàn bộ các câu hỏi BẮT BUỘC phải nằm chính xác trong phạm vi này, tuyệt đối không hỏi lan man ngoài phạm vi!`
+      : '';
+
     const prompt = `Bạn là chuyên gia biên soạn đề thi khảo thí trắc nghiệm hàng đầu Việt Nam theo bộ Sách giáo khoa Kết nối tri thức, Cánh Diều, Chân trời sáng tạo.
 Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm khách quan 4 lựa chọn (A, B, C, D) chất lượng cao, đúng 100% chuyên môn sư phạm:
 - Chủ đề / Trọng tâm bài học: "${targetTopic}"
 - Phân môn: ${subject}
 - Khối lớp: ${grade}
-- Mức độ tư duy: ${difficulty}
+- Mức độ tư duy: ${difficulty}${scopeInstruction}
 
 QUY TẮC BẮT BUỘC:
 1. KHÔNG VIẾT CÂU HỎI CHUNG CHUNG như "Định nghĩa cốt lõi...", "Khi tìm hiểu về...". Phải đưa ra bài toán, hàm số, phương trình, công thức, hiện tượng khoa học hoặc câu hỏi thực tế cụ thể!
@@ -1040,7 +1044,7 @@ Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm chất lư�
 
 // AI On-Demand Specific Extraction (Formulas, Exercises, Definitions, Summary, or Custom Query)
 app.post("/api/ai/extract-specific", async (req, res) => {
-  const { target = "formulas", title = "Tài liệu", content = "", customQuery } = req.body;
+  const { target = "formulas", title = "Tài liệu", content = "", customQuery, scopeConstraint } = req.body;
   try {
     const ai = getGeminiClient();
 
@@ -1095,6 +1099,11 @@ Viết các công thức chuẩn dạng LaTeX (ví dụ: $y = ax^2 + bx + c$, $\
   "answer": "Nội dung giải đáp chi tiết, sư phạm, có dẫn chứng rõ ràng",
   "highlights": ["Điểm nổi bật 1", "Điểm nổi bật 2"]
 }`;
+    }
+
+    if (scopeConstraint && scopeConstraint.trim()) {
+      targetPrompt += `\n\n[QUY ĐỊNH PHẠM VI BẮT BUỘC THEO YÊU CẦU CỦA GIÁO VIÊN]:
+Thầy/Cô yêu cầu CHỈ trích xuất và giới hạn chặt chẽ trong phạm vi kiến thức: "${scopeConstraint.trim()}". Tuyệt đối không trích xuất ngoài phạm vi này.`;
     }
 
     const prompt = `${targetPrompt}
@@ -1288,13 +1297,17 @@ ${rawText ? rawText.slice(0, 18000) : fileName}`;
 
 // AI Doc to Slides
 app.post("/api/ai/doc-to-slides", async (req, res) => {
-  const { content, title = "Bài học", subject = "Chung", count = 4 } = req.body;
+  const { content, title = "Bài học", subject = "Chung", count = 4, scopeConstraint } = req.body;
   try {
     const ai = getGeminiClient();
 
+    const scopeInstruction = scopeConstraint && scopeConstraint.trim()
+      ? `\n- PHẠM VI KIẾN THỨC BẮT BUỘC THEO YÊU CẦU CỦA GIÁO VIÊN: "${scopeConstraint.trim()}". Toàn bộ các slide BẮT BUỘC phải tập trung đào sâu đúng phạm vi này, tuyệt đối không soạn lan man ngoài phạm vi!`
+      : '';
+
     const prompt = `Hãy chuyển hóa tài liệu bài học sau thành ${count} slide trình chiếu sinh động, chuyên nghiệp cho màn hình Tivi 75 inch.
 Môn: ${subject}
-Chủ đề: ${title}
+Chủ đề: ${title}${scopeInstruction}
 
 Tài liệu:
 ${content ? content.slice(0, 10000) : title}
