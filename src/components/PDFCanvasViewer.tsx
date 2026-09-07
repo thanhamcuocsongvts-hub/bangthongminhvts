@@ -602,7 +602,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
 
       {/* Interactive Overlay Touch Whiteboard (Rendered INSIDE container so it works 100% in Fullscreen) */}
       {effectiveAnnotating && (
-        <div className="absolute inset-0 z-50 pointer-events-auto">
+        <div className="absolute inset-0 z-50 pointer-events-none">
           <TouchWhiteboard
             id={`pdf-whiteboard-overlay-${title.replace(/[^a-zA-Z0-9]/g, '_')}`}
             isOverlay={true}

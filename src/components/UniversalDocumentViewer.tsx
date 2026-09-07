@@ -270,7 +270,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
       >
         {/* Interactive Annotation Drawing Layer with Full Toolbar, Fluorescent Colors & Shapes */}
         {isAnnotating && fileType !== 'pdf' && (
-          <div className="absolute inset-0 z-40 pointer-events-auto">
+          <div className="absolute inset-0 z-40 pointer-events-none">
             <TouchWhiteboard
               id={`doc-whiteboard-${lesson.id}`}
               isOverlay={true}

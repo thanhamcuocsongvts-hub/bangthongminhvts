@@ -20,6 +20,8 @@ import {
   ChevronDown,
   ChevronUp,
   Pipette,
+  MousePointer,
+  Hand,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint } from '../types';
 
@@ -70,6 +72,33 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       };
     }
   }, [showColorPopover]);
+
+  // Keyboard shortcut listener ('Esc' to exit overlay, 'V' or 'S' for Mouse/Scroll, 'B' or 'P' for Pen)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (isOverlay && onCloseOverlay) {
+          onCloseOverlay();
+        }
+      } else if (e.key === 'v' || e.key === 'V' || e.key === 's' || e.key === 'S') {
+        setActiveTool('select');
+      } else if (e.key === 'b' || e.key === 'B' || e.key === 'p' || e.key === 'P') {
+        setActiveTool('pen');
+      } else if (e.key === 'h' || e.key === 'H') {
+        setActiveTool('highlighter');
+      } else if (e.key === 'e' || e.key === 'E') {
+        setActiveTool('eraser');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOverlay, onCloseOverlay]);
 
   // Laser pointer position state
   const [laserPos, setLaserPos] = useState<{ x: number; y: number } | null>(null);
@@ -225,6 +254,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activeTool === 'select') return;
     e.preventDefault();
     const point = getCanvasCoords(e);
 
@@ -383,7 +413,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       id={id}
       ref={containerRef}
       className={`relative w-full h-full ${
-        isOverlay ? 'rounded-none min-h-0 bg-transparent' : `min-h-[500px] rounded-3xl ${getBgClass()}`
+        isOverlay ? 'rounded-none min-h-0 bg-transparent pointer-events-none' : `min-h-[500px] rounded-3xl ${getBgClass()}`
       } overflow-hidden flex flex-col`}
     >
       {/* Underlying Content or Blackboard Grid */}
@@ -396,12 +426,51 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       {/* Drawing Canvas Layer */}
       <canvas
         ref={canvasRef}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        className="absolute inset-0 w-full h-full touch-canvas cursor-crosshair z-10"
+        onPointerDown={activeTool === 'select' ? undefined : handlePointerDown}
+        onPointerMove={activeTool === 'select' ? undefined : handlePointerMove}
+        onPointerUp={activeTool === 'select' ? undefined : handlePointerUp}
+        onPointerLeave={activeTool === 'select' ? undefined : handlePointerUp}
+        className={`absolute inset-0 w-full h-full ${
+          activeTool === 'select'
+            ? 'pointer-events-none cursor-default'
+            : 'pointer-events-auto touch-canvas cursor-crosshair'
+        } z-10`}
       />
+
+      {/* Nút X Góc Trên Phải: Tắt công cụ và trở về màn hình trình chiếu tức thì */}
+      {isOverlay && onCloseOverlay && (
+        <div className="absolute top-3 right-4 z-50 pointer-events-auto flex items-center gap-2 animate-fade-in">
+          <button
+            id="top-right-close-overlay-btn"
+            onClick={onCloseOverlay}
+            className="px-4 py-2 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-2xl border-2 border-white/50 backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer ring-4 ring-rose-500/30"
+            title="Bấm nút X để tắt công cụ và trở về màn hình trình chiếu (Phím tắt: Esc)"
+          >
+            <X className="w-5 h-5 stroke-[2.5]" />
+            <span>Trở về trình chiếu</span>
+          </button>
+        </div>
+      )}
+
+      {/* Banner thông báo chế độ Chuột / Cuộn tài liệu */}
+      {activeTool === 'select' && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-auto animate-fade-in">
+          <div className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-slate-900/95 border-2 border-blue-400 text-white shadow-2xl backdrop-blur-md">
+            <MousePointer className="w-4 h-4 text-blue-400 animate-bounce" />
+            <span className="text-xs font-bold text-blue-100">
+              Đang ở chế độ Chuột: Bạn có thể vuốt/cuộn tài liệu lên xuống tự do
+            </span>
+            <button
+              onClick={() => setActiveTool('pen')}
+              className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer transition-all active:scale-95 ml-1"
+              title="Bật lại Bút Viết"
+            >
+              <Pen className="w-3.5 h-3.5" />
+              <span>Bút Viết</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Laser Pointer Animated Glow */}
       {laserPos && (
@@ -438,11 +507,11 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
           {isOverlay && onCloseOverlay && (
             <button
               onClick={onCloseOverlay}
-              className="px-3.5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xl border border-white/30 transition-all active:scale-95 cursor-pointer"
-              title="Tắt chế độ vẽ đè trên tài liệu"
+              className="px-3.5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xl border border-white/30 transition-all active:scale-95 cursor-pointer ring-2 ring-rose-400/50"
+              title="Tắt công cụ vẽ để trở về màn hình trình chiếu"
             >
-              <X className="w-4 h-4" />
-              <span>Tắt Vẽ</span>
+              <X className="w-4 h-4 stroke-[2.5]" />
+              <span>Trở về trình chiếu</span>
             </button>
           )}
         </div>
@@ -450,16 +519,31 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-2xl md:rounded-3xl bg-slate-950/95 backdrop-blur-2xl border-2 border-white/25 shadow-2xl text-white max-w-[98vw] overflow-x-auto custom-scrollbar-none shrink-0">
           {/* Tool Pickers */}
           <div className="flex items-center gap-1 shrink-0">
+            {/* Chế độ Chuột để cuộn tài liệu lên xuống */}
+            <button
+              id="tool-select-btn"
+              onClick={() => setActiveTool('select')}
+              title="Chế độ Chuột: Cuộn lướt tài liệu lên xuống tự do mà không vẽ (Phím tắt: V hoặc S)"
+              className={`p-2 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold shrink-0 cursor-pointer ${
+                activeTool === 'select'
+                  ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300 font-black'
+                  : 'hover:bg-white/10 text-blue-300'
+              }`}
+            >
+              <MousePointer className="w-4 h-4" />
+              <span className="text-[11px] font-bold">Chuột / Cuộn</span>
+            </button>
+
             <button
               id="tool-pen-btn"
               onClick={() => setActiveTool('pen')}
-              title="Bút phấn viết tự do"
-              className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-bold shrink-0 ${
-                activeTool === 'pen' ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-400' : 'hover:bg-white/10 text-slate-300'
+              title="Bút phấn viết tự do (Phím tắt: B hoặc P)"
+              className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-bold shrink-0 cursor-pointer ${
+                activeTool === 'pen' ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-400 font-black' : 'hover:bg-white/10 text-slate-300'
               }`}
             >
               <Pen className="w-4 h-4" />
-              <span className="hidden lg:inline text-[11px]">Bút Viết</span>
+              <span className="text-[11px]">Bút Viết</span>
             </button>
 
             <button
@@ -827,16 +911,16 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
               <span className="text-[11px] font-bold">Thu Gọn</span>
             </button>
 
-            {/* Tắt Chế Độ Vẽ Đè (Nếu là Overlay) */}
+            {/* Tắt Công Cụ Vẽ & Trở Về Màn Hình Trình Chiếu */}
             {isOverlay && onCloseOverlay && (
               <button
                 id="close-overlay-touch-btn"
                 onClick={onCloseOverlay}
-                title="Tắt chế độ vẽ đè trên tài liệu"
-                className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 shadow-md transition-all ml-1 active:scale-95 cursor-pointer shrink-0"
+                title="Tắt công cụ vẽ để trở về màn hình trình chiếu (Phím tắt: Esc)"
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs flex items-center gap-1.5 shadow-lg shadow-rose-600/30 transition-all ml-1 active:scale-95 cursor-pointer shrink-0 border border-white/30 ring-2 ring-rose-400/60"
               >
-                <X className="w-4 h-4" />
-                <span className="text-[11px]">Tắt Vẽ</span>
+                <X className="w-4 h-4 stroke-[3]" />
+                <span className="text-[11px] font-black uppercase tracking-wide">Trở về trình chiếu</span>
               </button>
             )}
           </div>

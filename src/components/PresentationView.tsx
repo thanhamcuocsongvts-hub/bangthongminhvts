@@ -398,7 +398,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
 
             {/* Overlay Drawing Canvas when enabled */}
             {isOverlayAnnotation && (
-              <div className="absolute inset-0 z-40 pointer-events-auto">
+              <div className="absolute inset-0 z-40 pointer-events-none">
                 <TouchWhiteboard
                   id="slide-overlay-whiteboard"
                   isOverlay={true}
