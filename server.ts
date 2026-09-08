@@ -465,15 +465,63 @@ function generateSmartCurriculumQuestions(targetTopic: string, subject: string, 
         timeLimit: 30
       },
       {
-        question: "Cho hàm số $y = f(x)$ có bảng xét dấu đạo hàm như sau. Hàm số đã cho đạt cực đại tại điểm nào?",
+        question: "Cho hàm số $y = f(x)$ liên tục trên $\\mathbb{R}$ và có bảng biến thiên như hình bên. Điểm cực đại của hàm số đã cho là:",
+        diagramType: "variation_table",
+        diagramData: {
+          title: "Bảng biến thiên của hàm số y = f(x)",
+          x: ["-\\infty", "-1", "2", "+\\infty"],
+          yPrime: ["+", "0", "-", "0", "+"],
+          yArrows: [
+            { start: "-\\infty", end: "3", dir: "up" },
+            { start: "3", end: "-2", dir: "down" },
+            { start: "-2", end: "+\\infty", dir: "up" }
+          ]
+        },
         options: [
           { key: "A", text: "$x = -1$" },
-          { key: "B", text: "$x = 1$" },
-          { key: "C", text: "$x = 0$" },
-          { key: "D", text: "$x = 2$" }
+          { key: "B", text: "$x = 3$" },
+          { key: "C", text: "$x = 2$" },
+          { key: "D", text: "$x = -2$" }
         ],
         correctAnswer: "A",
-        explanation: "Đạo hàm $f'(x)$ đổi dấu từ dương $(+)$ sang âm $(-)$ khi qua điểm $x = -1$, do đó hàm số đạt cực đại tại $x = -1$.",
+        explanation: "Dựa vào bảng biến thiên, đạo hàm $f'(x)$ đổi dấu từ dương sang âm khi qua điểm $x = -1$ và $f(-1) = 3$. Do đó điểm cực đại của hàm số là $x = -1$ (giá trị cực đại là $y_{CĐ} = 3$).",
+        timeLimit: 30
+      },
+      {
+        question: "Đường cong trong hình vẽ bên là đồ thị của một trong bốn hàm số được liệt kê dưới đây. Hỏi đó là hàm số nào?",
+        diagramType: "function_graph",
+        diagramData: {
+          graphType: "cubic",
+          title: "Đồ thị hàm số bậc ba y = f(x)"
+        },
+        options: [
+          { key: "A", text: "$y = x^3 - 3x^2 + 2$" },
+          { key: "B", text: "$y = -x^3 + 3x^2 + 2$" },
+          { key: "C", text: "$y = x^4 - 2x^2 + 2$" },
+          { key: "D", text: "$y = \\frac{2x + 1}{x - 1}$" }
+        ],
+        correctAnswer: "A",
+        explanation: "Đồ thị có dạng cong chữ N đặc trưng của hàm số bậc ba $y = ax^3 + bx^2 + cx + d$ với $a > 0$, cắt trục tung tại điểm $(0; 2)$. Do đó phương án đúng là $y = x^3 - 3x^2 + 2$.",
+        timeLimit: 30
+      },
+      {
+        question: "Một trường THPT thống kê điểm kiểm tra môn Toán của 50 học sinh trong bảng tần số ghép nhóm dưới đây. Xác định nhóm chứa mốt của mẫu số liệu:",
+        diagramType: "data_table",
+        diagramData: {
+          title: "Bảng tần số ghép nhóm điểm kiểm tra môn Toán",
+          headers: ["Khoảng điểm", "[4; 6)", "[6; 7.5)", "[7.5; 8.5)", "[8.5; 10]"],
+          rows: [
+            ["Số học sinh (Tần số $m_i$)", "6", "14", "22", "8"]
+          ]
+        },
+        options: [
+          { key: "A", text: "$[7.5; 8.5)$" },
+          { key: "B", text: "$[6; 7.5)$" },
+          { key: "C", text: "$[8.5; 10]$" },
+          { key: "D", text: "$[4; 6)$" }
+        ],
+        correctAnswer: "A",
+        explanation: "Nhóm chứa mốt là nhóm có tần số lớn nhất. Trong bảng trên, nhóm $[7.5; 8.5)$ có tần số lớn nhất là 22 học sinh ($m_3 = 22$). Do đó nhóm chứa mốt là $[7.5; 8.5)$.",
         timeLimit: 30
       },
       {
@@ -922,15 +970,48 @@ app.post("/api/ai/fast-matrix-quiz", async (req, res) => {
 
     const systemInstruction = `Bạn là hệ thống AI Khảo thí & Soạn đề trắc nghiệm giáo dục hàng đầu Việt Nam.
 Nhiệm vụ: Phân tích ma trận đề (nếu có) hoặc yêu cầu của giáo viên để tạo ${numQuestions} câu hỏi trắc nghiệm 4 phương án (A, B, C, D) CHUẨN XÁC, SÁT VỚI CHƯƠNG TRÌNH SGK MỚI (Kết nối tri thức, Cánh diều, Chân trời sáng tạo).
-QUY TẮC:
-1. Không viết câu hỏi chung chung. Phải đưa ra bài toán, hàm số, hiện tượng, phương trình hoặc tình huống cụ thể.
-2. Công thức toán, lý, hóa BẮT BUỘC kẹp giữa dấu $ ... $ (ví dụ $y = x^2 - 4x + 3$).
-3. TRONG JSON: MỌI KÝ HIỆU DẤU GẠCH CHÉO LATEX PHẢI ĐƯỢC ESCAPE BẰNG HAI DẤU GẠCH CHÉO \\\\ (ví dụ \\\\frac, \\\\sqrt, \\\\Delta).
-4. Định dạng đầu ra: JSON mảng thuần túy:
+
+YÊU CẦU ĐẶC THÙ THEO TỪNG MÔN HỌC:
+1. MÔN TOÁN HỌC:
+   - Ký hiệu toán học bắt buộc viết bằng LaTeX kẹp giữa cặp dấu $: $\\frac{a}{b}$, $\\sqrt{x}$, $\\int_0^1 f(x)dx$, $\\lim_{x \\to 2}$, $\\Delta$.
+   - Nếu câu hỏi liên quan đến BẢNG BIẾN THIÊN, trả về thêm thuộc tính:
+     "diagramType": "variation_table",
+     "diagramData": {
+       "title": "Bảng biến thiên của hàm số y = f(x)",
+       "x": ["-\\infty", "-1", "2", "+\\infty"],
+       "yPrime": ["+", "0", "-", "0", "+"],
+       "yArrows": [
+         { "start": "-\\infty", "end": "3", "dir": "up" },
+         { "start": "3", "end": "-2", "dir": "down" },
+         { "start": "-2", "end": "+\\infty", "dir": "up" }
+       ]
+     }
+   - Nếu câu hỏi liên quan đến BẢNG THỐNG KÊ (Xác suất thống kê SGK mới), trả về thêm:
+     "diagramType": "data_table",
+     "diagramData": {
+       "title": "Bảng tần số ghép nhóm",
+       "headers": ["Nhóm điểm", "[2; 4)", "[4; 6)", "[6; 8)", "[8; 10]"],
+       "rows": [["Tần số $m_i$", "5", "12", "18", "7"]]
+     }
+   - Nếu câu hỏi liên quan đến ĐỒ THỊ HÀM SỐ, trả về:
+     "diagramType": "function_graph",
+     "diagramData": { "graphType": "cubic", "title": "Đồ thị hàm số bậc ba y = f(x)" }
+2. MÔN VẬT LÝ:
+   - Dùng đúng ký hiệu vật lý chuẩn: $\\vec{v}$, $\\omega$, $\\lambda$, chu kỳ $T = 2\\pi \\sqrt{\\frac{m}{k}}$, đơn vị $\\text{m/s}$, $\\text{rad/s}$, $\\Omega$.
+   - Nếu có mạch điện xoay chiều, trả về: "diagramType": "physics_circuit", "diagramData": { "circuitType": "rlc_series", "title": "Mạch RLC nối tiếp" }.
+3. MÔN HÓA HỌC:
+   - Công thức phân tử và phản ứng chuẩn: $\\text{CH}_3\\text{COOH}$, $\\text{C}_2\\text{H}_5\\text{OH}$, phản ứng có mũi tên $\\xrightarrow{t^o}$ hoặc $\\rightleftharpoons$.
+   - Trả về: "diagramType": "chemistry_diagram", "diagramData": { "equation": "..." }.
+
+QUY TẮC KỸ THUẬT:
+1. TRONG JSON: MỌI KÝ HIỆU DẤU GẠCH CHÉO LATEX PHẢI ĐƯỢC ESCAPE BẰNG HAI DẤU GẠCH CHÉO \\\\ (ví dụ \\\\frac, \\\\sqrt, \\\\Delta).
+2. Định dạng đầu ra: JSON mảng thuần túy:
 [
   {
     "id": "q1",
     "question": "Nội dung câu hỏi...",
+    "diagramType": "variation_table | data_table | function_graph | physics_circuit | chemistry_diagram | null",
+    "diagramData": {},
     "options": [
       { "key": "A", "text": "Phương án A" },
       { "key": "B", "text": "Phương án B" },
@@ -938,7 +1019,7 @@ QUY TẮC:
       { "key": "D", "text": "Phương án D" }
     ],
     "correctAnswer": "A",
-    "explanation": "Lời giải chi tiết...",
+    "explanation": "Lời giải chi tiết theo chuẩn sư phạm...",
     "timeLimit": ${Number(timeLimit) || 30},
     "difficulty": "${difficulty}"
   }
@@ -1022,6 +1103,8 @@ Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm chất lư�
             ],
         correctAnswer: (q.correctAnswer || 'A').toUpperCase(),
         explanation: q.explanation || 'Lời giải chi tiết theo chuẩn sư phạm.',
+        diagramType: q.diagramType || undefined,
+        diagramData: q.diagramData || undefined,
         timeLimit: Number(q.timeLimit) || Number(timeLimit) || 30,
         difficulty: q.difficulty || difficulty,
         subject,
@@ -1481,13 +1564,90 @@ app.post("/api/rooms", (req, res) => {
   res.json({ success: true, room: rooms[roomPin] });
 });
 
+const DEFAULT_SAMPLE_QUESTIONS: QuizQuestion[] = [
+  {
+    id: "q_sample_1",
+    question: "Cho hàm số $y = f(x)$ liên tục trên $\\mathbb{R}$ và có bảng biến thiên như hình dưới. Hàm số đã cho nghịch biến trên khoảng nào dưới đây?",
+    options: ["$(-\\infty; -1)$", "$(-1; 2)$", "$(2; +\\infty)$", "$(0; 3)$"],
+    correctAnswer: 1,
+    explanation: "Dựa vào bảng biến thiên, ta thấy $f'(x) < 0$ trên khoảng $(-1; 2)$, do đó hàm số nghịch biến trên khoảng $(-1; 2)$.",
+    points: 10,
+    difficulty: "Thông hiểu",
+    diagramType: "variation_table",
+    diagramData: {
+      x: ["-\\infty", "-1", "2", "+\\infty"],
+      yPrime: ["", "+", "0", "-", "0", "+", ""],
+      y: ["-\\infty", "↗", "4", "↘", "-1", "↗", "+\\infty"],
+    },
+  },
+  {
+    id: "q_sample_2",
+    question: "Cho hàm số bậc ba $y = f(x) = x^3 - 3x + 2$ có đồ thị $(C)$. Tọa độ điểm cực đại của đồ thị hàm số là:",
+    options: ["$(-1; 4)$", "$(1; 0)$", "$(0; 2)$", "$(2; 4)$"],
+    correctAnswer: 0,
+    explanation: "Ta có $y' = 3x^2 - 3 = 0 \\Leftrightarrow x = \\pm 1$. Vì $y''(-1) = -6 < 0$ nên điểm cực đại là $(-1; 4)$.",
+    points: 10,
+    difficulty: "Nhận biết",
+    diagramType: "function_graph",
+    diagramData: {
+      fn: "x^3 - 3*x + 2",
+      domain: [-2.5, 2.5],
+      points: [
+        { x: -1, y: 4, label: "CĐ(-1;4)" },
+        { x: 1, y: 0, label: "CT(1;0)" },
+      ],
+    },
+  },
+  {
+    id: "q_sample_3",
+    question: "Khảo sát điểm kiểm tra giữa kỳ môn Toán của 40 học sinh lớp 12A thu được bảng tần số ghép nhóm sau. Tìm mốt $M_o$ của mẫu số liệu ghép nhóm:",
+    options: ["$8.25$", "$7.85$", "$8.15$", "$7.50$"],
+    correctAnswer: 0,
+    explanation: "Nhóm chứa mốt là $[8; 9)$ với tần số $m_i = 16$. Áp dụng công thức mốt của mẫu số liệu ghép nhóm: $M_o = 8 + \\frac{16 - 10}{(16 - 10) + (16 - 6)} \\times (9 - 8) = 8 + \\frac{6}{16} = 8.375 \\approx 8.25$.",
+    points: 10,
+    difficulty: "Vận dụng",
+    diagramType: "data_table",
+    diagramData: {
+      headers: ["Khoảng điểm", "[5; 6)", "[6; 7)", "[7; 8)", "[8; 9)", "[9; 10]"],
+      rows: [["Số học sinh", "4", "6", "10", "16", "4"]],
+    },
+  },
+  {
+    id: "q_sample_4",
+    question: "Trong không gian $Oxyz$, cho mặt phẳng $(P): 2x - y + 2z - 5 = 0$. Một vectơ pháp tuyến $\\vec{n}$ của $(P)$ có tọa độ là:",
+    options: ["$\\vec{n} = (2; -1; 2)$", "$\\vec{n} = (2; 1; 2)$", "$\\vec{n} = (-2; 1; 2)$", "$\\vec{n} = (2; -1; -5)$"],
+    correctAnswer: 0,
+    explanation: "Mặt phẳng $(P): Ax + By + Cz + D = 0$ có một vectơ pháp tuyến là $\\vec{n} = (A; B; C) = (2; -1; 2)$.",
+    points: 10,
+    difficulty: "Nhận biết",
+  },
+];
+
+function ensureRoom(pin: string): RoomState {
+  const safePin = (pin || "758899").trim();
+  if (!rooms[safePin]) {
+    rooms[safePin] = {
+      pin: safePin,
+      title: "Phòng Trắc Nghiệm Ôn Tập Sư Phạm",
+      activeQuestionIndex: 0,
+      isLive: true,
+      startedAt: new Date().toISOString(),
+      questions: DEFAULT_SAMPLE_QUESTIONS,
+      submissions: {},
+      activeStudents: [],
+    };
+  }
+  // If room exists but has 0 questions, seed sample questions so students can always do quiz
+  if (rooms[safePin].questions.length === 0) {
+    rooms[safePin].questions = DEFAULT_SAMPLE_QUESTIONS;
+  }
+  return rooms[safePin];
+}
+
 // 2. Get Room State (For Teacher & Students)
 app.get("/api/rooms/:pin", (req, res) => {
   const { pin } = req.params;
-  const room = rooms[pin];
-  if (!room) {
-    return res.status(404).json({ error: "Phòng học không tồn tại hoặc đã kết thúc." });
-  }
+  const room = ensureRoom(pin);
   res.json(room);
 });
 
@@ -1495,11 +1655,7 @@ app.get("/api/rooms/:pin", (req, res) => {
 app.post("/api/rooms/:pin/join", (req, res) => {
   const { pin } = req.params;
   const { studentName, studentId } = req.body;
-
-  const room = rooms[pin];
-  if (!room) {
-    return res.status(404).json({ error: "Phòng học không tồn tại." });
-  }
+  const room = ensureRoom(pin);
 
   const sId = studentId || "std_" + Math.random().toString(36).substring(2, 9);
   const sName = (studentName || "").trim() || `Học sinh ${room.activeStudents.length + 1}`;
@@ -1519,11 +1675,7 @@ app.post("/api/rooms/:pin/join", (req, res) => {
 app.post("/api/rooms/:pin/submit", (req, res) => {
   const { pin } = req.params;
   const { questionId, studentId, studentName, selectedOption, timeSpentSeconds } = req.body;
-
-  const room = rooms[pin];
-  if (!room) {
-    return res.status(404).json({ error: "Phòng học không tồn tại." });
-  }
+  const room = ensureRoom(pin);
 
   const q = room.questions.find((x) => x.id === questionId);
   if (!q) {
@@ -1534,7 +1686,15 @@ app.post("/api/rooms/:pin/submit", (req, res) => {
     room.submissions[questionId] = [];
   }
 
-  const isCorrect = selectedOption === q.correctAnswer;
+  const optLetters = ['A', 'B', 'C', 'D'];
+  const selStr = String(selectedOption ?? '').toUpperCase();
+  const corrStr = String(q.correctAnswer ?? '').toUpperCase();
+  const isCorrect =
+    selStr === corrStr ||
+    (typeof q.correctAnswer === 'number' && optLetters[q.correctAnswer] === selStr) ||
+    (typeof selectedOption === 'number' && optLetters[selectedOption] === corrStr) ||
+    (typeof q.correctAnswer === 'string' && optLetters.indexOf(corrStr) === Number(selectedOption)) ||
+    (typeof selectedOption === 'string' && optLetters.indexOf(selStr) === Number(q.correctAnswer));
   const existingSubIdx = room.submissions[questionId].findIndex((s) => s.studentId === studentId);
 
   const subData: StudentSubmission = {
@@ -1559,11 +1719,7 @@ app.post("/api/rooms/:pin/submit", (req, res) => {
 app.post("/api/rooms/:pin/control", (req, res) => {
   const { pin } = req.params;
   const { activeQuestionIndex, isLive } = req.body;
-
-  const room = rooms[pin];
-  if (!room) {
-    return res.status(404).json({ error: "Phòng học không tồn tại." });
-  }
+  const room = ensureRoom(pin);
 
   if (typeof activeQuestionIndex === "number") {
     room.activeQuestionIndex = activeQuestionIndex;
@@ -1578,31 +1734,64 @@ app.post("/api/rooms/:pin/control", (req, res) => {
 // 6. Reset Room Submissions
 app.post("/api/rooms/:pin/reset", (req, res) => {
   const { pin } = req.params;
-  const room = rooms[pin];
-  if (!room) {
-    return res.status(404).json({ error: "Phòng học không tồn tại." });
-  }
+  const room = ensureRoom(pin);
   room.submissions = {};
   room.activeQuestionIndex = 0;
   res.json({ success: true, room });
 });
 
-// 7. Seed initial room with clean slate for teacher's own questions/AI generation
-const initDefaultRoom = () => {
-  const pin = "758899";
-  rooms[pin] = {
-    pin,
-    title: "Phòng Trắc Nghiệm Ôn Tập Sư Phạm",
-    activeQuestionIndex: 0,
-    isLive: true,
-    startedAt: new Date().toISOString(),
-    questions: [],
-    submissions: {},
-    activeStudents: [],
-  };
-};
+// 7. Simulate Full Class Submissions (Instant 30 Students)
+app.post("/api/rooms/:pin/simulate-class", (req, res) => {
+  const { pin } = req.params;
+  const room = ensureRoom(pin);
 
-initDefaultRoom();
+  const sampleStudentNames = [
+    "Nguyễn Hoàng Minh", "Trần Thị Mai Anh", "Lê Văn Cường", "Phạm Quỳnh Như",
+    "Hoàng Tuấn Kiệt", "Vũ Thảo Nguyên", "Đặng Đình Phúc", "Bùi Thanh Trúc",
+    "Hồ Ngọc Hà", "Đỗ Minh Khang", "Trịnh Thùy Linh", "Lý Gia Huy",
+    "Dương Hải Đăng", "Phan Bảo Châu", "Võ Quốc Bảo", "Ngô Diệu Hương",
+    "Lương Quang Dũng", "Đinh Phương Thảo", "Chu Hoàng Long", "Mai Thanh Hằng",
+    "Trương Vĩnh Kỳ", "Tạ Bích Phượng", "Cao Bá Hưng", "Lê Thùy Dương",
+    "Đoàn Thế Vinh", "Phùng Ngọc Khánh", "Nguyễn Tiến Đạt", "Vũ Hoàng Yến",
+    "Hà Đức Huy", "Trần Quốc Toản"
+  ];
+
+  room.activeStudents = sampleStudentNames.map((name, i) => ({
+    id: `std_sim_${i + 1}`,
+    name,
+    joinedAt: new Date(Date.now() - (30 - i) * 1000).toISOString(),
+  }));
+
+  room.submissions = {};
+
+  room.questions.forEach((q, qIndex) => {
+    room.submissions[q.id] = [];
+    sampleStudentNames.forEach((name, sIndex) => {
+      // Create high-performing realistic class: ~75% correct rate
+      const roll = Math.random();
+      let chosenOpt = q.correctAnswer;
+      if (roll > 0.78) {
+        // Pick an incorrect option
+        const wrongOpts = [0, 1, 2, 3].filter((o) => o !== q.correctAnswer);
+        chosenOpt = wrongOpts[Math.floor(Math.random() * wrongOpts.length)];
+      }
+
+      room.submissions[q.id].push({
+        studentId: `std_sim_${sIndex + 1}`,
+        studentName: name,
+        selectedOption: chosenOpt,
+        isCorrect: chosenOpt === q.correctAnswer,
+        timeSpentSeconds: Math.floor(8 + Math.random() * 20),
+        submittedAt: new Date(Date.now() - Math.floor(Math.random() * 30000)).toISOString(),
+      });
+    });
+  });
+
+  res.json({ success: true, count: sampleStudentNames.length, room });
+});
+
+// 8. Seed initial room
+ensureRoom("758899");
 
 // Integrate Vite Middleware
 async function startServer() {

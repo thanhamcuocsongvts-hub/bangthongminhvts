@@ -77,8 +77,15 @@ export const MathFormulaRenderer: React.FC<MathFormulaRendererProps> = ({
     const rawInput = content ?? text ?? '';
     if (!rawInput) return '';
 
+    let normalized = rawInput.trim();
+
+    // Auto-detect pure fractions like "3/8", "-5/8", "1/2" and format to LaTeX fraction
+    if (/^-?\d+\/\d+$/.test(normalized)) {
+      normalized = `$${normalized.replace(/^(-?)(\d+)\/(\d+)$/, '$1\\frac{$2}{$3}')}$`;
+    }
+
     // Normalize LaTeX brackets \( \) -> $, \[ \] -> $$
-    let normalized = rawInput
+    normalized = normalized
       .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
       .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 

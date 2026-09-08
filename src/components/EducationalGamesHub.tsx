@@ -18,6 +18,9 @@ import {
   VolumeX,
   RefreshCw,
   Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronUp,
   Star,
   Check,
   X,
@@ -26,6 +29,9 @@ import {
   Layers,
   Loader2,
   Trash2,
+  ArrowRight,
+  Shuffle,
+  UserCheck,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QuizQuestion, Student, ClassroomGroup } from '../types';
@@ -112,6 +118,63 @@ const DEFAULT_GAME_QUESTIONS: QuizQuestion[] = [
   },
 ];
 
+/**
+ * Chuẩn hóa danh sách câu hỏi game để đảm bảo 100% không bị rỗng,
+ * các phương án luôn có định dạng { key, text }, đáp án đúng chuẩn A/B/C/D,
+ * công thức toán lý hóa và giải thích luôn hiển thị chuẩn xác.
+ */
+export function normalizeGameQuestions(rawList?: QuizQuestion[]): QuizQuestion[] {
+  const list = rawList && rawList.length > 0 ? rawList : DEFAULT_GAME_QUESTIONS;
+  return list.map((q, qIdx) => {
+    let normalizedOpts: { key: string; text: string }[] = [];
+    if (Array.isArray(q.options)) {
+      normalizedOpts = q.options.map((opt: any, idx: number) => {
+        const letter = ['A', 'B', 'C', 'D'][idx] || `Lựa chọn ${idx + 1}`;
+        if (typeof opt === 'string') {
+          const cleanText = opt.replace(/^[A-D][\.\:\)\s]+/, '').trim() || opt;
+          return { key: letter, text: cleanText };
+        }
+        if (opt && typeof opt === 'object') {
+          return {
+            key: opt.key || letter,
+            text: opt.text || String(opt),
+          };
+        }
+        return { key: letter, text: String(opt) };
+      });
+    }
+    if (normalizedOpts.length === 0) {
+      normalizedOpts = [
+        { key: 'A', text: 'Phương án A' },
+        { key: 'B', text: 'Phương án B' },
+        { key: 'C', text: 'Phương án C' },
+        { key: 'D', text: 'Phương án D' },
+      ];
+    }
+
+    let corr = q.correctAnswer;
+    if (typeof corr === 'number') {
+      corr = ['A', 'B', 'C', 'D'][corr] || 'A';
+    } else if (typeof corr === 'string' && corr.length === 1 && /[0-3]/.test(corr)) {
+      corr = ['A', 'B', 'C', 'D'][parseInt(corr, 10)] || 'A';
+    } else if (typeof corr === 'string') {
+      corr = corr.toUpperCase().trim();
+    } else {
+      corr = 'A';
+    }
+
+    return {
+      ...q,
+      id: q.id || `gq_norm_${qIdx + 1}`,
+      question: q.question || `Câu hỏi ${qIdx + 1}`,
+      options: normalizedOpts,
+      correctAnswer: corr,
+      timeLimit: q.timeLimit || 30,
+      explanation: q.explanation || 'Không có giải thích chi tiết.',
+    };
+  });
+}
+
 export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   classroom,
   questions = [],
@@ -145,12 +208,13 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
     }
   }, [lessonTitle, lessonSubject]);
 
-  const activeQuestions =
+  const activeQuestions = normalizeGameQuestions(
     localQuestions && localQuestions.length > 0
       ? localQuestions
       : questions && questions.length > 0
       ? questions
-      : DEFAULT_GAME_QUESTIONS;
+      : DEFAULT_GAME_QUESTIONS
+  );
 
   const isUsingDefault = (!localQuestions || localQuestions.length === 0) && (!questions || questions.length === 0);
 
@@ -177,11 +241,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
       });
       const data = await res.json();
       if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
-        const formatted: QuizQuestion[] = data.questions.map((q: QuizQuestion, idx: number) => ({
-          ...q,
-          id: `game_q_${Date.now()}_${idx + 1}`,
-          timeLimit: q.timeLimit || 30,
-        }));
+        const formatted = normalizeGameQuestions(data.questions);
         setLocalQuestions(formatted);
         onUpdateQuestions?.(formatted);
         setShowAIMakerModal(false);
@@ -651,7 +711,8 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
   const [winnerTeam, setWinnerTeam] = useState<string | null>(null);
 
   const TARGET_GOAL = 5; // 5 steps to reach finish line
-  const currentQ = questions[currentQIndex % questions.length] || questions[0];
+  const safeQuestions = normalizeGameQuestions(questions);
+  const currentQ = safeQuestions[currentQIndex % safeQuestions.length];
 
   const handleAnswerOption = (optKey: string) => {
     if (revealed || winnerTeam) return;
@@ -878,7 +939,7 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
 };
 
 /* ========================================================================= */
-/* GAME 2: VÒNG QUAY MAY MẮN (LUCKY WHEEL OF FORTUNE)                        */
+/* GAME 2: VÒNG QUAY MAY MẮN (LUCKY WHEEL OF FORTUNE & QUESTION CALLER)       */
 /* ========================================================================= */
 interface LuckyWheelGameProps {
   classroom?: ClassroomGroup | null;
@@ -899,9 +960,18 @@ const DEFAULT_SLICES = [
 const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isSpinning, setIsSpinning] = useState<boolean>(false);
-  const [wheelMode, setWheelMode] = useState<'students' | 'rewards'>('students');
+  const [wheelMode, setWheelMode] = useState<'students' | 'questions' | 'rewards'>('students');
   const [winnerResult, setWinnerResult] = useState<string | null>(null);
+  const [winnerStudent, setWinnerStudent] = useState<string | null>(null);
   const [rotationAngle, setRotationAngle] = useState<number>(0);
+
+  // Active question state
+  const [currentQIndex, setCurrentQIndex] = useState<number>(0);
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [showExplanation, setShowExplanation] = useState<boolean>(false); // Hidden by default!
+  const [timerSeconds, setTimerSeconds] = useState<number>(30);
+  const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
+  const [awardedScore, setAwardedScore] = useState<number | null>(null);
 
   // Student list from classroom or fallback names
   const studentNames =
@@ -918,7 +988,36 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
           'Hoàng Thảo Linh',
         ];
 
-  const slices = wheelMode === 'students' ? studentNames : DEFAULT_SLICES;
+  // Questions labels for wheel slices - always normalized
+  const safeQuestions = normalizeGameQuestions(questions);
+  const questionLabels = safeQuestions.map((_, idx) => `Câu ${idx + 1}`);
+
+  const slices =
+    wheelMode === 'students'
+      ? studentNames
+      : wheelMode === 'questions'
+      ? questionLabels
+      : DEFAULT_SLICES;
+
+  const currentQ: QuizQuestion = safeQuestions[currentQIndex % safeQuestions.length];
+
+  // Countdown timer effect
+  useEffect(() => {
+    let timer: any = null;
+    if (isTimerRunning && timerSeconds > 0) {
+      timer = setInterval(() => {
+        setTimerSeconds((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            setIsTimerRunning(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [isTimerRunning, timerSeconds]);
 
   // Draw the wheel on canvas
   useEffect(() => {
@@ -931,7 +1030,7 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
     const height = canvas.height;
     const centerX = width / 2;
     const centerY = height / 2;
-    const radius = Math.min(centerX, centerY) - 10;
+    const radius = Math.min(centerX, centerY) - 12;
     const numSlices = slices.length;
     const arc = (2 * Math.PI) / numSlices;
 
@@ -947,6 +1046,8 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
       '#06b6d4',
       '#f97316',
       '#14b8a6',
+      '#3b82f6',
+      '#e11d48',
     ];
 
     ctx.save();
@@ -961,6 +1062,8 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
       ctx.arc(0, 0, radius, angle, angle + arc);
       ctx.lineTo(0, 0);
       ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#ffffff';
       ctx.stroke();
 
       // Text label
@@ -968,8 +1071,8 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
       ctx.rotate(angle + arc / 2);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 13px system-ui, sans-serif';
-      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.shadowColor = 'rgba(0,0,0,0.85)';
       ctx.shadowBlur = 4;
       const text = slices[i].length > 18 ? slices[i].slice(0, 16) + '...' : slices[i];
       ctx.fillText(text, radius - 20, 5);
@@ -980,7 +1083,7 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
 
     // Center pin
     ctx.beginPath();
-    ctx.arc(centerX, centerY, 22, 0, 2 * Math.PI);
+    ctx.arc(centerX, centerY, 24, 0, 2 * Math.PI);
     ctx.fillStyle = '#1e1b4b';
     ctx.fill();
     ctx.lineWidth = 4;
@@ -988,7 +1091,7 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
     ctx.stroke();
 
     ctx.fillStyle = '#facc15';
-    ctx.font = 'bold 12px sans-serif';
+    ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('QUAY', centerX, centerY);
@@ -998,12 +1101,15 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
     if (isSpinning) return;
     setIsSpinning(true);
     setWinnerResult(null);
+    setAwardedScore(null);
+    setSelectedOption(null);
+    setShowExplanation(false);
 
     const randomDegrees = 1440 + Math.floor(Math.random() * 1800); // 4 to 9 full spins
     const finalAngle = rotationAngle + randomDegrees;
 
     const startTime = performance.now();
-    const duration = 4500; // 4.5s smooth decelerating spin
+    const duration = 4000;
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
@@ -1017,16 +1123,28 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
         requestAnimationFrame(animate);
       } else {
         setIsSpinning(false);
-        // Calculate winning slice at top needle (270 deg or 90 deg)
+        // Calculate winning slice at top needle
         const normalizedAngle = (360 - (current % 360)) % 360;
         const sliceAngle = 360 / slices.length;
         const winnerIndex = Math.floor(normalizedAngle / sliceAngle) % slices.length;
         const winner = slices[winnerIndex];
         setWinnerResult(winner);
 
+        if (wheelMode === 'students') {
+          setWinnerStudent(winner);
+          // Set timer for active question
+          setTimerSeconds(currentQ?.timeLimit || 30);
+          setIsTimerRunning(true);
+        } else if (wheelMode === 'questions') {
+          const targetIndex = winnerIndex % safeQuestions.length;
+          setCurrentQIndex(targetIndex);
+          setTimerSeconds(safeQuestions[targetIndex]?.timeLimit || 30);
+          setIsTimerRunning(true);
+        }
+
         confetti({
-          particleCount: 120,
-          spread: 80,
+          particleCount: 100,
+          spread: 70,
           origin: { y: 0.6 },
         });
       }
@@ -1035,76 +1153,317 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
     requestAnimationFrame(animate);
   };
 
-  return (
-    <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-center gap-8 animate-fade-in p-4">
-      {/* Canvas Wheel Area */}
-      <div className="relative flex flex-col items-center">
-        {/* Top Pointer Needle */}
-        <div className="w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[28px] border-t-amber-400 drop-shadow-lg z-20 -mb-3" />
+  const handleOptionSelect = (key: string) => {
+    setSelectedOption(key);
+    setIsTimerRunning(false);
+    if (currentQ && key === currentQ.correctAnswer) {
+      confetti({
+        particleCount: 120,
+        spread: 90,
+        origin: { y: 0.5 },
+      });
+    }
+  };
 
-        <div className="p-3 rounded-full bg-gradient-to-b from-amber-400 to-amber-600 shadow-2xl border-4 border-slate-900">
-          <canvas
-            ref={canvasRef}
-            width={380}
-            height={380}
-            className="rounded-full shadow-inner block"
-          />
+  const handleAwardPoints = (points: number) => {
+    setAwardedScore(points);
+    confetti({
+      particleCount: 150,
+      spread: 100,
+      origin: { y: 0.6 },
+    });
+  };
+
+  const handleNextQuestion = () => {
+    setCurrentQIndex((prev) => (prev + 1) % safeQuestions.length);
+    setSelectedOption(null);
+    setShowExplanation(false);
+    setAwardedScore(null);
+    setTimerSeconds(safeQuestions[(currentQIndex + 1) % safeQuestions.length]?.timeLimit || 30);
+    setIsTimerRunning(false);
+  };
+
+  return (
+    <div className="w-full space-y-6 animate-fade-in p-2">
+      {/* Top Controller Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-slate-900 border border-slate-800">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-amber-400" />
+          <span className="font-black text-sm text-white uppercase tracking-wider">
+            VÒNG QUAY ÔN TẬP BÀI GIẢNG
+          </span>
         </div>
 
-        <button
-          onClick={handleSpin}
-          disabled={isSpinning}
-          className="mt-6 px-8 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-black text-base shadow-2xl transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center gap-2"
-        >
-          <Sparkles className="w-5 h-5 text-slate-950" />
-          <span>{isSpinning ? 'Đang Quay Vòng...' : 'NHẤN ĐỂ QUAY VÒNG'}</span>
-        </button>
+        {/* Mode Selector */}
+        <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
+          <button
+            onClick={() => {
+              setWheelMode('students');
+              setWinnerResult(null);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              wheelMode === 'students'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Gọi Học Sinh ({studentNames.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setWheelMode('questions');
+              setWinnerResult(null);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              wheelMode === 'questions'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <ListChecks className="w-3.5 h-3.5" />
+            <span>Quay Câu Hỏi ({questionLabels.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setWheelMode('rewards');
+              setWinnerResult(null);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              wheelMode === 'rewards'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Trophy className="w-3.5 h-3.5" />
+            <span>Điểm Thưởng</span>
+          </button>
+        </div>
       </div>
 
-      {/* Control Panel & Winner Announcement */}
-      <div className="flex-1 space-y-5 max-w-md w-full">
-        {/* Mode Selector */}
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
-          <label className="text-xs font-black uppercase text-slate-400">Chọn Kiểu Vòng Quay</label>
-          <div className="grid grid-cols-2 gap-2">
+      {/* Main Game Stage: Wheel on Left, Question Box on Right */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: The Wheel (5 cols on lg) */}
+        <div className="lg:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-900/90 rounded-3xl border border-slate-800 shadow-xl">
+          <div className="relative flex flex-col items-center">
+            {/* Top Pointer Needle */}
+            <div className="w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[28px] border-t-amber-400 drop-shadow-lg z-20 -mb-3" />
+
+            <div className="p-2.5 rounded-full bg-gradient-to-b from-amber-400 via-amber-500 to-amber-600 shadow-2xl border-4 border-slate-950">
+              <canvas
+                ref={canvasRef}
+                width={340}
+                height={340}
+                className="rounded-full shadow-inner block"
+              />
+            </div>
+
             <button
-              onClick={() => setWheelMode('students')}
-              className={`p-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                wheelMode === 'students'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
+              onClick={handleSpin}
+              disabled={isSpinning}
+              className="mt-5 w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
             >
-              <Users className="w-4 h-4" />
-              <span>Gọi Tên Học Sinh ({slices.length})</span>
-            </button>
-            <button
-              onClick={() => setWheelMode('rewards')}
-              className={`p-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                wheelMode === 'rewards'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Trophy className="w-4 h-4" />
-              <span>Điểm & Thưởng</span>
+              <Sparkles className="w-4 h-4 text-slate-950" />
+              <span>{isSpinning ? 'Đang Quay Vòng...' : 'NHẤN ĐỂ QUAY VÒNG'}</span>
             </button>
           </div>
+
+          {/* Winner Announcement Badge */}
+          {winnerResult && (
+            <div className="mt-4 w-full p-4 rounded-2xl bg-gradient-to-r from-indigo-950 via-purple-950 to-indigo-950 border border-amber-400/80 text-center animate-fade-in space-y-1">
+              <span className="text-[11px] font-black uppercase tracking-widest text-amber-300 flex items-center justify-center gap-1.5">
+                <Trophy className="w-3.5 h-3.5" />
+                {wheelMode === 'students' ? 'HỌC SINH ĐƯỢC CHỌN' : 'KẾT QUẢ VÒNG QUAY'}
+              </span>
+              <div className="text-xl font-black text-white">{winnerResult}</div>
+            </div>
+          )}
         </div>
 
-        {/* Winner Card */}
-        {winnerResult && (
-          <div className="p-6 rounded-3xl bg-gradient-to-b from-indigo-900/90 to-purple-900/90 border-2 border-amber-400 shadow-2xl text-center space-y-2 animate-fade-in">
-            <Trophy className="w-10 h-10 text-amber-400 mx-auto animate-bounce" />
-            <span className="text-xs font-black uppercase tracking-widest text-amber-300">
-              KẾT QUẢ VÒNG QUAY
-            </span>
-            <h4 className="text-2xl font-black text-white">{winnerResult}</h4>
-            <p className="text-xs text-indigo-200">
-              Xin chúc mừng! Hãy mời bạn thực hiện thử thách hoặc nhận điểm thưởng!
-            </p>
-          </div>
-        )}
+        {/* Right Column: Question Display & Interactive Stage (7 cols on lg) */}
+        <div className="lg:col-span-7 space-y-4">
+          {currentQ ? (
+            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-5 text-slate-100">
+              {/* Question Header & Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-3 py-1 rounded-xl bg-indigo-600 text-white text-xs font-black">
+                    CÂU {currentQIndex + 1} / {safeQuestions.length}
+                  </span>
+                  {winnerStudent && (
+                    <span className="px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5" />
+                      <span>{winnerStudent}</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Timer & Switch Question */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsTimerRunning(!isTimerRunning)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                      timerSeconds <= 5
+                        ? 'bg-rose-950/80 border border-rose-500 text-rose-300 animate-pulse'
+                        : 'bg-slate-800 border border-slate-700 text-slate-200'
+                    }`}
+                  >
+                    <Timer className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{timerSeconds}s</span>
+                  </button>
+
+                  <button
+                    onClick={handleNextQuestion}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <span>Câu tiếp theo</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Question Body with LaTeX Math / Science / Diagram rendering */}
+              <div className="py-2">
+                <QuizRichContentRenderer
+                  content={currentQ.question}
+                  diagramType={currentQ.diagramType}
+                  diagramData={currentQ.diagramData}
+                  textClassName="text-base md:text-lg font-bold text-white leading-relaxed"
+                />
+              </div>
+
+              {/* 4 Options Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {currentQ.options.map((opt) => {
+                  const isSelected = selectedOption === opt.key;
+                  const isCorrect = opt.key === currentQ.correctAnswer;
+                  let btnStyle = 'bg-slate-950 hover:bg-slate-800 border-slate-800 text-slate-200';
+
+                  if (selectedOption) {
+                    if (isSelected) {
+                      btnStyle = isCorrect
+                        ? 'bg-emerald-950/80 border-emerald-500 text-emerald-100 ring-2 ring-emerald-500'
+                        : 'bg-rose-950/80 border-rose-500 text-rose-100 ring-2 ring-rose-500';
+                    } else if (isCorrect && showExplanation) {
+                      btnStyle = 'bg-emerald-950/40 border-emerald-600/60 text-emerald-200';
+                    }
+                  }
+
+                  return (
+                    <button
+                      key={opt.key}
+                      onClick={() => handleOptionSelect(opt.key)}
+                      className={`p-4 rounded-2xl border text-left flex items-start gap-3 transition-all cursor-pointer active:scale-98 ${btnStyle}`}
+                    >
+                      <span
+                        className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                          isSelected
+                            ? isCorrect
+                              ? 'bg-emerald-500 text-slate-950'
+                              : 'bg-rose-500 text-white'
+                            : 'bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        {opt.key}
+                      </span>
+                      <div className="flex-1 text-sm font-semibold pt-0.5">
+                        <MathFormulaRenderer content={opt.text} />
+                      </div>
+                      {selectedOption && isCorrect && (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Action Bar: Toggle Explanation & Points Awarding */}
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/80">
+                {/* ẨN / HIỆN LỜI GIẢI ĐÁP ÁN (MẶC ĐỊNH ẨN) */}
+                <button
+                  onClick={() => setShowExplanation(!showExplanation)}
+                  className="px-4 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  {showExplanation ? (
+                    <>
+                      <EyeOff className="w-4 h-4" />
+                      <span>Ẩn lời giải & đáp án</span>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-4 h-4" />
+                      <span>💡 Xem lời giải & đáp án chi tiết</span>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+
+                {/* Chấm điểm cho học sinh */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleAwardPoints(100)}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer active:scale-95"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Đúng (+100đ)</span>
+                  </button>
+                  <button
+                    onClick={() => handleAwardPoints(0)}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Sai</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Awarded Score Banner */}
+              {awardedScore !== null && (
+                <div className="p-3 rounded-2xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-200 text-xs flex items-center justify-between animate-fade-in">
+                  <span className="font-bold flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    {awardedScore > 0
+                      ? `Đã cộng +${awardedScore} điểm cho bạn ${winnerStudent || 'học sinh'}!`
+                      : 'Đã ghi nhận câu trả lời chưa đúng.'}
+                  </span>
+                  <button
+                    onClick={handleNextQuestion}
+                    className="text-xs font-bold text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                  >
+                    Chuyển câu tiếp theo →
+                  </button>
+                </div>
+              )}
+
+              {/* Lời giải chi tiết (CHỈ HIỆN THỊ KHI BẤM NÚT XEM) */}
+              {showExplanation && (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-2 animate-fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      Đáp án đúng: Phương án {currentQ.correctAnswer}
+                    </span>
+                  </div>
+                  <div className="leading-relaxed text-slate-200 text-xs pt-1 border-t border-amber-500/20">
+                    <strong className="text-amber-300">Giải thích chi tiết: </strong>
+                    <MathFormulaRenderer content={currentQ.explanation || 'Không có giải thích chi tiết.'} />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-3">
+              <Sparkles className="w-8 h-8 text-amber-400 mx-auto animate-pulse" />
+              <h4 className="text-base font-black text-white">Chưa có bộ câu hỏi ôn tập</h4>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Thầy/Cô hãy nhấn nút <strong>"Soạn Đề Game Bằng AI"</strong> ở thanh công cụ trên để nạp câu hỏi cho vòng quay.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1124,7 +1483,8 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
 
   const TOTAL_TILES = 6;
-  const currentQ = questions[(selectedTile || 0) % questions.length] || questions[0];
+  const safeQuestions = normalizeGameQuestions(questions);
+  const currentQ = safeQuestions[(selectedTile || 0) % safeQuestions.length];
 
   const handleTileClick = (tileIdx: number) => {
     if (flippedTiles.includes(tileIdx)) return;
@@ -1304,7 +1664,8 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
   const [audiencePoll, setAudiencePoll] = useState<Record<string, number> | null>(null);
   const [answeredState, setAnsweredState] = useState<'pending' | 'correct' | 'wrong'>('pending');
 
-  const currentQ = questions[(level - 1) % questions.length] || questions[0];
+  const safeQuestions = normalizeGameQuestions(questions);
+  const currentQ = safeQuestions[(level - 1) % safeQuestions.length];
 
   const handleUse5050 = () => {
     if (used5050) return;
