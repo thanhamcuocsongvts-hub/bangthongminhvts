@@ -258,20 +258,26 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
     }
   };
 
-  // Track active page during smooth scroll (Continuous Mode)
+  // Track active page during smooth scroll with requestAnimationFrame throttling (Continuous Mode)
+  const scrollRafRef = useRef<number | null>(null);
   const handleScroll = () => {
     if (viewMode !== 'continuous' || !scrollContainerRef.current || numPages === 0) return;
-    const container = scrollContainerRef.current;
-    const scrollTop = container.scrollTop;
-    const gap = 24; // 24px gap between pages
-    const approxPage = Math.min(
-      numPages,
-      Math.max(1, Math.floor((scrollTop + pageHeight * 0.3) / (pageHeight + gap)) + 1)
-    );
-    if (approxPage !== currentPage) {
-      setCurrentPage(approxPage);
-      setPageInputVal(String(approxPage));
-    }
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      if (!scrollContainerRef.current) return;
+      const container = scrollContainerRef.current;
+      const scrollTop = container.scrollTop;
+      const gap = 24; // 24px gap between pages
+      const approxPage = Math.min(
+        numPages,
+        Math.max(1, Math.floor((scrollTop + pageHeight * 0.3) / (pageHeight + gap)) + 1)
+      );
+      if (approxPage !== currentPage) {
+        setCurrentPage(approxPage);
+        setPageInputVal(String(approxPage));
+      }
+    });
   };
 
   // Handle Fullscreen Toggle
@@ -501,7 +507,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 w-full h-full overflow-y-auto overflow-x-auto p-4 flex flex-col items-center bg-slate-950/95 custom-scrollbar relative select-none touch-pan-y"
+        className="flex-1 w-full h-full overflow-y-auto overflow-x-auto p-4 flex flex-col items-center bg-slate-950/95 custom-scrollbar relative select-none touch-pan-y scroll-smooth overscroll-contain"
         style={{
           WebkitOverflowScrolling: 'touch',
         }}

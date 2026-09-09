@@ -25,11 +25,25 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  ShieldCheck,
+  ShieldAlert,
+  Lock,
+  Unlock,
+  AlertTriangle,
+  Pause,
+  AlertCircle,
+  Eye,
+  RefreshCw,
+  Key,
+  Shield,
+  Timer,
+  CheckCircle,
+  Smartphone,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
 import mammoth from 'mammoth';
-import { QuizQuestion, RoomState, StudentSubmission, TextScale } from '../types';
+import { QuizQuestion, RoomState, StudentSubmission, TextScale, ActiveStudent } from '../types';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 
@@ -68,10 +82,18 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   currentLesson,
   onApplyQuestions,
 }) => {
-  // Mode: Default to 'creator' as requested by the user:
-  // "Ở phần trắc nghiệm này đừng hiển thị mặc định như ảnh 1. mà phải chổ tính năng tạo câu hỏi do AI thực hiện.
-  // Giáo viên có thể nhập yêu cầu tạo câu hỏi hoặc up ma trận đề ( file ảnh, PDF, Word) và Ai dựa vào đó mà tạo ra các câu theo yêu cầu rồi mới hiển thị các câu cho học sinh làm bài."
-  const [activeMode, setActiveMode] = useState<'creator' | 'live'>('creator');
+  // Mode: Default to 'creator' or switch to 'live' or 'exam' (Chế độ phòng thi)
+  const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'exam'>('creator');
+
+  // Exam Room Mode state (Chế độ phòng thi)
+  const [examDurationMinutes, setExamDurationMinutes] = useState<number>(45);
+  const [examSecondsRemaining, setExamSecondsRemaining] = useState<number | null>(null);
+  const [isExamActive, setIsExamActive] = useState<boolean>(false);
+  const [isExamScreenLocked, setIsExamScreenLocked] = useState<boolean>(true);
+  const [isTeacherEmergencyLocked, setIsTeacherEmergencyLocked] = useState<boolean>(false);
+  const [examStudentFilter, setExamStudentFilter] = useState<'all' | 'warning' | 'safe'>('all');
+  const [examSearchTerm, setExamSearchTerm] = useState<string>('');
+  const examTickerRef = useRef<any>(null);
 
   // Creator state
   const [promptTopic, setPromptTopic] = useState<string>('');
@@ -139,6 +161,174 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
     return () => clearInterval(timerRef.current);
   }, [isTimerRunning, timeLeft, activeMode]);
+
+  // Sync roomState examSettings into local teacher state
+  useEffect(() => {
+    if (roomState?.examSettings) {
+      if (typeof roomState.examSettings.totalDurationMinutes === 'number') {
+        setExamDurationMinutes(roomState.examSettings.totalDurationMinutes);
+      }
+      if (typeof roomState.examSettings.isScreenLocked === 'boolean') {
+        setIsExamScreenLocked(roomState.examSettings.isScreenLocked);
+      }
+      if (typeof roomState.examSettings.isTeacherLocked === 'boolean') {
+        setIsTeacherEmergencyLocked(roomState.examSettings.isTeacherLocked);
+      }
+      if (roomState.examSettings.endsAtTimestamp && roomState.examSettings.isTimerRunning) {
+        const remaining = Math.max(0, Math.floor((roomState.examSettings.endsAtTimestamp - Date.now()) / 1000));
+        setExamSecondsRemaining(remaining);
+        setIsExamActive(remaining > 0);
+      } else if (roomState.examSettings.endsAtTimestamp && !roomState.examSettings.isTimerRunning) {
+        const remaining = Math.max(0, Math.floor((roomState.examSettings.endsAtTimestamp - Date.now()) / 1000));
+        setExamSecondsRemaining(remaining);
+        setIsExamActive(false);
+      } else {
+        setExamSecondsRemaining(null);
+        setIsExamActive(false);
+      }
+    }
+  }, [roomState?.examSettings]);
+
+  // Exam countdown timer ticker
+  useEffect(() => {
+    if (isExamActive && examSecondsRemaining !== null && examSecondsRemaining > 0) {
+      examTickerRef.current = setInterval(() => {
+        setExamSecondsRemaining((prev) => {
+          if (prev === null || prev <= 1) {
+            clearInterval(examTickerRef.current);
+            setIsExamActive(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      clearInterval(examTickerRef.current);
+    }
+    return () => clearInterval(examTickerRef.current);
+  }, [isExamActive, examSecondsRemaining]);
+
+  const handleExamAction = async (action: 'start' | 'pause' | 'reset' | 'extend', extraMins = 0) => {
+    if (!roomState?.pin) return;
+    try {
+      await fetch(`/api/rooms/${roomState.pin}/exam-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          totalDurationMinutes: examDurationMinutes,
+          isScreenLocked: isExamScreenLocked,
+          isTeacherLocked: isTeacherEmergencyLocked,
+          isExamMode: true,
+          extraMinutes: extraMins,
+        }),
+      });
+      onRefreshRoom();
+    } catch (e) {
+      console.error('Exam action error', e);
+    }
+  };
+
+  const handleToggleScreenLock = async () => {
+    if (!roomState?.pin) return;
+    const nextVal = !isExamScreenLocked;
+    setIsExamScreenLocked(nextVal);
+    try {
+      await fetch(`/api/rooms/${roomState.pin}/exam-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          isScreenLocked: nextVal,
+        }),
+      });
+      onRefreshRoom();
+    } catch (e) {
+      console.error('Toggle screen lock error', e);
+    }
+  };
+
+  const handleToggleTeacherEmergencyLock = async () => {
+    if (!roomState?.pin) return;
+    const nextVal = !isTeacherEmergencyLocked;
+    setIsTeacherEmergencyLocked(nextVal);
+    try {
+      await fetch(`/api/rooms/${roomState.pin}/exam-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          isTeacherLocked: nextVal,
+        }),
+      });
+      onRefreshRoom();
+    } catch (e) {
+      console.error('Toggle teacher lock error', e);
+    }
+  };
+
+  const handleSimulateExamClass = async () => {
+    if (!roomState?.pin) return;
+    const sampleStudents = [
+      { name: 'Nguyễn Minh Tuấn', code: 'HS1201', warnings: 0, locked: true },
+      { name: 'Trần Mai Phương', code: 'HS1202', warnings: 0, locked: true },
+      { name: 'Lê Hoàng Nam', code: 'HS1203', warnings: 1, locked: true },
+      { name: 'Phạm Thu Thảo', code: 'HS1204', warnings: 0, locked: true },
+      { name: 'Vũ Quốc Bảo', code: 'HS1205', warnings: 2, locked: false },
+      { name: 'Đỗ Gia Hân', code: 'HS1206', warnings: 0, locked: true },
+      { name: 'Hoàng Đức Anh', code: 'HS1207', warnings: 0, locked: true },
+      { name: 'Bùi Ngọc Ánh', code: 'HS1208', warnings: 0, locked: true },
+      { name: 'Đặng Khánh Linh', code: 'HS1209', warnings: 0, locked: true },
+      { name: 'Trịnh Văn Hùng', code: 'HS1210', warnings: 0, locked: true },
+      { name: 'Lê Mỹ Duyên', code: 'HS1211', warnings: 1, locked: true },
+      { name: 'Nguyễn Tiến Đạt', code: 'HS1212', warnings: 0, locked: true },
+      { name: 'Phan Minh Khang', code: 'HS1213', warnings: 0, locked: true },
+      { name: 'Võ Thùy Trang', code: 'HS1214', warnings: 0, locked: true },
+      { name: 'Dương Thành Long', code: 'HS1215', warnings: 3, locked: false },
+      { name: 'Ngô Bảo Châu', code: 'HS1216', warnings: 0, locked: true },
+      { name: 'Hồ Gia Bảo', code: 'HS1217', warnings: 0, locked: true },
+      { name: 'Lý Diệu Linh', code: 'HS1218', warnings: 0, locked: true },
+      { name: 'Tạ Quang Khải', code: 'HS1219', warnings: 0, locked: true },
+      { name: 'Cao Phương Linh', code: 'HS1220', warnings: 0, locked: true },
+      { name: 'Đỗ Anh Dũng', code: 'HS1221', warnings: 0, locked: true },
+      { name: 'Lê Thùy Dương', code: 'HS1222', warnings: 0, locked: true },
+      { name: 'Nguyễn Hải Yến', code: 'HS1223', warnings: 1, locked: true },
+      { name: 'Bùi Văn Sơn', code: 'HS1224', warnings: 0, locked: true },
+    ];
+
+    for (const s of sampleStudents) {
+      try {
+        await fetch(`/api/rooms/${roomState.pin}/student-status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentId: `sim_${s.code}`,
+            studentName: s.name,
+            studentCode: s.code,
+            isFocusLocked: s.locked,
+            warningCount: s.warnings,
+          }),
+        });
+      } catch (e) {
+        console.error('Sim error', e);
+      }
+    }
+    onRefreshRoom();
+  };
+
+  const formatExamTime = (totalSeconds: number | null) => {
+    if (totalSeconds === null) {
+      const mins = examDurationMinutes;
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00`;
+    }
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    if (hrs > 0) {
+      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Handle file selection (Image, PDF, Word, TXT)
   const handleFileUpload = async (file: File) => {
@@ -452,6 +642,29 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 </span>
               )}
             </button>
+
+            <button
+              id="exam-mode-nav-btn"
+              onClick={() => setActiveMode('exam')}
+              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                activeMode === 'exam'
+                  ? 'bg-rose-600 text-white shadow-md'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-rose-300" />
+              <span>Chế Độ Phòng Thi</span>
+              {isExamActive ? (
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-400"></span>
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded-full bg-slate-700 text-[11px] text-slate-300">
+                  Khóa MH
+                </span>
+              )}
+            </button>
           </div>
 
           <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pl-2">
@@ -497,6 +710,48 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                 <span>Tạo đề mới</span>
+              </button>
+            </>
+          )}
+
+          {activeMode === 'exam' && (
+            <>
+              <button
+                onClick={() => setShowQRModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <QrCode className="w-4 h-4 text-emerald-400" />
+                <span>Mã QR & PIN</span>
+              </button>
+
+              <button
+                onClick={handleSimulateExamClass}
+                className="px-3.5 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Mô phỏng 24 thí sinh với SBD và trạng thái khóa màn hình"
+              >
+                <Users className="w-3.5 h-3.5 text-rose-300" />
+                <span>Mô phỏng 24 Thí sinh</span>
+              </button>
+
+              <button
+                onClick={handleToggleTeacherEmergencyLock}
+                className={`px-3.5 py-2 rounded-xl border text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                  isTeacherEmergencyLocked
+                    ? 'bg-amber-600 hover:bg-amber-500 border-amber-400 text-white animate-pulse'
+                    : 'bg-rose-900/60 hover:bg-rose-800 border-rose-700 text-rose-200'
+                }`}
+              >
+                {isTeacherEmergencyLocked ? (
+                  <>
+                    <Unlock className="w-3.5 h-3.5 text-white" />
+                    <span>Đang Khóa Khẩn Cấp (Bấm mở)</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-3.5 h-3.5 text-rose-300" />
+                    <span>Khóa Khẩn Cấp MH</span>
+                  </>
+                )}
               </button>
             </>
           )}
@@ -1270,6 +1525,479 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
           )}
         </div>
       )}
+
+      {/* VIEW 3: EXAM ROOM MODE (CHẾ ĐỘ PHÒNG THI) */}
+      {activeMode === 'exam' && (() => {
+        const studentList: ActiveStudent[] = Array.isArray(roomState?.activeStudents)
+          ? roomState.activeStudents
+          : [];
+        const warningCount = studentList.filter((s) => (s.warningCount || 0) > 0).length;
+        const safeCount = studentList.filter((s) => s.isFocusLocked).length;
+
+        return (
+          <div className="flex-1 flex flex-col overflow-y-auto bg-slate-900 text-slate-100 p-6 space-y-6">
+            {/* Section 1: Exam Header & Countdown Command Center */}
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+              {/* Left: Giant Digital Countdown & Duration Controller */}
+              <div className="xl:col-span-8 p-6 md:p-8 rounded-3xl bg-slate-800/90 border border-slate-700 shadow-xl flex flex-col justify-between space-y-6 relative overflow-hidden">
+                {/* Top Row: Title & PIN Badge */}
+                <div className="flex flex-wrap items-center justify-between gap-4 z-10">
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-black tracking-wider uppercase">
+                      <ShieldCheck className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Hệ Thống Phòng Thi Trực Tuyến & Giám Thị Số</span>
+                    </div>
+                    <h2 className="text-2xl md:text-3xl font-black text-white tracking-tight">
+                      Chế Độ Phòng Thi Chuẩn Quốc Gia
+                    </h2>
+                  </div>
+
+                  {/* Big PIN for room entrance */}
+                  <div className="flex items-center gap-3">
+                    <div className="bg-slate-900/90 px-4 py-2 rounded-2xl border border-slate-700 flex items-center gap-3">
+                      <div className="text-xs text-slate-400 font-bold uppercase tracking-wider">MÃ PIN XÁC THỰC:</div>
+                      <span className="font-mono text-2xl md:text-3xl font-black text-amber-400 tracking-widest">
+                        {roomState?.pin || '758899'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setShowQRModal(true)}
+                      className="p-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-md cursor-pointer"
+                      title="Mở mã QR phòng thi để học sinh quét"
+                    >
+                      <QrCode className="w-6 h-6" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Center: Giant Countdown Display */}
+                <div className="flex flex-col items-center justify-center py-4 space-y-3 z-10">
+                  <div className="flex items-center gap-3">
+                    {isExamActive ? (
+                      <span className="flex items-center gap-2 px-4 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-black border border-emerald-500/30 animate-pulse">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        ĐANG TÍNH GIỜ LÀM BÀI
+                      </span>
+                    ) : examSecondsRemaining === 0 ? (
+                      <span className="flex items-center gap-2 px-4 py-1 rounded-full bg-rose-500/20 text-rose-400 text-xs font-black border border-rose-500/30">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        ĐÃ HẾT THỜI GIAN THI
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2 px-4 py-1 rounded-full bg-slate-700 text-slate-300 text-xs font-black border border-slate-600">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        SẴN SÀNG BẮT ĐẦU
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Clock Display */}
+                  <div className="text-6xl md:text-7xl lg:text-8xl font-mono font-black tracking-widest text-white drop-shadow-[0_0_25px_rgba(244,63,94,0.3)] select-none">
+                    {formatExamTime(examSecondsRemaining)}
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full max-w-xl h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 transition-all duration-1000 rounded-full"
+                      style={{
+                        width: `${
+                          examSecondsRemaining !== null && examDurationMinutes > 0
+                            ? Math.min(100, Math.max(0, (examSecondsRemaining / (examDurationMinutes * 60)) * 100))
+                            : 100
+                        }%`,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Bottom Row: Control Buttons & Presets */}
+                <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-700/60 z-10">
+                  {/* Duration presets */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 font-bold">Thời lượng:</span>
+                    {[15, 30, 45, 60, 90].map((m) => (
+                      <button
+                        key={m}
+                        disabled={isExamActive}
+                        onClick={() => setExamDurationMinutes(m)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          examDurationMinutes === m
+                            ? 'bg-rose-600 text-white shadow-sm'
+                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:opacity-40 disabled:pointer-events-none'
+                        }`}
+                      >
+                        {m} phút
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2">
+                    {!isExamActive ? (
+                      <button
+                        id="start-exam-timer-btn"
+                        onClick={() => handleExamAction('start')}
+                        className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm flex items-center gap-2 shadow-lg shadow-emerald-900/30 transition-all cursor-pointer active:scale-95"
+                      >
+                        <Play className="w-4 h-4" />
+                        <span>BẮT ĐẦU TÍNH GIỜ</span>
+                      </button>
+                    ) : (
+                      <button
+                        id="pause-exam-timer-btn"
+                        onClick={() => handleExamAction('pause')}
+                        className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-900/30 transition-all cursor-pointer active:scale-95"
+                      >
+                        <Pause className="w-4 h-4" />
+                        <span>TẠM DỪNG</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleExamAction('extend', 5)}
+                      className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                      title="Gia hạn thêm 5 phút cho toàn bộ phòng thi"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>+5 Phút</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleExamAction('reset')}
+                      className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white font-bold text-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Làm mới thời gian thi"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Thu Bài / Đặt Lại</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: Screen Lock & Anti-Cheat Command Widget */}
+              <div className="xl:col-span-4 p-6 md:p-8 rounded-3xl bg-slate-800/90 border border-slate-700 shadow-xl flex flex-col justify-between space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-rose-400 font-black text-sm uppercase tracking-wider">
+                      <Shield className="w-4 h-4" />
+                      <span>Cấu Hình Khóa Thiết Bị</span>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
+                      isExamScreenLocked ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'
+                    }`}>
+                      {isExamScreenLocked ? 'ĐANG KÍCH HOẠT' : 'ĐANG TẮT'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-700/60">
+                    {/* Anti-cheat Fullscreen Lock Toggle */}
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <div className="text-sm font-bold text-white flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Khóa Toàn Màn Hình</span>
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          Chặn rời tab, thu nhỏ hoặc mở ứng dụng khác
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleToggleScreenLock}
+                        className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${
+                          isExamScreenLocked ? 'bg-emerald-600' : 'bg-slate-700'
+                        }`}
+                      >
+                        <div
+                          className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${
+                            isExamScreenLocked ? 'translate-x-6' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="border-t border-slate-800 pt-3">
+                      <div className="text-xs text-slate-400 space-y-1">
+                        <div className="flex items-center gap-1.5 text-emerald-400">
+                          <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>Tự động phát hiện khi học sinh rời khỏi màn hình thi</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-emerald-400">
+                          <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>Đếm số lần vi phạm và báo động ngay lập tức lên bảng</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Emergency Teacher Freeze / Lock Button */}
+                  <div className="space-y-2">
+                    <div className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                      Lệnh Giám Thị Khẩn Cấp:
+                    </div>
+                    <button
+                      onClick={handleToggleTeacherEmergencyLock}
+                      className={`w-full py-3.5 px-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-lg active:scale-95 ${
+                        isTeacherEmergencyLocked
+                          ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30 animate-pulse'
+                          : 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white shadow-rose-900/40'
+                      }`}
+                    >
+                      {isTeacherEmergencyLocked ? (
+                        <>
+                          <Unlock className="w-5 h-5" />
+                          <span>MỞ KHÓA MÀN HÌNH HỌC SINH</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-5 h-5" />
+                          <span>KHÓA MÀN HÌNH TẤT CẢ HỌC SINH KHẨN CẤP</span>
+                        </>
+                      )}
+                    </button>
+                    <p className="text-[11px] text-slate-400 text-center">
+                      {isTeacherEmergencyLocked
+                        ? '⚠️ Màn hình của tất cả thí sinh đang bị tạm dừng và đóng băng bởi giám thị.'
+                        : 'Khi kích hoạt, màn hình toàn bộ học sinh lập tức bị đóng băng để nhắc nhở chung.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick Link to Student View */}
+                <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-400">
+                  <span>Liên kết học sinh:</span>
+                  <button
+                    onClick={() => window.open(joinUrl, '_blank')}
+                    className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Mở thử trang học sinh</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: 4 Real-time Proctoring Metric Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Metric 1: Total joined students */}
+              <div className="p-5 rounded-2xl bg-slate-800/80 border border-slate-700 shadow-sm flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-400 font-bold uppercase">Sĩ Số Trong Phòng</div>
+                  <div className="text-3xl font-black text-white font-mono">
+                    {studentList.length}
+                  </div>
+                  <div className="text-[11px] text-slate-400">Thí sinh đã kết nối</div>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                  <Users className="w-6 h-6" />
+                </div>
+              </div>
+
+              {/* Metric 2: Fullscreen locked students (Safe) */}
+              <div className="p-5 rounded-2xl bg-slate-800/80 border border-slate-700 shadow-sm flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-400 font-bold uppercase">Đang Khóa An Toàn</div>
+                  <div className="text-3xl font-black text-emerald-400 font-mono">
+                    {safeCount}
+                  </div>
+                  <div className="text-[11px] text-emerald-400/80">100% Toàn màn hình</div>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+              </div>
+
+              {/* Metric 3: Warning / Anti-cheat alerts */}
+              <div className="p-5 rounded-2xl bg-slate-800/80 border border-slate-700 shadow-sm flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-400 font-bold uppercase">Cảnh Báo Vi Phạm</div>
+                  <div className="text-3xl font-black text-rose-400 font-mono">
+                    {warningCount}
+                  </div>
+                  <div className="text-[11px] text-rose-400/80">Rời tab / thu nhỏ ứng dụng</div>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+              </div>
+
+              {/* Metric 4: Question Count & Completion */}
+              <div className="p-5 rounded-2xl bg-slate-800/80 border border-slate-700 shadow-sm flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-400 font-bold uppercase">Số Lượng Câu Hỏi</div>
+                  <div className="text-3xl font-black text-amber-400 font-mono">
+                    {questions.length} câu
+                  </div>
+                  <div className="text-[11px] text-slate-400">Đề thi trắc nghiệm</div>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                  <FileText className="w-6 h-6" />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3: Student Proctoring Grid & Live Anti-Cheat Monitor */}
+            <div className="p-6 rounded-3xl bg-slate-800/90 border border-slate-700 shadow-xl space-y-5">
+              {/* Header & Filter Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg md:text-xl font-black text-white flex items-center gap-2">
+                    <Eye className="w-5 h-5 text-indigo-400" />
+                    <span>Bảng Giám Sát Thí Sinh Thời Gian Thực</span>
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full bg-slate-700 text-xs font-bold text-slate-300">
+                    {studentList.length} em
+                  </span>
+                </div>
+
+                {/* Filters */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="bg-slate-900 p-1 rounded-xl border border-slate-700 flex items-center text-xs">
+                    <button
+                      onClick={() => setExamStudentFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        examStudentFilter === 'all'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Tất cả
+                    </button>
+                    <button
+                      onClick={() => setExamStudentFilter('warning')}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        examStudentFilter === 'warning'
+                          ? 'bg-rose-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Vi phạm ({warningCount})
+                    </button>
+                    <button
+                      onClick={() => setExamStudentFilter('safe')}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        examStudentFilter === 'safe'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      An toàn ({safeCount})
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={onRefreshRoom}
+                    className="p-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-all cursor-pointer"
+                    title="Làm mới danh sách thí sinh"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Students Grid */}
+              {studentList.length === 0 ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center space-y-4 bg-slate-900/50 rounded-2xl border border-slate-700/50">
+                  <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
+                    <Users className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-base font-bold text-slate-200">Chưa có thí sinh nào vào phòng</h4>
+                    <p className="text-xs text-slate-400 max-w-md">
+                      Học sinh quét mã QR hoặc truy cập đường link và nhập mã PIN <span className="font-mono font-bold text-amber-400">{roomState?.pin || '758899'}</span> cùng Số Báo Danh để bắt đầu.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleSimulateExamClass}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-md"
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Mô phỏng 24 thí sinh vào phòng thi ngay</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {studentList
+                    .filter((student) => {
+                      if (examStudentFilter === 'warning') return (student.warningCount || 0) > 0;
+                      if (examStudentFilter === 'safe') return student.isFocusLocked;
+                      return true;
+                    })
+                    .map((student, idx) => {
+                      const studentId = student.id || `st_${idx}`;
+                      const hasWarning = (student.warningCount || 0) > 0;
+                      const isLocked = student.isFocusLocked;
+
+                      return (
+                        <div
+                          key={studentId}
+                          className={`p-4 rounded-2xl border transition-all ${
+                            hasWarning
+                              ? 'bg-rose-950/40 border-rose-700/80 shadow-lg shadow-rose-950/50'
+                              : isLocked
+                              ? 'bg-slate-900/80 border-slate-700/80 hover:border-slate-600'
+                              : 'bg-slate-900/40 border-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div className="flex items-center gap-2.5">
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm ${
+                                hasWarning
+                                  ? 'bg-rose-600 text-white'
+                                  : 'bg-indigo-600 text-white'
+                              }`}>
+                                {(student.studentName || student.name || 'T').charAt(0)}
+                              </div>
+                              <div>
+                                <div className="font-bold text-sm text-white truncate max-w-[140px]" title={student.studentName || student.name}>
+                                  {student.studentName || student.name || 'Thí sinh'}
+                                </div>
+                                <div className="text-[11px] font-mono text-slate-400">
+                                  SBD: {student.studentCode || `HS${1201 + idx}`}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Lock icon */}
+                            {isLocked ? (
+                              <span className="p-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="Đang toàn màn hình">
+                                <Lock className="w-3.5 h-3.5" />
+                              </span>
+                            ) : (
+                              <span className="p-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20" title="Chưa khóa toàn màn hình">
+                                <Unlock className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Status pill */}
+                          <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                            {hasWarning ? (
+                              <div className="flex items-center gap-1.5 text-rose-300 text-xs font-bold bg-rose-500/20 px-2.5 py-1 rounded-lg border border-rose-500/30">
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Vi phạm {student.warningCount} lần (Rời tab)</span>
+                              </div>
+                            ) : isLocked ? (
+                              <div className="flex items-center gap-1.5 text-emerald-300 text-xs font-bold bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                                <span>Màn hình khóa an toàn</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 text-slate-400 text-xs bg-slate-800 px-2.5 py-1 rounded-lg">
+                                <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                                <span>Đang làm bài</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* QR Code Modal for Student Mobile Join */}
       {showQRModal && (

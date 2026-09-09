@@ -42,8 +42,25 @@ export interface StudentSubmission {
 export interface ActiveStudent {
   id: string;
   name: string;
+  studentName?: string; // Tên hiển thị tương thích
+  studentCode?: string; // Số báo danh / Mã học sinh
   joinedAt: string;
   avatarColor?: string;
+  isFocusLocked?: boolean; // Thiết bị đang duy trì khóa màn hình / chế độ an toàn
+  warningCount?: number; // Số lần vi phạm thoát toàn màn hình hoặc chuyển tab
+  lastActiveAt?: string;
+  submittedCount?: number;
+}
+
+export interface ExamSettings {
+  isExamMode: boolean; // Bật / Tắt Chế độ phòng thi
+  totalDurationMinutes: number; // Tổng thời gian làm bài (phút)
+  startedAtTimestamp?: number | null; // Mốc thời gian bắt đầu (ms)
+  endsAtTimestamp?: number | null; // Mốc thời gian kết thúc dự kiến (ms)
+  isScreenLocked: boolean; // Yêu cầu khóa toàn màn hình & chặn chuyển tab
+  isTeacherLocked: boolean; // Giáo viên tạm dừng hoặc khóa khẩn cấp màn hình học sinh
+  allowReview: boolean; // Cho phép xem lại kết quả sau nộp
+  isTimerRunning?: boolean; // Trạng thái đang đếm giờ
 }
 
 export interface RoomState {
@@ -55,6 +72,7 @@ export interface RoomState {
   questions: QuizQuestion[];
   submissions: Record<string, StudentSubmission[]>; // questionId -> submissions
   activeStudents: ActiveStudent[];
+  examSettings?: ExamSettings; // Cấu hình Chế độ phòng thi & đồng hồ tổng
 }
 
 export interface LessonDoc {

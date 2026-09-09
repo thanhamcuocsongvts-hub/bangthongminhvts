@@ -237,7 +237,8 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
 
       {/* Main Content Area Based On Type with Smooth Touch Pinch-to-Zoom */}
       <div
-        className="flex-1 w-full h-full overflow-auto bg-slate-950 relative flex flex-col custom-scrollbar"
+        className="flex-1 w-full h-full overflow-auto bg-slate-950 relative flex flex-col custom-scrollbar scroll-smooth overscroll-contain touch-pan-y"
+        style={{ WebkitOverflowScrolling: 'touch' }}
         onTouchStart={(e) => {
           if (e.touches.length === 2) {
             const touch1 = e.touches[0];
@@ -448,7 +449,10 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         {/* 4. WORD DOCUMENT VIEWER (.DOCX, .DOC)                     */}
         {/* ========================================================= */}
         {fileType === 'docx' && (
-          <div className="flex-1 w-full h-full overflow-y-auto p-3 md:p-6 flex justify-center bg-slate-950/80">
+          <div
+            className="flex-1 w-full h-full overflow-y-auto p-3 md:p-6 flex justify-center bg-slate-950/80 custom-scrollbar scroll-smooth overscroll-contain touch-pan-y"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
             <div
               className={`w-full max-w-4xl bg-white text-slate-900 rounded-2xl p-6 md:p-10 shadow-2xl border border-slate-300 font-serif leading-relaxed ${fontSizeClasses[fontSize]} transition-all`}
             >

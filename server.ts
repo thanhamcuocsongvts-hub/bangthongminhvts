@@ -120,6 +120,30 @@ interface StudentSubmission {
   submittedAt: string;
 }
 
+interface ActiveStudent {
+  id: string;
+  name: string;
+  studentName?: string;
+  studentCode?: string;
+  joinedAt: string;
+  avatarColor?: string;
+  isFocusLocked?: boolean;
+  warningCount?: number;
+  lastActiveAt?: string;
+  submittedCount?: number;
+}
+
+interface ExamSettings {
+  isExamMode: boolean;
+  totalDurationMinutes: number;
+  startedAtTimestamp?: number | null;
+  endsAtTimestamp?: number | null;
+  isScreenLocked: boolean;
+  isTeacherLocked: boolean;
+  allowReview: boolean;
+  isTimerRunning?: boolean;
+}
+
 interface RoomState {
   pin: string;
   title: string;
@@ -135,7 +159,8 @@ interface RoomState {
     timeLimit: number;
   }>;
   submissions: Record<string, StudentSubmission[]>; // questionId -> array of submissions
-  activeStudents: Array<{ id: string; name: string; joinedAt: string }>;
+  activeStudents: ActiveStudent[];
+  examSettings?: ExamSettings;
 }
 
 const rooms: Record<string, RoomState> = {};
@@ -1564,13 +1589,19 @@ app.post("/api/rooms", (req, res) => {
   res.json({ success: true, room: rooms[roomPin] });
 });
 
-const DEFAULT_SAMPLE_QUESTIONS: QuizQuestion[] = [
+const DEFAULT_SAMPLE_QUESTIONS: any[] = [
   {
     id: "q_sample_1",
     question: "Cho hàm số $y = f(x)$ liên tục trên $\\mathbb{R}$ và có bảng biến thiên như hình dưới. Hàm số đã cho nghịch biến trên khoảng nào dưới đây?",
-    options: ["$(-\\infty; -1)$", "$(-1; 2)$", "$(2; +\\infty)$", "$(0; 3)$"],
-    correctAnswer: 1,
+    options: [
+      { key: "A", text: "$(-\\infty; -1)$" },
+      { key: "B", text: "$(-1; 2)$" },
+      { key: "C", text: "$(2; +\\infty)$" },
+      { key: "D", text: "$(0; 3)$" },
+    ],
+    correctAnswer: "B",
     explanation: "Dựa vào bảng biến thiên, ta thấy $f'(x) < 0$ trên khoảng $(-1; 2)$, do đó hàm số nghịch biến trên khoảng $(-1; 2)$.",
+    timeLimit: 30,
     points: 10,
     difficulty: "Thông hiểu",
     diagramType: "variation_table",
@@ -1583,9 +1614,15 @@ const DEFAULT_SAMPLE_QUESTIONS: QuizQuestion[] = [
   {
     id: "q_sample_2",
     question: "Cho hàm số bậc ba $y = f(x) = x^3 - 3x + 2$ có đồ thị $(C)$. Tọa độ điểm cực đại của đồ thị hàm số là:",
-    options: ["$(-1; 4)$", "$(1; 0)$", "$(0; 2)$", "$(2; 4)$"],
-    correctAnswer: 0,
+    options: [
+      { key: "A", text: "$(-1; 4)$" },
+      { key: "B", text: "$(1; 0)$" },
+      { key: "C", text: "$(0; 2)$" },
+      { key: "D", text: "$(2; 4)$" },
+    ],
+    correctAnswer: "A",
     explanation: "Ta có $y' = 3x^2 - 3 = 0 \\Leftrightarrow x = \\pm 1$. Vì $y''(-1) = -6 < 0$ nên điểm cực đại là $(-1; 4)$.",
+    timeLimit: 30,
     points: 10,
     difficulty: "Nhận biết",
     diagramType: "function_graph",
@@ -1601,9 +1638,15 @@ const DEFAULT_SAMPLE_QUESTIONS: QuizQuestion[] = [
   {
     id: "q_sample_3",
     question: "Khảo sát điểm kiểm tra giữa kỳ môn Toán của 40 học sinh lớp 12A thu được bảng tần số ghép nhóm sau. Tìm mốt $M_o$ của mẫu số liệu ghép nhóm:",
-    options: ["$8.25$", "$7.85$", "$8.15$", "$7.50$"],
-    correctAnswer: 0,
+    options: [
+      { key: "A", text: "$8.25$" },
+      { key: "B", text: "$7.85$" },
+      { key: "C", text: "$8.15$" },
+      { key: "D", text: "$7.50$" },
+    ],
+    correctAnswer: "A",
     explanation: "Nhóm chứa mốt là $[8; 9)$ với tần số $m_i = 16$. Áp dụng công thức mốt của mẫu số liệu ghép nhóm: $M_o = 8 + \\frac{16 - 10}{(16 - 10) + (16 - 6)} \\times (9 - 8) = 8 + \\frac{6}{16} = 8.375 \\approx 8.25$.",
+    timeLimit: 30,
     points: 10,
     difficulty: "Vận dụng",
     diagramType: "data_table",
@@ -1615,9 +1658,15 @@ const DEFAULT_SAMPLE_QUESTIONS: QuizQuestion[] = [
   {
     id: "q_sample_4",
     question: "Trong không gian $Oxyz$, cho mặt phẳng $(P): 2x - y + 2z - 5 = 0$. Một vectơ pháp tuyến $\\vec{n}$ của $(P)$ có tọa độ là:",
-    options: ["$\\vec{n} = (2; -1; 2)$", "$\\vec{n} = (2; 1; 2)$", "$\\vec{n} = (-2; 1; 2)$", "$\\vec{n} = (2; -1; -5)$"],
-    correctAnswer: 0,
+    options: [
+      { key: "A", text: "$\\vec{n} = (2; -1; 2)$" },
+      { key: "B", text: "$\\vec{n} = (2; 1; 2)$" },
+      { key: "C", text: "$\\vec{n} = (-2; 1; 2)$" },
+      { key: "D", text: "$\\vec{n} = (2; -1; -5)$" },
+    ],
+    correctAnswer: "A",
     explanation: "Mặt phẳng $(P): Ax + By + Cz + D = 0$ có một vectơ pháp tuyến là $\\vec{n} = (A; B; C) = (2; -1; 2)$.",
+    timeLimit: 30,
     points: 10,
     difficulty: "Nhận biết",
   },
@@ -1635,6 +1684,27 @@ function ensureRoom(pin: string): RoomState {
       questions: DEFAULT_SAMPLE_QUESTIONS,
       submissions: {},
       activeStudents: [],
+      examSettings: {
+        isExamMode: false,
+        totalDurationMinutes: 45,
+        startedAtTimestamp: null,
+        endsAtTimestamp: null,
+        isScreenLocked: false,
+        isTeacherLocked: false,
+        allowReview: true,
+      },
+    };
+  }
+  // Ensure examSettings exists
+  if (!rooms[safePin].examSettings) {
+    rooms[safePin].examSettings = {
+      isExamMode: false,
+      totalDurationMinutes: 45,
+      startedAtTimestamp: null,
+      endsAtTimestamp: null,
+      isScreenLocked: false,
+      isTeacherLocked: false,
+      allowReview: true,
     };
   }
   // If room exists but has 0 questions, seed sample questions so students can always do quiz
@@ -1651,24 +1721,97 @@ app.get("/api/rooms/:pin", (req, res) => {
   res.json(room);
 });
 
-// 3. Student Join Room
+// 3. Student Join Room with PIN & Optional Student Code
 app.post("/api/rooms/:pin/join", (req, res) => {
   const { pin } = req.params;
-  const { studentName, studentId } = req.body;
+  const { studentName, studentId, studentCode } = req.body;
   const room = ensureRoom(pin);
 
   const sId = studentId || "std_" + Math.random().toString(36).substring(2, 9);
   const sName = (studentName || "").trim() || `Học sinh ${room.activeStudents.length + 1}`;
+  const sCode = (studentCode || "").trim();
 
   // Check if exists
   const existingIdx = room.activeStudents.findIndex((s) => s.id === sId);
   if (existingIdx === -1) {
-    room.activeStudents.push({ id: sId, name: sName, joinedAt: new Date().toISOString() });
+    room.activeStudents.push({
+      id: sId,
+      name: sName,
+      studentCode: sCode || undefined,
+      joinedAt: new Date().toISOString(),
+      isFocusLocked: room.examSettings?.isScreenLocked || false,
+      warningCount: 0,
+      lastActiveAt: new Date().toISOString(),
+      submittedCount: 0,
+    });
   } else {
     room.activeStudents[existingIdx].name = sName;
+    if (sCode) room.activeStudents[existingIdx].studentCode = sCode;
+    room.activeStudents[existingIdx].lastActiveAt = new Date().toISOString();
   }
 
   res.json({ success: true, studentId: sId, studentName: sName, room });
+});
+
+// 3b. Student Screen Lock & Focus Status Update (Anti-Cheat)
+app.post("/api/rooms/:pin/student-status", (req, res) => {
+  const { pin } = req.params;
+  const { studentId, isFocusLocked, violationType } = req.body;
+  const room = ensureRoom(pin);
+
+  const student = room.activeStudents.find((s) => s.id === studentId);
+  if (student) {
+    if (typeof isFocusLocked === "boolean") {
+      student.isFocusLocked = isFocusLocked;
+    }
+    if (violationType) {
+      student.warningCount = (student.warningCount || 0) + 1;
+    }
+    student.lastActiveAt = new Date().toISOString();
+  }
+
+  res.json({ success: true, student, room });
+});
+
+// 3c. Configure Exam Room Settings (Timer, Screen Lock, Mode)
+app.post("/api/rooms/:pin/exam-config", (req, res) => {
+  const { pin } = req.params;
+  const { isExamMode, totalDurationMinutes, isScreenLocked, isTeacherLocked, action } = req.body;
+  const room = ensureRoom(pin);
+
+  if (!room.examSettings) {
+    room.examSettings = {
+      isExamMode: false,
+      totalDurationMinutes: 45,
+      startedAtTimestamp: null,
+      endsAtTimestamp: null,
+      isScreenLocked: false,
+      isTeacherLocked: false,
+      allowReview: true,
+    };
+  }
+
+  if (typeof isExamMode === "boolean") room.examSettings.isExamMode = isExamMode;
+  if (typeof totalDurationMinutes === "number") room.examSettings.totalDurationMinutes = totalDurationMinutes;
+  if (typeof isScreenLocked === "boolean") room.examSettings.isScreenLocked = isScreenLocked;
+  if (typeof isTeacherLocked === "boolean") room.examSettings.isTeacherLocked = isTeacherLocked;
+
+  // Actions: 'start' exam timer, 'pause' exam timer, 'reset' exam timer
+  if (action === "start") {
+    const now = Date.now();
+    const durationMs = (room.examSettings.totalDurationMinutes || 45) * 60 * 1000;
+    room.examSettings.startedAtTimestamp = now;
+    room.examSettings.endsAtTimestamp = now + durationMs;
+    room.examSettings.isExamMode = true;
+    room.isLive = true;
+  } else if (action === "pause") {
+    room.examSettings.endsAtTimestamp = null;
+  } else if (action === "reset") {
+    room.examSettings.startedAtTimestamp = null;
+    room.examSettings.endsAtTimestamp = null;
+  }
+
+  res.json({ success: true, room });
 });
 
 // 4. Student Submit Answer
@@ -1769,11 +1912,11 @@ app.post("/api/rooms/:pin/simulate-class", (req, res) => {
     sampleStudentNames.forEach((name, sIndex) => {
       // Create high-performing realistic class: ~75% correct rate
       const roll = Math.random();
-      let chosenOpt = q.correctAnswer;
+      let chosenOpt: string = q.correctAnswer;
       if (roll > 0.78) {
         // Pick an incorrect option
-        const wrongOpts = [0, 1, 2, 3].filter((o) => o !== q.correctAnswer);
-        chosenOpt = wrongOpts[Math.floor(Math.random() * wrongOpts.length)];
+        const wrongOpts = ["A", "B", "C", "D"].filter((o) => o !== q.correctAnswer);
+        chosenOpt = wrongOpts[Math.floor(Math.random() * wrongOpts.length)] || "A";
       }
 
       room.submissions[q.id].push({

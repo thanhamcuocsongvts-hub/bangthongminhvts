@@ -1032,30 +1032,15 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
 
     if (activeTool === 'select') {
-      // 1. Hit-test on text elements from top to bottom
-      const hitText = texts.slice().reverse().find((t) => {
-        const textWidth = t.width || Math.max(t.text.length * (t.size * 0.65), 140);
-        const textHeight = t.height || (t.size * 2 + 20);
-        return x >= t.x && x <= t.x + textWidth && y >= t.y && y <= t.y + textHeight;
-      });
+      // Yêu cầu người dùng: "Khi viết thì chữ viết không tính là ảnh và bấm chuột vào chữ không ảnh hưởng. Chỉ vẽ đường thẳng, đường tròn, hình, đồ thị thì tính năng chọn của chuột mới thực hiện"
+      // Loại trừ chữ viết / text khi nhấp chuột; chỉ thực hiện chọn trên hình học, đường thẳng, đường tròn, đồ thị.
 
-      if (hitText) {
-        setSelectedTextId(hitText.id);
-        setSelectedStrokeId(null);
-        setIsDraggingText(true);
-        setIsDraggingStroke(false);
-        setDragLivePos({ x: hitText.x, y: hitText.y });
-        dragStartRef.current = {
-          startMouseX: e.clientX,
-          startMouseY: e.clientY,
-          origX: hitText.x,
-          origY: hitText.y,
-        };
-        return;
-      }
-
-      // 2. Hit-test on drawn strokes & geometric shapes (with accurate radial math for circles & ellipses)
+      // Hit-test ONLY on geometric shapes & math graphs (NOT handwriting, NOT text)
       const hitStroke = strokes.slice().reverse().find((s) => {
+        // Freehand pen strokes, highlighters, erasers are handwriting - NEVER select them with mouse/pointer
+        if (s.tool === 'pen' || s.tool === 'highlighter' || s.tool === 'eraser' || s.tool === 'laser') {
+          return false;
+        }
         const bounds = getStrokeBounds(s);
         if (!bounds) return false;
         if (s.tool === 'circle') {
@@ -1091,7 +1076,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         return;
       }
 
-      // If clicked on empty space, deselect both
+      // If clicked on empty space, handwriting, or text, deselect shapes
       setSelectedTextId(null);
       setSelectedStrokeId(null);
       setIsStrokeToolbarExpanded(false);
@@ -1255,85 +1240,105 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     if (!isDrawingRef.current) return;
 
-    const currentPt = { x, y, pressure: e.pressure || 0.5 };
-    const pts = activePointsRef.current;
-    pts.push(currentPt);
+    // Collect high-frequency touch samples (coalesced events) for ultra-smooth 120fps handwriting on 75" TV
+    const coalescedList: { x: number; y: number; pressure: number }[] = [];
+    const nativeEvt = e.nativeEvent as any;
+    if (nativeEvt && typeof nativeEvt.getCoalescedEvents === 'function') {
+      const cEvents = nativeEvt.getCoalescedEvents();
+      if (Array.isArray(cEvents) && cEvents.length > 0) {
+        for (const ce of cEvents) {
+          coalescedList.push({
+            x: ce.clientX - rect.left + boardScrollX,
+            y: ce.clientY - rect.top + boardScrollY,
+            pressure: ce.pressure || 0.5,
+          });
+        }
+      }
+    }
+    if (coalescedList.length === 0) {
+      coalescedList.push({ x, y, pressure: e.pressure || 0.5 });
+    }
 
+    const pts = activePointsRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     if (activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'eraser') {
       // Incremental smooth bezier rendering for 120fps fluid drawing without clearing canvas
-      if (pts.length >= 3) {
-        const p0 = pts[pts.length - 3];
-        const p1 = pts[pts.length - 2];
-        const p2 = pts[pts.length - 1];
-        const mid1X = (p0.x + p1.x) / 2;
-        const mid1Y = (p0.y + p1.y) / 2;
-        const mid2X = (p1.x + p2.x) / 2;
-        const mid2Y = (p1.y + p2.y) / 2;
+      for (const pt of coalescedList) {
+        pts.push(pt);
+        if (pts.length >= 3) {
+          const p0 = pts[pts.length - 3];
+          const p1 = pts[pts.length - 2];
+          const p2 = pts[pts.length - 1];
+          const mid1X = (p0.x + p1.x) / 2;
+          const mid1Y = (p0.y + p1.y) / 2;
+          const mid2X = (p1.x + p2.x) / 2;
+          const mid2Y = (p1.y + p2.y) / 2;
 
-        const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
+          const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
 
-        ctx.save();
-        ctx.translate(-boardScrollX, -boardScrollY);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
-        if (activeTool === 'eraser') {
-          ctx.globalCompositeOperation = 'destination-out';
-          ctx.strokeStyle = '#000';
-        } else {
-          ctx.strokeStyle = activeColor;
-          if (activeTool === 'highlighter') {
-            ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
-            if (isLiveFluo) {
+          ctx.save();
+          ctx.translate(-boardScrollX, -boardScrollY);
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
+          if (activeTool === 'eraser') {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.strokeStyle = '#000';
+          } else {
+            ctx.strokeStyle = activeColor;
+            if (activeTool === 'highlighter') {
+              ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
+              if (isLiveFluo) {
+                ctx.shadowColor = activeColor;
+                ctx.shadowBlur = 12;
+              }
+            } else if (isLiveFluo) {
               ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 12;
+              ctx.shadowBlur = 8;
             }
-          } else if (isLiveFluo) {
-            ctx.shadowColor = activeColor;
-            ctx.shadowBlur = 8;
           }
-        }
-        ctx.beginPath();
-        ctx.moveTo(mid1X, mid1Y);
-        ctx.quadraticCurveTo(p1.x, p1.y, mid2X, mid2Y);
-        ctx.stroke();
-        ctx.restore();
-      } else if (pts.length === 2) {
-        const p0 = pts[0];
-        const p1 = pts[1];
-        const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
-        ctx.save();
-        ctx.translate(-boardScrollX, -boardScrollY);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
-        if (activeTool === 'eraser') {
-          ctx.globalCompositeOperation = 'destination-out';
-          ctx.strokeStyle = '#000';
-        } else {
-          ctx.strokeStyle = activeColor;
-          if (activeTool === 'highlighter') {
-            ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
-            if (isLiveFluo) {
+          ctx.beginPath();
+          ctx.moveTo(mid1X, mid1Y);
+          ctx.quadraticCurveTo(p1.x, p1.y, mid2X, mid2Y);
+          ctx.stroke();
+          ctx.restore();
+        } else if (pts.length === 2) {
+          const p0 = pts[0];
+          const p1 = pts[1];
+          const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
+          ctx.save();
+          ctx.translate(-boardScrollX, -boardScrollY);
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
+          if (activeTool === 'eraser') {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.strokeStyle = '#000';
+          } else {
+            ctx.strokeStyle = activeColor;
+            if (activeTool === 'highlighter') {
+              ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
+              if (isLiveFluo) {
+                ctx.shadowColor = activeColor;
+                ctx.shadowBlur = 12;
+              }
+            } else if (isLiveFluo) {
               ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 12;
+              ctx.shadowBlur = 8;
             }
-          } else if (isLiveFluo) {
-            ctx.shadowColor = activeColor;
-            ctx.shadowBlur = 8;
           }
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y);
+          ctx.lineTo(p1.x, p1.y);
+          ctx.stroke();
+          ctx.restore();
         }
-        ctx.beginPath();
-        ctx.moveTo(p0.x, p0.y);
-        ctx.lineTo(p1.x, p1.y);
-        ctx.stroke();
-        ctx.restore();
       }
     } else {
       // For geometric 2D/3D shapes, preview shape with full redraw
+      pts.push(coalescedList[coalescedList.length - 1]);
       redrawCanvas(ctx);
       ctx.save();
       ctx.translate(-boardScrollX, -boardScrollY);
@@ -1362,6 +1367,43 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       origBounds: { centerX: bounds.centerX, centerY: bounds.centerY, width: bounds.width, height: bounds.height },
       direction,
     };
+  };
+
+  const handleShapeResizePointerMove = (e: React.PointerEvent) => {
+    if (!isResizingStroke || !resizeStrokeStartRef.current || !selectedStrokeId) return;
+    e.stopPropagation();
+    const { startMouseX, startMouseY, origScale, origBounds, direction } = resizeStrokeStartRef.current;
+    const dx = e.clientX - startMouseX;
+    const dy = e.clientY - startMouseY;
+    const signX = direction.includes('e') ? 1 : direction.includes('w') ? -1 : 0;
+    const signY = direction.includes('s') ? 1 : direction.includes('n') ? -1 : 0;
+    const factorX = signX !== 0 ? (dx * signX) / Math.max(origBounds.width, 60) : 0;
+    const factorY = signY !== 0 ? (dy * signY) / Math.max(origBounds.height, 60) : 0;
+    const factor = Math.max(factorX, factorY) || factorX || factorY;
+    const newScale = Math.max(0.15, Math.min(6.0, Number((origScale * (1 + factor)).toFixed(2))));
+
+    if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
+    strokeRafRef.current = requestAnimationFrame(() => {
+      setPages((prev) => {
+        const updated = [...prev];
+        const curr = updated[currentPageIndex];
+        if (!curr) return prev;
+        const newStrokes = curr.strokes.map((s) =>
+          s.id === selectedStrokeId ? { ...s, scale: newScale } : s
+        );
+        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+        return updated;
+      });
+    });
+  };
+
+  const handleShapeResizePointerUp = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    setIsResizingStroke(false);
+    resizeStrokeStartRef.current = null;
   };
 
   const handlePointerUp = () => {
@@ -2672,28 +2714,40 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 {/* 4 Active Draggable Corner Handles for Direct Interactive Shape Scaling */}
                 <div
                   onPointerDown={(e) => handleShapeResizePointerDown(e, 'nw')}
-                  className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30"
+                  onPointerMove={handleShapeResizePointerMove}
+                  onPointerUp={handleShapeResizePointerUp}
+                  onPointerCancel={handleShapeResizePointerUp}
+                  className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
                   title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
                 >
                   <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
                 </div>
                 <div
                   onPointerDown={(e) => handleShapeResizePointerDown(e, 'ne')}
-                  className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30"
+                  onPointerMove={handleShapeResizePointerMove}
+                  onPointerUp={handleShapeResizePointerUp}
+                  onPointerCancel={handleShapeResizePointerUp}
+                  className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
                   title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
                 >
                   <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
                 </div>
                 <div
                   onPointerDown={(e) => handleShapeResizePointerDown(e, 'sw')}
-                  className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30"
+                  onPointerMove={handleShapeResizePointerMove}
+                  onPointerUp={handleShapeResizePointerUp}
+                  onPointerCancel={handleShapeResizePointerUp}
+                  className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
                   title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
                 >
                   <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
                 </div>
                 <div
                   onPointerDown={(e) => handleShapeResizePointerDown(e, 'se')}
-                  className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30"
+                  onPointerMove={handleShapeResizePointerMove}
+                  onPointerUp={handleShapeResizePointerUp}
+                  onPointerCancel={handleShapeResizePointerUp}
+                  className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
                   title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
                 >
                   <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
@@ -3914,55 +3968,33 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
           <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
 
-          {/* Chalk Color Picker (Compact with Popover Menu & Custom Color Picker) */}
+          {/* Chalk Color Picker (Gom gọn: Không hiển thị 3 màu ra ngoài, không hiển thị tên màu) */}
           <div className="relative shrink-0">
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setShowColorPopover((prev) => !prev)}
-                className="p-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white transition-all shadow-sm shrink-0 cursor-pointer"
-                title="Bảng màu phấn & dạ quang (Nhấp để chọn màu khác)"
-              >
-                <div
-                  className="w-5 h-5 rounded-full border-2 border-white shadow-md ring-2 shrink-0 transition-all"
-                  style={{
-                    backgroundColor: activeColor,
-                    boxShadow: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? `0 0 10px ${activeColor}` : undefined,
-                    borderColor: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? '#ffffff' : 'rgba(255,255,255,0.8)',
-                  }}
-                />
-                <span className="hidden xl:inline text-[11px] font-semibold text-slate-200">
-                  {chalkPalette.find((c) => c.value === activeColor)?.label || 'Màu phấn'}
-                </span>
-                <ChevronUp className={`w-3.5 h-3.5 text-slate-300 transition-transform ${showColorPopover ? 'rotate-180' : ''}`} />
-              </button>
-
-              {/* 3 Nút tắt nhanh màu phấn cốt lõi (Trắng, Vàng, Dạ quang chanh) */}
-              <div className="hidden sm:flex items-center gap-1 shrink-0 pl-0.5">
-                {[
-                  { val: '#ffffff', title: 'Phấn trắng' },
-                  { val: '#facc15', title: 'Phấn vàng' },
-                  { val: '#ccff00', title: 'Dạ quang chanh', isGlow: true },
-                ].map((sw) => (
-                  <button
-                    key={sw.val}
-                    onClick={() => {
-                      setActiveColor(sw.val);
-                      if (activeTool === 'eraser') setActiveTool('pen');
-                    }}
-                    title={sw.title}
-                    className={`w-5 h-5 rounded-full border transition-all cursor-pointer ${
-                      activeColor === sw.val
-                        ? 'scale-125 border-white ring-2 ring-white shadow-md'
-                        : 'border-white/40 opacity-75 hover:opacity-100 hover:scale-110'
-                    }`}
-                    style={{
-                      backgroundColor: sw.val,
-                      boxShadow: sw.isGlow ? `0 0 6px ${sw.val}` : undefined,
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
+            <button
+              onClick={() => {
+                setShowColorPopover((prev) => !prev);
+                setShowSizePopover(false);
+                setShowShapePicker(false);
+                setShowFunctionPicker(false);
+              }}
+              className={`p-1.5 sm:p-2 rounded-xl border flex items-center justify-center gap-1 transition-all shrink-0 cursor-pointer ${
+                showColorPopover
+                  ? 'bg-white/25 border-white ring-2 ring-white/50 shadow-lg'
+                  : 'bg-white/10 hover:bg-white/20 border-white/20'
+              }`}
+              title="Bảng màu phấn & dạ quang (17 màu + Dải RGB)"
+            >
+              <div
+                className="w-5 h-5 rounded-full border-2 border-white shadow-md shrink-0 transition-all"
+                style={{
+                  backgroundColor: activeColor,
+                  boxShadow: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff')
+                    ? `0 0 10px ${activeColor}`
+                    : '0 1px 3px rgba(0,0,0,0.5)',
+                }}
+              />
+              <ChevronUp className={`w-3 h-3 text-slate-300 transition-transform ${showColorPopover ? 'rotate-180' : ''}`} />
+            </button>
 
             {/* Color Palette Popover */}
             {showColorPopover && (
@@ -4104,36 +4136,76 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             )}
           </div>
 
-          <div className="h-6 w-px bg-white/20 mx-1" />
+          <div className="h-5 w-px bg-white/20 mx-0.5 shrink-0" />
 
-          {/* Stroke Size Selector - Mặc định các nét viết là 2p, riêng Khăn lau là 50p */}
-          <div className="flex items-center gap-1">
-            {chalkSizes.slice(0, 4).map((cs) => (
-              <button
-                key={cs.size}
-                onClick={() => setStrokeSize(cs.size)}
-                className={`w-7 h-7 rounded-xl flex items-center justify-center text-[10px] font-mono font-bold transition-all ${
-                  strokeSize === cs.size
-                    ? 'bg-white text-slate-900 shadow-md font-black ring-2 ring-white/50'
-                    : 'hover:bg-white/10 text-slate-300'
-                }`}
-                title={cs.label}
-              >
-                {cs.size}p
-              </button>
-            ))}
-            {activeTool === 'eraser' && (
-              <button
-                onClick={() => setStrokeSize(50)}
-                className={`px-2 h-7 rounded-xl flex items-center justify-center text-[10px] font-mono font-bold transition-all ${
-                  strokeSize === 50
-                    ? 'bg-rose-500 text-white shadow-md font-black ring-2 ring-rose-300'
-                    : 'hover:bg-white/10 text-rose-200'
-                }`}
-                title="Khăn lau bảng siêu tốc 50p"
-              >
-                50p
-              </button>
+          {/* Stroke Size Selector - Gom chung 2p, 4p, 6p, 8p, 12p, 14p, 50p thành 1 nút, mặc định 2p */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => {
+                setShowSizePopover((prev) => !prev);
+                setShowColorPopover(false);
+                setShowShapePicker(false);
+                setShowFunctionPicker(false);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-1 text-xs font-mono font-bold transition-all shrink-0 cursor-pointer ${
+                showSizePopover
+                  ? 'bg-white text-slate-900 border-white ring-2 ring-white/50 shadow-md font-black'
+                  : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'
+              }`}
+              title="Kích cỡ nét phấn & khăn lau (Mặc định 2p - Bấm để chọn 2p, 4p, 6p, 8p, 12p, 14p, 50p)"
+            >
+              <span className="font-mono font-bold text-xs">{strokeSize}p</span>
+              <ChevronUp className={`w-3 h-3 transition-transform ${showSizePopover ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Popover chọn kích cỡ nét */}
+            {showSizePopover && (
+              <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 p-2.5 rounded-2xl bg-slate-950/98 backdrop-blur-2xl border-2 border-white/25 shadow-2xl w-48 text-white flex flex-col gap-1 select-none animate-fade-in">
+                <div className="flex items-center justify-between pb-1.5 px-1 border-b border-white/10">
+                  <span className="text-[10px] font-black uppercase text-slate-300 tracking-wider">
+                    CỠ NÉT PHẤN & LAU
+                  </span>
+                  <button
+                    onClick={() => setShowSizePopover(false)}
+                    className="p-0.5 rounded hover:bg-white/10 text-slate-400 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1 max-h-64 overflow-y-auto custom-scrollbar pr-0.5">
+                  {[
+                    { size: 2, label: '2p (Mặc định)' },
+                    { size: 4, label: '4p (Nét vừa)' },
+                    { size: 6, label: '6p (Nét đậm)' },
+                    { size: 8, label: '8p (Tiêu đề)' },
+                    { size: 12, label: '12p (Nhấn mạnh)' },
+                    { size: 14, label: '14p (Siêu đậm)' },
+                    { size: 50, label: '50p (Khăn lau bảng)' },
+                  ].map((sz) => (
+                    <button
+                      key={sz.size}
+                      onClick={() => {
+                        setStrokeSize(sz.size);
+                        setShowSizePopover(false);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl text-left text-xs flex items-center justify-between transition-all cursor-pointer ${
+                        strokeSize === sz.size
+                          ? 'bg-emerald-600 text-white font-black shadow-sm ring-1 ring-emerald-400'
+                          : 'hover:bg-white/10 text-slate-200'
+                      }`}
+                    >
+                      <span className="font-medium text-[11px]">{sz.label}</span>
+                      <div
+                        className="rounded-full bg-white ml-2 shrink-0"
+                        style={{
+                          width: `${Math.min(sz.size, 16)}px`,
+                          height: `${Math.min(sz.size, 16)}px`,
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
