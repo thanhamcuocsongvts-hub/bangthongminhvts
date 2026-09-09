@@ -11,6 +11,12 @@ export interface GraphBounds {
   cy: number;
 }
 
+export interface GraphRenderOptions {
+  showGrid?: boolean;
+  showProjections?: boolean;
+  scale?: number;
+}
+
 export function isFunctionGraphTool(tool: WhiteboardTool): boolean {
   return [
     'func_linear',
@@ -32,14 +38,30 @@ export function isFunctionGraphTool(tool: WhiteboardTool): boolean {
   ].includes(tool);
 }
 
-export function getGraphBounds(points: StrokePoint[]): GraphBounds {
+export function getGraphBounds(points: StrokePoint[], scale: number = 1): GraphBounds {
   let minX = Infinity,
     maxX = -Infinity,
     minY = Infinity,
     maxY = -Infinity;
 
   if (!points || points.length === 0) {
-    return { minX: 100, maxX: 380, minY: 100, maxY: 340, width: 280, height: 240, cx: 240, cy: 220 };
+    return { minX: 100, maxX: 460, minY: 100, maxY: 420, width: 360, height: 320, cx: 280, cy: 260 };
+  }
+
+  if (points.length === 1) {
+    const p = points[0];
+    const w = 360 * Math.max(0.4, scale);
+    const h = 300 * Math.max(0.4, scale);
+    return {
+      minX: p.x,
+      maxX: p.x + w,
+      minY: p.y,
+      maxY: p.y + h,
+      width: w,
+      height: h,
+      cx: p.x + w / 2,
+      cy: p.y + h / 2,
+    };
   }
 
   points.forEach((p) => {
@@ -49,18 +71,35 @@ export function getGraphBounds(points: StrokePoint[]): GraphBounds {
     if (p.y > maxY) maxY = p.y;
   });
 
-  const width = Math.max(140, maxX - minX);
-  const height = Math.max(120, maxY - minY);
-  const cx = minX + width / 2;
-  const cy = minY + height / 2;
+  const rawWidth = Math.max(160, maxX - minX);
+  const rawHeight = Math.max(140, maxY - minY);
+  const cx = minX + rawWidth / 2;
+  const cy = minY + rawHeight / 2;
 
-  return { minX, maxX: minX + width, minY, maxY: minY + height, width, height, cx, cy };
+  // Apply scale relative to center if scale !== 1
+  const width = rawWidth * Math.max(0.3, scale);
+  const height = rawHeight * Math.max(0.3, scale);
+  const scaledMinX = cx - width / 2;
+  const scaledMaxX = cx + width / 2;
+  const scaledMinY = cy - height / 2;
+  const scaledMaxY = cy + height / 2;
+
+  return {
+    minX: scaledMinX,
+    maxX: scaledMaxX,
+    minY: scaledMinY,
+    maxY: scaledMaxY,
+    width,
+    height,
+    cx,
+    cy,
+  };
 }
 
 /**
- * Draws coordinate axes Oxy with arrows, unit ticks, and labels
+ * Draws Textbook-standard Coordinate Axes Oxy (Sách giáo khoa Toán Việt Nam)
  */
-function drawAxes(
+function drawTextbookAxes(
   ctx: CanvasRenderingContext2D,
   originX: number,
   originY: number,
@@ -68,628 +107,971 @@ function drawAxes(
   right: number,
   top: number,
   bottom: number,
-  color: string,
-  gridOpacity: number = 0.4
+  unitPx: number,
+  axisColor: string,
+  gridOpacity: number = 0.35,
+  showGrid: boolean = true
 ) {
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
+
+  // 1. Subtle Notebook Grid (Lưới ô ly chuẩn SGK)
+  if (showGrid && unitPx >= 16) {
+    ctx.save();
+    ctx.strokeStyle = axisColor;
+    ctx.globalAlpha = Math.min(0.25, gridOpacity * 0.4);
+    ctx.lineWidth = 0.6;
+    ctx.setLineDash([]);
+
+    // Vertical grid lines
+    for (let x = originX + unitPx; x <= right - 4; x += unitPx) {
+      ctx.beginPath();
+      ctx.moveTo(x, top + 4);
+      ctx.lineTo(x, bottom - 4);
+      ctx.stroke();
+    }
+    for (let x = originX - unitPx; x >= left + 4; x -= unitPx) {
+      ctx.beginPath();
+      ctx.moveTo(x, top + 4);
+      ctx.lineTo(x, bottom - 4);
+      ctx.stroke();
+    }
+    // Horizontal grid lines
+    for (let y = originY + unitPx; y <= bottom - 4; y += unitPx) {
+      ctx.beginPath();
+      ctx.moveTo(left + 4, y);
+      ctx.lineTo(right - 4, y);
+      ctx.stroke();
+    }
+    for (let y = originY - unitPx; y >= top + 4; y -= unitPx) {
+      ctx.beginPath();
+      ctx.moveTo(left + 4, y);
+      ctx.lineTo(right - 4, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // 2. Main Axes Lines
+  ctx.strokeStyle = axisColor;
+  ctx.fillStyle = axisColor;
   ctx.lineWidth = 1.6;
   ctx.setLineDash([]);
 
-  // Minor Grid lines
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = gridOpacity * 0.35;
-  ctx.lineWidth = 0.75;
-  const step = 28;
-  for (let x = originX + step; x < right - 10; x += step) {
-    ctx.beginPath();
-    ctx.moveTo(x, top + 5);
-    ctx.lineTo(x, bottom - 5);
-    ctx.stroke();
-  }
-  for (let x = originX - step; x > left + 10; x -= step) {
-    ctx.beginPath();
-    ctx.moveTo(x, top + 5);
-    ctx.lineTo(x, bottom - 5);
-    ctx.stroke();
-  }
-  for (let y = originY + step; y < bottom - 10; y += step) {
-    ctx.beginPath();
-    ctx.moveTo(left + 5, y);
-    ctx.lineTo(right - 5, y);
-    ctx.stroke();
-  }
-  for (let y = originY - step; y > top + 10; y -= step) {
-    ctx.beginPath();
-    ctx.moveTo(left + 5, y);
-    ctx.lineTo(right - 5, y);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Ox Axis
+  // Horizontal Axis Ox
   ctx.beginPath();
   ctx.moveTo(left, originY);
   ctx.lineTo(right, originY);
   ctx.stroke();
 
-  // Ox Arrow
-  const arrowSize = 7;
+  // Sharp Arrow for Ox
+  const arrowLen = 10;
+  const arrowWidth = 4;
   ctx.beginPath();
-  ctx.moveTo(right, originY);
-  ctx.lineTo(right - arrowSize * 1.5, originY - arrowSize * 0.7);
-  ctx.lineTo(right - arrowSize * 1.5, originY + arrowSize * 0.7);
+  ctx.moveTo(right + 2, originY);
+  ctx.lineTo(right - arrowLen, originY - arrowWidth);
+  ctx.lineTo(right - arrowLen + 2, originY);
+  ctx.lineTo(right - arrowLen, originY + arrowWidth);
   ctx.closePath();
   ctx.fill();
 
-  // Oy Axis
+  // Vertical Axis Oy
   ctx.beginPath();
   ctx.moveTo(originX, bottom);
   ctx.lineTo(originX, top);
   ctx.stroke();
 
-  // Oy Arrow
+  // Sharp Arrow for Oy
   ctx.beginPath();
-  ctx.moveTo(originX, top);
-  ctx.lineTo(originX - arrowSize * 0.7, top + arrowSize * 1.5);
-  ctx.lineTo(originX + arrowSize * 0.7, top + arrowSize * 1.5);
+  ctx.moveTo(originX, top - 2);
+  ctx.lineTo(originX - arrowWidth, top + arrowLen);
+  ctx.lineTo(originX, top + arrowLen - 2);
+  ctx.lineTo(originX + arrowWidth, top + arrowLen);
   ctx.closePath();
   ctx.fill();
 
-  // Labels: x, y, O
-  ctx.font = 'bold 12px "Be Vietnam Pro", sans-serif';
-  ctx.fillText('x', right - 12, originY + 16);
-  ctx.fillText('y', originX - 16, top + 12);
-  ctx.font = 'italic 11px "Be Vietnam Pro", serif';
-  ctx.fillText('O', originX - 13, originY + 14);
+  // 3. Coordinate Unit Ticks & Small Labels
+  ctx.lineWidth = 1.2;
+  const tickHalf = 3;
+  ctx.font = '10.5px "Cambria", "Times New Roman", serif';
+
+  // Ox Ticks
+  let countX = 0;
+  for (let x = originX + unitPx; x <= right - 16; x += unitPx) {
+    countX++;
+    ctx.beginPath();
+    ctx.moveTo(x, originY - tickHalf);
+    ctx.lineTo(x, originY + tickHalf);
+    ctx.stroke();
+    // Only label selected numbers to avoid clutter
+    if (unitPx > 26 || countX % 2 === 0 || countX === 1) {
+      ctx.fillText(String(countX), x - 3, originY + 14);
+    }
+  }
+  let countNegX = 0;
+  for (let x = originX - unitPx; x >= left + 14; x -= unitPx) {
+    countNegX++;
+    ctx.beginPath();
+    ctx.moveTo(x, originY - tickHalf);
+    ctx.lineTo(x, originY + tickHalf);
+    ctx.stroke();
+    if (unitPx > 26 || countNegX % 2 === 0 || countNegX === 1) {
+      ctx.fillText(`-${countNegX}`, x - 7, originY + 14);
+    }
+  }
+
+  // Oy Ticks
+  let countY = 0;
+  for (let y = originY - unitPx; y >= top + 16; y -= unitPx) {
+    countY++;
+    ctx.beginPath();
+    ctx.moveTo(originX - tickHalf, y);
+    ctx.lineTo(originX + tickHalf, y);
+    ctx.stroke();
+    if (unitPx > 26 || countY % 2 === 0 || countY === 1) {
+      ctx.fillText(String(countY), originX - 14, y + 4);
+    }
+  }
+  let countNegY = 0;
+  for (let y = originY + unitPx; y <= bottom - 14; y += unitPx) {
+    countNegY++;
+    ctx.beginPath();
+    ctx.moveTo(originX - tickHalf, y);
+    ctx.lineTo(originX + tickHalf, y);
+    ctx.stroke();
+    if (unitPx > 26 || countNegY % 2 === 0 || countNegY === 1) {
+      ctx.fillText(`-${countNegY}`, originX - 17, y + 4);
+    }
+  }
+
+  // 4. Textbook Labels: x, y, O
+  ctx.font = 'italic 13px "Cambria", "Times New Roman", serif';
+  ctx.fillText('x', right - 4, originY + 15);
+  ctx.fillText('y', originX - 15, top + 8);
+  ctx.fillText('O', originX - 13, originY + 13);
 
   ctx.restore();
 }
 
 /**
- * Draws a highlighted special point with label (e.g. Peak I, Inflection U, Intercepts)
+ * Draws Textbook Projection Lines (Đường dóng nét đứt chuẩn SGK từ điểm cực trị/đỉnh đến 2 trục)
  */
-function drawKeyPoint(
+function drawTextbookProjection(
   ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  label: string,
-  color: string,
-  align: 'top' | 'bottom' | 'left' | 'right' = 'top'
+  originX: number,
+  originY: number,
+  px: number,
+  py: number,
+  labelX: string,
+  labelY: string,
+  lineColor: string = 'rgba(56, 189, 248, 0.85)',
+  pointColor: string = '#facc15'
 ) {
   ctx.save();
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1.1;
+  ctx.setLineDash([3, 3]);
+
+  // Dóng xuống Ox
   ctx.beginPath();
-  ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+  ctx.moveTo(px, py);
+  ctx.lineTo(px, originY);
+  ctx.stroke();
+
+  // Dóng sang Oy
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.lineTo(originX, py);
+  ctx.stroke();
+
+  ctx.setLineDash([]);
+
+  // Điểm tọa độ đặc biệt (Solid Dot)
+  ctx.fillStyle = pointColor;
+  ctx.strokeStyle = '#0f172a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(px, py, 3.5, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
+  // Chữ số / nhãn tọa độ tại chân đường dóng
   ctx.fillStyle = '#facc15';
-  ctx.font = 'bold 11px "Be Vietnam Pro", sans-serif';
-  let tx = x + 5;
-  let ty = y - 5;
-  if (align === 'bottom') {
-    tx = x + 4;
-    ty = y + 14;
-  } else if (align === 'left') {
-    tx = x - 18;
-    ty = y + 4;
-  } else if (align === 'right') {
-    tx = x + 6;
-    ty = y + 4;
+  ctx.font = 'bold italic 11px "Cambria", "Times New Roman", serif';
+
+  if (labelX) {
+    const yOffset = py > originY ? -6 : 14;
+    ctx.fillText(labelX, px - 4, originY + yOffset);
   }
-  ctx.fillText(label, tx, ty);
+  if (labelY) {
+    const xOffset = px > originX ? -16 : 6;
+    ctx.fillText(labelY, originX + xOffset, py + 4);
+  }
+
   ctx.restore();
 }
 
 /**
- * Draws formula badge at the corner of graph (Disabled per user request)
+ * Draws Asymptote Line (Đường tiệm cận nét đứt chuẩn SGK)
  */
-function drawFormulaBadge(
-  _ctx: CanvasRenderingContext2D,
-  _x: number,
-  _y: number,
-  _formula: string,
-  _bgColor: string = 'rgba(15, 23, 42, 0.85)',
-  _textColor: string = '#facc15'
+function drawAsymptote(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  label?: string,
+  labelX?: number,
+  labelY?: number,
+  color: string = '#38bdf8'
 ) {
-  // Title / formula badge removed per user request
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.25;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+
+  if (label && labelX !== undefined && labelY !== undefined) {
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.font = 'italic 11px "Cambria", "Times New Roman", serif';
+    ctx.fillText(label, labelX, labelY);
+  }
+  ctx.restore();
 }
 
 /**
- * Main function to render all types of mathematical function graphs
+ * Plots a real analytical mathematical function y = f(x) smoothly
+ */
+function plotAnalyticalFunction(
+  ctx: CanvasRenderingContext2D,
+  fn: (x: number) => number,
+  xMinMath: number,
+  xMaxMath: number,
+  originX: number,
+  originY: number,
+  unitPx: number,
+  clampTop: number,
+  clampBottom: number,
+  strokeColor: string,
+  strokeWidth: number,
+  discontinuities: number[] = []
+) {
+  ctx.save();
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = Math.max(2.2, strokeWidth);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const stepPx = 0.75; // high precision evaluation
+  const xMinPx = originX + xMinMath * unitPx;
+  const xMaxPx = originX + xMaxMath * unitPx;
+
+  ctx.beginPath();
+  let isPenDown = false;
+
+  for (let px = xMinPx; px <= xMaxPx; px += stepPx) {
+    const xMath = (px - originX) / unitPx;
+
+    // Check proximity to vertical asymptotes
+    let nearDiscontinuity = false;
+    for (const d of discontinuities) {
+      if (Math.abs(xMath - d) < 0.04) {
+        nearDiscontinuity = true;
+        break;
+      }
+    }
+
+    if (nearDiscontinuity) {
+      if (isPenDown) {
+        ctx.stroke();
+        ctx.beginPath();
+        isPenDown = false;
+      }
+      continue;
+    }
+
+    const yMath = fn(xMath);
+    if (isNaN(yMath) || !isFinite(yMath)) {
+      if (isPenDown) {
+        ctx.stroke();
+        ctx.beginPath();
+        isPenDown = false;
+      }
+      continue;
+    }
+
+    const py = originY - yMath * unitPx;
+
+    // Clamp inside viewport
+    if (py < clampTop - 10 || py > clampBottom + 10) {
+      if (isPenDown) {
+        ctx.lineTo(px, Math.max(clampTop - 10, Math.min(clampBottom + 10, py)));
+        ctx.stroke();
+        ctx.beginPath();
+        isPenDown = false;
+      }
+      continue;
+    }
+
+    if (!isPenDown) {
+      ctx.moveTo(px, py);
+      isPenDown = true;
+    } else {
+      ctx.lineTo(px, py);
+    }
+  }
+
+  if (isPenDown) {
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Main Function Graph Drawer with Textbook Standard Presentation & Real Math Geometry
  */
 export function drawFunctionGraph(
   ctx: CanvasRenderingContext2D,
   tool: WhiteboardTool,
   points: StrokePoint[],
   color: string,
-  size: number
+  size: number,
+  scale: number = 1,
+  options?: GraphRenderOptions
 ) {
-  const b = getGraphBounds(points);
+  const effectiveScale = options?.scale ?? scale ?? 1;
+  const showGrid = options?.showGrid ?? true;
+  const showProjections = options?.showProjections ?? true;
+
+  const b = getGraphBounds(points, effectiveScale);
   const { minX, maxX, minY, maxY, width, height, cx, cy } = b;
+
+  // Viewport bounds
+  const left = minX + 12;
+  const right = maxX - 12;
+  const top = minY + 12;
+  const bottom = maxY - 12;
+
+  // Mathematical unit scaling (1 unit = unitPx)
+  // Adaptive unit size so graphs look clean across any box size
+  const unitPx = Math.max(24, Math.min(65, width / 8.5));
 
   ctx.save();
 
   switch (tool) {
     case 'func_linear': {
-      // 1. Hàm bậc nhất y = ax + b (Đường thẳng đi qua hệ trục)
-      const originX = cx - width * 0.1;
+      // 1. Hàm Bậc Nhất: y = 0.5x + 1
+      const originX = cx - width * 0.08;
       const originY = cy + height * 0.1;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      // Line y = 0.6x - 12 (in screen coordinates: y decreases as x increases)
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      const x1 = minX + 15;
-      const y1 = originY + height * 0.32;
-      const x2 = maxX - 15;
-      const y2 = originY - height * 0.42;
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
+      // Function: y = 0.5x + 1
+      const fn = (x: number) => 0.5 * x + 1;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      // Intercepts
-      const yIntY = originY - height * 0.18;
-      const xIntX = originX + width * 0.22;
-      drawKeyPoint(ctx, originX, yIntY, 'b (0, b)', color, 'left');
-      drawKeyPoint(ctx, xIntX, originY, '-b/a', color, 'bottom');
-      drawFormulaBadge(ctx, minX + 10, minY + 8, 'y = ax + b (a > 0)');
+      if (showProjections) {
+        // Intercept Oy: (0, 1)
+        drawTextbookProjection(ctx, originX, originY, originX, originY - 1 * unitPx, '', '1', '#38bdf8');
+        // Intercept Ox: (-2, 0)
+        drawTextbookProjection(ctx, originX, originY, originX - 2 * unitPx, originY, '-2', '', '#38bdf8');
+        // Extra point: (2, 2)
+        drawTextbookProjection(ctx, originX, originY, originX + 2 * unitPx, originY - 2 * unitPx, '2', '2', '#38bdf8');
+      }
       break;
     }
 
     case 'func_quadratic_up': {
-      // 2. Hàm bậc 2 (Parabol a > 0: Bề lõm quay lên)
-      const originX = cx;
-      const originY = cy + height * 0.2;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      // 2. Parabol a > 0: y = x² - 2x - 1 = (x-1)² - 2
+      // Đỉnh I(1, -2). Trục đối xứng x = 1
+      const originX = cx - width * 0.05;
+      const originY = cy - height * 0.05;
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const vertexX = originX;
-      const vertexY = originY + height * 0.18; // Peak below Ox
-      const spreadX = width * 0.4;
-      const topY = minY + 15;
+      // Trục đối xứng x = 1 (nét đứt)
+      const axisX = originX + 1 * unitPx;
+      drawAsymptote(ctx, axisX, top + 5, axisX, bottom - 5, 'x = 1', axisX + 4, top + 16, '#38bdf8');
 
-      // Axis of symmetry (dashed)
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(vertexX, topY);
-      ctx.lineTo(vertexX, maxY - 10);
-      ctx.stroke();
-      ctx.restore();
+      // Parabola y = (x-1)² - 2
+      const fn = (x: number) => (x - 1) * (x - 1) - 2;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      // Parabola Curve
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(vertexX - spreadX, topY);
-      ctx.quadraticCurveTo(vertexX, vertexY + 12, vertexX + spreadX, topY);
-      ctx.stroke();
+      if (showProjections) {
+        // Đỉnh I(1, -2)
+        const vPx = originX + 1 * unitPx;
+        const vPy = originY - -2 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, vPx, vPy, '1', '-2', '#38bdf8', '#facc15');
 
-      drawKeyPoint(ctx, vertexX, vertexY, 'I (-b/2a; -Δ/4a)', color, 'bottom');
-      drawFormulaBadge(ctx, minX + 10, minY + 8, 'y = ax² + bx + c (a > 0)');
+        // Giao Oy: (0, -1)
+        drawTextbookProjection(ctx, originX, originY, originX, originY - -1 * unitPx, '', '-1', '#38bdf8', '#38bdf8');
+        // Điểm đối xứng (2, -1)
+        drawTextbookProjection(ctx, originX, originY, originX + 2 * unitPx, originY - -1 * unitPx, '2', '', '#38bdf8', '#38bdf8');
+
+        // Nhãn đỉnh I
+        ctx.fillStyle = '#facc15';
+        ctx.font = 'bold 12px "Cambria", "Times New Roman", serif';
+        ctx.fillText('I', vPx + 6, vPy + 14);
+      }
       break;
     }
 
     case 'func_quadratic_down': {
-      // 3. Hàm bậc 2 (Parabol a < 0: Bề lõm quay xuống)
-      const originX = cx;
-      const originY = cy - height * 0.15;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      // 3. Parabol a < 0: y = -(x-1)² + 2 = -x² + 2x + 1
+      // Đỉnh I(1, 2). Trục đối xứng x = 1
+      const originX = cx - width * 0.05;
+      const originY = cy + height * 0.12;
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const vertexX = originX;
-      const vertexY = originY - height * 0.22; // Peak above Ox
-      const spreadX = width * 0.4;
-      const bottomY = maxY - 15;
+      // Trục đối xứng x = 1 (nét đứt)
+      const axisX = originX + 1 * unitPx;
+      drawAsymptote(ctx, axisX, top + 5, axisX, bottom - 5, 'x = 1', axisX + 4, top + 16, '#38bdf8');
 
-      // Axis of symmetry (dashed)
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(vertexX, minY + 10);
-      ctx.lineTo(vertexX, bottomY);
-      ctx.stroke();
-      ctx.restore();
+      // Parabola y = -(x-1)² + 2
+      const fn = (x: number) => -(x - 1) * (x - 1) + 2;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      // Parabola Curve
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(vertexX - spreadX, bottomY);
-      ctx.quadraticCurveTo(vertexX, vertexY - 12, vertexX + spreadX, bottomY);
-      ctx.stroke();
+      if (showProjections) {
+        // Đỉnh I(1, 2)
+        const vPx = originX + 1 * unitPx;
+        const vPy = originY - 2 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, vPx, vPy, '1', '2', '#38bdf8', '#facc15');
 
-      drawKeyPoint(ctx, vertexX, vertexY, 'I (-b/2a; -Δ/4a)', color, 'top');
-      drawFormulaBadge(ctx, minX + 10, minY + 8, 'y = ax² + bx + c (a < 0)');
+        // Giao Oy: (0, 1)
+        drawTextbookProjection(ctx, originX, originY, originX, originY - 1 * unitPx, '', '1', '#38bdf8', '#38bdf8');
+        // Điểm đối xứng (2, 1)
+        drawTextbookProjection(ctx, originX, originY, originX + 2 * unitPx, originY - 1 * unitPx, '2', '', '#38bdf8', '#38bdf8');
+
+        // Nhãn đỉnh I
+        ctx.fillStyle = '#facc15';
+        ctx.font = 'bold 12px "Cambria", "Times New Roman", serif';
+        ctx.fillText('I', vPx + 6, vPy - 8);
+      }
       break;
     }
 
     case 'func_cubic_2extrema_pos': {
-      // 4. Hàm bậc 3: a > 0 có 2 cực trị (Đồ thị chữ N)
+      // 4. Hàm Bậc 3 a > 0 có 2 cực trị (Đồ thị chữ N chuẩn SGK 12)
+      // y = x³ - 3x.
+      // Cực đại: A(-1, 2). Cực tiểu: B(1, -2). Điểm uốn: U(0, 0)
       const originX = cx;
       const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const cdX = originX - width * 0.22;
-      const cdY = originY - height * 0.28; // Cực đại
-      const ctX = originX + width * 0.22;
-      const ctY = originY + height * 0.28; // Cực tiểu
-      const uX = originX;
-      const uY = originY; // Điểm uốn
+      // Function: y = x³ - 3x (dáng chữ N uốn lượn sắc sảo)
+      const fn = (x: number) => x * x * x - 3 * x;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      // Cubic curve N-shape
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, maxY - 15);
-      ctx.bezierCurveTo(cdX - width * 0.15, cdY - height * 0.05, cdX - width * 0.05, cdY, cdX, cdY);
-      ctx.bezierCurveTo(cdX + width * 0.15, cdY, ctX - width * 0.15, ctY, ctX, ctY);
-      ctx.bezierCurveTo(ctX + width * 0.05, ctY, ctX + width * 0.15, ctY + height * 0.05, maxX - 15, minY + 15);
-      ctx.stroke();
+      if (showProjections) {
+        // Cực đại: (-1, 2)
+        const cdX = originX - 1 * unitPx;
+        const cdY = originY - 2 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, cdX, cdY, '-1', '2', '#38bdf8', '#facc15');
 
-      // Extrema & Inflection points
-      drawKeyPoint(ctx, cdX, cdY, 'CĐ', color, 'top');
-      drawKeyPoint(ctx, ctX, ctY, 'CT', color, 'bottom');
-      drawKeyPoint(ctx, uX, uY, 'U', color, 'right');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = ax³+bx²+cx+d (a>0, 2 Cực Trị)');
+        // Cực tiểu: (1, -2)
+        const ctX = originX + 1 * unitPx;
+        const ctY = originY - -2 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, ctX, ctY, '1', '-2', '#38bdf8', '#facc15');
+
+        // Điểm uốn U(0, 0)
+        ctx.fillStyle = '#facc15';
+        ctx.font = 'bold 11px "Cambria", "Times New Roman", serif';
+        ctx.fillText('U', originX + 5, originY - 5);
+      }
       break;
     }
 
     case 'func_cubic_2extrema_neg': {
-      // 5. Hàm bậc 3: a < 0 có 2 cực trị (Đồ thị chữ N ngược)
+      // 5. Hàm Bậc 3 a < 0 có 2 cực trị (Đồ thị chữ N ngược)
+      // y = -x³ + 3x
+      // Cực tiểu: (-1, -2). Cực đại: (1, 2). Điểm uốn: U(0, 0)
       const originX = cx;
       const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const ctX = originX - width * 0.22;
-      const ctY = originY + height * 0.28; // Cực tiểu
-      const cdX = originX + width * 0.22;
-      const cdY = originY - height * 0.28; // Cực đại
+      const fn = (x: number) => -x * x * x + 3 * x;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, minY + 15);
-      ctx.bezierCurveTo(ctX - width * 0.15, ctY + height * 0.05, ctX - width * 0.05, ctY, ctX, ctY);
-      ctx.bezierCurveTo(ctX + width * 0.15, ctY, cdX - width * 0.15, cdY, cdX, cdY);
-      ctx.bezierCurveTo(cdX + width * 0.05, cdY, cdX + width * 0.15, cdY - height * 0.05, maxX - 15, maxY - 15);
-      ctx.stroke();
+      if (showProjections) {
+        // Cực tiểu: (-1, -2)
+        const ctX = originX - 1 * unitPx;
+        const ctY = originY - -2 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, ctX, ctY, '-1', '-2', '#38bdf8', '#facc15');
 
-      drawKeyPoint(ctx, ctX, ctY, 'CT', color, 'bottom');
-      drawKeyPoint(ctx, cdX, cdY, 'CĐ', color, 'top');
-      drawKeyPoint(ctx, originX, originY, 'U', color, 'left');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = ax³+bx²+cx+d (a<0, 2 Cực Trị)');
+        // Cực đại: (1, 2)
+        const cdX = originX + 1 * unitPx;
+        const cdY = originY - 2 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, cdX, cdY, '1', '2', '#38bdf8', '#facc15');
+
+        ctx.fillStyle = '#facc15';
+        ctx.font = 'bold 11px "Cambria", "Times New Roman", serif';
+        ctx.fillText('U', originX - 14, originY - 5);
+      }
       break;
     }
 
     case 'func_cubic_noextrema_pos': {
-      // 6. Hàm bậc 3: a > 0 không có cực trị (Đồng biến trên R)
+      // 6. Hàm Bậc 3 a > 0 không có cực trị (Đồng biến trên R)
+      // y = 0.5x³ + x. Điểm uốn U(0, 0)
       const originX = cx;
       const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, maxY - 15);
-      ctx.bezierCurveTo(originX - width * 0.25, originY + height * 0.3, originX - width * 0.1, originY + height * 0.05, originX, originY);
-      ctx.bezierCurveTo(originX + width * 0.1, originY - height * 0.05, originX + width * 0.25, originY - height * 0.3, maxX - 15, minY + 15);
-      ctx.stroke();
+      const fn = (x: number) => 0.4 * x * x * x + 0.8 * x;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      drawKeyPoint(ctx, originX, originY, 'U (Điểm Uốn)', color, 'right');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = ax³+... (a>0, Đồng Biến)');
+      if (showProjections) {
+        // Point (1, 1.2)
+        const pX = originX + 1 * unitPx;
+        const pY = originY - 1.2 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, pX, pY, '1', '', '#38bdf8', '#facc15');
+      }
       break;
     }
 
     case 'func_cubic_noextrema_neg': {
-      // 7. Hàm bậc 3: a < 0 không có cực trị (Nghịch biến trên R)
+      // 7. Hàm Bậc 3 a < 0 không có cực trị (Nghịch biến trên R)
+      // y = -0.4x³ - 0.8x
       const originX = cx;
       const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, minY + 15);
-      ctx.bezierCurveTo(originX - width * 0.25, originY - height * 0.3, originX - width * 0.1, originY - height * 0.05, originX, originY);
-      ctx.bezierCurveTo(originX + width * 0.1, originY + height * 0.05, originX + width * 0.25, originY + height * 0.3, maxX - 15, maxY - 15);
-      ctx.stroke();
-
-      drawKeyPoint(ctx, originX, originY, 'U (Điểm Uốn)', color, 'left');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = ax³+... (a<0, Nghịch Biến)');
+      const fn = (x: number) => -0.4 * x * x * x - 0.8 * x;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
       break;
     }
 
     case 'func_cubic_inflection_pos': {
-      // 8. Hàm bậc 3: a > 0 có tiếp tuyến ngang tại điểm uốn (y' = 0 tại 1 điểm)
+      // 8. Hàm Bậc 3 có tiếp tuyến ngang tại điểm uốn (y' = 0 tại x = 0)
+      // y = 0.3x³
       const originX = cx;
       const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(originX - width * 0.25, originY);
-      ctx.lineTo(originX + width * 0.25, originY);
-      ctx.stroke();
-      ctx.restore();
+      // Tiếp tuyến ngang tại U(0, 0) (trùng Ox)
+      drawAsymptote(ctx, originX - 2 * unitPx, originY, originX + 2 * unitPx, originY, "y' = 0", originX + 1.8 * unitPx, originY - 6, '#38bdf8');
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, maxY - 15);
-      ctx.bezierCurveTo(originX - width * 0.25, originY + height * 0.25, originX - width * 0.15, originY, originX, originY);
-      ctx.bezierCurveTo(originX + width * 0.15, originY, originX + width * 0.25, originY - height * 0.25, maxX - 15, minY + 15);
-      ctx.stroke();
-
-      drawKeyPoint(ctx, originX, originY, 'U (y\' = 0)', color, 'top');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = a(x-x₀)³+y₀ (Tiếp Tuyến Ngang)');
+      const fn = (x: number) => 0.35 * x * x * x;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
       break;
     }
 
     case 'func_cubic_inflection_neg': {
-      // 9. Hàm bậc 3: a < 0 có tiếp tuyến ngang tại điểm uốn
+      // 9. Hàm Bậc 3 a < 0 có tiếp tuyến ngang tại điểm uốn
       const originX = cx;
       const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(originX - width * 0.25, originY);
-      ctx.lineTo(originX + width * 0.25, originY);
-      ctx.stroke();
-      ctx.restore();
+      drawAsymptote(ctx, originX - 2 * unitPx, originY, originX + 2 * unitPx, originY, "y' = 0", originX + 1.8 * unitPx, originY - 6, '#38bdf8');
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, minY + 15);
-      ctx.bezierCurveTo(originX - width * 0.25, originY - height * 0.25, originX - width * 0.15, originY, originX, originY);
-      ctx.bezierCurveTo(originX + width * 0.15, originY, originX + width * 0.25, originY + height * 0.25, maxX - 15, maxY - 15);
-      ctx.stroke();
-
-      drawKeyPoint(ctx, originX, originY, 'U (y\' = 0)', color, 'bottom');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = a(x-x₀)³+y₀ (a < 0)');
+      const fn = (x: number) => -0.35 * x * x * x;
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
       break;
     }
 
     case 'func_rational_pos': {
-      // 10. Hàm nhất biến: y = (ax+b)/(cx+d), ad - bc > 0 (Đồng biến trên từng khoảng)
-      const originX = cx;
-      const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      // 10. Hàm Phân Thức Nhất Biến: y = (x - 1)/(x + 1) = 1 - 2/(x + 1)
+      // Đồng biến trên từng khoảng (ad - bc = 1 - (-1) = 2 > 0)
+      // Tiệm cận đứng: x = -1. Tiệm cận ngang: y = 1. Tâm đối xứng: I(-1, 1)
+      const originX = cx + width * 0.08;
+      const originY = cy + height * 0.08;
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const asympX = originX - width * 0.08; // Tiệm cận đứng x = x0
-      const asympY = originY - height * 0.08; // Tiệm cận ngang y = y0
+      const tcDX = originX - 1 * unitPx; // x = -1
+      const tcNY = originY - 1 * unitPx; // y = 1
 
-      // Asymptotes (dashed)
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.setLineDash([5, 4]);
-      ctx.lineWidth = 1.3;
-      // Vertical asymptote
-      ctx.beginPath();
-      ctx.moveTo(asympX, minY + 8);
-      ctx.lineTo(asympX, maxY - 8);
-      ctx.stroke();
-      // Horizontal asymptote
-      ctx.beginPath();
-      ctx.moveTo(minX + 8, asympY);
-      ctx.lineTo(maxX - 8, asympY);
-      ctx.stroke();
-      ctx.restore();
+      // Tiệm cận đứng x = -1
+      drawAsymptote(ctx, tcDX, top + 5, tcDX, bottom - 5, 'x = -1', tcDX - 32, top + 18, '#38bdf8');
+      // Tiệm cận ngang y = 1
+      drawAsymptote(ctx, left + 5, tcNY, right - 5, tcNY, 'y = 1', right - 32, tcNY - 6, '#38bdf8');
 
-      // Branch 1 (Left branch: from bottom to asympY from below)
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, asympY + 8);
-      ctx.bezierCurveTo(asympX - width * 0.25, asympY + 12, asympX - 12, asympY + height * 0.2, asympX - 6, maxY - 15);
-      ctx.stroke();
+      // Hyperbola function
+      const fn = (x: number) => (x - 1) / (x + 1);
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size,
+        [-1]
+      );
 
-      // Branch 2 (Right branch: from asympY + height to asympY from above)
-      ctx.beginPath();
-      ctx.moveTo(asympX + 6, minY + 15);
-      ctx.bezierCurveTo(asympX + 12, asympY - height * 0.2, asympX + width * 0.25, asympY - 12, maxX - 15, asympY - 8);
-      ctx.stroke();
+      if (showProjections) {
+        // Tâm đối xứng I(-1, 1)
+        ctx.fillStyle = '#facc15';
+        ctx.beginPath();
+        ctx.arc(tcDX, tcNY, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.font = 'bold 12px "Cambria", "Times New Roman", serif';
+        ctx.fillText('I', tcDX - 12, tcNY - 6);
 
-      drawKeyPoint(ctx, asympX, asympY, 'I (Tâm ĐX)', color, 'top');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = (ax+b)/(cx+d) (ad - bc > 0)');
+        // Giao Oy: (0, -1)
+        drawTextbookProjection(ctx, originX, originY, originX, originY - -1 * unitPx, '', '-1', '#38bdf8', '#38bdf8');
+        // Giao Ox: (1, 0)
+        drawTextbookProjection(ctx, originX, originY, originX + 1 * unitPx, originY, '1', '', '#38bdf8', '#38bdf8');
+      }
       break;
     }
 
     case 'func_rational_neg': {
-      // 11. Hàm nhất biến: y = (ax+b)/(cx+d), ad - bc < 0 (Nghịch biến trên từng khoảng)
-      const originX = cx;
-      const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      // 11. Hàm Phân Thức Nhất Biến: y = (2x - 1)/(x - 1) = 2 + 1/(x - 1)
+      // Nghịch biến trên từng khoảng (ad - bc = -2 - (-1) = -1 < 0)
+      // Tiệm cận đứng: x = 1. Tiệm cận ngang: y = 2. Tâm đối xứng: I(1, 2)
+      const originX = cx - width * 0.08;
+      const originY = cy + height * 0.12;
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const asympX = originX + width * 0.06; // Tiệm cận đứng
-      const asympY = originY + height * 0.06; // Tiệm cận ngang
+      const tcDX = originX + 1 * unitPx; // x = 1
+      const tcNY = originY - 2 * unitPx; // y = 2
 
-      // Asymptotes (dashed)
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.setLineDash([5, 4]);
-      ctx.lineWidth = 1.3;
-      // Vertical asymptote
-      ctx.beginPath();
-      ctx.moveTo(asympX, minY + 8);
-      ctx.lineTo(asympX, maxY - 8);
-      ctx.stroke();
-      // Horizontal asymptote
-      ctx.beginPath();
-      ctx.moveTo(minX + 8, asympY);
-      ctx.lineTo(maxX - 8, asympY);
-      ctx.stroke();
-      ctx.restore();
+      // Tiệm cận đứng x = 1
+      drawAsymptote(ctx, tcDX, top + 5, tcDX, bottom - 5, 'x = 1', tcDX + 5, top + 18, '#38bdf8');
+      // Tiệm cận ngang y = 2
+      drawAsymptote(ctx, left + 5, tcNY, right - 5, tcNY, 'y = 2', right - 32, tcNY - 6, '#38bdf8');
 
-      // Branch 1 (Left branch: from top down to horizontal asymptote)
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, asympY - 8);
-      ctx.bezierCurveTo(asympX - width * 0.25, asympY - 12, asympX - 12, asympY - height * 0.2, asympX - 6, minY + 15);
-      ctx.stroke();
+      const fn = (x: number) => (2 * x - 1) / (x - 1);
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size,
+        [1]
+      );
 
-      // Branch 2 (Right branch: from vertical asymptote down to horizontal asymptote)
-      ctx.beginPath();
-      ctx.moveTo(asympX + 6, maxY - 15);
-      ctx.bezierCurveTo(asympX + 12, asympY + height * 0.2, asympX + width * 0.25, asympY + 12, maxX - 15, asympY + 8);
-      ctx.stroke();
+      if (showProjections) {
+        // Tâm đối xứng I(1, 2)
+        ctx.fillStyle = '#facc15';
+        ctx.beginPath();
+        ctx.arc(tcDX, tcNY, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.font = 'bold 12px "Cambria", "Times New Roman", serif';
+        ctx.fillText('I', tcDX + 6, tcNY - 6);
 
-      drawKeyPoint(ctx, asympX, asympY, 'I (Tâm ĐX)', color, 'bottom');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = (ax+b)/(cx+d) (ad - bc < 0)');
+        // Giao Oy: (0, 1)
+        drawTextbookProjection(ctx, originX, originY, originX, originY - 1 * unitPx, '', '1', '#38bdf8', '#38bdf8');
+        // Giao Ox: (0.5, 0)
+        drawTextbookProjection(ctx, originX, originY, originX + 0.5 * unitPx, originY, '0.5', '', '#38bdf8', '#38bdf8');
+      }
       break;
     }
 
     case 'func_frac21': {
-      // 12. Hàm bậc 2 trên bậc 1: y = (ax² + bx + c) / (dx + e) (Có tiệm cận xiên & đứng)
-      const originX = cx;
-      const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      // 12. Hàm Bậc 2 trên Bậc 1: y = (x² - x + 1)/(x - 1) = x + 1/(x - 1)
+      // Tiệm cận đứng: x = 1
+      // Tiệm cận xiên: y = x
+      // Cực tiểu: (2, 3). Cực đại: (0, -1). Tâm đối xứng I(1, 1)
+      const originX = cx - width * 0.08;
+      const originY = cy + height * 0.05;
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const asympX = originX; // Tiệm cận đứng x = x0
+      const tcDX = originX + 1 * unitPx;
+      // Tiệm cận đứng x = 1
+      drawAsymptote(ctx, tcDX, top + 5, tcDX, bottom - 5, 'x = 1', tcDX + 6, top + 18, '#38bdf8');
 
-      // Asymptotes (dashed)
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.setLineDash([5, 4]);
-      ctx.lineWidth = 1.3;
-      // Tiệm cận đứng
-      ctx.beginPath();
-      ctx.moveTo(asympX, minY + 8);
-      ctx.lineTo(asympX, maxY - 8);
-      ctx.stroke();
       // Tiệm cận xiên y = x
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, originY + height * 0.38);
-      ctx.lineTo(maxX - 15, originY - height * 0.38);
-      ctx.stroke();
-      ctx.restore();
+      const x1Math = (left - originX) / unitPx;
+      const x2Math = (right - originX) / unitPx;
+      drawAsymptote(
+        ctx,
+        originX + x1Math * unitPx,
+        originY - x1Math * unitPx,
+        originX + x2Math * unitPx,
+        originY - x2Math * unitPx,
+        'y = x',
+        right - 35,
+        originY - x2Math * unitPx + 15,
+        '#38bdf8'
+      );
 
-      // Upper Branch (Cực tiểu)
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(asympX + 8, minY + 15);
-      ctx.quadraticCurveTo(asympX + width * 0.18, originY - height * 0.12, maxX - 15, originY - height * 0.44);
-      ctx.stroke();
+      const fn = (x: number) => x + 1 / (x - 1);
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size,
+        [1]
+      );
 
-      // Lower Branch (Cực đại)
-      ctx.beginPath();
-      ctx.moveTo(asympX - 8, maxY - 15);
-      ctx.quadraticCurveTo(asympX - width * 0.18, originY + height * 0.12, minX + 15, originY + height * 0.44);
-      ctx.stroke();
+      if (showProjections) {
+        // Cực tiểu: (2, 3)
+        const ctX = originX + 2 * unitPx;
+        const ctY = originY - 3 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, ctX, ctY, '2', '3', '#38bdf8', '#facc15');
 
-      drawKeyPoint(ctx, asympX + width * 0.18, originY - height * 0.12, 'CT', color, 'top');
-      drawKeyPoint(ctx, asympX - width * 0.18, originY + height * 0.12, 'CĐ', color, 'bottom');
-      drawKeyPoint(ctx, asympX, originY, 'I (Giao 2 TC)', color, 'right');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = (ax²+bx+c)/(dx+e) (Bậc 2 / Bậc 1)');
+        // Cực đại: (0, -1)
+        const cdX = originX;
+        const cdY = originY - -1 * unitPx;
+        drawTextbookProjection(ctx, originX, originY, cdX, cdY, '', '-1', '#38bdf8', '#facc15');
+
+        // Tâm đối xứng I(1, 1)
+        const iX = originX + 1 * unitPx;
+        const iY = originY - 1 * unitPx;
+        ctx.fillStyle = '#facc15';
+        ctx.beginPath();
+        ctx.arc(iX, iY, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillText('I', iX + 6, iY - 4);
+      }
       break;
     }
 
     case 'func_exp_pos': {
-      // 13. Hàm số mũ y = a^x (a > 1, Đồng biến)
-      const originX = cx - width * 0.15;
+      // 13. Hàm Số Mũ y = a^x (a > 1, ví dụ y = 2^x)
+      // Tiệm cận ngang: Ox (y = 0). Điểm đặc biệt: (0, 1) và (1, 2)
+      const originX = cx - width * 0.12;
       const originY = cy + height * 0.18;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      // Special point (0, 1)
-      const unitY = height * 0.22;
-      const pt01Y = originY - unitY;
+      const fn = (x: number) => Math.pow(2, x);
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 15, originY - 2); // Asymptotic to Ox on the left
-      ctx.bezierCurveTo(originX - width * 0.2, originY - 4, originX - 10, pt01Y + 15, originX, pt01Y);
-      ctx.bezierCurveTo(originX + width * 0.15, pt01Y - unitY * 0.6, originX + width * 0.32, minY + 20, maxX - 20, minY + 10);
-      ctx.stroke();
-
-      drawKeyPoint(ctx, originX, pt01Y, '(0, 1)', color, 'left');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = aˣ (a > 1)');
+      if (showProjections) {
+        // Điểm (0, 1)
+        drawTextbookProjection(ctx, originX, originY, originX, originY - 1 * unitPx, '', '1', '#38bdf8', '#facc15');
+        // Điểm (1, 2)
+        drawTextbookProjection(ctx, originX, originY, originX + 1 * unitPx, originY - 2 * unitPx, '1', '2', '#38bdf8', '#facc15');
+        // Điểm (2, 4)
+        if (originY - 4 * unitPx > top) {
+          drawTextbookProjection(ctx, originX, originY, originX + 2 * unitPx, originY - 4 * unitPx, '2', '4', '#38bdf8', '#facc15');
+        }
+      }
       break;
     }
 
     case 'func_exp_neg': {
-      // 14. Hàm số mũ y = a^x (0 < a < 1, Nghịch biến)
-      const originX = cx + width * 0.15;
+      // 14. Hàm Số Mũ y = a^x (0 < a < 1, ví dụ y = (1/2)^x)
+      const originX = cx + width * 0.12;
       const originY = cy + height * 0.18;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const unitY = height * 0.22;
-      const pt01Y = originY - unitY;
+      const fn = (x: number) => Math.pow(0.5, x);
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        (left - originX) / unitPx,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(minX + 20, minY + 10);
-      ctx.bezierCurveTo(originX - width * 0.32, minY + 20, originX - width * 0.15, pt01Y - unitY * 0.6, originX, pt01Y);
-      ctx.bezierCurveTo(originX + 10, pt01Y + 15, originX + width * 0.2, originY - 4, maxX - 15, originY - 2);
-      ctx.stroke();
-
-      drawKeyPoint(ctx, originX, pt01Y, '(0, 1)', color, 'right');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = aˣ (0 < a < 1)');
+      if (showProjections) {
+        // Điểm (0, 1)
+        drawTextbookProjection(ctx, originX, originY, originX, originY - 1 * unitPx, '', '1', '#38bdf8', '#facc15');
+        // Điểm (-1, 2)
+        drawTextbookProjection(ctx, originX, originY, originX - 1 * unitPx, originY - 2 * unitPx, '-1', '2', '#38bdf8', '#facc15');
+      }
       break;
     }
 
     case 'func_log_pos': {
-      // 15. Hàm logarit y = log_a(x) (a > 1, Đồng biến)
-      const originX = cx - width * 0.22;
+      // 15. Hàm Logarit y = log_a(x) (a > 1, ví dụ y = log2(x))
+      // Tiệm cận đứng: Oy (x = 0). Điểm đặc biệt: (1, 0) và (2, 1)
+      const originX = cx - width * 0.2;
       const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      // Special point (1, 0)
-      const unitX = width * 0.22;
-      const pt10X = originX + unitX;
+      const fn = (x: number) => (x > 0 ? Math.log2(x) : -Infinity);
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        0.04,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(originX + 3, maxY - 15); // Asymptotic to Oy below
-      ctx.bezierCurveTo(originX + 6, originY + height * 0.25, originX + unitX * 0.6, originY + 8, pt10X, originY);
-      ctx.bezierCurveTo(pt10X + unitX * 0.6, originY - 12, maxX - width * 0.15, minY + 25, maxX - 15, minY + 15);
-      ctx.stroke();
-
-      drawKeyPoint(ctx, pt10X, originY, '(1, 0)', color, 'bottom');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = log_a(x) (a > 1)');
+      if (showProjections) {
+        // Điểm (1, 0)
+        drawTextbookProjection(ctx, originX, originY, originX + 1 * unitPx, originY, '1', '', '#38bdf8', '#facc15');
+        // Điểm (2, 1)
+        drawTextbookProjection(ctx, originX, originY, originX + 2 * unitPx, originY - 1 * unitPx, '2', '1', '#38bdf8', '#facc15');
+        // Điểm (4, 2)
+        if (originX + 4 * unitPx < right) {
+          drawTextbookProjection(ctx, originX, originY, originX + 4 * unitPx, originY - 2 * unitPx, '4', '2', '#38bdf8', '#facc15');
+        }
+      }
       break;
     }
 
     case 'func_log_neg': {
-      // 16. Hàm logarit y = log_a(x) (0 < a < 1, Nghịch biến)
-      const originX = cx - width * 0.22;
+      // 16. Hàm Logarit y = log_a(x) (0 < a < 1, ví dụ y = log_0.5(x) = -log2(x))
+      const originX = cx - width * 0.2;
       const originY = cy;
-      drawAxes(ctx, originX, originY, minX + 5, maxX - 5, minY + 5, maxY - 5, color);
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
-      const unitX = width * 0.22;
-      const pt10X = originX + unitX;
+      const fn = (x: number) => (x > 0 ? -Math.log2(x) : Infinity);
+      plotAnalyticalFunction(
+        ctx,
+        fn,
+        0.04,
+        (right - originX) / unitPx,
+        originX,
+        originY,
+        unitPx,
+        top,
+        bottom,
+        color,
+        size
+      );
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(2.5, size);
-      ctx.beginPath();
-      ctx.moveTo(originX + 3, minY + 15); // Asymptotic to Oy above
-      ctx.bezierCurveTo(originX + 6, originY - height * 0.25, originX + unitX * 0.6, originY - 8, pt10X, originY);
-      ctx.bezierCurveTo(pt10X + unitX * 0.6, originY + 12, maxX - width * 0.15, maxY - 25, maxX - 15, maxY - 15);
-      ctx.stroke();
-
-      drawKeyPoint(ctx, pt10X, originY, '(1, 0)', color, 'top');
-      drawFormulaBadge(ctx, minX + 8, minY + 8, 'y = log_a(x) (0 < a < 1)');
+      if (showProjections) {
+        // Điểm (1, 0)
+        drawTextbookProjection(ctx, originX, originY, originX + 1 * unitPx, originY, '1', '', '#38bdf8', '#facc15');
+        // Điểm (2, -1)
+        drawTextbookProjection(ctx, originX, originY, originX + 2 * unitPx, originY - -1 * unitPx, '2', '-1', '#38bdf8', '#facc15');
+      }
       break;
     }
 

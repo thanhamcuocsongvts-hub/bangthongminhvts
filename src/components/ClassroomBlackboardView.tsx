@@ -528,7 +528,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           { x: p.x + 300, y: p.y + 240, pressure: 0.5 },
         ];
       }
-      drawFunctionGraph(ctx, tool, renderPts, color, size);
+      drawFunctionGraph(ctx, tool, renderPts, color, size, scale);
       ctx.restore();
       return;
     }
@@ -1539,6 +1539,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         };
         return updated;
       });
+
+      // Automatically select function graphs so the user can easily zoom/scale and move them immediately
+      if (isFunctionGraphTool(activeTool)) {
+        setSelectedStrokeId(newStroke.id);
+        setIsStrokeToolbarExpanded(true);
+      }
     }
   };
 
@@ -3178,6 +3184,25 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     title="Phóng to hình"
                   >
                     <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPages((prev) => {
+                        const updated = [...prev];
+                        const curr = updated[currentPageIndex];
+                        if (!curr) return prev;
+                        const newStrokes = curr.strokes.map((s) =>
+                          s.id === selectedStroke.id ? { ...s, scale: 1.0 } : s
+                        );
+                        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                        return updated;
+                      });
+                    }}
+                    className="px-1.5 py-0.5 bg-cyan-500/30 hover:bg-cyan-500/50 rounded text-[9.5px] font-bold text-cyan-200"
+                    title="Đặt lại kích thước chuẩn (100%)"
+                  >
+                    100%
                   </button>
                 </div>
 

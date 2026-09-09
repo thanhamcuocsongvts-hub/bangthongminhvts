@@ -207,9 +207,10 @@ app.get("/api/teachers", (req, res) => {
     teachersStore.unshift(DEFAULT_ADMIN_ACCOUNT);
     writeJsonFileSync(TEACHERS_FILE, teachersStore);
   }
-  res.json({ teachers: teachersStore });
+  res.json({ teachers: teachersStore, timestamp: new Date().toISOString() });
 });
 
+// Update or Create Teacher with Safe Class Merging (Never wipe existing classes with empty payload)
 app.post("/api/teachers", (req, res) => {
   const teacher = req.body;
   if (!teacher || !teacher.id) {
@@ -217,7 +218,12 @@ app.post("/api/teachers", (req, res) => {
   }
   const existingIndex = teachersStore.findIndex((t) => t.id === teacher.id || (t.username && t.username.toLowerCase() === (teacher.username || '').toLowerCase()) || (t.email && t.email.toLowerCase() === (teacher.email || '').toLowerCase()));
   if (existingIndex >= 0) {
-    teachersStore[existingIndex] = { ...teachersStore[existingIndex], ...teacher };
+    const existing = teachersStore[existingIndex];
+    // Safeguard: keep existing classes if incoming classes array is empty or undefined
+    const finalClasses = (Array.isArray(teacher.classes) && teacher.classes.length > 0)
+      ? teacher.classes
+      : (existing.classes || []);
+    teachersStore[existingIndex] = { ...existing, ...teacher, classes: finalClasses };
   } else {
     teachersStore.push(teacher);
   }
@@ -225,6 +231,31 @@ app.post("/api/teachers", (req, res) => {
   res.json({ success: true, teachers: teachersStore });
 });
 
+// Direct Classes Update Endpoint (Guarantees class updates, additions, deletions, and score edits are instantly saved on the server)
+app.post("/api/teachers/:teacherId/classes", (req, res) => {
+  const { teacherId } = req.params;
+  const { classes } = req.body;
+  if (!teacherId || !Array.isArray(classes)) {
+    return res.status(400).json({ error: "Dữ liệu lớp học không hợp lệ" });
+  }
+
+  const teacher = teachersStore.find((t) => t.id === teacherId);
+  if (!teacher) {
+    return res.status(404).json({ error: "Không tìm thấy giáo viên" });
+  }
+
+  teacher.classes = classes;
+  writeJsonFileSync(TEACHERS_FILE, teachersStore);
+
+  // Also create a backup copy in data directory
+  const BACKUP_FILE = path.join(DATA_DIR, `teachers_backup.json`);
+  writeJsonFileSync(BACKUP_FILE, teachersStore);
+
+  console.log(`[Cloud Sync] Successfully saved ${classes.length} classes for teacher ${teacher.name} (${teacherId})`);
+  res.json({ success: true, classes: teacher.classes, teachers: teachersStore });
+});
+
+// Full Cloud Sync Endpoint (Cross-device PC <-> Mobile with Intelligent Merge)
 app.post("/api/teachers/sync", (req, res) => {
   const { teachers } = req.body;
   if (Array.isArray(teachers)) {
@@ -232,12 +263,64 @@ app.post("/api/teachers/sync", (req, res) => {
       if (!incoming || !incoming.id) return;
       const idx = teachersStore.findIndex((t) => t.id === incoming.id || (t.username && incoming.username && t.username.toLowerCase() === incoming.username.toLowerCase()) || (t.email && incoming.email && t.email.toLowerCase() === incoming.email.toLowerCase()));
       if (idx >= 0) {
-        teachersStore[idx] = { ...teachersStore[idx], ...incoming };
+        const existing = teachersStore[idx];
+        const incomingClasses = incoming.classes;
+        let finalClasses = existing.classes || [];
+
+        // If incoming has classes, merge them intelligently so students & scores are never accidentally lost
+        if (Array.isArray(incomingClasses) && incomingClasses.length > 0) {
+          const classMap = new Map<string, any>();
+          (existing.classes || []).forEach((c: any) => classMap.set(c.id, c));
+          incomingClasses.forEach((c: any) => {
+            if (classMap.has(c.id)) {
+              const existingClass = classMap.get(c.id)!;
+              const studentMap = new Map<string, any>();
+              (existingClass.students || []).forEach((s: any) => studentMap.set(s.id || s.code, s));
+              (c.students || []).forEach((s: any) => studentMap.set(s.id || s.code, s));
+              classMap.set(c.id, {
+                ...existingClass,
+                ...c,
+                students: Array.from(studentMap.values()),
+              });
+            } else {
+              classMap.set(c.id, c);
+            }
+          });
+          finalClasses = Array.from(classMap.values());
+        }
+
+        teachersStore[idx] = { ...existing, ...incoming, classes: finalClasses };
       } else {
         teachersStore.push(incoming);
       }
     });
   }
+  if (!teachersStore.some((t) => t.id === 'teacher_admin_root' || t.username === 'admin')) {
+    teachersStore.unshift(DEFAULT_ADMIN_ACCOUNT);
+  }
+  writeJsonFileSync(TEACHERS_FILE, teachersStore);
+  res.json({ success: true, teachers: teachersStore });
+});
+
+// Full System Backup Export Endpoint
+app.get("/api/backup/download", (req, res) => {
+  res.setHeader("Content-Disposition", `attachment; filename="smartboard_backup_${Date.now()}.json"`);
+  res.setHeader("Content-Type", "application/json");
+  res.json({
+    exportedAt: new Date().toISOString(),
+    teachers: teachersStore,
+    lessonsCount: cloudLessonsStore.length,
+    documentsCount: cloudDocumentsStore.length,
+  });
+});
+
+// Full System Backup Restore Endpoint
+app.post("/api/backup/restore", (req, res) => {
+  const { teachers } = req.body;
+  if (!Array.isArray(teachers) || teachers.length === 0) {
+    return res.status(400).json({ error: "File sao lưu không chứa dữ liệu giáo viên hợp lệ" });
+  }
+  teachersStore = teachers;
   if (!teachersStore.some((t) => t.id === 'teacher_admin_root' || t.username === 'admin')) {
     teachersStore.unshift(DEFAULT_ADMIN_ACCOUNT);
   }

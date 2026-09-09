@@ -82,43 +82,50 @@ export default function App() {
 
   // Sync teachers across devices (PC <-> Mobile)
   useEffect(() => {
-    // 1. Push local teachers to server if any exist
-    if (teachers && teachers.length > 0) {
-      fetch('/api/teachers/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teachers }),
-      }).catch((e) => console.warn('Sync teachers to server warning:', e));
-    }
-    // 2. Fetch server teachers so mobile gets all accounts registered from PC
+    // 1. Fetch server teachers FIRST so another computer/mobile gets all accounts and classes registered
     fetch('/api/teachers')
       .then((res) => res.json())
       .then((data) => {
         if (data.teachers && Array.isArray(data.teachers) && data.teachers.length > 0) {
           setTeachers((prev) => {
             const map = new Map<string, TeacherProfile>();
-            prev.forEach((t) => map.set(t.id, t));
+            // Load server teachers
             data.teachers.forEach((t: TeacherProfile) => {
-              const rawClasses = (t.classes && t.classes.length > 0) ? t.classes : (map.get(t.id)?.classes || []);
-              const cleanedClasses = rawClasses.map((c: any) => ({
+              const cleanedClasses = (t.classes || []).map((c: any) => ({
                 ...c,
                 students: cleanStudentList(c.students || []),
               }));
-              if (!map.has(t.id)) {
-                map.set(t.id, { ...t, classes: cleanedClasses });
+              map.set(t.id, { ...t, classes: cleanedClasses });
+            });
+
+            // Merge local teachers: if local has classes and server has none, keep local; otherwise server is source of truth
+            prev.forEach((localT) => {
+              const serverT = map.get(localT.id);
+              if (!serverT) {
+                map.set(localT.id, localT);
               } else {
-                const existing = map.get(t.id)!;
-                map.set(t.id, {
-                  ...existing,
-                  ...t,
-                  classes: cleanedClasses,
+                const serverHasClasses = serverT.classes && serverT.classes.length > 0;
+                const localHasClasses = localT.classes && localT.classes.length > 0;
+                const finalClasses = serverHasClasses ? serverT.classes : (localHasClasses ? localT.classes : []);
+                map.set(localT.id, {
+                  ...localT,
+                  ...serverT,
+                  classes: finalClasses,
                 });
               }
             });
+
             const merged = Array.from(map.values());
             localStorage.setItem('smartboard_teachers', JSON.stringify(merged));
             return merged;
           });
+        } else if (teachers && teachers.length > 0) {
+          // If server was completely empty, push local teachers to server
+          fetch('/api/teachers/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ teachers }),
+          }).catch((e) => console.warn('Sync teachers to server warning:', e));
         }
       })
       .catch((e) => console.warn('Fetch teachers error:', e));
@@ -433,6 +440,20 @@ export default function App() {
     setTeachers((prev) => {
       const next = prev.map((t) => (t.id === updatedTeacher.id ? updatedTeacher : t));
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+
+      // CRITICAL: Synchronize directly with the server so other computers/devices instantly get the class and student list!
+      fetch(`/api/teachers/${encodeURIComponent(updatedTeacher.id)}/classes`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ classes: updatedTeacher.classes || [] }),
+      }).catch((e) => console.warn('Sync teacher classes error:', e));
+
+      fetch('/api/teachers/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teachers: next }),
+      }).catch((e) => console.warn('Sync teacher to server error:', e));
+
       return next;
     });
   };
@@ -920,13 +941,19 @@ export default function App() {
           teachers={teachers}
           activeTeacher={activeTeacher}
           onUpdateTeacher={(updated) => {
-            setTeachers((prev) =>
-              prev.map((t) => (t.id === updated.id ? updated : t))
-            );
-            localStorage.setItem(
-              'smartboard_teachers',
-              JSON.stringify(teachers.map((t) => (t.id === updated.id ? updated : t)))
-            );
+            const next = teachers.map((t) => (t.id === updated.id ? updated : t));
+            setTeachers(next);
+            localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+            fetch(`/api/teachers/${encodeURIComponent(updated.id)}/classes`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ classes: updated.classes || [] }),
+            }).catch((e) => console.warn('Sync classes error:', e));
+            fetch('/api/teachers/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ teachers: next }),
+            }).catch((e) => console.warn('Sync teacher error:', e));
           }}
           onAddNewTeacher={(newT) => {
             setTeachers((prev) => {

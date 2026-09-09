@@ -23,6 +23,14 @@ import {
   Box,
   Pipette,
   Grid,
+  ZoomIn,
+  ZoomOut,
+  Triangle,
+  Globe,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint } from '../types';
 import { isFunctionGraphTool, drawFunctionGraph } from '../utils/mathGraphRenderer';
