@@ -143,7 +143,7 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
   };
 
   return (
-    <div className={`w-full ${isModal ? 'max-w-4xl' : 'max-w-6xl w-full min-h-[85vh]'} bg-white rounded-3xl border border-slate-200/90 shadow-2xl overflow-hidden flex flex-col md:flex-row select-none transition-all`}>
+    <div className={`w-full ${isModal ? 'max-w-4xl rounded-3xl border border-slate-200/90 shadow-2xl' : 'w-full min-h-screen rounded-none border-0 shadow-none'} bg-white overflow-hidden flex flex-col md:flex-row select-none transition-all`}>
       <div className="md:w-5/12 bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 p-8 text-white flex flex-col justify-between relative overflow-hidden">
         <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-indigo-500/20 blur-2xl pointer-events-none" />
         <div className="absolute -left-16 -bottom-16 w-56 h-56 rounded-full bg-blue-500/20 blur-2xl pointer-events-none" />
@@ -228,8 +228,8 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
         </div>
       </div>
 
-      <div className="md:w-7/12 p-6 md:p-8 flex flex-col justify-between space-y-6">
-        <div>
+      <div className={`md:w-7/12 p-6 md:p-8 ${!isModal ? 'lg:p-12 xl:p-24' : ''} flex flex-col justify-center space-y-6`}>
+        <div className={`w-full ${!isModal ? 'max-w-2xl mx-auto' : ''}`}>
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2">
               <GraduationCap className="w-6 h-6 text-indigo-600" />
@@ -543,7 +543,7 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
           )}
         </div>
 
-        <div className="pt-3 border-t border-slate-100 flex items-center justify-center text-xs text-slate-500">
+        <div className={`pt-3 mt-8 border-t border-slate-100 flex items-center justify-center text-xs text-slate-500 w-full ${!isModal ? 'max-w-2xl mx-auto' : ''}`}>
           <div className="font-bold text-indigo-700 bg-indigo-50 px-4 py-1.5 rounded-full border border-indigo-100 shadow-2xs">
             Được phát triển bởi <span className="font-black text-indigo-900">Thầy Trịnh Tuấn Kiệt</span>
           </div>
