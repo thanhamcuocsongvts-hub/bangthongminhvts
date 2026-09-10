@@ -61,6 +61,20 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+    
+    // Sync to Firestore
+    try {
+      const authModule = await import('../lib/firebase');
+      const firestoreModule = await import('firebase/firestore');
+      const auth = authModule.auth;
+      const db = authModule.db;
+      const { doc, setDoc } = firestoreModule;
+      if (auth.currentUser) {
+        await setDoc(doc(db, 'users', auth.currentUser.uid, 'data', 'lessons'), { lessons });
+      }
+    } catch(e) {
+      console.warn("Firestore sync failed", e);
+    }
   } catch (err) {
     console.warn('IndexedDB save fallback to localStorage:', err);
     try {
@@ -75,6 +89,28 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
  * Load lesson documents from IndexedDB
  */
 export async function loadLessonsFromDB(): Promise<any[] | null> {
+  // First try Firestore
+  try {
+    const authModule = await import('../lib/firebase');
+    const firestoreModule = await import('firebase/firestore');
+    const auth = authModule.auth;
+    const db = authModule.db;
+    const { doc, getDoc } = firestoreModule;
+    if (auth.currentUser) {
+      const docSnap = await getDoc(doc(db, 'users', auth.currentUser.uid, 'data', 'lessons'));
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.lessons) {
+          // Sync back to local IDB
+          saveLessonsToDB(data.lessons).catch(() => {});
+          return data.lessons;
+        }
+      }
+    }
+  } catch(e) {
+    console.warn("Firestore read failed", e);
+  }
+
   try {
     const db = await openDB();
     const tx = db.transaction(STORE_LESSONS, 'readonly');

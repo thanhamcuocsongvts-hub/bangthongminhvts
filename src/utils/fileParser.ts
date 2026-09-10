@@ -64,33 +64,19 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
 
   const fileDataUrl = await readAsDataUrl();
 
-  // Cross-device Cloud Persistence: Upload file to server cloud storage for permanent access on any PC / TV
+  // Cross-device Cloud Persistence: Upload file to Firebase Storage
   let serverFileUrl = '';
   try {
-    const base64Data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string) || '');
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    const authModule = await import('../lib/firebase');
+    const storageModule = await import('firebase/storage');
+    const auth = authModule.auth;
+    const storage = authModule.storage;
+    const { ref, uploadBytes, getDownloadURL } = storageModule;
 
-    if (base64Data) {
-      const uploadRes = await fetch('/api/documents/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileType: ext,
-          fileSize: sizeFormatted,
-          base64Data,
-        }),
-      });
-      if (uploadRes.ok) {
-        const uploadData = await uploadRes.json();
-        if (uploadData.fileUrl) {
-          serverFileUrl = uploadData.fileUrl;
-        }
-      }
+    if (auth.currentUser) {
+      const storageRef = ref(storage, `users/${auth.currentUser.uid}/files/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(storageRef, file);
+      serverFileUrl = await getDownloadURL(snapshot.ref);
     }
   } catch (err) {
     console.warn('Auto cloud upload notice:', err);

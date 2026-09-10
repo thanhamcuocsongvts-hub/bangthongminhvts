@@ -1,0 +1,51 @@
+{
+  "project_id": "gen-lang-client-0268472512",
+  "collections": [
+    {
+      "name": "users",
+      "document_id": "uid",
+      "fields": [
+        { "name": "username", "type": "string" },
+        { "name": "email", "type": "string" },
+        { "name": "createdAt", "type": "timestamp" }
+      ],
+      "rules": "Users can only read and write their own document."
+    },
+    {
+      "name": "classes",
+      "document_id": "auto",
+      "fields": [
+        { "name": "userId", "type": "string" },
+        { "name": "name", "type": "string" },
+        { "name": "students", "type": "array" },
+        { "name": "createdAt", "type": "timestamp" },
+        { "name": "updatedAt", "type": "timestamp" }
+      ],
+      "rules": "Users can read and write only if userId matches their auth uid."
+    },
+    {
+      "name": "files",
+      "document_id": "auto",
+      "fields": [
+        { "name": "userId", "type": "string" },
+        { "name": "name", "type": "string" },
+        { "name": "url", "type": "string" },
+        { "name": "type", "type": "string" },
+        { "name": "size", "type": "number" },
+        { "name": "uploadedAt", "type": "timestamp" }
+      ],
+      "rules": "Users can read and write only if userId matches their auth uid."
+    },
+    {
+      "name": "boardStates",
+      "document_id": "auto",
+      "fields": [
+        { "name": "userId", "type": "string" },
+        { "name": "name", "type": "string" },
+        { "name": "strokes", "type": "string" },
+        { "name": "updatedAt", "type": "timestamp" }
+      ],
+      "rules": "Users can read and write only if userId matches their auth uid."
+    }
+  ]
+}

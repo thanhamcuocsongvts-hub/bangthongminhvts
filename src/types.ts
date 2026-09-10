@@ -142,6 +142,9 @@ export type WhiteboardTool =
   | 'func_exp_neg'
   | 'func_log_pos'
   | 'func_log_neg'
+  | 'phys_oscillation'
+  | 'phys_projectile'
+  | 'phys_wave'
   | 'text';
 
 export interface StrokePoint {
@@ -172,6 +175,9 @@ export interface WhiteboardStroke {
   text?: string;
   timestamp?: number;
   customVertices?: StrokeVertex[];
+  graphOffsetX?: number; // For pan feature on graphs
+  graphOffsetY?: number; // For pan feature on graphs
+  graphScale?: number;   // For zoom feature on graphs
 }
 
 export interface ChatMessage {

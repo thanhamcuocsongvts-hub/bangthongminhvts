@@ -6,7 +6,6 @@ import {
   User,
   School,
   Phone,
-  BookOpen,
   ArrowRight,
   Eye,
   EyeOff,
@@ -15,52 +14,40 @@ import {
   Sparkles,
   ShieldCheck,
   Tv,
-  Users,
   LogOut,
   X,
   HelpCircle,
 } from 'lucide-react';
 import { TeacherProfile, SubjectType } from '../types';
-import { ADMIN_TEACHER } from '../data/defaultTeachers';
+import { useAuth } from '../lib/AuthContext';
 
 interface EducationalAuthScreenProps {
   isModal?: boolean;
   onClose?: () => void;
-  teachers?: TeacherProfile[];
   activeTeacher: TeacherProfile | null;
   onSelectTeacher: (teacher: TeacherProfile) => void;
   onAddNewTeacher: (newTeacher: TeacherProfile) => void;
-  onDeleteTeacher?: (teacherId: string) => void;
-  onResetPassword?: (teacherId: string, newPassword?: string) => void;
   onLogout: () => void;
 }
 
 export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
   isModal = false,
   onClose,
-  teachers = [],
   activeTeacher,
   onSelectTeacher,
   onAddNewTeacher,
-  onDeleteTeacher,
-  onResetPassword,
   onLogout,
 }) => {
-  const teacherList = teachers || [];
-  const [tab, setTab] = useState<'login' | 'register' | 'google'>(
-    teacherList.length === 0 ? 'register' : 'login'
-  );
+  const { login, register } = useAuth();
+  const [tab, setTab] = useState<'login' | 'register'>('login');
 
-  // Login form state
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState<string>('');
   const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [showLoginPassword, setShowLoginPassword] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Register form state
   const [regName, setRegName] = useState<string>('');
-  const [regUsername, setRegUsername] = useState<string>('');
   const [regEmail, setRegEmail] = useState<string>('');
   const [regPhone, setRegPhone] = useState<string>('');
   const [regSubject, setRegSubject] = useState<SubjectType>('Toán học');
@@ -70,14 +57,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
   const [showRegPassword, setShowRegPassword] = useState<boolean>(false);
   const [regError, setRegError] = useState<string | null>(null);
 
-  // Google SSO state
-  const [googleEmail, setGoogleEmail] = useState<string>('thanhamcuocsong.vts@gmail.com');
-  const [googleName, setGoogleName] = useState<string>('Thầy Võ Thành Sơn');
-  const [googleSubject, setGoogleSubject] = useState<SubjectType>('Toán học');
-  const [googleSchool, setGoogleSchool] = useState<string>('Trường THPT');
-  const [isGoogleLoading, setIsGoogleLoading] = useState<boolean>(false);
-
-  // General Notification Toast
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showForgotModal, setShowForgotModal] = useState<boolean>(false);
   const [forgotEmail, setForgotEmail] = useState<string>('');
@@ -87,23 +66,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Cross-device sync: fetch server accounts on mount so accounts created on PC appear on mobile
-  React.useEffect(() => {
-    fetch('/api/teachers')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.teachers && Array.isArray(d.teachers)) {
-          d.teachers.forEach((t: TeacherProfile) => {
-            if (!teacherList.some((existing) => existing.id === t.id)) {
-              onAddNewTeacher(t);
-            }
-          });
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  // Handle Standard Login with Cross-Device Sync (PC <-> Mobile)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
@@ -115,79 +77,30 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
       return;
     }
 
-    // Explicit Admin Account Check (Password 123456)
-    if (identifier === 'admin' || identifier === 'admin@smartboard.edu.vn') {
-      if (cleanPassword === '123456') {
-        let adminAccount = teacherList.find(
-          (t) => t.id === 'teacher_admin_root' || t.username === 'admin' || t.role === 'admin'
-        );
-        if (!adminAccount) {
-          adminAccount = ADMIN_TEACHER;
-          onAddNewTeacher(adminAccount);
-        }
-        onSelectTeacher(adminAccount);
-        showToast('Đăng nhập thành công với Quyền Quản Trị Viên (Admin)!');
-        if (onClose) setTimeout(onClose, 600);
-        return;
-      } else {
-        setLoginError('Mật khẩu Quản trị viên (Admin) không chính xác.');
-        return;
-      }
+    try {
+      await login(identifier, cleanPassword);
+      const matched: TeacherProfile = {
+        id: identifier,
+        name: identifier,
+        username: identifier.split('@')[0],
+        email: identifier.includes('@') ? identifier : `${identifier}@smartboard.local`,
+        phone: '',
+        subject: 'Toán học',
+        school: 'Trường THPT',
+        avatar: '👨‍🏫',
+        classes: [],
+        createdAt: new Date().toISOString(),
+      };
+      
+      onSelectTeacher(matched);
+      showToast(`Đăng nhập thành công!`);
+      if (onClose) setTimeout(onClose, 600);
+    } catch (err: any) {
+      setLoginError(err.message || 'Lỗi đăng nhập Firebase');
     }
-
-    // Find teacher matching username or email in local state
-    let matched = teacherList.find(
-      (t) =>
-        (t.username && t.username.trim().toLowerCase() === identifier) ||
-        (t.email && t.email.trim().toLowerCase() === identifier) ||
-        (t.name && t.name.trim().toLowerCase() === identifier)
-    );
-
-    // If not found in local state (e.g. registered on PC, now logging in on Mobile), check server store!
-    if (!matched) {
-      try {
-        const res = await fetch('/api/teachers');
-        const data = await res.json();
-        if (data.teachers && Array.isArray(data.teachers)) {
-          const found = data.teachers.find(
-            (t: TeacherProfile) =>
-              (t.username && t.username.trim().toLowerCase() === identifier) ||
-              (t.email && t.email.trim().toLowerCase() === identifier) ||
-              (t.name && t.name.trim().toLowerCase() === identifier)
-          );
-          if (found) {
-            matched = found;
-            onAddNewTeacher(found);
-          }
-        }
-      } catch (err) {
-        console.warn('Check server teachers error:', err);
-      }
-    }
-
-    if (!matched) {
-      if (teacherList.length === 0) {
-        setLoginError('Hệ thống chưa có tài khoản giáo viên nào. Vui lòng chọn tab "Đăng Ký Tài Khoản" bên cạnh.');
-      } else {
-        setLoginError('Không tìm thấy tài khoản giáo viên với thông tin này. Vui lòng kiểm tra lại hoặc Đăng ký mới.');
-      }
-      return;
-    }
-
-    // Check password (ignoring accidental leading/trailing spaces)
-    const savedPassword = (matched.password || '').trim();
-    if (savedPassword && savedPassword !== cleanPassword && cleanPassword !== '') {
-      setLoginError('Mật khẩu không chính xác. Lưu ý kiểm tra bàn phím điện thoại có tự động viết hoa chữ cái đầu không.');
-      return;
-    }
-
-    onSelectTeacher(matched);
-    showToast(`Đăng nhập thành công! Chào mừng ${matched.name}.`);
-    if (onClose) setTimeout(onClose, 600);
   };
 
-  // Handle Standard Registration
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError(null);
 
@@ -201,82 +114,37 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
       return;
     }
 
-    const email = regEmail.trim() || `${regUsername || regName.toLowerCase().replace(/\s+/g, '')}@truongthpt.edu.vn`;
-    const username = regUsername.trim() || regName.toLowerCase().replace(/\s+/g, '');
+    const email = regEmail.trim();
+    const username = regName.toLowerCase().replace(/\s+/g, '');
 
-    // Check duplicate
-    const duplicate = teacherList.find(
-      (t) => t.email.toLowerCase() === email.toLowerCase() || (t.username && t.username.toLowerCase() === username.toLowerCase())
-    );
-
-    if (duplicate) {
-      setRegError('Email hoặc Tên đăng nhập này đã tồn tại. Vui lòng đăng nhập hoặc dùng thông tin khác.');
-      return;
-    }
-
-    const newTeacher: TeacherProfile = {
-      id: 'teacher_' + Date.now(),
-      name: regName.trim(),
-      username,
-      password: regPassword || '123456',
-      email,
-      phone: regPhone.trim() || '',
-      subject: regSubject,
-      school: regSchool.trim() || 'Trường THPT',
-      avatar: regSubject === 'Toán học' || regSubject === 'Vật lý' || regSubject === 'Tin học' ? '👨‍🏫' : '👩‍🏫',
-      classes: [], // Start clean with 0 classes, ready for real teacher classes & student upload
-      createdAt: new Date().toISOString(),
-    };
-
-    onAddNewTeacher(newTeacher);
-    onSelectTeacher(newTeacher);
-    showToast(`Tạo tài khoản giáo viên ${newTeacher.name} thành công!`);
-    if (onClose) setTimeout(onClose, 600);
-  };
-
-  // Handle Google Sign In / Registration
-  const handleGoogleAuth = async () => {
-    setIsGoogleLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 800));
+      await register(email, regPassword, regName);
+      
+      const newTeacher: TeacherProfile = {
+        id: email || username,
+        name: regName.trim(),
+        username,
+        email: email || `${username}@smartboard.local`,
+        phone: regPhone,
+        subject: regSubject,
+        school: regSchool.trim() || 'Trường THPT',
+        avatar: regSubject === 'Toán học' || regSubject === 'Vật lý' || regSubject === 'Tin học' ? '👨‍🏫' : '👩‍🏫',
+        classes: [],
+        createdAt: new Date().toISOString(),
+      };
 
-      const cleanEmail = googleEmail.trim().toLowerCase();
-      let matched = teacherList.find((t) => t.email.toLowerCase() === cleanEmail);
-
-      if (matched) {
-        onSelectTeacher(matched);
-        showToast(`Đăng nhập thành công với tài khoản Google: ${matched.email}`);
-      } else {
-        const newGoogleTeacher: TeacherProfile = {
-          id: 'teacher_google_' + Date.now(),
-          name: googleName.trim() || 'Thầy Võ Thành Sơn',
-          username: cleanEmail.split('@')[0],
-          email: cleanEmail,
-          phone: '',
-          subject: googleSubject,
-          school: googleSchool.trim() || 'Trường THPT',
-          avatar: '🎓',
-          isGoogleAccount: true,
-          classes: [], // Start clean with 0 classes
-          createdAt: new Date().toISOString(),
-        };
-
-        onAddNewTeacher(newGoogleTeacher);
-        onSelectTeacher(newGoogleTeacher);
-        showToast(`Đã tạo và đăng nhập tài khoản Google cho ${newGoogleTeacher.name}!`);
-      }
-
+      onAddNewTeacher(newTeacher);
+      onSelectTeacher(newTeacher);
+      showToast(`Tạo tài khoản giáo viên thành công!`);
       if (onClose) setTimeout(onClose, 600);
-    } finally {
-      setIsGoogleLoading(false);
+    } catch (err: any) {
+      setRegError(err.message || 'Lỗi đăng ký Firebase');
     }
   };
 
-  const content = (
+  return (
     <div className={`w-full ${isModal ? 'max-w-4xl' : 'max-w-6xl w-full min-h-[85vh]'} bg-white rounded-3xl border border-slate-200/90 shadow-2xl overflow-hidden flex flex-col md:flex-row select-none transition-all`}>
-      {/* Left Educational Branding Column */}
       <div className="md:w-5/12 bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 p-8 text-white flex flex-col justify-between relative overflow-hidden">
-        {/* Subtle decorative background circles */}
         <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-indigo-500/20 blur-2xl pointer-events-none" />
         <div className="absolute -left-16 -bottom-16 w-56 h-56 rounded-full bg-blue-500/20 blur-2xl pointer-events-none" />
 
@@ -328,7 +196,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
           </div>
         </div>
 
-        {/* Current Active Account quick status (if logged in) */}
         <div className="relative z-10 pt-6 mt-6 border-t border-white/10">
           {activeTeacher ? (
             <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-between gap-2">
@@ -361,23 +228,17 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
         </div>
       </div>
 
-      {/* Right Form Column */}
       <div className="md:w-7/12 p-6 md:p-8 flex flex-col justify-between space-y-6">
         <div>
-          {/* Top header row with close button if in modal */}
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2">
               <GraduationCap className="w-6 h-6 text-indigo-600" />
               <div>
                 <h3 className="text-lg font-black text-slate-900">
-                  {tab === 'login' && 'Đăng Nhập Cổng Giáo Viên'}
-                  {tab === 'register' && 'Đăng Ký Hồ Sơ Sư Phạm'}
-                  {tab === 'google' && 'Đăng Nhập Bằng Google'}
+                  {tab === 'login' ? 'Đăng Nhập Cổng Giáo Viên' : 'Đăng Ký Hồ Sơ Sư Phạm'}
                 </h3>
                 <p className="text-[11px] text-slate-500 font-medium">
-                  {tab === 'login' && 'Nhập thông tin tài khoản để truy cập giáo án & sổ điểm'}
-                  {tab === 'register' && 'Điền thông tin chính xác để khởi tạo tài khoản cá nhân'}
-                  {tab === 'google' && 'Đồng bộ bài giảng và danh sách lớp qua Google'}
+                  {tab === 'login' ? 'Nhập thông tin tài khoản để truy cập giáo án & sổ điểm' : 'Điền thông tin chính xác để khởi tạo tài khoản cá nhân'}
                 </p>
               </div>
             </div>
@@ -392,7 +253,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
             )}
           </div>
 
-          {/* Toast Notice */}
           {toastMessage && (
             <div
               className={`mt-4 p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 animate-fade-in ${
@@ -410,7 +270,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
             </div>
           )}
 
-          {/* Navigation Tab Bar */}
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 mt-4">
             <button
               type="button"
@@ -443,39 +302,8 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
               <span>Đăng Ký Mới</span>
             </button>
-
-            <button
-              type="button"
-              onClick={() => setTab('google')}
-              className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                tab === 'google'
-                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.98 0 12s.45 3.84 1.25 5.42l4.03-3.15z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                />
-              </svg>
-              <span>Google</span>
-            </button>
           </div>
 
-          {/* TAB 1: LOGIN FORM */}
           {tab === 'login' && (
             <form onSubmit={handleLogin} className="space-y-4 mt-5">
               {loginError && (
@@ -485,7 +313,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 </div>
               )}
 
-              {/* Username / Email field */}
               <div>
                 <label className="block text-xs font-black uppercase text-slate-700 mb-1">
                   Tên Đăng Nhập / Email Giáo Viên <span className="text-rose-500">*</span>
@@ -500,13 +327,12 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                     spellCheck={false}
                     value={loginIdentifier}
                     onChange={(e) => setLoginIdentifier(e.target.value)}
-                    placeholder="Ví dụ: thanhamcuocsong.vts@gmail.com hoặc vothanhson"
+                    placeholder="Ví dụ: thanhamcuocsong.vts@gmail.com"
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                   />
                 </div>
               </div>
 
-              {/* Password field */}
               <div>
                 <label className="block text-xs font-black uppercase text-slate-700 mb-1">
                   Mật Khẩu <span className="text-rose-500">*</span>
@@ -533,7 +359,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 </div>
               </div>
 
-              {/* Remember me & Forgot Password */}
               <div className="flex items-center justify-between text-xs pt-1">
                 <label className="flex items-center gap-2 cursor-pointer text-slate-600 font-medium">
                   <input
@@ -554,7 +379,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 </button>
               </div>
 
-              {/* Login Button */}
               <button
                 type="submit"
                 className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 active:scale-98 transition-all"
@@ -562,73 +386,9 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 <span>ĐĂNG NHẬP HỆ THỐNG</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
-
-              {/* Guest Mode Direct Access Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  const guestTeacher: TeacherProfile = {
-                    id: 'teacher_guest_' + Date.now(),
-                    name: 'Thầy/Cô Giảng Dạy (Khách)',
-                    username: 'guest',
-                    password: '',
-                    email: 'guest@smartboard.edu.vn',
-                    phone: '',
-                    subject: 'Toán học',
-                    school: 'Trường THPT',
-                    avatar: '👨‍🏫',
-                    classes: [],
-                    createdAt: new Date().toISOString(),
-                  };
-                  onAddNewTeacher(guestTeacher);
-                  onSelectTeacher(guestTeacher);
-                  showToast('Đang vào phòng học với Chế Độ Khách...');
-                  if (onClose) setTimeout(onClose, 500);
-                }}
-                className="w-full py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 active:scale-98 transition-all"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>VÀO DẠY NGAY (CHẾ ĐỘ KHÁCH - KHÔNG CẦN TÀI KHOẢN)</span>
-              </button>
-
-              {/* Or separator */}
-              <div className="flex items-center gap-3 pt-1 text-slate-400 text-xs font-bold uppercase">
-                <div className="flex-1 h-px bg-slate-200" />
-                <span>HOẶC</span>
-                <div className="flex-1 h-px bg-slate-200" />
-              </div>
-
-              {/* Google Sign In Quick Button */}
-              <button
-                type="button"
-                onClick={handleGoogleAuth}
-                disabled={isGoogleLoading}
-                className="w-full py-2.5 rounded-2xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold text-xs flex items-center justify-center gap-2.5 shadow-2xs transition-all"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.98 0 12s.45 3.84 1.25 5.42l4.03-3.15z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                  />
-                </svg>
-                <span>{isGoogleLoading ? 'Đang kết nối Google...' : 'Đăng nhập nhanh với Google'}</span>
-              </button>
             </form>
           )}
 
-          {/* TAB 2: REGISTER FORM */}
           {tab === 'register' && (
             <form onSubmit={handleRegister} className="space-y-3.5 mt-4 max-h-[60vh] overflow-y-auto pr-1">
               {regError && (
@@ -638,7 +398,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 </div>
               )}
 
-              {/* Name */}
               <div>
                 <label className="block text-xs font-black uppercase text-slate-700 mb-1">
                   Họ và Tên Thầy / Cô <span className="text-rose-500">*</span>
@@ -656,7 +415,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 </div>
               </div>
 
-              {/* Subject & School in 2 columns */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-black uppercase text-slate-700 mb-1">
@@ -696,7 +454,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 </div>
               </div>
 
-              {/* Email & Phone in 2 columns */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-black uppercase text-slate-700 mb-1">
@@ -731,7 +488,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 </div>
               </div>
 
-              {/* Password & Confirm Password */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-black uppercase text-slate-700 mb-1">
@@ -785,115 +541,8 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
               </div>
             </form>
           )}
-
-          {/* TAB 3: GOOGLE AUTH */}
-          {tab === 'google' && (
-            <div className="space-y-4 mt-5">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-2xs flex items-center justify-center shrink-0">
-                    <svg className="w-5 h-5" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.98 0 12s.45 3.84 1.25 5.42l4.03-3.15z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                      />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="text-xs font-black text-slate-900">Tài Khoản Google Workspace / Gmail</div>
-                    <div className="text-[11px] text-slate-500">Đăng nhập một chạm không cần nhớ mật khẩu</div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Email Google của Thầy/Cô:
-                  </label>
-                  <input
-                    type="email"
-                    value={googleEmail}
-                    onChange={(e) => setGoogleEmail(e.target.value)}
-                    placeholder="thanhamcuocsong.vts@gmail.com"
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      Họ và Tên:
-                    </label>
-                    <input
-                      type="text"
-                      value={googleName}
-                      onChange={(e) => setGoogleName(e.target.value)}
-                      placeholder="Thầy Võ Thành Sơn"
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      Môn Dạy:
-                    </label>
-                    <select
-                      value={googleSubject}
-                      onChange={(e) => setGoogleSubject(e.target.value as SubjectType)}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="Toán học">Toán học</option>
-                      <option value="Vật lý">Vật lý</option>
-                      <option value="Hóa học">Hóa học</option>
-                      <option value="Sinh học">Sinh học</option>
-                      <option value="Ngữ văn">Ngữ văn</option>
-                      <option value="Tiếng Anh">Tiếng Anh</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleGoogleAuth}
-                disabled={isGoogleLoading}
-                className="w-full py-3.5 rounded-2xl bg-slate-900 hover:bg-black text-white font-black text-sm flex items-center justify-center gap-3 shadow-lg shadow-slate-900/20 active:scale-98 transition-all"
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.98 0 12s.45 3.84 1.25 5.42l4.03-3.15z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                  />
-                </svg>
-                <span>{isGoogleLoading ? 'Đang xác thực Google...' : 'ĐĂNG NHẬP BẰNG TÀI KHOẢN GOOGLE'}</span>
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Bottom Educational Footer Note */}
         <div className="pt-3 border-t border-slate-100 flex items-center justify-center text-xs text-slate-500">
           <div className="font-bold text-indigo-700 bg-indigo-50 px-4 py-1.5 rounded-full border border-indigo-100 shadow-2xs">
             Được phát triển bởi <span className="font-black text-indigo-900">Thầy Trịnh Tuấn Kiệt</span>
@@ -901,7 +550,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
         </div>
       </div>
 
-      {/* Forgot Password Modal */}
       {showForgotModal && (
         <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-md p-6 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-4">
@@ -937,36 +585,16 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
               <button
                 onClick={() => {
                   showToast('Đã gửi hướng dẫn khôi phục mật khẩu về email của Thầy/Cô!');
-                  setShowForgotModal(false);
+                  setTimeout(() => setShowForgotModal(false), 1500);
                 }}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-xs font-bold text-white shadow-xs"
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20"
               >
-                Gửi Yêu Cầu
+                Gửi Hướng Dẫn
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-
-  if (isModal) {
-    return (
-      <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-        {content}
-      </div>
-    );
-  }
-
-  // Full Screen Educational Portal Layout
-  return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 flex flex-col justify-between p-3 sm:p-6 md:p-8 relative overflow-x-hidden">
-      <div className="w-full flex-1 flex items-center justify-center my-auto py-2">
-        {content}
-      </div>
-      <footer className="w-full py-3 px-4 bg-slate-950/85 backdrop-blur-md border-t border-white/10 text-center text-xs text-slate-300 select-none flex items-center justify-center shrink-0 mt-4 rounded-2xl">
-        <span>Được phát triển bởi <strong className="text-emerald-400 font-black">Thầy Trịnh Tuấn Kiệt</strong></span>
-      </footer>
     </div>
   );
 };

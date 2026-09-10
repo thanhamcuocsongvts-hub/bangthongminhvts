@@ -15,6 +15,9 @@ export interface GraphRenderOptions {
   showGrid?: boolean;
   showProjections?: boolean;
   scale?: number;
+  graphOffsetX?: number;
+  graphOffsetY?: number;
+  graphScale?: number;
 }
 
 export function isFunctionGraphTool(tool: WhiteboardTool): boolean {
@@ -35,6 +38,9 @@ export function isFunctionGraphTool(tool: WhiteboardTool): boolean {
     'func_exp_neg',
     'func_log_pos',
     'func_log_neg',
+    'phys_oscillation',
+    'phys_projectile',
+    'phys_wave',
   ].includes(tool);
 }
 
@@ -110,7 +116,9 @@ function drawTextbookAxes(
   unitPx: number,
   axisColor: string,
   gridOpacity: number = 0.35,
-  showGrid: boolean = true
+  showGrid: boolean = true,
+  labelXStr: string = 'x',
+  labelYStr: string = 'y'
 ) {
   ctx.save();
 
@@ -245,8 +253,8 @@ function drawTextbookAxes(
 
   // 4. Textbook Labels: x, y, O
   ctx.font = 'italic 13px "Cambria", "Times New Roman", serif';
-  ctx.fillText('x', right - 4, originY + 15);
-  ctx.fillText('y', originX - 15, top + 8);
+  ctx.fillText(labelXStr, right - 4, originY + 15);
+  ctx.fillText(labelYStr, originX - 15, top + 8);
   ctx.fillText('O', originX - 13, originY + 13);
 
   ctx.restore();
@@ -446,6 +454,9 @@ export function drawFunctionGraph(
   const effectiveScale = options?.scale ?? scale ?? 1;
   const showGrid = options?.showGrid ?? true;
   const showProjections = options?.showProjections ?? true;
+  const gOffsetX = options?.graphOffsetX ?? 0;
+  const gOffsetY = options?.graphOffsetY ?? 0;
+  const gScale = options?.graphScale ?? 1;
 
   const b = getGraphBounds(points, effectiveScale);
   const { minX, maxX, minY, maxY, width, height, cx, cy } = b;
@@ -458,15 +469,23 @@ export function drawFunctionGraph(
 
   // Mathematical unit scaling (1 unit = unitPx)
   // Adaptive unit size so graphs look clean across any box size
-  const unitPx = Math.max(24, Math.min(65, width / 8.5));
+  const baseUnitPx = Math.max(24, Math.min(65, width / 8.5));
+  const unitPx = baseUnitPx * gScale;
+
+  // Apply Panning offset to the coordinate origin
+  const graphOriginX = cx + gOffsetX;
+  const graphOriginY = cy + gOffsetY;
 
   ctx.save();
+  ctx.beginPath();
+  ctx.rect(minX, minY, width, height);
+  ctx.clip(); // Clip everything to the bounding box so panned graphs don't bleed out
 
   switch (tool) {
     case 'func_linear': {
       // 1. Hàm Bậc Nhất: y = 0.5x + 1
-      const originX = cx - width * 0.08;
-      const originY = cy + height * 0.1;
+      const originX = graphOriginX - width * 0.08;
+      const originY = graphOriginY + height * 0.1;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       // Function: y = 0.5x + 1
@@ -499,8 +518,8 @@ export function drawFunctionGraph(
     case 'func_quadratic_up': {
       // 2. Parabol a > 0: y = x² - 2x - 1 = (x-1)² - 2
       // Đỉnh I(1, -2). Trục đối xứng x = 1
-      const originX = cx - width * 0.05;
-      const originY = cy - height * 0.05;
+      const originX = graphOriginX - width * 0.05;
+      const originY = graphOriginY - height * 0.05;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       // Trục đối xứng x = 1 (nét đứt)
@@ -545,8 +564,8 @@ export function drawFunctionGraph(
     case 'func_quadratic_down': {
       // 3. Parabol a < 0: y = -(x-1)² + 2 = -x² + 2x + 1
       // Đỉnh I(1, 2). Trục đối xứng x = 1
-      const originX = cx - width * 0.05;
-      const originY = cy + height * 0.12;
+      const originX = graphOriginX - width * 0.05;
+      const originY = graphOriginY + height * 0.12;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       // Trục đối xứng x = 1 (nét đứt)
@@ -783,8 +802,8 @@ export function drawFunctionGraph(
       // 10. Hàm Phân Thức Nhất Biến: y = (x - 1)/(x + 1) = 1 - 2/(x + 1)
       // Đồng biến trên từng khoảng (ad - bc = 1 - (-1) = 2 > 0)
       // Tiệm cận đứng: x = -1. Tiệm cận ngang: y = 1. Tâm đối xứng: I(-1, 1)
-      const originX = cx + width * 0.08;
-      const originY = cy + height * 0.08;
+      const originX = graphOriginX + width * 0.08;
+      const originY = graphOriginY + height * 0.08;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX - 1 * unitPx; // x = -1
@@ -833,8 +852,8 @@ export function drawFunctionGraph(
       // 11. Hàm Phân Thức Nhất Biến: y = (2x - 1)/(x - 1) = 2 + 1/(x - 1)
       // Nghịch biến trên từng khoảng (ad - bc = -2 - (-1) = -1 < 0)
       // Tiệm cận đứng: x = 1. Tiệm cận ngang: y = 2. Tâm đối xứng: I(1, 2)
-      const originX = cx - width * 0.08;
-      const originY = cy + height * 0.12;
+      const originX = graphOriginX - width * 0.08;
+      const originY = graphOriginY + height * 0.12;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX + 1 * unitPx; // x = 1
@@ -883,8 +902,8 @@ export function drawFunctionGraph(
       // Tiệm cận đứng: x = 1
       // Tiệm cận xiên: y = x
       // Cực tiểu: (2, 3). Cực đại: (0, -1). Tâm đối xứng I(1, 1)
-      const originX = cx - width * 0.08;
-      const originY = cy + height * 0.05;
+      const originX = graphOriginX - width * 0.08;
+      const originY = graphOriginY + height * 0.05;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX + 1 * unitPx;
@@ -948,8 +967,8 @@ export function drawFunctionGraph(
     case 'func_exp_pos': {
       // 13. Hàm Số Mũ y = a^x (a > 1, ví dụ y = 2^x)
       // Tiệm cận ngang: Ox (y = 0). Điểm đặc biệt: (0, 1) và (1, 2)
-      const originX = cx - width * 0.12;
-      const originY = cy + height * 0.18;
+      const originX = graphOriginX - width * 0.12;
+      const originY = graphOriginY + height * 0.18;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const fn = (x: number) => Math.pow(2, x);
@@ -982,8 +1001,8 @@ export function drawFunctionGraph(
 
     case 'func_exp_neg': {
       // 14. Hàm Số Mũ y = a^x (0 < a < 1, ví dụ y = (1/2)^x)
-      const originX = cx + width * 0.12;
-      const originY = cy + height * 0.18;
+      const originX = graphOriginX + width * 0.12;
+      const originY = graphOriginY + height * 0.18;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const fn = (x: number) => Math.pow(0.5, x);
@@ -1013,7 +1032,7 @@ export function drawFunctionGraph(
     case 'func_log_pos': {
       // 15. Hàm Logarit y = log_a(x) (a > 1, ví dụ y = log2(x))
       // Tiệm cận đứng: Oy (x = 0). Điểm đặc biệt: (1, 0) và (2, 1)
-      const originX = cx - width * 0.2;
+      const originX = graphOriginX - width * 0.2;
       const originY = cy;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
@@ -1047,7 +1066,7 @@ export function drawFunctionGraph(
 
     case 'func_log_neg': {
       // 16. Hàm Logarit y = log_a(x) (0 < a < 1, ví dụ y = log_0.5(x) = -log2(x))
-      const originX = cx - width * 0.2;
+      const originX = graphOriginX - width * 0.2;
       const originY = cy;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
@@ -1075,6 +1094,66 @@ export function drawFunctionGraph(
       break;
     }
 
+    case 'phys_oscillation': {
+      // Dao động điều hoà: x = A cos(wt + phi) -> vẽ đồ thị x-t
+      const originX = left + width * 0.1;
+      const originY = cy;
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid, 't', 'x');
+      const fn = (t: number) => t >= 0 ? 3 * Math.cos(1.5 * t) : NaN;
+      plotAnalyticalFunction(ctx, fn, 0, (right - originX) / unitPx, originX, originY, unitPx, top, bottom, color, size);
+      
+      if (showProjections) {
+        drawTextbookProjection(ctx, originX, originY, originX, originY - 3 * unitPx, '', 'A', '#38bdf8');
+        drawTextbookProjection(ctx, originX, originY, originX, originY + 3 * unitPx, '', '-A', '#38bdf8');
+        // T = 2pi / 1.5 ~ 4.18
+        const T = 2 * Math.PI / 1.5;
+        drawTextbookProjection(ctx, originX, originY, originX + T * unitPx, originY, 'T', '', '#38bdf8');
+      }
+      break;
+    }
+    case 'phys_projectile': {
+      // Ném xiên: Quỹ đạo parabol y = xtan(alpha) - g x^2 / (2v0^2 cos^2 alpha)
+      const originX = left + width * 0.1;
+      const originY = bottom - height * 0.1;
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid, 'x', 'y');
+      
+      // y = x - 0.2 x^2 (tầm xa x = 5)
+      const fn = (x: number) => (x >= 0 && x <= 5) ? x - 0.2 * x * x : NaN;
+      plotAnalyticalFunction(ctx, fn, 0, 5, originX, originY, unitPx, top, bottom, color, size);
+      
+      if (showProjections) {
+        drawTextbookProjection(ctx, originX, originY, originX + 2.5 * unitPx, originY - 1.25 * unitPx, 'x_max', 'y_max', '#38bdf8', '#ef4444');
+        drawTextbookProjection(ctx, originX, originY, originX + 5 * unitPx, originY, 'L', '', '#38bdf8');
+      }
+      break;
+    }
+    case 'phys_wave': {
+      // Sóng dừng (Standing Wave)
+      const originX = left + width * 0.1;
+      const originY = cy;
+      drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid, 'x', 'u');
+      
+      const k = Math.PI / 2; // lambda = 4
+      const fn1 = (x: number) => x >= 0 ? 2 * Math.sin(k * x) : NaN;
+      const fn2 = (x: number) => x >= 0 ? -2 * Math.sin(k * x) : NaN;
+      const fn3 = (x: number) => x >= 0 ? 1.4 * Math.sin(k * x) : NaN;
+      const fn4 = (x: number) => x >= 0 ? -1.4 * Math.sin(k * x) : NaN;
+      
+      plotAnalyticalFunction(ctx, fn1, 0, (right - originX) / unitPx, originX, originY, unitPx, top, bottom, color, size);
+      ctx.setLineDash([5, 5]);
+      plotAnalyticalFunction(ctx, fn2, 0, (right - originX) / unitPx, originX, originY, unitPx, top, bottom, color, size);
+      
+      ctx.globalAlpha = 0.3;
+      ctx.setLineDash([]);
+      plotAnalyticalFunction(ctx, fn3, 0, (right - originX) / unitPx, originX, originY, unitPx, top, bottom, color, size);
+      plotAnalyticalFunction(ctx, fn4, 0, (right - originX) / unitPx, originX, originY, unitPx, top, bottom, color, size);
+      ctx.globalAlpha = 1;
+      
+      if (showProjections) {
+        drawTextbookProjection(ctx, originX, originY, originX + 2 * unitPx, originY, 'λ/2', '', '#38bdf8', '#ef4444');
+      }
+      break;
+    }
     default:
       break;
   }

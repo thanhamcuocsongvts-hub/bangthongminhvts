@@ -564,7 +564,7 @@ export default function App() {
     return (
       <EducationalAuthScreen
         isModal={false}
-        teachers={teachers}
+        
         activeTeacher={null}
         onSelectTeacher={(t) => {
           setActiveTeacherId(t.id);
@@ -886,7 +886,7 @@ export default function App() {
         <EducationalAuthScreen
           isModal={true}
           onClose={() => setShowTeacherAuthModal(false)}
-          teachers={teachers}
+          
           activeTeacher={activeTeacher}
           onSelectTeacher={(t) => {
             setActiveTeacherId(t.id);
@@ -908,8 +908,8 @@ export default function App() {
             localStorage.setItem('smartboard_active_teacher', newT.id);
             setShowTeacherAuthModal(false);
           }}
-          onDeleteTeacher={handleDeleteTeacher}
-          onResetPassword={handleResetPassword}
+          
+          
           onLogout={handleLogout}
         />
       )}
@@ -940,6 +940,16 @@ export default function App() {
           onClose={() => setShowAdminModal(false)}
           teachers={teachers}
           activeTeacher={activeTeacher}
+          onDeleteTeacher={(id) => {
+            const next = teachers.filter((t) => t.id !== id);
+            setTeachers(next);
+            localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+          }}
+          onResetPassword={(id, newPassword) => {
+            const next = teachers.map((t) => t.id === id ? { ...t, password: newPassword || '123456' } : t);
+            setTeachers(next);
+            localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+          }}
           onUpdateTeacher={(updated) => {
             const next = teachers.map((t) => (t.id === updated.id ? updated : t));
             setTeachers(next);
@@ -967,8 +977,8 @@ export default function App() {
               body: JSON.stringify(newT),
             }).catch((e) => console.warn('Sync new teacher error:', e));
           }}
-          onResetPassword={handleResetPassword}
-          onDeleteTeacher={handleDeleteTeacher}
+          
+          
           onSelectTeacher={(t) => {
             setActiveTeacherId(t.id);
             localStorage.setItem('smartboard_active_teacher', t.id);

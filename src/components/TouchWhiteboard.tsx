@@ -31,6 +31,8 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  Move,
+  Sliders,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint } from '../types';
 import { isFunctionGraphTool, drawFunctionGraph } from '../utils/mathGraphRenderer';
@@ -93,6 +95,218 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   const lastSmoothedRef = useRef<StrokePoint | null>(null);
   const lastTimeRef = useRef<number>(0);
   const lastVelocityRef = useRef<number>(0);
+
+  // Selected stroke / drawn shape & interactive transformation state
+  const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
+  const [moveSpeed, setMoveSpeed] = useState<number>(15);
+  const [isStrokeToolbarExpanded, setIsStrokeToolbarExpanded] = useState<boolean>(true);
+  const [isDraggingStroke, setIsDraggingStroke] = useState<boolean>(false);
+  const [isResizingStroke, setIsResizingStroke] = useState<boolean>(false);
+  const dragStrokeStartRef = useRef<{
+    startMouseX: number;
+    startMouseY: number;
+    origPoints: StrokePoint[];
+    centerX: number;
+    centerY: number;
+    origRotation: number;
+  } | null>(null);
+  const resizeStrokeStartRef = useRef<{
+    startMouseX: number;
+    startMouseY: number;
+    origScale: number;
+    origBounds: { centerX: number; centerY: number; width: number; height: number };
+    direction: string;
+  } | null>(null);
+  const strokeRafRef = useRef<number | null>(null);
+  const continuousNudgeIntervalRef = useRef<any>(null);
+
+  // Helper to compute bounding box for any stroke or shape
+  const getStrokeBounds = useCallback((stroke: WhiteboardStroke) => {
+    if (stroke.tool === 'circle') {
+      let cx = 0, cy = 0, radius = 20;
+      if (stroke.points && stroke.points.length >= 2) {
+        const p1 = stroke.points[0];
+        const p2 = stroke.points[stroke.points.length - 1];
+        cx = p1.x;
+        cy = p1.y;
+        radius = Math.max(10, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+      }
+      const padding = 12;
+      return {
+        minX: cx - radius - padding,
+        maxX: cx + radius + padding,
+        minY: cy - radius - padding,
+        maxY: cy + radius + padding,
+        centerX: cx,
+        centerY: cy,
+        width: (radius + padding) * 2,
+        height: (radius + padding) * 2,
+        radius,
+      };
+    }
+
+    if (stroke.tool === 'ellipse') {
+      let cx = 0, cy = 0, rx = 30, ry = 20;
+      if (stroke.points && stroke.points.length >= 2) {
+        const p1 = stroke.points[0];
+        const p2 = stroke.points[stroke.points.length - 1];
+        cx = (p1.x + p2.x) / 2;
+        cy = (p1.y + p2.y) / 2;
+        rx = Math.max(10, Math.abs(p2.x - p1.x) / 2);
+        ry = Math.max(10, Math.abs(p2.y - p1.y) / 2);
+      }
+      const padding = 12;
+      return {
+        minX: cx - rx - padding,
+        maxX: cx + rx + padding,
+        minY: cy - ry - padding,
+        maxY: cy + ry + padding,
+        centerX: cx,
+        centerY: cy,
+        width: (rx + padding) * 2,
+        height: (ry + padding) * 2,
+        rx,
+        ry,
+      };
+    }
+
+    if (!stroke.points || stroke.points.length === 0) return null;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    stroke.points.forEach((p) => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    });
+
+    if (maxX - minX < 24) {
+      const padX = (24 - (maxX - minX)) / 2;
+      minX -= padX;
+      maxX += padX;
+    }
+    if (maxY - minY < 24) {
+      const padY = (24 - (maxY - minY)) / 2;
+      minY -= padY;
+      maxY += padY;
+    }
+
+    const padding = 12;
+    return {
+      minX: minX - padding,
+      maxX: maxX + padding,
+      minY: minY - padding,
+      maxY: maxY + padding,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2,
+      width: maxX - minX + padding * 2,
+      height: maxY - minY + padding * 2,
+    };
+  }, []);
+
+  // Nudge selected stroke smoothly
+  const handleNudgeStroke = useCallback((deltaX: number, deltaY: number) => {
+    if (!selectedStrokeId) return;
+    setStrokes((prev) =>
+      prev.map((s) => {
+        if (s.id === selectedStrokeId) {
+          const movedPoints = s.points ? s.points.map((p) => ({ ...p, x: p.x + deltaX, y: p.y + deltaY })) : [];
+          return {
+            ...s,
+            points: movedPoints,
+            centerX: s.centerX ? s.centerX + deltaX : undefined,
+            centerY: s.centerY ? s.centerY + deltaY : undefined,
+          };
+        }
+        return s;
+      })
+    );
+  }, [selectedStrokeId]);
+
+  // Continuous hold-to-move controller for 4-way navigation buttons
+  const startContinuousNudge = useCallback((deltaXRatio: number, deltaYRatio: number) => {
+    handleNudgeStroke(deltaXRatio * moveSpeed, deltaYRatio * moveSpeed);
+    if (continuousNudgeIntervalRef.current) clearInterval(continuousNudgeIntervalRef.current);
+    continuousNudgeIntervalRef.current = setInterval(() => {
+      handleNudgeStroke(deltaXRatio * moveSpeed, deltaYRatio * moveSpeed);
+    }, 60);
+  }, [handleNudgeStroke, moveSpeed]);
+
+  const stopContinuousNudge = useCallback(() => {
+    if (continuousNudgeIntervalRef.current) {
+      clearInterval(continuousNudgeIntervalRef.current);
+      continuousNudgeIntervalRef.current = null;
+    }
+  }, []);
+
+  // Center selected stroke to the current visible viewport
+  const handleCenterStroke = useCallback(() => {
+    if (!selectedStrokeId) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const targetStroke = strokes.find((s) => s.id === selectedStrokeId);
+    if (!targetStroke) return;
+    const bounds = getStrokeBounds(targetStroke);
+    if (!bounds) return;
+
+    const visibleCenterX = canvas.width / (2 * (window.devicePixelRatio || 1));
+    const visibleCenterY = canvas.height / (2 * (window.devicePixelRatio || 1));
+    const deltaX = Math.round(visibleCenterX - bounds.centerX);
+    const deltaY = Math.round(visibleCenterY - bounds.centerY);
+    handleNudgeStroke(deltaX, deltaY);
+  }, [selectedStrokeId, strokes, getStrokeBounds, handleNudgeStroke]);
+
+  // Handle shape corner resize
+  const handleShapeResizePointerDown = (e: React.PointerEvent, direction: string) => {
+    e.stopPropagation();
+    if (!selectedStrokeId) return;
+    const selectedStroke = strokes.find((s) => s.id === selectedStrokeId);
+    if (!selectedStroke) return;
+    const bounds = getStrokeBounds(selectedStroke);
+    if (!bounds) return;
+
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (_) {}
+
+    setIsResizingStroke(true);
+    resizeStrokeStartRef.current = {
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      origScale: selectedStroke.scale || 1,
+      origBounds: { centerX: bounds.centerX, centerY: bounds.centerY, width: bounds.width, height: bounds.height },
+      direction,
+    };
+  };
+
+  const handleShapeResizePointerMove = (e: React.PointerEvent) => {
+    if (!isResizingStroke || !resizeStrokeStartRef.current || !selectedStrokeId) return;
+    e.stopPropagation();
+    const { startMouseX, startMouseY, origScale, origBounds, direction } = resizeStrokeStartRef.current;
+    const dx = e.clientX - startMouseX;
+    const dy = e.clientY - startMouseY;
+    const signX = direction.includes('e') ? 1 : direction.includes('w') ? -1 : 0;
+    const signY = direction.includes('s') ? 1 : direction.includes('n') ? -1 : 0;
+    const factorX = signX !== 0 ? (dx * signX) / Math.max(origBounds.width, 60) : 0;
+    const factorY = signY !== 0 ? (dy * signY) / Math.max(origBounds.height, 60) : 0;
+    const factor = Math.max(factorX, factorY) || factorX || factorY;
+    const newScale = Math.max(0.15, Math.min(6.0, Number((origScale * (1 + factor)).toFixed(2))));
+
+    if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
+    strokeRafRef.current = requestAnimationFrame(() => {
+      setStrokes((prev) =>
+        prev.map((s) => (s.id === selectedStrokeId ? { ...s, scale: newScale } : s))
+      );
+    });
+  };
+
+  const handleShapeResizePointerUp = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    setIsResizingStroke(false);
+    resizeStrokeStartRef.current = null;
+  };
 
   // 17 Authentic Chalk & Neon Fluorescent Colors (matching ClassroomBlackboardView)
   const colors = [
@@ -180,11 +394,32 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     tool: WhiteboardTool,
     points: StrokePoint[],
     color: string,
-    size: number
+    size: number,
+    scale: number = 1,
+    rotation: number = 0
   ) => {
     if (!points || points.length === 0) return;
 
     ctx.save();
+
+    // Center of points for rotation & scale
+    let cx = 0, cy = 0;
+    points.forEach((p) => { cx += p.x; cy += p.y; });
+    cx /= points.length;
+    cy /= points.length;
+
+    if (rotation) {
+      ctx.translate(cx, cy);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.translate(-cx, -cy);
+    }
+
+    if (scale !== 1 && !isFunctionGraphTool(tool)) {
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+      ctx.translate(-cx, -cy);
+    }
+
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = size;
@@ -219,7 +454,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         const p = points[0] || { x: 150, y: 150 };
         renderPts = [p, { x: p.x + 300, y: p.y + 240 }];
       }
-      drawFunctionGraph(ctx, tool, renderPts, color, size);
+      drawFunctionGraph(ctx, tool, renderPts, color, size, scale);
       ctx.restore();
       return;
     }
@@ -368,6 +603,72 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       ctx.moveTo(cx, bottomY); ctx.lineTo(cx + rx, bottomY);
       ctx.stroke();
       ctx.setLineDash([]);
+    } else if (tool === 'pyramid_tri' && points.length >= 2) {
+      // 3D Triangular Pyramid (Hình chóp đáy tam giác S.ABC chuẩn SGK)
+      const w = Math.max(50, Math.abs(p2.x - p1.x));
+      const h = Math.max(50, Math.abs(p2.y - p1.y));
+      const topX = (p1.x + p2.x) / 2;
+      const topY = Math.min(p1.y, p2.y);
+      const bottomY = Math.max(p1.y, p2.y);
+
+      // Base vertices: A (back, hidden), B (front-left), C (front-right)
+      const Ax = topX - w * 0.15;
+      const Ay = bottomY - h * 0.28;
+      const Bx = topX - w * 0.46;
+      const By = bottomY;
+      const Cx = topX + w * 0.44;
+      const Cy = bottomY - h * 0.06;
+
+      // Visible edges (solid)
+      ctx.beginPath();
+      ctx.moveTo(topX, topY); ctx.lineTo(Bx, By); // SB
+      ctx.moveTo(topX, topY); ctx.lineTo(Cx, Cy); // SC
+      ctx.moveTo(Bx, By); ctx.lineTo(Cx, Cy);     // BC
+      ctx.stroke();
+
+      // Hidden edges (dashed)
+      ctx.beginPath();
+      ctx.setLineDash([6, 5]);
+      ctx.moveTo(topX, topY); ctx.lineTo(Ax, Ay); // SA (khuất)
+      ctx.moveTo(Ax, Ay); ctx.lineTo(Bx, By);     // AB (khuất)
+      ctx.moveTo(Ax, Ay); ctx.lineTo(Cx, Cy);     // AC (khuất)
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (tool === 'pyramid_quad' && points.length >= 2) {
+      // 3D Parallelogram Pyramid (Hình chóp đáy hình bình hành S.ABCD chuẩn SGK)
+      const w = Math.max(60, Math.abs(p2.x - p1.x));
+      const h = Math.max(50, Math.abs(p2.y - p1.y));
+      const topX = (p1.x + p2.x) / 2 - w * 0.08;
+      const topY = Math.min(p1.y, p2.y);
+      const bottomY = Math.max(p1.y, p2.y);
+
+      // Base vertices: A (back-left, hidden), B (front-left), C (front-right), D (back-right)
+      const Ax = topX - w * 0.3;
+      const Ay = bottomY - h * 0.28;
+      const Bx = topX - w * 0.46;
+      const By = bottomY;
+      const Cx = topX + w * 0.24;
+      const Cy = bottomY;
+      const Dx = topX + w * 0.4;
+      const Dy = bottomY - h * 0.28;
+
+      // Visible edges (solid)
+      ctx.beginPath();
+      ctx.moveTo(topX, topY); ctx.lineTo(Bx, By); // SB
+      ctx.moveTo(topX, topY); ctx.lineTo(Cx, Cy); // SC
+      ctx.moveTo(topX, topY); ctx.lineTo(Dx, Dy); // SD
+      ctx.moveTo(Bx, By); ctx.lineTo(Cx, Cy);     // BC
+      ctx.moveTo(Cx, Cy); ctx.lineTo(Dx, Dy);     // CD
+      ctx.stroke();
+
+      // Hidden edges (dashed)
+      ctx.beginPath();
+      ctx.setLineDash([6, 5]);
+      ctx.moveTo(topX, topY); ctx.lineTo(Ax, Ay); // SA (khuất)
+      ctx.moveTo(Ax, Ay); ctx.lineTo(Bx, By);     // AB (khuất)
+      ctx.moveTo(Ax, Ay); ctx.lineTo(Dx, Dy);     // AD (khuất)
+      ctx.stroke();
+      ctx.setLineDash([]);
     } else if ((tool === 'cylinder' || tool === 'revolution_cylinder') && points.length >= 2) {
       const topY = Math.min(p1.y, p2.y);
       const bottomY = Math.max(p1.y, p2.y);
@@ -507,7 +808,15 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
 
       strokeList.forEach((stroke) => {
-        renderSingleStroke(ctx, stroke.tool, stroke.points, stroke.color, stroke.size);
+        renderSingleStroke(
+          ctx,
+          stroke.tool,
+          stroke.points,
+          stroke.color,
+          stroke.size,
+          stroke.scale || 1,
+          stroke.rotation || 0
+        );
       });
     },
     []
@@ -558,6 +867,37 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     redrawCanvas(strokes);
   }, [strokes, redrawCanvas]);
 
+  // Keyboard arrow keys & delete for selected stroke
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedStrokeId) return;
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      const step = e.shiftKey ? moveSpeed * 2.5 : moveSpeed;
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleNudgeStroke(0, -step);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleNudgeStroke(0, step);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handleNudgeStroke(-step, 0);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNudgeStroke(step, 0);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        setStrokes((prev) => prev.filter((s) => s.id !== selectedStrokeId));
+        setSelectedStrokeId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedStrokeId, handleNudgeStroke, moveSpeed]);
+
   const getCanvasCoords = (e: React.PointerEvent<HTMLCanvasElement>): StrokePoint => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -571,7 +911,30 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
   // Pointer event handlers with anti-jitter low-pass filter
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (activeTool === 'select') return;
+    if (activeTool === 'select') {
+      const point = getCanvasCoords(e);
+      // Hit-test on geometric shapes & math graphs (never select freehand handwriting)
+      const hitStroke = strokes.slice().reverse().find((s) => {
+        if (s.tool === 'pen' || s.tool === 'highlighter' || s.tool === 'eraser' || s.tool === 'laser') {
+          return false;
+        }
+        const bounds = getStrokeBounds(s);
+        if (!bounds) return false;
+        if (s.tool === 'circle') {
+          const dist = Math.hypot(point.x - bounds.centerX, point.y - bounds.centerY);
+          return dist <= (bounds.radius || bounds.width / 2) + 20;
+        }
+        return point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY;
+      });
+      if (hitStroke) {
+        setSelectedStrokeId(hitStroke.id);
+        setIsStrokeToolbarExpanded(true);
+      } else {
+        setSelectedStrokeId(null);
+      }
+      return;
+    }
+
     e.preventDefault();
     const point = getCanvasCoords(e);
 
@@ -759,6 +1122,13 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       setTimeout(() => redrawCanvas(updated), 0);
       return updated;
     });
+
+    const isShapeOrGraph = !['pen', 'highlighter', 'eraser', 'laser', 'text'].includes(activeTool);
+    if (isShapeOrGraph) {
+      setSelectedStrokeId(newStroke.id);
+      setIsStrokeToolbarExpanded(true);
+    }
+
     setRedoStack([]);
     setIsDrawing(false);
     setCurrentPoints([]);
@@ -893,6 +1263,555 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
           )}
         </div>
       ))}
+
+      {/* INTERACTIVE BOUNDING BOX & CONTROLLER FOR SELECTED STROKE / DRAWN SHAPE */}
+      {selectedStrokeId && (() => {
+        const selectedStroke = strokes.find((s) => s.id === selectedStrokeId);
+        if (!selectedStroke) return null;
+        const bounds = getStrokeBounds(selectedStroke);
+        if (!bounds) return null;
+
+        const currentRotation = selectedStroke.rotation || 0;
+        const currentScale = selectedStroke.scale || 1;
+
+        return (
+          <div
+            className="absolute pointer-events-none z-40 animate-fade-in"
+            style={{
+              left: `${bounds.minX}px`,
+              top: `${bounds.minY}px`,
+              width: `${bounds.width}px`,
+              height: `${bounds.height}px`,
+            }}
+          >
+            {/* Interactive Inner Drag Area allowing easy grabbing & movement of the entire shape */}
+            <div
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                try {
+                  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                } catch (_) {}
+                setIsDraggingStroke(true);
+                dragStrokeStartRef.current = {
+                  startMouseX: e.clientX,
+                  startMouseY: e.clientY,
+                  origPoints: selectedStroke.points ? selectedStroke.points.map((p) => ({ ...p })) : [],
+                  centerX: bounds.centerX,
+                  centerY: bounds.centerY,
+                  origRotation: selectedStroke.rotation || 0,
+                };
+              }}
+              onPointerMove={(e) => {
+                if (!isDraggingStroke || !dragStrokeStartRef.current || !selectedStrokeId) return;
+                e.stopPropagation();
+                const deltaX = e.clientX - dragStrokeStartRef.current.startMouseX;
+                const deltaY = e.clientY - dragStrokeStartRef.current.startMouseY;
+                const origPts = dragStrokeStartRef.current.origPoints;
+                const origCenterX = dragStrokeStartRef.current.centerX;
+                const origCenterY = dragStrokeStartRef.current.centerY;
+
+                if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
+                strokeRafRef.current = requestAnimationFrame(() => {
+                  setStrokes((prev) =>
+                    prev.map((s) => {
+                      if (s.id === selectedStrokeId) {
+                        const movedPoints = origPts.map((p) => ({ ...p, x: p.x + deltaX, y: p.y + deltaY }));
+                        return {
+                          ...s,
+                          points: movedPoints,
+                          centerX: origCenterX + deltaX,
+                          centerY: origCenterY + deltaY,
+                        };
+                      }
+                      return s;
+                    })
+                  );
+                });
+              }}
+              onPointerUp={(e) => {
+                e.stopPropagation();
+                try {
+                  (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                } catch (_) {}
+                setIsDraggingStroke(false);
+              }}
+              onPointerCancel={(e) => {
+                e.stopPropagation();
+                try {
+                  (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                } catch (_) {}
+                setIsDraggingStroke(false);
+              }}
+              className="absolute inset-0 cursor-move pointer-events-auto bg-cyan-400/10 hover:bg-cyan-400/20 active:bg-cyan-400/30 rounded-2xl transition-colors border-2 border-cyan-400/40 touch-none select-none flex items-center justify-center group"
+              title="Chạm và kéo để di chuyển hình (hoặc dùng 4 nút điều hướng / phím mũi tên)"
+            >
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-slate-950/85 px-2.5 py-1 rounded-full text-cyan-300 text-[11px] font-bold shadow-lg flex items-center gap-1.5 pointer-events-none">
+                <Move className="w-3.5 h-3.5" />
+                Kéo di chuyển hình
+              </div>
+            </div>
+
+            {/* Bounding box outline with rotation visual styling & active draggable corner handles */}
+            <div
+              className="w-full h-full border-2 border-dashed border-cyan-400/90 rounded-2xl relative shadow-lg ring-2 ring-cyan-400/30 pointer-events-none"
+              style={{
+                transform: `rotate(${currentRotation}deg) scale(${currentScale})`,
+                transformOrigin: 'center center',
+              }}
+            >
+              {/* 4 Active Draggable Corner Handles */}
+              <div
+                onPointerDown={(e) => handleShapeResizePointerDown(e, 'nw')}
+                onPointerMove={handleShapeResizePointerMove}
+                onPointerUp={handleShapeResizePointerUp}
+                onPointerCancel={handleShapeResizePointerUp}
+                className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
+                title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+              >
+                <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+              </div>
+              <div
+                onPointerDown={(e) => handleShapeResizePointerDown(e, 'ne')}
+                onPointerMove={handleShapeResizePointerMove}
+                onPointerUp={handleShapeResizePointerUp}
+                onPointerCancel={handleShapeResizePointerUp}
+                className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
+                title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+              >
+                <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+              </div>
+              <div
+                onPointerDown={(e) => handleShapeResizePointerDown(e, 'sw')}
+                onPointerMove={handleShapeResizePointerMove}
+                onPointerUp={handleShapeResizePointerUp}
+                onPointerCancel={handleShapeResizePointerUp}
+                className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
+                title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+              >
+                <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+              </div>
+              <div
+                onPointerDown={(e) => handleShapeResizePointerDown(e, 'se')}
+                onPointerMove={handleShapeResizePointerMove}
+                onPointerUp={handleShapeResizePointerUp}
+                onPointerCancel={handleShapeResizePointerUp}
+                className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
+                title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+              >
+                <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+              </div>
+
+              {/* Center crosshair */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 border border-cyan-300 rounded-full flex items-center justify-center pointer-events-none">
+                <div className="w-1 h-1 bg-cyan-300 rounded-full" />
+              </div>
+            </div>
+
+            {/* Floating Toolbar: Collapsed & Expandable */}
+            {!isStrokeToolbarExpanded ? (
+              /* DẠNG THU GỌN (Collapsed Compact Mode) */
+              <div
+                className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-slate-950/95 backdrop-blur-md px-2.5 py-1.5 rounded-2xl border-2 border-cyan-400/80 shadow-2xl text-white pointer-events-auto whitespace-nowrap z-50 select-none animate-fade-in"
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {/* Mini Directional Movement */}
+                <div className="flex items-center gap-1 bg-white/10 px-1.5 py-1 rounded-xl">
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(-1, 0); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời sang TRÁI"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(0, -1); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời lên TRÊN"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(0, 1); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời xuống DƯỚI"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(1, 0); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời sang PHẢI"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCenterStroke(); }}
+                    className="px-1.5 py-0.5 bg-white/10 hover:bg-cyan-500/30 rounded-lg text-[10px] font-bold text-cyan-200 hover:text-white transition-colors cursor-pointer ml-0.5"
+                    title="Đưa hình về giữa bảng"
+                  >
+                    🎯 Giữa
+                  </button>
+                </div>
+
+                {/* Color Dot indicator */}
+                <div
+                  className="w-4 h-4 rounded-full border border-white/80 shadow-xs shrink-0"
+                  style={{ backgroundColor: selectedStroke.color || '#ffffff' }}
+                  title="Màu sắc hiện tại"
+                />
+
+                {/* Delete Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setStrokes((prev) => prev.filter((s) => s.id !== selectedStroke.id));
+                    setSelectedStrokeId(null);
+                  }}
+                  className="p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors flex items-center justify-center text-xs cursor-pointer"
+                  title="Xóa hình này"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+
+                {/* Expand Full Toolbar Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsStrokeToolbarExpanded(true);
+                  }}
+                  className="px-2.5 py-1 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 hover:text-white font-bold text-[11px] flex items-center gap-1.5 border border-cyan-400/50 transition-all cursor-pointer shadow-xs"
+                  title="Bấm để mở đầy đủ thanh công cụ: Xoay 360°, chọn màu, phóng to/thu nhỏ"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-cyan-300" />
+                  <span>Mở rộng ▾</span>
+                </button>
+
+                {/* Close button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStrokeId(null);
+                  }}
+                  className="p-1 rounded-lg hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  title="Bỏ chọn"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              /* DẠNG MỞ RỘNG ĐẦY ĐỦ (Expanded Full Mode) */
+              <div
+                className="absolute -top-20 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-slate-950/98 backdrop-blur-md px-3.5 py-2 rounded-2xl border-2 border-cyan-400/90 shadow-2xl text-white pointer-events-auto whitespace-nowrap z-50 select-none animate-fade-in"
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {/* Collapse Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsStrokeToolbarExpanded(false);
+                  }}
+                  className="px-2 py-1 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 rounded-xl text-[10.5px] font-black flex items-center gap-1 border border-cyan-400/40 cursor-pointer mr-0.5"
+                  title="Thu gọn thanh công cụ lại"
+                >
+                  <ChevronUp className="w-3.5 h-3.5 text-cyan-300" />
+                  <span>Thu gọn ▴</span>
+                </button>
+
+                {/* 4-Way Smooth Directional Movement */}
+                <div className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 rounded-xl">
+                  <span className="text-[11px] font-black text-cyan-300 flex items-center gap-1 mr-0.5">
+                    <Move className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Di chuyển:</span>
+                  </span>
+
+                  {/* Left */}
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(-1, 0); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1.5 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời sang TRÁI (Nhấn hoặc Giữ để di chuyển mượt)"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Up */}
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(0, -1); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1.5 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời lên TRÊN (Nhấn hoặc Giữ để di chuyển mượt)"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Down */}
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(0, 1); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1.5 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời xuống DƯỚI (Nhấn hoặc Giữ để di chuyển mượt)"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Right */}
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); startContinuousNudge(1, 0); }}
+                    onPointerUp={(e) => { e.stopPropagation(); stopContinuousNudge(); }}
+                    onPointerLeave={stopContinuousNudge}
+                    onPointerCancel={stopContinuousNudge}
+                    className="p-1.5 bg-white/10 hover:bg-cyan-500/40 active:scale-90 rounded-lg text-cyan-200 hover:text-white transition-transform flex items-center justify-center cursor-pointer"
+                    title="Dời sang PHẢI (Nhấn hoặc Giữ để di chuyển mượt)"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Speed toggle presets */}
+                  <div className="flex items-center gap-0.5 bg-slate-900/90 p-0.5 rounded-lg border border-white/10 ml-1">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMoveSpeed(5); }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${moveSpeed === 5 ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                      title="Bước tinh chỉnh 5px"
+                    >
+                      5px
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMoveSpeed(15); }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${moveSpeed === 15 ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                      title="Bước tiêu chuẩn 15px"
+                    >
+                      15px
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMoveSpeed(35); }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${moveSpeed === 35 ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                      title="Bước nhanh 35px"
+                    >
+                      35px
+                    </button>
+                  </div>
+
+                  {/* Center to Viewport Button */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCenterStroke(); }}
+                    className="px-2 py-1 bg-white/10 hover:bg-cyan-500/30 rounded-lg text-[10.5px] font-bold text-cyan-200 hover:text-white transition-colors flex items-center gap-1 cursor-pointer"
+                    title="Đưa hình vẽ về ngay giữa tầm nhìn bảng"
+                  >
+                    <span>🎯 Giữa</span>
+                  </button>
+
+                  {/* Coordinates Badge */}
+                  <span className="text-[10px] font-mono text-cyan-400/90 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-500/30 hidden md:inline">
+                    X:{Math.round(bounds.centerX)} Y:{Math.round(bounds.centerY)}
+                  </span>
+                </div>
+
+                <div className="h-5 w-px bg-white/20 mx-1" />
+
+                {/* 360-Degree Rotation Controls */}
+                <div className="flex items-center gap-1.5 bg-white/10 px-2 py-1 rounded-xl">
+                  <RotateCw className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-xs font-black text-amber-300 font-mono min-w-[36px] text-center">
+                    {Math.round(currentRotation)}°
+                  </span>
+
+                  {/* Rotation Slider 0° -> 360° */}
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    step="5"
+                    value={Math.round((currentRotation % 360 + 360) % 360)}
+                    onChange={(e) => {
+                      const newAngle = Number(e.target.value);
+                      setStrokes((prev) =>
+                        prev.map((s) => (s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s))
+                      );
+                    }}
+                    className="w-20 md:w-28 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-400"
+                    title="Kéo trượt để xoay hình 0 - 360 độ"
+                  />
+
+                  {/* Quick Rotate Buttons */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newAngle = (currentRotation - 15 + 360) % 360;
+                      setStrokes((prev) =>
+                        prev.map((s) => (s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s))
+                      );
+                    }}
+                    className="p-1 hover:bg-white/20 rounded-lg text-slate-200 text-[11px] font-bold cursor-pointer"
+                    title="Xoay ngược chiều kim đồng hồ 15°"
+                  >
+                    -15°
+                  </button>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newAngle = (currentRotation + 15) % 360;
+                      setStrokes((prev) =>
+                        prev.map((s) => (s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s))
+                      );
+                    }}
+                    className="p-1 hover:bg-white/20 rounded-lg text-slate-200 text-[11px] font-bold cursor-pointer"
+                    title="Xoay thuận chiều kim đồng hồ 15°"
+                  >
+                    +15°
+                  </button>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newAngle = (currentRotation + 90) % 360;
+                      setStrokes((prev) =>
+                        prev.map((s) => (s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s))
+                      );
+                    }}
+                    className="px-1.5 py-0.5 bg-amber-500/30 hover:bg-amber-500/50 rounded-lg text-amber-200 text-[10px] font-black cursor-pointer"
+                    title="Xoay vuông góc 90°"
+                  >
+                    +90°
+                  </button>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newAngle = (currentRotation + 180) % 360;
+                      setStrokes((prev) =>
+                        prev.map((s) => (s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s))
+                      );
+                    }}
+                    className="px-1.5 py-0.5 bg-amber-500/30 hover:bg-amber-500/50 rounded-lg text-amber-200 text-[10px] font-black cursor-pointer"
+                    title="Lật ngược 180°"
+                  >
+                    180°
+                  </button>
+                </div>
+
+                <div className="h-5 w-px bg-white/20 mx-1" />
+
+                {/* Change Color Palette */}
+                <div className="flex items-center gap-1 max-w-[260px] sm:max-w-[340px] overflow-x-auto py-0.5 custom-scrollbar-none">
+                  {colors.map((cp) => (
+                    <button
+                      key={cp.value}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStrokes((prev) =>
+                          prev.map((s) => (s.id === selectedStroke.id ? { ...s, color: cp.value } : s))
+                        );
+                      }}
+                      className={`w-4 h-4 rounded-full border transition-transform shrink-0 cursor-pointer ${
+                        selectedStroke.color === cp.value
+                          ? 'border-white scale-125 ring-2 ring-cyan-400'
+                          : 'border-transparent hover:scale-110'
+                      }`}
+                      style={{
+                        backgroundColor: cp.value,
+                        boxShadow: cp.isFluorescent ? `0 0 6px ${cp.value}` : undefined,
+                      }}
+                      title={cp.label}
+                    />
+                  ))}
+                </div>
+
+                <div className="h-5 w-px bg-white/20 mx-1" />
+
+                {/* Scale +/- */}
+                <div className="flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded-xl">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newScale = Math.max(0.3, currentScale - 0.15);
+                      setStrokes((prev) =>
+                        prev.map((s) => (s.id === selectedStroke.id ? { ...s, scale: newScale } : s))
+                      );
+                    }}
+                    className="p-1 hover:bg-white/20 rounded-lg text-slate-300 hover:text-white cursor-pointer"
+                    title="Thu nhỏ hình"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-[10px] font-mono text-cyan-300">{Math.round(currentScale * 100)}%</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newScale = Math.min(3.0, currentScale + 0.15);
+                      setStrokes((prev) =>
+                        prev.map((s) => (s.id === selectedStroke.id ? { ...s, scale: newScale } : s))
+                      );
+                    }}
+                    className="p-1 hover:bg-white/20 rounded-lg text-slate-300 hover:text-white cursor-pointer"
+                    title="Phóng to hình"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setStrokes((prev) =>
+                        prev.map((s) => (s.id === selectedStroke.id ? { ...s, scale: 1.0 } : s))
+                      );
+                    }}
+                    className="px-1.5 py-0.5 bg-cyan-500/30 hover:bg-cyan-500/50 rounded text-[9.5px] font-bold text-cyan-200 cursor-pointer"
+                    title="Đặt lại kích thước chuẩn (100%)"
+                  >
+                    100%
+                  </button>
+                </div>
+
+                <div className="h-5 w-px bg-white/20 mx-1" />
+
+                {/* Delete Stroke */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setStrokes((prev) => prev.filter((s) => s.id !== selectedStroke.id));
+                    setSelectedStrokeId(null);
+                  }}
+                  className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition-colors flex items-center gap-1 text-xs cursor-pointer font-bold"
+                  title="Xóa hình này (Phím tắt: Delete)"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Xóa</span>
+                </button>
+
+                {/* Close Overlay Selection Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStrokeId(null);
+                  }}
+                  className="p-1 rounded-xl hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  title="Bỏ chọn"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Top Right Close Button: Tắt công cụ và trở về màn hình trình chiếu */}
       {isOverlay && onCloseOverlay && (
@@ -1449,6 +2368,53 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
                       >
                         <span className="font-mono text-xs font-bold">y = logₐ(x) (a&gt;1)</span>
                         <span className="text-[9.5px]">Hàm Số Logarit</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 4. Đồ Thị Vật Lý */}
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-amber-200/80 mb-1.5 block">
+                      4. Đồ Thị Vật Lý (Dao Động, Sóng)
+                    </span>
+                    <div className="grid grid-cols-3 gap-2 mt-4">
+                      <button
+                        onClick={() => {
+                          setActiveTool('phys_oscillation');
+                          setShowFunctionPicker(false);
+                        }}
+                        className={`p-2 rounded-xl text-xs flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                          activeTool === 'phys_oscillation' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/15'
+                        }`}
+                      >
+                        <span className="font-mono text-xs font-bold">x = A.cos(ωt+φ)</span>
+                        <span className="text-[9.5px]">Dao Động Điều Hoà</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setActiveTool('phys_wave');
+                          setShowFunctionPicker(false);
+                        }}
+                        className={`p-2 rounded-xl text-xs flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                          activeTool === 'phys_wave' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/15'
+                        }`}
+                      >
+                        <span className="font-mono text-xs font-bold">u(x,t)</span>
+                        <span className="text-[9.5px]">Sóng Dừng</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setActiveTool('phys_projectile');
+                          setShowFunctionPicker(false);
+                        }}
+                        className={`p-2 rounded-xl text-xs flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                          activeTool === 'phys_projectile' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/15'
+                        }`}
+                      >
+                        <span className="font-mono text-xs font-bold">Ném Xiên</span>
+                        <span className="text-[9.5px]">Quỹ Đạo Parabol</span>
                       </button>
                     </div>
                   </div>

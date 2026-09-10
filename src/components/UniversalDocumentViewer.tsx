@@ -22,6 +22,8 @@ import {
   Printer,
   Pen,
 } from 'lucide-react';
+import DocViewer, { DocViewerRenderers } from '@cyntler/react-doc-viewer';
+import '@cyntler/react-doc-viewer/dist/index.css';
 import { LessonDoc } from '../types';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { cleanDocumentText } from '../utils/fileParser';
@@ -446,9 +448,20 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         )}
 
         {/* ========================================================= */}
-        {/* 4. WORD DOCUMENT VIEWER (.DOCX, .DOC)                     */}
+        {/* 4. OFFICE DOCUMENT VIEWER (.DOCX, .PPTX, .XLSX) VIA CYNTLER */}
         {/* ========================================================= */}
-        {fileType === 'docx' && (
+        {(fileType === 'docx' || fileType === 'pptx' || fileType === 'xlsx') && lesson.fileUrl && lesson.fileUrl.startsWith('http') ? (
+          <div className="flex-1 w-full h-full relative z-10 bg-white overflow-hidden">
+            <DocViewer 
+              documents={[{ uri: lesson.fileUrl, fileType: fileType, fileName: lesson.title }]}
+              pluginRenderers={DocViewerRenderers}
+              config={{
+                header: { disableHeader: true, disableFileName: true, retainURLParams: false }
+              }}
+              style={{ width: "100%", height: "100%" }}
+            />
+          </div>
+        ) : fileType === 'docx' ? (
           <div
             className="flex-1 w-full h-full overflow-y-auto p-3 md:p-6 flex justify-center bg-slate-950/80 custom-scrollbar scroll-smooth overscroll-contain touch-pan-y"
             style={{ WebkitOverflowScrolling: 'touch' }}
@@ -494,12 +507,12 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
               )}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ========================================================= */}
         {/* 5. POWERPOINT PRESENTATION VIEWER (.PPTX, .PPT)           */}
         {/* ========================================================= */}
-        {fileType === 'pptx' && (
+        {fileType === 'pptx' && !(lesson.fileUrl && lesson.fileUrl.startsWith('http')) && (
           <div className="flex-1 w-full h-full overflow-y-auto p-6 flex flex-col items-center justify-center text-center space-y-4">
             <div className="p-8 rounded-3xl bg-slate-900 border border-indigo-500/40 shadow-2xl max-w-lg w-full space-y-4">
               <Layers className="w-14 h-14 mx-auto text-indigo-400 animate-pulse" />
