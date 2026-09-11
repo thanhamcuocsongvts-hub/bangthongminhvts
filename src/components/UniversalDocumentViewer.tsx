@@ -450,7 +450,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         {/* ========================================================= */}
         {/* 4. OFFICE DOCUMENT VIEWER (.DOCX, .PPTX, .XLSX) VIA CYNTLER */}
         {/* ========================================================= */}
-        {(fileType === 'docx' || fileType === 'pptx' || fileType === 'xlsx') && lesson.fileUrl && lesson.fileUrl.startsWith('http') ? (
+        {(fileType === 'docx' || fileType === 'pptx' || fileType === 'xlsx') && lesson.fileUrl && !lesson.fileUrl.startsWith('blob:') && lesson.fileUrl.startsWith('http') ? (
           <div className="flex-1 w-full h-full relative z-10 bg-white overflow-hidden">
             <DocViewer 
               documents={[{ uri: lesson.fileUrl, fileType: fileType, fileName: lesson.title }]}

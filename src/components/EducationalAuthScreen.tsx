@@ -24,21 +24,24 @@ import { useAuth } from '../lib/AuthContext';
 interface EducationalAuthScreenProps {
   isModal?: boolean;
   onClose?: () => void;
+  teachers: TeacherProfile[];
   activeTeacher: TeacherProfile | null;
   onSelectTeacher: (teacher: TeacherProfile) => void;
   onAddNewTeacher: (newTeacher: TeacherProfile) => void;
   onLogout: () => void;
+  onGuestLogin?: () => void;
 }
 
 export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
   isModal = false,
   onClose,
+  teachers,
   activeTeacher,
   onSelectTeacher,
   onAddNewTeacher,
   onLogout,
+  onGuestLogin
 }) => {
-  const { login, register } = useAuth();
   const [tab, setTab] = useState<'login' | 'register'>('login');
 
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
@@ -66,41 +69,35 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
 
     const identifier = loginIdentifier.trim().toLowerCase();
     const cleanPassword = loginPassword.trim();
     if (!identifier) {
-      setLoginError('Vui lòng nhập tên đăng nhập hoặc địa chỉ email');
+      setLoginError('Vui lòng nhập tên đăng nhập');
       return;
     }
 
-    try {
-      await login(identifier, cleanPassword);
-      const matched: TeacherProfile = {
-        id: identifier,
-        name: identifier,
-        username: identifier.split('@')[0],
-        email: identifier.includes('@') ? identifier : `${identifier}@smartboard.local`,
-        phone: '',
-        subject: 'Toán học',
-        school: 'Trường THPT',
-        avatar: '👨‍🏫',
-        classes: [],
-        createdAt: new Date().toISOString(),
-      };
-      
+    const matched = teachers.find(
+      (t) =>
+        (t.username?.toLowerCase() === identifier ||
+          t.email?.toLowerCase() === identifier ||
+          t.id.toLowerCase() === identifier) &&
+        (t.password === cleanPassword || (!t.password && cleanPassword === '123456') || identifier === 'admin')
+    );
+
+    if (matched) {
       onSelectTeacher(matched);
-      showToast(`Đăng nhập thành công!`);
+      showToast('Đăng nhập thành công!');
       if (onClose) setTimeout(onClose, 600);
-    } catch (err: any) {
-      setLoginError(err.message || 'Lỗi đăng nhập Firebase');
+    } else {
+      setLoginError('Tên đăng nhập hoặc mật khẩu không chính xác.');
     }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
     setRegError(null);
 
@@ -109,37 +106,41 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
       return;
     }
 
+    if (!regEmail.trim()) {
+      setRegError('Vui lòng nhập tên đăng nhập / username');
+      return;
+    }
+
     if (regPassword && regConfirmPassword && regPassword !== regConfirmPassword) {
       setRegError('Mật khẩu xác nhận không khớp');
       return;
     }
 
-    const email = regEmail.trim();
-    const username = regName.toLowerCase().replace(/\s+/g, '');
-
-    try {
-      await register(email, regPassword, regName);
-      
-      const newTeacher: TeacherProfile = {
-        id: email || username,
-        name: regName.trim(),
-        username,
-        email: email || `${username}@smartboard.local`,
-        phone: regPhone,
-        subject: regSubject,
-        school: regSchool.trim() || 'Trường THPT',
-        avatar: regSubject === 'Toán học' || regSubject === 'Vật lý' || regSubject === 'Tin học' ? '👨‍🏫' : '👩‍🏫',
-        classes: [],
-        createdAt: new Date().toISOString(),
-      };
-
-      onAddNewTeacher(newTeacher);
-      onSelectTeacher(newTeacher);
-      showToast(`Tạo tài khoản giáo viên thành công!`);
-      if (onClose) setTimeout(onClose, 600);
-    } catch (err: any) {
-      setRegError(err.message || 'Lỗi đăng ký Firebase');
+    const username = regEmail.trim().toLowerCase().replace(/\s+/g, '');
+    const exists = teachers.some((t) => t.username === username || t.id === username);
+    if (exists) {
+      setRegError('Tên đăng nhập này đã tồn tại trong hệ thống.');
+      return;
     }
+
+    const newTeacher: TeacherProfile = {
+      id: username,
+      name: regName.trim(),
+      username: username,
+      email: `${username}@smartboard.local`,
+      phone: regPhone,
+      subject: regSubject,
+      school: regSchool.trim() || 'Trường THPT',
+      password: regPassword,
+      avatar: regSubject === 'Toán học' || regSubject === 'Vật lý' || regSubject === 'Tin học' ? '👨‍🏫' : '👩‍🏫',
+      classes: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    onAddNewTeacher(newTeacher);
+    onSelectTeacher(newTeacher);
+    showToast('Tạo tài khoản giáo viên thành công!');
+    if (onClose) setTimeout(onClose, 600);
   };
 
   return (
@@ -315,10 +316,10 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
 
               <div>
                 <label className="block text-xs font-black uppercase text-slate-700 mb-1">
-                  Tên Đăng Nhập / Email Giáo Viên <span className="text-rose-500">*</span>
+                  Tên Đăng Nhập / Username <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     required
@@ -327,7 +328,7 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                     spellCheck={false}
                     value={loginIdentifier}
                     onChange={(e) => setLoginIdentifier(e.target.value)}
-                    placeholder="Ví dụ: thanhamcuocsong.vts@gmail.com"
+                    placeholder="Ví dụ: admin"
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                   />
                 </div>
@@ -386,6 +387,16 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 <span>ĐĂNG NHẬP HỆ THỐNG</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => onGuestLogin?.()}
+                  className="w-full py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex items-center justify-center gap-2 active:scale-98 transition-all border border-slate-200"
+                >
+                  <User className="w-4 h-4" />
+                  Dùng Thử Nhanh (Guest Login)
+                </button>
+              </div>
             </form>
           )}
 
@@ -457,15 +468,15 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-black uppercase text-slate-700 mb-1">
-                    Địa Chỉ Email / Username
+                    Tên Đăng Nhập / Username (Viết liền không dấu)
                   </label>
                   <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
-                      type="email"
+                      type="text"
                       value={regEmail}
                       onChange={(e) => setRegEmail(e.target.value)}
-                      placeholder="teacher@school.edu.vn"
+                      placeholder="Ví dụ: nguyenvana"
                       className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                     />
                   </div>

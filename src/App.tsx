@@ -77,8 +77,23 @@ export default function App() {
     return localStorage.getItem('smartboard_active_teacher') || '';
   });
 
-  const activeTeacher =
-    (teachers || []).find((t) => t.id === activeTeacherId) || null;
+  const [isGuestMode, setIsGuestMode] = useState<boolean>(false);
+  const [guestTeacherData, setGuestTeacherData] = useState<TeacherProfile | null>(null);
+
+  const activeTeacher = isGuestMode 
+    ? guestTeacherData 
+    : (teachers || []).find((t) => t.id === activeTeacherId) || null;
+
+  // Guest mode cleanup on exit
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (isGuestMode) {
+        // We do not save guest data anywhere, it is naturally lost.
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isGuestMode]);
 
   // Sync teachers across devices (PC <-> Mobile)
   useEffect(() => {
@@ -246,8 +261,9 @@ export default function App() {
       });
   }, []);
 
-  // Save to LocalStorage & IndexedDB (Bypassing browser 5MB quota with IndexedDB)
+    // Save to LocalStorage & IndexedDB (Bypassing browser 5MB quota with IndexedDB)
   useEffect(() => {
+    if (isGuestMode) return;
     try {
       localStorage.setItem('smartboard_lessons', JSON.stringify(lessons));
     } catch (e) {
@@ -256,19 +272,22 @@ export default function App() {
     saveLessonsToDB(lessons).catch((err) => {
       console.error('Failed to sync to IndexedDB:', err);
     });
-  }, [lessons]);
+  }, [lessons, isGuestMode]);
 
   useEffect(() => {
+    if (isGuestMode) return;
     localStorage.setItem('smartboard_active_lesson', activeLessonId);
-  }, [activeLessonId]);
+  }, [activeLessonId, isGuestMode]);
 
   useEffect(() => {
+    if (isGuestMode) return;
     localStorage.setItem('smartboard_teachers', JSON.stringify(teachers));
-  }, [teachers]);
+  }, [teachers, isGuestMode]);
 
   useEffect(() => {
+    if (isGuestMode) return;
     localStorage.setItem('smartboard_active_teacher', activeTeacherId);
-  }, [activeTeacherId]);
+  }, [activeTeacherId, isGuestMode]);
 
   // Fetch Room State from backend periodically
   const fetchRoom = useCallback(async (pin: string = '758899') => {
@@ -436,7 +455,11 @@ export default function App() {
   };
 
   // Update teacher data (e.g. from Gradebook)
-  const handleUpdateActiveTeacher = (updatedTeacher: TeacherProfile) => {
+    const handleUpdateActiveTeacher = (updatedTeacher: TeacherProfile) => {
+    if (isGuestMode) {
+      setGuestTeacherData(updatedTeacher);
+      return;
+    }
     setTeachers((prev) => {
       const next = prev.map((t) => (t.id === updatedTeacher.id ? updatedTeacher : t));
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
@@ -487,6 +510,10 @@ export default function App() {
 
   // Logout Teacher
   const handleLogout = () => {
+    if (isGuestMode) {
+      setIsGuestMode(false);
+      setGuestTeacherData(null);
+    }
     setActiveTeacherId('');
     localStorage.removeItem('smartboard_active_teacher');
     setShowTeacherAuthModal(false);
@@ -562,9 +589,9 @@ export default function App() {
   // If not logged in, show educational login/register portal
   if (!activeTeacher) {
     return (
-      <EducationalAuthScreen
+            <EducationalAuthScreen
         isModal={false}
-        
+        teachers={teachers}
         activeTeacher={null}
         onSelectTeacher={(t) => {
           setActiveTeacherId(t.id);
@@ -587,6 +614,22 @@ export default function App() {
           setActiveTab('whiteboard');
         }}
         onLogout={handleLogout}
+        onGuestLogin={() => {
+          setIsGuestMode(true);
+          setGuestTeacherData({
+            id: 'guest',
+            name: 'Khách (Dùng thử)',
+            username: 'guest',
+            email: 'guest@smartboard.local',
+            phone: '',
+            subject: 'Khác',
+            school: '',
+            avatar: '👤',
+            classes: [],
+            createdAt: new Date().toISOString(),
+          });
+          setActiveTab('whiteboard');
+        }}
       />
     );
   }
@@ -883,10 +926,10 @@ export default function App() {
 
       {/* Teacher Authentication / Profile Switcher Modal */}
       {showTeacherAuthModal && (
-        <EducationalAuthScreen
+                <EducationalAuthScreen
           isModal={true}
           onClose={() => setShowTeacherAuthModal(false)}
-          
+          teachers={teachers}
           activeTeacher={activeTeacher}
           onSelectTeacher={(t) => {
             setActiveTeacherId(t.id);
@@ -908,9 +951,23 @@ export default function App() {
             localStorage.setItem('smartboard_active_teacher', newT.id);
             setShowTeacherAuthModal(false);
           }}
-          
-          
           onLogout={handleLogout}
+          onGuestLogin={() => {
+            setIsGuestMode(true);
+            setGuestTeacherData({
+              id: 'guest',
+              name: 'Khách (Dùng thử)',
+              username: 'guest',
+              email: 'guest@smartboard.local',
+              phone: '',
+              subject: 'Khác',
+              school: '',
+              avatar: '👤',
+              classes: [],
+              createdAt: new Date().toISOString(),
+            });
+            setShowTeacherAuthModal(false);
+          }}
         />
       )}
 
