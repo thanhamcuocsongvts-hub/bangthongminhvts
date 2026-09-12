@@ -336,15 +336,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                   <Download className="w-4 h-4" />
                 </button>
 
-                {lessons.length > 1 && (
-                  <button
-                    onClick={() => onDeleteLesson(lesson.id)}
-                    title="Xóa bài giảng"
-                    className="p-2.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-rose-600 transition-all border border-slate-200"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+                <button
+                  onClick={() => onDeleteLesson(lesson.id)}
+                  title="Xóa bài giảng"
+                  className="p-2.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-rose-600 transition-all border border-slate-200"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
           );

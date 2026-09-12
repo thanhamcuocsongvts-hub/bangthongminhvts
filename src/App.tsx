@@ -34,6 +34,8 @@ import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadLessonsFromDB, saveLessonsToDB } from './utils/storageUtils';
+import { db } from './lib/firebase';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 export default function App() {
   // Check URL mode for student mobile access
@@ -97,53 +99,45 @@ export default function App() {
 
   // Sync teachers across devices (PC <-> Mobile)
   useEffect(() => {
-    // 1. Fetch server teachers FIRST so another computer/mobile gets all accounts and classes registered
-    fetch('/api/teachers')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.teachers && Array.isArray(data.teachers) && data.teachers.length > 0) {
+    // Fetch from Firestore for reliable cross-device sync
+    const fetchCloudData = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'global_store', 'smartboard_data'));
+        if (docSnap.exists() && docSnap.data().teachers) {
+          const cloudTeachers = docSnap.data().teachers;
+          // Intelligent merge to avoid dropping local newly added classes if they haven't synced
           setTeachers((prev) => {
-            const map = new Map<string, TeacherProfile>();
-            // Load server teachers
-            data.teachers.forEach((t: TeacherProfile) => {
-              const cleanedClasses = (t.classes || []).map((c: any) => ({
-                ...c,
-                students: cleanStudentList(c.students || []),
-              }));
-              map.set(t.id, { ...t, classes: cleanedClasses });
+            const map = new Map();
+            prev.forEach(t => map.set(t.id, t));
+            const next = cloudTeachers.map((ct) => {
+               if(map.has(ct.id)) {
+                 return { ...ct, classes: ct.classes && ct.classes.length > 0 ? ct.classes : map.get(ct.id).classes };
+               }
+               return ct;
             });
-
-            // Merge local teachers: if local has classes and server has none, keep local; otherwise server is source of truth
-            prev.forEach((localT) => {
-              const serverT = map.get(localT.id);
-              if (!serverT) {
-                map.set(localT.id, localT);
-              } else {
-                const serverHasClasses = serverT.classes && serverT.classes.length > 0;
-                const localHasClasses = localT.classes && localT.classes.length > 0;
-                const finalClasses = serverHasClasses ? serverT.classes : (localHasClasses ? localT.classes : []);
-                map.set(localT.id, {
-                  ...localT,
-                  ...serverT,
-                  classes: finalClasses,
-                });
-              }
-            });
-
-            const merged = Array.from(map.values());
-            localStorage.setItem('smartboard_teachers', JSON.stringify(merged));
-            return merged;
+            localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
+            return next;
           });
-        } else if (teachers && teachers.length > 0) {
-          // If server was completely empty, push local teachers to server
-          fetch('/api/teachers/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ teachers }),
-          }).catch((e) => console.warn('Sync teachers to server warning:', e));
+        } else {
+          syncTeachersToCloud(teachers);
         }
-      })
-      .catch((e) => console.warn('Fetch teachers error:', e));
+      } catch (e) {
+        console.warn('Failed to load from Firestore:', e);
+      }
+    };
+    fetchCloudData();
+    
+    // Subscribe to realtime updates
+    const unsub = onSnapshot(doc(db, 'global_store', 'smartboard_data'), (docSnap) => {
+       if (docSnap.exists() && docSnap.data().teachers) {
+          const cloudTeachers = docSnap.data().teachers;
+          setTeachers(cloudTeachers);
+          localStorage.setItem('smartboard_teachers', JSON.stringify(cloudTeachers));
+       }
+    });
+    return () => unsub();
+    
   }, []);
 
   // Lessons State & Persistence
@@ -463,19 +457,12 @@ export default function App() {
     setTeachers((prev) => {
       const next = prev.map((t) => (t.id === updatedTeacher.id ? updatedTeacher : t));
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
 
       // CRITICAL: Synchronize directly with the server so other computers/devices instantly get the class and student list!
-      fetch(`/api/teachers/${encodeURIComponent(updatedTeacher.id)}/classes`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ classes: updatedTeacher.classes || [] }),
-      }).catch((e) => console.warn('Sync teacher classes error:', e));
+      
 
-      fetch('/api/teachers/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teachers: next }),
-      }).catch((e) => console.warn('Sync teacher to server error:', e));
+      
 
       return next;
     });
@@ -486,6 +473,7 @@ export default function App() {
     setTeachers((prev) => {
       const next = prev.filter((t) => t.id !== teacherId);
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
       return next;
     });
     if (activeTeacherId === teacherId) {
@@ -499,13 +487,10 @@ export default function App() {
     setTeachers((prev) => {
       const next = prev.map((t) => (t.id === teacherId ? { ...t, password: newPassword } : t));
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
       return next;
     });
-    fetch('/api/teachers/reset-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ teacherId, newPassword }),
-    }).catch((e) => console.warn('Reset password error', e));
+    
   };
 
   // Logout Teacher
@@ -602,13 +587,10 @@ export default function App() {
           setTeachers((prev) => {
             const next = [...prev, newT];
             localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
             return next;
           });
-          fetch('/api/teachers', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newT),
-          }).catch((e) => console.warn('Sync new teacher error:', e));
+          
           setActiveTeacherId(newT.id);
           localStorage.setItem('smartboard_active_teacher', newT.id);
           setActiveTab('whiteboard');
@@ -940,13 +922,10 @@ export default function App() {
             setTeachers((prev) => {
               const next = [...prev, newT];
               localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
               return next;
             });
-            fetch('/api/teachers', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newT),
-            }).catch((e) => console.warn('Sync new teacher error:', e));
+            
             setActiveTeacherId(newT.id);
             localStorage.setItem('smartboard_active_teacher', newT.id);
             setShowTeacherAuthModal(false);
@@ -1001,38 +980,30 @@ export default function App() {
             const next = teachers.filter((t) => t.id !== id);
             setTeachers(next);
             localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
           }}
           onResetPassword={(id, newPassword) => {
             const next = teachers.map((t) => t.id === id ? { ...t, password: newPassword || '123456' } : t);
             setTeachers(next);
             localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
           }}
           onUpdateTeacher={(updated) => {
             const next = teachers.map((t) => (t.id === updated.id ? updated : t));
             setTeachers(next);
             localStorage.setItem('smartboard_teachers', JSON.stringify(next));
-            fetch(`/api/teachers/${encodeURIComponent(updated.id)}/classes`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ classes: updated.classes || [] }),
-            }).catch((e) => console.warn('Sync classes error:', e));
-            fetch('/api/teachers/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ teachers: next }),
-            }).catch((e) => console.warn('Sync teacher error:', e));
+      syncTeachersToCloud(next);
+            
+            
           }}
           onAddNewTeacher={(newT) => {
             setTeachers((prev) => {
               const next = [...prev, newT];
               localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      syncTeachersToCloud(next);
               return next;
             });
-            fetch('/api/teachers', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newT),
-            }).catch((e) => console.warn('Sync new teacher error:', e));
+            
           }}
           
           

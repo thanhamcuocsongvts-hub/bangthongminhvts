@@ -1,5 +1,4 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
     // Helper functions
@@ -11,20 +10,22 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Public collection for prototype cross-device sync (without requiring Firebase Auth Email/Password)
+    match /global_store/{document=**} {
+      allow read, write: if true;
+    }
+
     match /users/{userId} {
       allow read, write: if isOwner(userId);
     }
-
     match /classes/{classId} {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
-
     match /files/{fileId} {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
-
     match /boardStates/{boardId} {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;

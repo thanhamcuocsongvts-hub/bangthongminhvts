@@ -69,9 +69,7 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
       const auth = authModule.auth;
       const db = authModule.db;
       const { doc, setDoc } = firestoreModule;
-      if (auth.currentUser) {
-        await setDoc(doc(db, 'users', auth.currentUser.uid, 'data', 'lessons'), { lessons });
-      }
+      await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons });
     } catch(e) {
       console.warn("Firestore sync failed", e);
     }
@@ -96,8 +94,7 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
     const auth = authModule.auth;
     const db = authModule.db;
     const { doc, getDoc } = firestoreModule;
-    if (auth.currentUser) {
-      const docSnap = await getDoc(doc(db, 'users', auth.currentUser.uid, 'data', 'lessons'));
+    const docSnap = await getDoc(doc(db, 'global_store', 'smartboard_lessons'));
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.lessons) {
@@ -106,7 +103,6 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
           return data.lessons;
         }
       }
-    }
   } catch(e) {
     console.warn("Firestore read failed", e);
   }
