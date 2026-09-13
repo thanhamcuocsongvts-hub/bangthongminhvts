@@ -209,7 +209,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".txt,.json,.doc,.docx,.pdf,.md,.xlsx,.xls,.csv"
+          accept=".txt,.json,.doc,.docx,.pdf,.md,.xlsx,.xls,.csv,.ppt,.pptx,image/*"
           className="hidden"
           onChange={(e) => handleFileUpload(e.target.files)}
         />
