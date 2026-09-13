@@ -34,7 +34,8 @@ import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadLessonsFromDB, saveLessonsToDB } from './utils/storageUtils';
-import { db } from './lib/firebase';
+import { db, auth } from './lib/firebase';
+import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 export default function App() {
@@ -49,6 +50,21 @@ export default function App() {
     return params.get('room') || '758899';
   });
 
+
+  const syncTeachersToCloud = async (newTeachers: any[]) => {
+    try {
+      await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: newTeachers }, { merge: true });
+    } catch (e) {
+      console.warn('Sync to Firestore failed:', e);
+    }
+  };
+
+
+  useEffect(() => {
+    // Auto anonymous login to enable Firebase Storage uploads
+    if (auth) { signInAnonymously(auth).catch(e => console.warn('Anon auth failed:', e)); }
+  }, []);
+  
   // Teachers State & Persistence
   const [teachers, setTeachers] = useState<TeacherProfile[]>(() => {
     const saved = localStorage.getItem('smartboard_teachers');
@@ -913,6 +929,7 @@ export default function App() {
           onClose={() => setShowTeacherAuthModal(false)}
           teachers={teachers}
           activeTeacher={activeTeacher}
+          lessons={lessons}
           onSelectTeacher={(t) => {
             setActiveTeacherId(t.id);
             localStorage.setItem('smartboard_active_teacher', t.id);
@@ -980,7 +997,15 @@ export default function App() {
             const next = teachers.filter((t) => t.id !== id);
             setTeachers(next);
             localStorage.setItem('smartboard_teachers', JSON.stringify(next));
-      syncTeachersToCloud(next);
+            syncTeachersToCloud(next);
+            
+            // Xóa tài liệu liên quan
+            const teacherToDelete = teachers.find(x => x.id === id);
+            const nextLessons = lessons.filter(l => l.author !== teacherToDelete?.name);
+            if (nextLessons.length !== lessons.length) {
+              setLessons(nextLessons);
+              saveLessonsToDB(nextLessons).catch(()=>{});
+            }
           }}
           onResetPassword={(id, newPassword) => {
             const next = teachers.map((t) => t.id === id ? { ...t, password: newPassword || '123456' } : t);

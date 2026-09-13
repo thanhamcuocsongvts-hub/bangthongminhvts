@@ -16,7 +16,15 @@ const config = {
 
 const app = !getApps().length ? initializeApp(config) : getApp();
 
-export const auth = getAuth(app);
+let authInstance: any = null;
+try {
+  if (config.apiKey) authInstance = getAuth(app);
+} catch (e) { console.warn("Firebase Auth init failed", e); }
+export const auth = authInstance;
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "(default)");
-export const storage = getStorage(app);
+let storageInstance: any = null;
+try {
+  if (config.projectId) storageInstance = getStorage(app);
+} catch (e) { console.warn("Firebase Storage init failed", e); }
+export const storage = storageInstance;
 export default app;

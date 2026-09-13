@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  HardDrive,
   ShieldCheck,
   Search,
   Eye,
@@ -29,6 +30,7 @@ interface AdminManagementModalProps {
   onClose: () => void;
   teachers: TeacherProfile[];
   activeTeacher: TeacherProfile | null;
+  lessons?: LessonDoc[];
   onSelectTeacher: (teacher: TeacherProfile) => void;
   onUpdateTeacher: (teacher: TeacherProfile) => void;
   onDeleteTeacher: (teacherId: string) => void;
@@ -41,6 +43,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
   onClose,
   teachers,
   activeTeacher,
+  lessons = [],
   onSelectTeacher,
   onUpdateTeacher,
   onDeleteTeacher,
@@ -360,7 +363,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
             filteredTeachers.map((t) => {
               const isRevealed = !!revealedPasswords[t.id];
               const pwd = t.password || '123456';
-              const isAdmin = t.role === 'admin' || t.username === 'admin' || t.id === 'teacher_admin_root';
+              const isAdmin = t.id === 'teacher_admin_root';
               const isActive = activeTeacher?.id === t.id;
 
               return (
@@ -471,6 +474,35 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span>Reset MK</span>
                     </button>
+                  </div>
+
+                  {/* Storage Usage Column */}
+                  <div className="flex flex-col items-center justify-center bg-slate-50/50 p-2 rounded-xl border border-slate-200/50 shrink-0 min-w-[90px]">
+                    <div className="flex items-center gap-1.5 text-slate-500 mb-1">
+                      <HardDrive className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Lưu Trữ</span>
+                    </div>
+                    {(() => {
+                      const teacherLessons = (lessons || []).filter(l => l.author === t.name);
+                      const fileCount = teacherLessons.length;
+                      let totalKB = 0;
+                      teacherLessons.forEach(l => {
+                        if (l.fileSize) {
+                          const num = parseFloat(l.fileSize);
+                          if (!isNaN(num)) {
+                            if (l.fileSize.includes('MB')) totalKB += num * 1024;
+                            else if (l.fileSize.includes('KB')) totalKB += num;
+                          }
+                        }
+                      });
+                      const displaySize = totalKB > 1024 ? (totalKB / 1024).toFixed(1) + ' MB' : Math.round(totalKB) + ' KB';
+                      return (
+                        <div className="text-center">
+                          <div className="text-sm font-black text-indigo-600">{displaySize}</div>
+                          <div className="text-[10px] text-slate-400 font-medium">{fileCount} tệp</div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Right Actions: Edit, Login As, Delete */}

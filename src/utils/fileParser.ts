@@ -73,7 +73,7 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
     const storage = authModule.storage;
     const { ref, uploadBytes, getDownloadURL } = storageModule;
 
-    if (auth.currentUser) {
+    if (auth && auth.currentUser) {
       const storageRef = ref(storage, `users/${auth.currentUser.uid}/files/${Date.now()}_${file.name}`);
       const snapshot = await uploadBytes(storageRef, file);
       serverFileUrl = await getDownloadURL(snapshot.ref);

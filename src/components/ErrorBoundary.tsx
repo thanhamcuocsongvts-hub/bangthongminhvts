@@ -48,7 +48,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="space-y-2">
               <h2 className="text-xl font-bold text-white tracking-tight">Đã xảy ra sự cố hiển thị</h2>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Hệ thống đã tự động bảo vệ dữ liệu giảng dạy của Thầy/Cô. Vui lòng bấm làm mới để tiếp tục phiên làm việc bình thường.
+                Lỗi chi tiết: {this.state.error?.message || "Unknown error"}
               </p>
             </div>
             <div className="flex items-center justify-center gap-3">
