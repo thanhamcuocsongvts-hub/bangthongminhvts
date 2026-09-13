@@ -688,6 +688,7 @@ export default function App() {
                   );
                 }}
                 onLaunchQuiz={() => setActiveTab('quiz')}
+                onClosePresentation={() => { setActiveLessonId(''); setActiveTab('documents'); }}
                 onAskAIAboutSlide={(slide) => {
                   setActiveTab('ai_chat');
                   handleSendAIMessage(

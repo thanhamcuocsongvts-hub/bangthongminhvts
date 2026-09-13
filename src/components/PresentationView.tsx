@@ -43,6 +43,7 @@ interface PresentationViewProps {
   onLaunchQuiz: () => void;
   onAskAIAboutSlide: (slide: SlideItem) => void;
   onOpenExportModal: () => void;
+  onClosePresentation?: () => void;
 }
 
 export const PresentationView: React.FC<PresentationViewProps> = ({
@@ -55,6 +56,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   onLaunchQuiz,
   onAskAIAboutSlide,
   onOpenExportModal,
+  onClosePresentation,
 }) => {
   const [currentSlideIndex, setCurrentSlideIndex] = useState<number>(0);
   const [isSplitMode, setIsSplitMode] = useState<boolean>(false);
@@ -522,6 +524,18 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             )}
             <span className="hidden xl:inline">{isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}</span>
           </button>
+
+          {/* Close Presentation Button */}
+          {onClosePresentation && (
+            <button
+              onClick={onClosePresentation}
+              className="p-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white border border-rose-400 font-bold flex items-center gap-1.5 shadow-md shadow-rose-500/20 transition-all cursor-pointer"
+              title="Đóng tệp và trở về kho bài giảng"
+            >
+              <X className="w-4 h-4 stroke-[3]" />
+              <span className="hidden xl:inline">Đóng Tệp</span>
+            </button>
+          )}
         </div>
       </div>
 
