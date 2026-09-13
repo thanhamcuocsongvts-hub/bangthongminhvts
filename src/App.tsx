@@ -152,8 +152,19 @@ export default function App() {
           localStorage.setItem('smartboard_teachers', JSON.stringify(cloudTeachers));
        }
     });
-    return () => unsub();
-    
+
+    const unsubLessons = onSnapshot(doc(db, 'global_store', 'smartboard_lessons'), (docSnap) => {
+       if (docSnap.exists() && docSnap.data().lessons) {
+          const cloudLessons = docSnap.data().lessons;
+          setLessons(cloudLessons);
+       }
+       setIsLessonsLoaded(true);
+    });
+
+    return () => {
+      unsub();
+      unsubLessons();
+    };
   }, []);
 
   // Lessons State & Persistence
@@ -236,6 +247,7 @@ export default function App() {
     },
   ]);
   const [isAILoading, setIsAILoading] = useState<boolean>(false);
+  const [isLessonsLoaded, setIsLessonsLoaded] = useState<boolean>(false);
 
   // Load lessons from Cloud Server & high-capacity IndexedDB on mount
   useEffect(() => {
@@ -247,33 +259,15 @@ export default function App() {
       })
       .catch((err) => {
         console.warn('IndexedDB initial load note:', err);
-      });
-
-    // Cross-device sync: Fetch lessons stored on the cloud server (accessible from PC, TV 75", Mobile)
-    fetch('/api/lessons')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.lessons && Array.isArray(data.lessons) && data.lessons.length > 0) {
-          setLessons((prev) => {
-            const map = new Map<string, LessonDoc>();
-            prev.forEach((l) => map.set(l.id, l));
-            data.lessons.forEach((l: LessonDoc) => {
-              map.set(l.id, { ...l, syncedToCloud: true });
-            });
-            const merged = Array.from(map.values());
-            saveLessonsToDB(merged).catch(() => {});
-            return merged;
-          });
-        }
       })
-      .catch((err) => {
-        console.warn('Could not fetch cloud lessons:', err);
-      });
+      .finally(() => setIsLessonsLoaded(true));
+
+
   }, []);
 
     // Save to LocalStorage & IndexedDB (Bypassing browser 5MB quota with IndexedDB)
   useEffect(() => {
-    if (isGuestMode) return;
+    if (isGuestMode || !isLessonsLoaded) return;
     try {
       localStorage.setItem('smartboard_lessons', JSON.stringify(lessons));
     } catch (e) {
@@ -353,18 +347,7 @@ export default function App() {
   const handleSyncToCloud = async () => {
     setIsSyncingCloud(true);
     try {
-      const res = await fetch('/api/lessons/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lessons }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.lessons && Array.isArray(data.lessons)) {
-          setLessons(data.lessons);
-          saveLessonsToDB(data.lessons).catch(() => {});
-        }
-      }
+      await saveLessonsToDB(lessons);
     } catch (err) {
       console.error('Cloud sync error:', err);
     } finally {
@@ -675,7 +658,7 @@ export default function App() {
             {activeTab === 'presentation' && (
               <PresentationView
                 lesson={currentLesson}
-                allLessons={lessons}
+                allLessons={lessons.filter(l => l.author === activeTeacher?.name)}
                 textScale={textScale}
                 onSelectLesson={(doc) => setActiveLessonId(doc.id)}
                 onAddLesson={(newDoc) => {
@@ -733,27 +716,18 @@ export default function App() {
               <ClassroomBlackboardView
                 classroom={activeTeacher?.classes?.[0] || null}
                 activeTeacher={activeTeacher || null}
-                lessons={lessons || []}
+                lessons={lessons.filter(l => l.author === activeTeacher?.name) || []}
                 activeLessonId={activeLessonId}
                 onSelectLesson={setActiveLessonId}
                 onAddLesson={(newDoc) => {
                   setLessons((prev) => [newDoc, ...prev]);
                   setActiveLessonId(newDoc.id);
-                  fetch('/api/lessons', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newDoc),
-                  }).catch((e) => console.warn('Sync new lesson to cloud error:', e));
                 }}
                 onUpdateLesson={(updatedDoc) => {
                   setLessons((prev) =>
                     prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
                   );
-                  fetch('/api/lessons', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(updatedDoc),
-                  }).catch((e) => console.warn('Sync updated lesson to cloud error:', e));
+                  
                 }}
                 onDeleteLesson={(id) => {
                   setLessons((prev) => {
@@ -763,7 +737,7 @@ export default function App() {
                     }
                     return next;
                   });
-                  fetch(`/api/lessons/${id}`, { method: 'DELETE' }).catch(() => {});
+                  
                 }}
                 onSwitchToPresentation={() => setActiveTab('presentation')}
                 onSwitchToReader={() => setActiveTab('reader')}
@@ -885,7 +859,8 @@ export default function App() {
             {/* Tab 7: Document Library & Cloud Sync */}
             {activeTab === 'documents' && (
               <DocumentLibrary
-                lessons={lessons}
+                activeTeacher={activeTeacher}
+                lessons={lessons.filter(l => l.author === activeTeacher?.name)}
                 activeLessonId={activeLessonId}
                 onSelectLesson={(id) => {
                   setActiveLessonId(id);
@@ -894,15 +869,11 @@ export default function App() {
                 onAddLesson={(newDoc) => {
                   setLessons((prev) => [newDoc, ...prev]);
                   setActiveLessonId(newDoc.id);
-                  fetch('/api/lessons', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newDoc),
-                  }).catch((e) => console.warn('Sync new lesson to cloud error:', e));
+                  
                 }}
                 onDeleteLesson={(id) => {
                   setLessons((prev) => prev.filter((l) => l.id !== id));
-                  fetch(`/api/lessons/${id}`, { method: 'DELETE' }).catch(() => {});
+                  
                 }}
                 onSyncToCloud={handleSyncToCloud}
                 isSyncing={isSyncingCloud}

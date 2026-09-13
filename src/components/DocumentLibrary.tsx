@@ -22,8 +22,11 @@ import { LessonDoc, SubjectType } from '../types';
 import { exportLessonJSON } from '../utils/exportUtils';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
 
+import { TeacherProfile } from '../types';
+
 interface DocumentLibraryProps {
   lessons: LessonDoc[];
+  activeTeacher: TeacherProfile | null;
   activeLessonId: string;
   onSelectLesson: (id: string) => void;
   onAddLesson: (newDoc: LessonDoc) => void;
@@ -40,6 +43,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   onDeleteLesson,
   onSyncToCloud,
   isSyncing,
+  activeTeacher,
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedSubject, setSelectedSubject] = useState<string>('Tất cả');
@@ -54,7 +58,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [newTitle, setNewTitle] = useState<string>('');
   const [newSubject, setNewSubject] = useState<SubjectType>('Sinh học');
   const [newGrade, setNewGrade] = useState<string>('Lớp 10');
-  const [newAuthor, setNewAuthor] = useState<string>('Giáo viên bộ môn');
+  const [newAuthor, setNewAuthor] = useState<string>(activeTeacher?.name || 'Giáo viên bộ môn');
   const [newContent, setNewContent] = useState<string>('');
 
   const subjects = ['Tất cả', 'Sinh học', 'Vật lý', 'Toán học', 'Hóa học', 'Lịch sử', 'Ngữ văn', 'Tiếng Anh'];
@@ -118,7 +122,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       grade: newGrade,
       lastModified: new Date().toISOString(),
       syncedToCloud: true,
-      author: newAuthor.trim() || 'Giáo viên bộ môn',
+      author: activeTeacher?.name || newAuthor.trim() || 'Giáo viên bộ môn',
       rawText: newContent || newTitle,
       slides,
       quizzes: [],
