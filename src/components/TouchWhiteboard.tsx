@@ -1,3 +1,9 @@
+declare global {
+  interface Window {
+    currentRafRef?: { id?: number };
+  }
+}
+
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
   MousePointer2,
@@ -72,7 +78,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   const [strokes, setStrokes] = useState<WhiteboardStroke[]>([]);
   const [redoStack, setRedoStack] = useState<WhiteboardStroke[]>([]);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
-  const [currentPoints, setCurrentPoints] = useState<StrokePoint[]>([]);
+  const currentPointsRef = useRef<StrokePoint[]>([]);
 
   // Text items support
   const [texts, setTexts] = useState<WhiteboardText[]>([]);
@@ -959,7 +965,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     }
 
     setIsDrawing(true);
-    setCurrentPoints([point]);
+    currentPointsRef.current = [point];
     lastSmoothedRef.current = { ...point };
     lastTimeRef.current = Date.now();
     lastVelocityRef.current = 0;
@@ -1006,7 +1012,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     if (!isDrawing) return;
 
     // Anti-jitter noise reduction filter
-    const lastSmoothed = lastSmoothedRef.current || currentPoints[currentPoints.length - 1];
+    const lastSmoothed = lastSmoothedRef.current || currentPointsRef.current[currentPointsRef.current.length - 1];
     const dist = Math.hypot(rawPoint.x - lastSmoothed.x, rawPoint.y - lastSmoothed.y);
 
     // Filter micro-jitter (< 1.4px)
@@ -1037,13 +1043,19 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     };
     lastSmoothedRef.current = smoothedPoint;
 
-    const newPoints = [...currentPoints, smoothedPoint];
-    setCurrentPoints(newPoints);
+    currentPointsRef.current.push(smoothedPoint);
+    const newPoints = currentPointsRef.current;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    
+    // Use requestAnimationFrame for batching rendering
+    if (!window.currentRafRef) window.currentRafRef = {};
+    if (window.currentRafRef.id) cancelAnimationFrame(window.currentRafRef.id);
+    
+    window.currentRafRef.id = requestAnimationFrame(() => {
 
     // Freehand tools: Lightning-fast incremental Bezier rendering
     if (['pen', 'highlighter', 'eraser'].includes(activeTool)) {
@@ -1098,11 +1110,12 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       redrawCanvas(strokes);
       renderSingleStroke(ctx, activeTool, newPoints, activeColor, strokeSize);
     }
+    });
   };
 
   const handlePointerUp = () => {
     if (activeTool === 'laser') return;
-    if (!isDrawing || currentPoints.length === 0) {
+    if (!isDrawing || currentPointsRef.current.length === 0) {
       setIsDrawing(false);
       return;
     }
@@ -1110,7 +1123,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     const newStroke: WhiteboardStroke = {
       id: 'stroke_' + Date.now(),
       tool: activeTool,
-      points: currentPoints,
+      points: currentPointsRef.current,
       color: activeColor,
       size: strokeSize,
       opacity: activeTool === 'highlighter' ? 0.45 : 1,
@@ -1131,7 +1144,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
     setRedoStack([]);
     setIsDrawing(false);
-    setCurrentPoints([]);
+    currentPointsRef.current = [];
     lastSmoothedRef.current = null;
   };
 

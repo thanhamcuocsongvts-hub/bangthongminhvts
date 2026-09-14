@@ -135,11 +135,11 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   // Auto-cleanup any stray summary or evaluation rows (e.g. "KẾT QUẢ XẾP LOẠI", "Tốt", "Khá", "Đạt", "Chưa đạt", "THỐNG KÊ") from existing class data
   useEffect(() => {
     if (!currentClass) return;
-    const hasStraySummary = currentClass.students.some((st) =>
+    const hasStraySummary = (currentClass.students || []).some((st) =>
       isEvaluationOrSummaryRow(st.name) || isEvaluationOrSummaryRow(st.code)
     );
     if (hasStraySummary) {
-      const cleaned = currentClass.students.filter(
+      const cleaned = (currentClass.students || []).filter(
         (st) => !isEvaluationOrSummaryRow(st.name) && !isEvaluationOrSummaryRow(st.code)
       );
       const updatedClasses = classes.map((c) =>
@@ -194,7 +194,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
 
   // Average for current view
   const classStats = useMemo(() => {
-    if (!currentClass || currentClass.students.length === 0) {
+    if (!currentClass || (!currentClass.students || currentClass.students.length === 0)) {
       return { avg: '-', excellentCount: 0, goodCount: 0, passCount: 0 };
     }
 
@@ -203,7 +203,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
     let goodCount = 0;
     let passCount = 0;
 
-    currentClass.students.forEach((st) => {
+    (currentClass.students || []).forEach((st) => {
       let val: number | null = null;
       if (activeSemester === 'hk1') {
         val = calculateSemesterDtb(st.hk1);
@@ -238,7 +238,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   ) => {
     if (!currentClass) return;
 
-    const updatedStudents = currentClass.students.map((st) => {
+    const updatedStudents = (currentClass.students || []).map((st) => {
       if (st.id !== studentId) return st;
 
       const currentSem = st[semKey] || {};
@@ -287,7 +287,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
     value: any
   ) => {
     if (!currentClass) return;
-    const updatedStudents = currentClass.students.map((st) =>
+    const updatedStudents = (currentClass.students || []).map((st) =>
       st.id === studentId ? { ...st, [field]: value } : st
     );
 
@@ -304,7 +304,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   // Adjust bonus points
   const handleAdjustBonus = (studentId: string, delta: number) => {
     if (!currentClass) return;
-    const student = currentClass.students.find((s) => s.id === studentId);
+    const student = (currentClass.students || []).find((s) => s.id === studentId);
     if (!student) return;
 
     const newPts = (student.bonusPoints || 0) + delta;
@@ -319,7 +319,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    const updatedStudents = currentClass.students.map((st) =>
+    const updatedStudents = (currentClass.students || []).map((st) =>
       st.id === studentId
         ? {
             ...st,
@@ -344,7 +344,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
     if (!currentClass) return;
     if (!confirm('Thầy/Cô có chắc chắn muốn xóa học sinh này khỏi danh sách lớp?')) return;
 
-    const updatedStudents = currentClass.students.filter((st) => st.id !== studentId);
+    const updatedStudents = (currentClass.students || []).filter((st) => st.id !== studentId);
     const updatedClasses = classes.map((c) =>
       c.id === currentClass.id ? { ...c, students: updatedStudents } : c
     );
@@ -362,7 +362,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
 
     const newStudent: ClassStudent = {
       id: 'st_' + Date.now(),
-      code: newStudentCode.trim() || `HS${1000 + currentClass.students.length + 1}`,
+      code: newStudentCode.trim() || `HS${1000 + (currentClass.students?.length || 0) + 1}`,
       name: newStudentName.trim(),
       gender: newStudentGender,
       birthDate: newStudentBirthDate.trim(),
@@ -459,7 +459,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
       });
       setActiveClassId(newClass.id);
     } else if (currentClass) {
-      const baseStudents = replaceExisting ? [] : currentClass.students;
+      const baseStudents = replaceExisting ? [] : (currentClass.students || []);
       const updatedStudents = [...baseStudents, ...imported];
       const mergedCols = Array.from(
         new Set([...(currentClass.customColumns || []), ...(customColumns || [])])
@@ -488,7 +488,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   const handleAutoMergeNameColumn = (colName: string) => {
     if (!currentClass) return;
 
-    const updatedStudents = currentClass.students.map((st) => {
+    const updatedStudents = (currentClass.students || []).map((st) => {
       const firstNameVal = st.customFields?.[colName];
       if (firstNameVal !== undefined && firstNameVal !== null) {
         const firstNameStr = String(firstNameVal).trim();
@@ -554,7 +554,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
     if (!confirm(`Thầy/Cô có chắc muốn xóa cột "${colName}" khỏi bảng?`)) return;
 
     const updatedCols = (currentClass.customColumns || []).filter((c) => c !== colName);
-    const updatedStudents = currentClass.students.map((st) => {
+    const updatedStudents = (currentClass.students || []).map((st) => {
       if (st.customFields && st.customFields[colName] !== undefined) {
         const custom = { ...st.customFields };
         delete custom[colName];
@@ -688,7 +688,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                       : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  {cls.name} <span className="text-xs opacity-75 font-normal">({cls.students.length})</span>
+                  {cls.name} <span className="text-xs opacity-75 font-normal">({cls.students?.length || 0})</span>
                 </button>
               );
             })}
@@ -1527,7 +1527,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
               </h3>
               <p className="text-xs md:text-sm text-slate-600 mt-1">
                 Thầy/Cô có chắc chắn muốn xóa lớp <strong>{currentClass.name}</strong> (gồm{' '}
-                <strong>{currentClass.students.length} học sinh</strong> và toàn bộ điểm số 2 học kỳ)?
+                <strong>{(currentClass.students?.length || 0)} học sinh</strong> và toàn bộ điểm số 2 học kỳ)?
                 Hành động này không thể hoàn tác.
               </p>
             </div>
@@ -1771,7 +1771,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
           classRoom={currentClass}
           selectedStudentId={conductStudentId}
           onSaveConduct={(studentId, record) => {
-            const updatedStudents = currentClass.students.map((st) => {
+            const updatedStudents = (currentClass.students || []).map((st) => {
               if (st.id === studentId) {
                 const currentRecords = st.conductRecords || [];
                 const newBonus = (st.bonusPoints || 0) + record.points;
@@ -1858,10 +1858,10 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
               <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1">
                 <div className="font-bold flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 text-amber-600" />
-                  <span>Xem trước ({currentClass.students.filter(s => (s.bonusPoints || 0) !== 0).length} học sinh có điểm thi đua):</span>
+                  <span>Xem trước ({(currentClass.students || []).filter(s => (s.bonusPoints || 0) !== 0).length} học sinh có điểm thi đua):</span>
                 </div>
                 <div className="max-h-36 overflow-y-auto custom-scrollbar space-y-1 pt-1">
-                  {currentClass.students.filter(s => (s.bonusPoints || 0) !== 0).map((st) => {
+                  {(currentClass.students || []).filter(s => (s.bonusPoints || 0) !== 0).map((st) => {
                     const currentScore = (st as any)[accumulateTargetCol] ?? 0;
                     const delta = Math.round((st.bonusPoints || 0) * accumulateRatio * 10) / 10;
                     const nextScore = Math.max(0, Math.min(10, Math.round((currentScore + delta) * 10) / 10));
@@ -1904,7 +1904,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const updatedStudents = currentClass.students.map((st) => {
+                    const updatedStudents = (currentClass.students || []).map((st) => {
                       const bonus = st.bonusPoints || 0;
                       if (bonus === 0) return st;
 

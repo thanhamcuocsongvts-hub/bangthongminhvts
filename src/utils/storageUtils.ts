@@ -108,7 +108,10 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
  * Load lesson documents from Firestore, backend API, IndexedDB, or LocalStorage
  */
 export async function loadLessonsFromDB(): Promise<any[] | null> {
-  // 1. First try Firestore
+  let cloudLessons: any[] | null = null;
+  let localLessons: any[] | null = null;
+
+  // 1. Try Firestore
   try {
     const authModule = await import('../lib/firebase');
     const firestoreModule = await import('firebase/firestore');
@@ -118,14 +121,48 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
     if (docSnap.exists()) {
       const data = docSnap.data();
       if (data && Array.isArray(data.lessons) && data.lessons.length > 0) {
-        return data.lessons;
+        cloudLessons = data.lessons;
       }
     }
   } catch(e) {
     console.warn("Firestore read failed", e);
   }
 
-  // 2. Try Server backend API
+  // 2. Try IndexedDB
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_LESSONS, 'readonly');
+    const store = tx.objectStore(STORE_LESSONS);
+    localLessons = await new Promise((resolve) => {
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result && req.result.length > 0 ? req.result : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch(e) {
+    console.warn("IndexedDB read failed", e);
+  }
+
+  // Merge Cloud and Local Data
+  if (cloudLessons) {
+    if (localLessons && localLessons.length > 0) {
+      const localMap = new Map();
+      localLessons.forEach(l => localMap.set(l.id, l));
+      cloudLessons.forEach(cl => {
+        if (localMap.has(cl.id)) {
+          const ll = localMap.get(cl.id);
+          if (!cl.fileUrl && ll.fileUrl) cl.fileUrl = ll.fileUrl;
+          if (!cl.rawText && ll.rawText) cl.rawText = ll.rawText;
+        }
+      });
+    }
+    return cloudLessons;
+  }
+
+  if (localLessons) {
+    return localLessons;
+  }
+
+  // 3. Try Server backend API
   try {
     const res = await fetch('/api/lessons');
     if (res.ok) {
@@ -138,36 +175,16 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
     console.warn("Backend read failed", e);
   }
 
-  // 3. Try IndexedDB
-  try {
-    const db = await openDB();
-    const tx = db.transaction(STORE_LESSONS, 'readonly');
-    const store = tx.objectStore(STORE_LESSONS);
-
-    return new Promise((resolve) => {
-      const req = store.getAll();
-      req.onsuccess = () => {
-        const results = req.result;
-        if (results && results.length > 0) {
-          resolve(results);
-        } else {
-          resolve(null);
-        }
-      };
-      req.onerror = () => resolve(null);
-    });
-  } catch (err) {
-    console.warn('IndexedDB read fallback to localStorage:', err);
-    const ls = localStorage.getItem('smartboard_lessons');
-    if (ls) {
-      try {
-        return JSON.parse(ls);
-      } catch (e) {
-        return null;
-      }
+  const ls = localStorage.getItem('smartboard_lessons');
+  if (ls) {
+    try {
+      return JSON.parse(ls);
+    } catch (e) {
+      return null;
     }
-    return null;
   }
+  
+  return null;
 }
 
 /**

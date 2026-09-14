@@ -367,7 +367,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
           </button>
 
           {/* Document Switcher Dropdown */}
-          {allLessons.length > 1 && (
+          {allLessons.length > 0 && (
             <div className="relative">
               <button
                 onClick={() => setShowDocPicker(!showDocPicker)}

@@ -149,7 +149,9 @@ export default function App() {
               }
             });
             localStorage.setItem('smartboard_teachers', JSON.stringify(next));
-            return next;
+            try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
           });
         }
       } catch (e) {
@@ -175,7 +177,17 @@ export default function App() {
               const map = new Map();
               cloudLessons.forEach((l: any) => map.set(l.id, l));
               prev.forEach((l) => {
-                if (!map.has(l.id)) map.set(l.id, l);
+                if (map.has(l.id)) {
+                  const cloudL = map.get(l.id);
+                  if (!cloudL.fileUrl && l.fileUrl) {
+                    cloudL.fileUrl = l.fileUrl; // Preserve local dataUrl or valid url if cloud stripped it
+                  }
+                  if (!cloudL.rawText && l.rawText) {
+                    cloudL.rawText = l.rawText;
+                  }
+                } else {
+                  map.set(l.id, l);
+                }
               });
               const merged = Array.from(map.values());
               try {
@@ -352,7 +364,7 @@ export default function App() {
 
   // Sync Room with active lesson questions when switching lesson
   useEffect(() => {
-    if (currentLesson && currentLesson.quizzes.length > 0) {
+    if (currentLesson && currentLesson.quizzes?.length > 0) {
       fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -447,7 +459,7 @@ export default function App() {
       const generatedQuestions: QuizQuestion[] = data.questions || [];
 
       if (generatedQuestions.length > 0) {
-        const updatedQuizzes = [...currentLesson.quizzes, ...generatedQuestions];
+        const updatedQuizzes = [...(currentLesson.quizzes || []), ...generatedQuestions];
         const updatedLessons = lessons.map((l) =>
           l.id === currentLesson.id ? { ...l, quizzes: updatedQuizzes } : l
         );
@@ -490,7 +502,9 @@ export default function App() {
 
       
 
-      return next;
+      try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
     });
   };
 
@@ -500,7 +514,9 @@ export default function App() {
       const next = prev.filter((t) => t.id !== teacherId);
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
       syncTeachersToCloud(next);
-      return next;
+      try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
     });
     if (activeTeacherId === teacherId) {
       setActiveTeacherId('');
@@ -514,7 +530,9 @@ export default function App() {
       const next = prev.map((t) => (t.id === teacherId ? { ...t, password: newPassword } : t));
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
       syncTeachersToCloud(next);
-      return next;
+      try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
     });
     
   };
@@ -614,7 +632,9 @@ export default function App() {
             const next = [...prev, newT];
             localStorage.setItem('smartboard_teachers', JSON.stringify(next));
       syncTeachersToCloud(next);
-            return next;
+            try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
           });
           
           setActiveTeacherId(newT.id);
@@ -698,6 +718,8 @@ export default function App() {
                     const next = [docWithAuthor, ...prev.filter(x => x.id !== docWithAuthor.id)];
                     try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
                     saveLessonsToDB(next).catch(() => {});
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
                     return next;
                   });
                   setActiveLessonId(docWithAuthor.id);
@@ -705,6 +727,8 @@ export default function App() {
                 onUpdateLesson={(updatedDoc) => {
                   setLessons((prev) => {
                     const next = prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l));
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
                     try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
                     saveLessonsToDB(next).catch(() => {});
                     return next;
@@ -738,6 +762,8 @@ export default function App() {
                     if (next.length > 0) {
                       setActiveLessonId(next[0].id);
                     }
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
                     return next;
                   });
                   setActiveTab('whiteboard');
@@ -775,6 +801,8 @@ export default function App() {
                     if (next.length > 0) {
                       setActiveLessonId(next[0].id);
                     }
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
                     return next;
                   });
                   
@@ -915,6 +943,8 @@ export default function App() {
                     const next = [docWithAuthor, ...prev.filter(x => x.id !== docWithAuthor.id)];
                     try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
                     saveLessonsToDB(next).catch(() => {});
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
                     return next;
                   });
                   setActiveLessonId(docWithAuthor.id);
@@ -922,6 +952,8 @@ export default function App() {
                 onDeleteLesson={(id) => {
                   setLessons((prev) => {
                     const next = prev.filter((l) => l.id !== id);
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
                     try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
                     saveLessonsToDB(next).catch(() => {});
                     return next;
@@ -963,7 +995,9 @@ export default function App() {
               const next = [...prev, newT];
               localStorage.setItem('smartboard_teachers', JSON.stringify(next));
       syncTeachersToCloud(next);
-              return next;
+              try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
             });
             
             setActiveTeacherId(newT.id);
@@ -1049,7 +1083,9 @@ export default function App() {
               const next = [...prev, newT];
               localStorage.setItem('smartboard_teachers', JSON.stringify(next));
       syncTeachersToCloud(next);
-              return next;
+              try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
             });
             
           }}
@@ -1087,7 +1123,7 @@ export default function App() {
           onClose={() => setShowAIQuizModal(false)}
           onApplyQuestions={async (newQuestions, quizTitle, replace) => {
             if (!newQuestions || newQuestions.length === 0) return;
-            const updatedQuizzes = replace ? newQuestions : [...currentLesson.quizzes, ...newQuestions];
+            const updatedQuizzes = replace ? newQuestions : [...(currentLesson.quizzes || []), ...newQuestions];
             const updatedLessons = lessons.map((l) =>
               l.id === currentLesson.id
                 ? {
