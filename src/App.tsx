@@ -53,7 +53,13 @@ export default function App() {
 
   const syncTeachersToCloud = async (newTeachers: any[]) => {
     try {
-      await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: newTeachers }, { merge: true });
+      const sanitized = JSON.parse(JSON.stringify(newTeachers));
+      await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: sanitized }, { merge: true });
+      fetch('/api/teachers/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teachers: sanitized }),
+      }).catch(() => {});
     } catch (e) {
       console.warn('Sync to Firestore failed:', e);
     }
@@ -121,22 +127,30 @@ export default function App() {
         const docSnap = await getDoc(doc(db, 'global_store', 'smartboard_data'));
         if (docSnap.exists() && docSnap.data().teachers) {
           const cloudTeachers = docSnap.data().teachers;
-          // Intelligent merge to avoid dropping local newly added classes if they haven't synced
           setTeachers((prev) => {
             const map = new Map();
             prev.forEach(t => map.set(t.id, t));
-            const next = cloudTeachers.map((ct) => {
-               if(map.has(ct.id)) {
-                 return { ...ct, classes: ct.classes && ct.classes.length > 0 ? ct.classes : map.get(ct.id).classes };
-               }
-               return ct;
+            const next = cloudTeachers.map((ct: any) => {
+              if (map.has(ct.id)) {
+                const localT = map.get(ct.id);
+                const localCount = (localT.classes || []).reduce((acc: number, c: any) => acc + (c.students?.length || 0), 0);
+                const cloudCount = (ct.classes || []).reduce((acc: number, c: any) => acc + (c.students?.length || 0), 0);
+                return {
+                  ...ct,
+                  classes: cloudCount >= localCount ? (ct.classes || []) : (localT.classes || []),
+                };
+              }
+              return ct;
+            });
+            // Also keep any local teachers not yet in cloud
+            prev.forEach(t => {
+              if (!next.some((x: any) => x.id === t.id)) {
+                next.push(t);
+              }
             });
             localStorage.setItem('smartboard_teachers', JSON.stringify(next));
-      syncTeachersToCloud(next);
             return next;
           });
-        } else {
-          syncTeachersToCloud(teachers);
         }
       } catch (e) {
         console.warn('Failed to load from Firestore:', e);
@@ -156,7 +170,20 @@ export default function App() {
     const unsubLessons = onSnapshot(doc(db, 'global_store', 'smartboard_lessons'), (docSnap) => {
        if (docSnap.exists() && docSnap.data().lessons) {
           const cloudLessons = docSnap.data().lessons;
-          setLessons(cloudLessons);
+          if (Array.isArray(cloudLessons) && cloudLessons.length > 0) {
+            setLessons((prev) => {
+              const map = new Map();
+              cloudLessons.forEach((l: any) => map.set(l.id, l));
+              prev.forEach((l) => {
+                if (!map.has(l.id)) map.set(l.id, l);
+              });
+              const merged = Array.from(map.values());
+              try {
+                localStorage.setItem('smartboard_lessons', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+          }
        }
        setIsLessonsLoaded(true);
     });
@@ -658,17 +685,30 @@ export default function App() {
             {activeTab === 'presentation' && (
               <PresentationView
                 lesson={currentLesson}
-                allLessons={lessons.filter(l => l.author === activeTeacher?.name)}
+                allLessons={lessons.filter(l => !activeTeacher?.name || l.author === activeTeacher?.name || !l.author || l.author === 'Giáo viên')}
                 textScale={textScale}
+                activeTeacher={activeTeacher}
                 onSelectLesson={(doc) => setActiveLessonId(doc.id)}
                 onAddLesson={(newDoc) => {
-                  setLessons((prev) => [newDoc, ...prev]);
-                  setActiveLessonId(newDoc.id);
+                  const docWithAuthor = {
+                    ...newDoc,
+                    author: activeTeacher?.name || newDoc.author || 'Giáo viên',
+                  };
+                  setLessons((prev) => {
+                    const next = [docWithAuthor, ...prev.filter(x => x.id !== docWithAuthor.id)];
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
+                  });
+                  setActiveLessonId(docWithAuthor.id);
                 }}
                 onUpdateLesson={(updatedDoc) => {
-                  setLessons((prev) =>
-                    prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
-                  );
+                  setLessons((prev) => {
+                    const next = prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l));
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
+                  });
                 }}
                 onLaunchQuiz={() => setActiveTab('quiz')}
                 onClosePresentation={() => { setActiveLessonId(''); setActiveTab('documents'); }}
@@ -860,20 +900,32 @@ export default function App() {
             {activeTab === 'documents' && (
               <DocumentLibrary
                 activeTeacher={activeTeacher}
-                lessons={lessons.filter(l => l.author === activeTeacher?.name)}
+                lessons={lessons.filter(l => !activeTeacher?.name || l.author === activeTeacher?.name || !l.author || l.author === 'Giáo viên')}
                 activeLessonId={activeLessonId}
                 onSelectLesson={(id) => {
                   setActiveLessonId(id);
                   setActiveTab('presentation');
                 }}
                 onAddLesson={(newDoc) => {
-                  setLessons((prev) => [newDoc, ...prev]);
-                  setActiveLessonId(newDoc.id);
-                  
+                  const docWithAuthor = {
+                    ...newDoc,
+                    author: activeTeacher?.name || newDoc.author || 'Giáo viên',
+                  };
+                  setLessons((prev) => {
+                    const next = [docWithAuthor, ...prev.filter(x => x.id !== docWithAuthor.id)];
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
+                  });
+                  setActiveLessonId(docWithAuthor.id);
                 }}
                 onDeleteLesson={(id) => {
-                  setLessons((prev) => prev.filter((l) => l.id !== id));
-                  
+                  setLessons((prev) => {
+                    const next = prev.filter((l) => l.id !== id);
+                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
+                    saveLessonsToDB(next).catch(() => {});
+                    return next;
+                  });
                 }}
                 onSyncToCloud={handleSyncToCloud}
                 isSyncing={isSyncingCloud}
@@ -896,12 +948,11 @@ export default function App() {
 
       {/* Teacher Authentication / Profile Switcher Modal */}
       {showTeacherAuthModal && (
-                <EducationalAuthScreen
+        <EducationalAuthScreen
           isModal={true}
           onClose={() => setShowTeacherAuthModal(false)}
           teachers={teachers}
           activeTeacher={activeTeacher}
-          lessons={lessons}
           onSelectTeacher={(t) => {
             setActiveTeacherId(t.id);
             localStorage.setItem('smartboard_active_teacher', t.id);

@@ -62,14 +62,35 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
     
+    // Sync to backend server
+    try {
+      fetch('/api/lessons/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lessons }),
+      }).catch(() => {});
+    } catch {}
+
     // Sync to Firestore
     try {
       const authModule = await import('../lib/firebase');
       const firestoreModule = await import('firebase/firestore');
-      const auth = authModule.auth;
       const db = authModule.db;
       const { doc, setDoc } = firestoreModule;
-      await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons });
+      
+      // Sanitize payload for Firestore (remove undefined and huge data URIs to stay well under 1MB)
+      const sanitizedLessons = lessons.map((l) => {
+        let cleanFileUrl = l.fileUrl;
+        if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 250000) {
+          cleanFileUrl = '';
+        }
+        return {
+          ...l,
+          fileUrl: cleanFileUrl,
+        };
+      });
+      const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
+      await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
     } catch(e) {
       console.warn("Firestore sync failed", e);
     }
@@ -84,29 +105,40 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
 }
 
 /**
- * Load lesson documents from IndexedDB
+ * Load lesson documents from Firestore, backend API, IndexedDB, or LocalStorage
  */
 export async function loadLessonsFromDB(): Promise<any[] | null> {
-  // First try Firestore
+  // 1. First try Firestore
   try {
     const authModule = await import('../lib/firebase');
     const firestoreModule = await import('firebase/firestore');
-    const auth = authModule.auth;
     const db = authModule.db;
     const { doc, getDoc } = firestoreModule;
     const docSnap = await getDoc(doc(db, 'global_store', 'smartboard_lessons'));
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.lessons) {
-          // Sync back to local IDB
-          saveLessonsToDB(data.lessons).catch(() => {});
-          return data.lessons;
-        }
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      if (data && Array.isArray(data.lessons) && data.lessons.length > 0) {
+        return data.lessons;
       }
+    }
   } catch(e) {
     console.warn("Firestore read failed", e);
   }
 
+  // 2. Try Server backend API
+  try {
+    const res = await fetch('/api/lessons');
+    if (res.ok) {
+      const json = await res.json();
+      if (json && Array.isArray(json.lessons) && json.lessons.length > 0) {
+        return json.lessons;
+      }
+    }
+  } catch(e) {
+    console.warn("Backend read failed", e);
+  }
+
+  // 3. Try IndexedDB
   try {
     const db = await openDB();
     const tx = db.transaction(STORE_LESSONS, 'readonly');

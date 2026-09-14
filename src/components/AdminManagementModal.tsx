@@ -23,7 +23,7 @@ import {
   Lock,
   User,
 } from 'lucide-react';
-import { TeacherProfile, SubjectType } from '../types';
+import { TeacherProfile, SubjectType, LessonDoc } from '../types';
 
 interface AdminManagementModalProps {
   isOpen: boolean;

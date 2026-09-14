@@ -922,7 +922,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
         gk: null,
         ck: null,
         dtb: st.hk2Dtb ?? null,
-        evaluation: undefined,
+        evaluation: null,
       };
 
       let finalYearAvg = st.cnDtb ?? null;
@@ -930,7 +930,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
         finalYearAvg = Math.round(((hk1Detail.dtb + 2 * hk2Detail.dtb) / 3) * 10) / 10;
       }
 
-      let yearEval = undefined;
+      let yearEval: string | null = null;
       if (finalYearAvg !== null) {
         if (finalYearAvg >= 9.0) yearEval = 'Xuất sắc';
         else if (finalYearAvg >= 8.0) yearEval = 'Giỏi';
@@ -943,8 +943,8 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
         id: 'st_' + Date.now() + '_' + idx,
         code: st.code || `HS${1000 + idx + 1}`,
         name: st.name.trim(),
-        gender: st.gender,
-        birthDate: st.birthDate,
+        gender: st.gender || 'Nam',
+        birthDate: st.birthDate || '',
         group: st.group || `Tổ ${(idx % 4) + 1}`,
         hk1: hk1Detail,
         hk2: hk2Detail,
@@ -955,8 +955,8 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
         test1PeriodScore: st.test1PeriodScore ?? st.gk ?? null,
         finalScore: st.finalScore ?? st.ck ?? null,
         bonusPoints: st.bonusPoints || 0,
-        notes: st.notes,
-        customFields: st.customFields,
+        notes: st.notes || '',
+        customFields: st.customFields || {},
         isCalled: false,
       };
     });

@@ -85,7 +85,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     setErrorMessage(null);
 
     try {
-      const newDoc = await parseUploadedFileToLesson(file);
+      const newDoc = await parseUploadedFileToLesson(file, activeTeacher?.name, activeTeacher?.id);
       onAddLesson(newDoc);
       setUploadStatus(`Đã nạp thành công tài liệu "${newDoc.title}"!`);
       setTimeout(() => setUploadStatus(null), 3500);

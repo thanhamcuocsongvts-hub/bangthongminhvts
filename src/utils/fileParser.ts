@@ -42,7 +42,11 @@ export function cleanDocumentText(text: string): string {
  * Instantly loads the file with full fidelity for multiple viewing modes (PDF Viewer, Split Screen, etc.).
  * AI extraction is performed on-demand when requested by the teacher.
  */
-export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> {
+export async function parseUploadedFileToLesson(
+  file: File,
+  authorName?: string,
+  teacherId?: string
+): Promise<LessonDoc> {
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
   const title = file.name.replace(/\.[^/.]+$/, '');
   const sizeFormatted = file.size > 1024 * 1024
@@ -64,22 +68,28 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
 
   const fileDataUrl = await readAsDataUrl();
 
-  // Cross-device Cloud Persistence: Upload file to Firebase Storage
+  // Cross-device Cloud Persistence: Upload file to server /api/documents/upload
   let serverFileUrl = '';
   try {
-    const authModule = await import('../lib/firebase');
-    const storageModule = await import('firebase/storage');
-    const auth = authModule.auth;
-    const storage = authModule.storage;
-    const { ref, uploadBytes, getDownloadURL } = storageModule;
-
-    if (auth && auth.currentUser) {
-      const storageRef = ref(storage, `users/${auth.currentUser.uid}/files/${Date.now()}_${file.name}`);
-      const snapshot = await uploadBytes(storageRef, file);
-      serverFileUrl = await getDownloadURL(snapshot.ref);
+    const uploadRes = await fetch('/api/documents/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: file.name,
+        fileType: ext,
+        base64Data: fileDataUrl,
+        fileSize: sizeFormatted,
+        teacherId: teacherId || null,
+      }),
+    });
+    if (uploadRes.ok) {
+      const resData = await uploadRes.json();
+      if (resData.fileUrl) {
+        serverFileUrl = resData.fileUrl;
+      }
     }
   } catch (err) {
-    console.warn('Auto cloud upload notice:', err);
+    console.warn('Backend document upload notice:', err);
   }
 
   let effectiveFileUrl = serverFileUrl || fileDataUrl;
@@ -92,7 +102,7 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
   let detectedGrade = 'Lớp 12';
   const slides: SlideItem[] = [];
   const quizzes: QuizQuestion[] = [];
-  const extractedSummary: ExtractedDocSummary | undefined = undefined;
+  let extractedSummary: ExtractedDocSummary | undefined = undefined;
 
   // 1. Auto-detect subject from filename
   const fnLower = file.name.toLowerCase();
@@ -251,14 +261,14 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
     rawText = cleanDocumentText(text);
   }
 
-  return {
+  const newLessonDoc: LessonDoc = {
     id: 'lesson_' + Date.now(),
     title,
     subject: detectedSubject,
     grade: detectedGrade,
     lastModified: new Date().toISOString(),
     syncedToCloud: true,
-    author: 'Giáo viên',
+    author: authorName || 'Giáo viên',
     rawText,
     slides,
     quizzes,
@@ -266,8 +276,11 @@ export async function parseUploadedFileToLesson(file: File): Promise<LessonDoc> 
     fileType,
     fileName: file.name,
     fileSize: sizeFormatted,
-    extractedSummary,
-    htmlContent,
-    sheetData,
   };
+
+  if (extractedSummary) newLessonDoc.extractedSummary = extractedSummary;
+  if (htmlContent) newLessonDoc.htmlContent = htmlContent;
+  if (sheetData) newLessonDoc.sheetData = sheetData;
+
+  return newLessonDoc;
 }

@@ -26,7 +26,7 @@ import {
   ChevronDown,
   RotateCcw,
 } from 'lucide-react';
-import { LessonDoc, SlideItem, TextScale } from '../types';
+import { LessonDoc, SlideItem, TextScale, TeacherProfile } from '../types';
 import { TouchWhiteboard } from './TouchWhiteboard';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
@@ -37,6 +37,7 @@ interface PresentationViewProps {
   lesson: LessonDoc;
   allLessons?: LessonDoc[];
   textScale: TextScale;
+  activeTeacher?: TeacherProfile | null;
   onSelectLesson?: (lesson: LessonDoc) => void;
   onAddLesson?: (lesson: LessonDoc) => void;
   onUpdateLesson?: (lesson: LessonDoc) => void;
@@ -50,6 +51,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   lesson,
   allLessons = [],
   textScale,
+  activeTeacher,
   onSelectLesson,
   onAddLesson,
   onUpdateLesson,
@@ -128,7 +130,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
     setIsUploadingFile(true);
     setUploadToast(`Đang nạp tệp "${file.name}" cho màn hình trình chiếu...`);
     try {
-      const newDoc = await parseUploadedFileToLesson(file);
+      const newDoc = await parseUploadedFileToLesson(file, activeTeacher?.name || lesson.author, activeTeacher?.id);
       onAddLesson?.(newDoc);
       onSelectLesson?.(newDoc);
       setCurrentSlideIndex(0);
