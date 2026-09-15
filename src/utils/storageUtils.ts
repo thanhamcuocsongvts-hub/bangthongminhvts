@@ -72,8 +72,13 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
     } catch {}
 
     // Sync to Firestore (Debounced to save quota)
+    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'syncing' }));
     if ((window as any).firestoreSyncTimeout) clearTimeout((window as any).firestoreSyncTimeout);
     (window as any).firestoreSyncTimeout = setTimeout(async () => {
+      if (!navigator.onLine) {
+        window.dispatchEvent(new CustomEvent('sync-status', { detail: 'offline' }));
+        return;
+      }
       try {
         const authModule = await import('../lib/firebase');
         const firestoreModule = await import('firebase/firestore');
@@ -92,10 +97,12 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
         });
         const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
         await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
+        window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
       } catch(e) {
         console.warn("Firestore sync failed", e);
+        window.dispatchEvent(new CustomEvent('sync-status', { detail: 'error' }));
       }
-    }, 5000); // 5 seconds debounce
+    }, 2000);
   } catch (err) {
     console.warn('IndexedDB save fallback to localStorage:', err);
     try {

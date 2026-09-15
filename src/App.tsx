@@ -52,8 +52,13 @@ export default function App() {
 
 
     const syncTeachersToCloud = async (newTeachers: any[]) => {
+    setSyncStatus('syncing');
     if ((window as any).teacherSyncTimeout) clearTimeout((window as any).teacherSyncTimeout);
     (window as any).teacherSyncTimeout = setTimeout(async () => {
+      if (!navigator.onLine) {
+        setSyncStatus('offline');
+        return;
+      }
       try {
         const sanitized = JSON.parse(JSON.stringify(newTeachers));
         await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: sanitized }, { merge: true });
@@ -62,10 +67,12 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ teachers: sanitized }),
         }).catch(() => {});
+        setSyncStatus('synced');
       } catch (e) {
         console.warn('Sync to Firestore failed:', e);
+        setSyncStatus('error');
       }
-    }, 5000);
+    }, 2000);
   };
 
 
@@ -105,6 +112,7 @@ export default function App() {
   });
 
   const [isGuestMode, setIsGuestMode] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error'>('synced');
   const [guestTeacherData, setGuestTeacherData] = useState<TeacherProfile | null>(null);
 
   const activeTeacher = isGuestMode 
@@ -124,6 +132,15 @@ export default function App() {
 
   // Sync teachers across devices (PC <-> Mobile)
   useEffect(() => {
+    const handleOnline = () => setSyncStatus('synced');
+    const handleOffline = () => setSyncStatus('offline');
+    const handleSyncStatus = (e: any) => setSyncStatus(e.detail);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('sync-status', handleSyncStatus);
+    
+    if (!navigator.onLine) setSyncStatus('offline');
     // Subscribe to realtime updates
     const unsub = onSnapshot(doc(db, 'global_store', 'smartboard_data'), (docSnap) => {
        if (docSnap.exists() && docSnap.data().teachers) {
@@ -633,6 +650,7 @@ export default function App() {
     <div className="w-screen h-screen flex flex-col bg-[#f8fafc] text-slate-800 overflow-hidden select-none">
       {/* 75-Inch Top Navigation Header Bar */}
       <HeaderBar
+        syncStatus={syncStatus}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         textScale={textScale}

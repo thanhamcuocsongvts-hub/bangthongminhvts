@@ -439,7 +439,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       ctx.lineWidth = size * 2.8;
       if (isFluo) {
         ctx.shadowColor = color;
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = 0;
       }
     } else if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
@@ -449,7 +449,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       ctx.globalAlpha = 1.0;
       if (isFluo) {
         ctx.shadowColor = color;
-        ctx.shadowBlur = 8;
+        ctx.shadowBlur = 0;
       }
     }
 
@@ -983,13 +983,13 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         ctx.globalAlpha = isFluo ? 0.65 : 0.45;
         if (isFluo) {
           ctx.shadowColor = activeColor;
-          ctx.shadowBlur = 12;
+          ctx.shadowBlur = 0;
         }
       } else if (activeTool === 'eraser') {
         ctx.globalCompositeOperation = 'destination-out';
       } else if (isFluo) {
         ctx.shadowColor = activeColor;
-        ctx.shadowBlur = 8;
+        ctx.shadowBlur = 0;
       }
       ctx.beginPath();
       const r = (activeTool === 'highlighter' ? strokeSize * 2.8 : activeTool === 'eraser' ? strokeSize * 3 : strokeSize) / 2;
@@ -1081,7 +1081,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
           ctx.strokeStyle = activeColor;
           if (isFluo) {
             ctx.shadowColor = activeColor;
-            ctx.shadowBlur = 12;
+            ctx.shadowBlur = 0;
           }
         } else if (activeTool === 'eraser') {
           ctx.globalCompositeOperation = 'destination-out';
@@ -1092,7 +1092,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
           ctx.strokeStyle = activeColor;
           if (isFluo) {
             ctx.shadowColor = activeColor;
-            ctx.shadowBlur = 8;
+            ctx.shadowBlur = 0;
           }
           // Dynamic calligraphy width
           const segWidth = Math.max(1, strokeSize * (0.6 + (p1.pressure || 0.6) * 0.6));

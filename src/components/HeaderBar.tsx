@@ -1,28 +1,10 @@
 import React from 'react';
-import {
-  Tv,
-  Presentation,
-  BookOpen,
-  PenTool,
-  CheckSquare,
-  BarChart3,
-  Users,
-  FolderOpen,
-  Bot,
-  Maximize,
-  Minimize,
-  QrCode,
-  Download,
-  Type,
-  Dices,
-  UserCheck,
-  LogOut,
-  LogIn,
-  Trophy,
-  Globe,
-  ShieldCheck,
-  KeyRound,
-  RefreshCw,
+import { 
+  Maximize, Minimize, Download, QrCode, User, Settings, Users, MonitorPlay, 
+  BookOpen, CheckCircle2, Trophy, Gamepad2, MessageSquare, PenTool,
+  Cloud, CloudOff, CloudUpload, CloudDrizzle,
+  Presentation, CheckSquare, Globe, BarChart3, FolderOpen, Bot, ShieldCheck, 
+  KeyRound, RefreshCw, LogOut, LogIn, Dices, Type
 } from 'lucide-react';
 import { TextScale, TeacherProfile } from '../types';
 
@@ -54,6 +36,7 @@ interface HeaderBarProps {
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   activeLessonTitle: string;
+  syncStatus?: 'synced' | 'syncing' | 'offline' | 'error';
   activeTeacher: TeacherProfile | null;
   onLogout: () => void;
 }

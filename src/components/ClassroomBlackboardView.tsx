@@ -500,7 +500,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       ctx.globalAlpha = isFluo ? 0.65 : 0.35;
       if (isFluo) {
         ctx.shadowColor = color;
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = 0;
       }
     } else if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
@@ -508,7 +508,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     } else {
       ctx.globalAlpha = 0.95;
       ctx.shadowColor = color;
-      ctx.shadowBlur = isFluo ? 8 : 1;
+      ctx.shadowBlur = 0;
     }
 
     // Check if custom vertices are available for parallel geometry rendering
@@ -1292,11 +1292,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
               if (isLiveFluo) {
                 ctx.shadowColor = activeColor;
-                ctx.shadowBlur = 12;
+                ctx.shadowBlur = 0;
               }
             } else if (isLiveFluo) {
               ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 8;
+              ctx.shadowBlur = 0;
             }
           }
           ctx.beginPath();
@@ -1322,11 +1322,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
               if (isLiveFluo) {
                 ctx.shadowColor = activeColor;
-                ctx.shadowBlur = 12;
+                ctx.shadowBlur = 0;
               }
             } else if (isLiveFluo) {
               ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 8;
+              ctx.shadowBlur = 0;
             }
           }
           ctx.beginPath();
