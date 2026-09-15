@@ -105,7 +105,7 @@ export async function parseUploadedFileToLesson(
   let extractedSummary: ExtractedDocSummary | undefined = undefined;
 
   // 1. Auto-detect subject from filename
-  const fnLower = file.name.toLowerCase();
+  const fnLower = file.name?.toLowerCase();
   if (fnLower.includes('sinh') || fnLower.includes('bio')) detectedSubject = 'Sinh học';
   else if (fnLower.includes('lý') || fnLower.includes('phys') || fnLower.includes('vat ly')) detectedSubject = 'Vật lý';
   else if (fnLower.includes('hóa') || fnLower.includes('chem') || fnLower.includes('hoa hoc')) detectedSubject = 'Hóa học';

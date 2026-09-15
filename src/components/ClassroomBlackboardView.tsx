@@ -1586,7 +1586,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === 'z') {
         if (e.shiftKey) {
           e.preventDefault();
           handleRedo();
@@ -1594,7 +1594,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           e.preventDefault();
           handleUndo();
         }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+      } else if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === 'y') {
         e.preventDefault();
         handleRedo();
       } else if (e.key === 'Delete' || e.key === 'Backspace') {

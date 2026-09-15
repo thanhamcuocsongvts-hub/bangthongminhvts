@@ -51,18 +51,21 @@ export default function App() {
   });
 
 
-  const syncTeachersToCloud = async (newTeachers: any[]) => {
-    try {
-      const sanitized = JSON.parse(JSON.stringify(newTeachers));
-      await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: sanitized }, { merge: true });
-      fetch('/api/teachers/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teachers: sanitized }),
-      }).catch(() => {});
-    } catch (e) {
-      console.warn('Sync to Firestore failed:', e);
-    }
+    const syncTeachersToCloud = async (newTeachers: any[]) => {
+    if ((window as any).teacherSyncTimeout) clearTimeout((window as any).teacherSyncTimeout);
+    (window as any).teacherSyncTimeout = setTimeout(async () => {
+      try {
+        const sanitized = JSON.parse(JSON.stringify(newTeachers));
+        await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: sanitized }, { merge: true });
+        fetch('/api/teachers/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teachers: sanitized }),
+        }).catch(() => {});
+      } catch (e) {
+        console.warn('Sync to Firestore failed:', e);
+      }
+    }, 5000);
   };
 
 
@@ -121,49 +124,11 @@ export default function App() {
 
   // Sync teachers across devices (PC <-> Mobile)
   useEffect(() => {
-    // Fetch from Firestore for reliable cross-device sync
-    const fetchCloudData = async () => {
-      try {
-        const docSnap = await getDoc(doc(db, 'global_store', 'smartboard_data'));
-        if (docSnap.exists() && docSnap.data().teachers) {
-          const cloudTeachers = docSnap.data().teachers;
-          setTeachers((prev) => {
-            const map = new Map();
-            prev.forEach(t => map.set(t.id, t));
-            const next = cloudTeachers.map((ct: any) => {
-              if (map.has(ct.id)) {
-                const localT = map.get(ct.id);
-                const localCount = (localT.classes || []).reduce((acc: number, c: any) => acc + (c.students?.length || 0), 0);
-                const cloudCount = (ct.classes || []).reduce((acc: number, c: any) => acc + (c.students?.length || 0), 0);
-                return {
-                  ...ct,
-                  classes: cloudCount >= localCount ? (ct.classes || []) : (localT.classes || []),
-                };
-              }
-              return ct;
-            });
-            // Also keep any local teachers not yet in cloud
-            prev.forEach(t => {
-              if (!next.some((x: any) => x.id === t.id)) {
-                next.push(t);
-              }
-            });
-            localStorage.setItem('smartboard_teachers', JSON.stringify(next));
-            try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
-          });
-        }
-      } catch (e) {
-        console.warn('Failed to load from Firestore:', e);
-      }
-    };
-    fetchCloudData();
-    
     // Subscribe to realtime updates
     const unsub = onSnapshot(doc(db, 'global_store', 'smartboard_data'), (docSnap) => {
        if (docSnap.exists() && docSnap.data().teachers) {
           const cloudTeachers = docSnap.data().teachers;
+          // Trust the cloud as the absolute source of truth for cross-device sync
           setTeachers(cloudTeachers);
           localStorage.setItem('smartboard_teachers', JSON.stringify(cloudTeachers));
        }
@@ -172,24 +137,24 @@ export default function App() {
     const unsubLessons = onSnapshot(doc(db, 'global_store', 'smartboard_lessons'), (docSnap) => {
        if (docSnap.exists() && docSnap.data().lessons) {
           const cloudLessons = docSnap.data().lessons;
-          if (Array.isArray(cloudLessons) && cloudLessons.length > 0) {
+          if (Array.isArray(cloudLessons)) {
             setLessons((prev) => {
-              const map = new Map();
-              cloudLessons.forEach((l: any) => map.set(l.id, l));
-              prev.forEach((l) => {
-                if (map.has(l.id)) {
-                  const cloudL = map.get(l.id);
-                  if (!cloudL.fileUrl && l.fileUrl) {
-                    cloudL.fileUrl = l.fileUrl; // Preserve local dataUrl or valid url if cloud stripped it
+              const localMap = new Map();
+              prev.forEach((l) => localMap.set(l.id, l));
+
+              const merged = cloudLessons.map((cloudL: any) => {
+                if (localMap.has(cloudL.id)) {
+                  const localL = localMap.get(cloudL.id);
+                  if (!cloudL.fileUrl && localL.fileUrl) {
+                    cloudL.fileUrl = localL.fileUrl; // Preserve local dataUrl if cloud stripped it
                   }
-                  if (!cloudL.rawText && l.rawText) {
-                    cloudL.rawText = l.rawText;
+                  if (!cloudL.rawText && localL.rawText) {
+                    cloudL.rawText = localL.rawText;
                   }
-                } else {
-                  map.set(l.id, l);
                 }
+                return cloudL;
               });
-              const merged = Array.from(map.values());
+
               try {
                 localStorage.setItem('smartboard_lessons', JSON.stringify(merged));
               } catch {}

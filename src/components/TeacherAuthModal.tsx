@@ -61,7 +61,7 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({
     const newTeacher: TeacherProfile = {
       id: 'teacher_' + Date.now(),
       name: name.trim(),
-      email: email.trim() || `${name.toLowerCase().replace(/\s+/g, '')}@truongthpt.edu.vn`,
+      email: email.trim() || `${name?.toLowerCase().replace(/\s+/g, '')}@truongthpt.edu.vn`,
       phone: phone.trim() || '0901.234.567',
       subject,
       school: school.trim() || 'Trường THPT',
@@ -100,7 +100,7 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({
       await new Promise((r) => setTimeout(r, 900));
 
       const existingTeacher = (teachers || []).find(
-        (t) => t.email.toLowerCase() === googleEmail.toLowerCase()
+        (t) => t.email?.toLowerCase() === googleEmail?.toLowerCase()
       );
 
       if (existingTeacher) {

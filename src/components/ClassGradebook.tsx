@@ -156,17 +156,17 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
       (st) => !isEvaluationOrSummaryRow(st.name) && !isEvaluationOrSummaryRow(st.code)
     );
 
-    const q = searchTerm.toLowerCase().trim();
+    const q = searchTerm?.toLowerCase().trim();
     if (!q) return validStudents;
 
     return validStudents.filter((st) => {
       return (
-        st.name.toLowerCase().includes(q) ||
-        st.code.toLowerCase().includes(q) ||
-        (st.group && st.group.toLowerCase().includes(q)) ||
-        (st.gender && st.gender.toLowerCase().includes(q)) ||
-        (st.birthDate && st.birthDate.toLowerCase().includes(q)) ||
-        (st.notes && st.notes.toLowerCase().includes(q))
+        st.name?.toLowerCase().includes(q) ||
+        st.code?.toLowerCase().includes(q) ||
+        (st.group && st.group?.toLowerCase().includes(q)) ||
+        (st.gender && st.gender?.toLowerCase().includes(q)) ||
+        (st.birthDate && st.birthDate?.toLowerCase().includes(q)) ||
+        (st.notes && st.notes?.toLowerCase().includes(q))
       );
     });
   }, [currentClass, searchTerm]);
@@ -175,7 +175,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   const splittedNameCol = useMemo(() => {
     if (!currentClass?.customColumns) return null;
     return currentClass.customColumns.find((col) => {
-      const lower = col.toLowerCase().trim();
+      const lower = col?.toLowerCase().trim();
       return (
         lower === 'tên' ||
         lower === 'ten' ||
@@ -492,7 +492,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
       const firstNameVal = st.customFields?.[colName];
       if (firstNameVal !== undefined && firstNameVal !== null) {
         const firstNameStr = String(firstNameVal).trim();
-        if (firstNameStr && !st.name.toLowerCase().endsWith(firstNameStr.toLowerCase())) {
+        if (firstNameStr && !st.name?.toLowerCase().endsWith(firstNameStr?.toLowerCase())) {
           const mergedName = `${st.name.trim()} ${firstNameStr}`.replace(/\s+/g, ' ');
           const updatedCustom = { ...st.customFields };
           delete updatedCustom[colName];

@@ -71,29 +71,31 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
       }).catch(() => {});
     } catch {}
 
-    // Sync to Firestore
-    try {
-      const authModule = await import('../lib/firebase');
-      const firestoreModule = await import('firebase/firestore');
-      const db = authModule.db;
-      const { doc, setDoc } = firestoreModule;
-      
-      // Sanitize payload for Firestore (remove undefined and huge data URIs to stay well under 1MB)
-      const sanitizedLessons = lessons.map((l) => {
-        let cleanFileUrl = l.fileUrl;
-        if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 250000) {
-          cleanFileUrl = '';
-        }
-        return {
-          ...l,
-          fileUrl: cleanFileUrl,
-        };
-      });
-      const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
-      await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
-    } catch(e) {
-      console.warn("Firestore sync failed", e);
-    }
+    // Sync to Firestore (Debounced to save quota)
+    if ((window as any).firestoreSyncTimeout) clearTimeout((window as any).firestoreSyncTimeout);
+    (window as any).firestoreSyncTimeout = setTimeout(async () => {
+      try {
+        const authModule = await import('../lib/firebase');
+        const firestoreModule = await import('firebase/firestore');
+        const db = authModule.db;
+        const { doc, setDoc } = firestoreModule;
+        
+        const sanitizedLessons = lessons.map((l) => {
+          let cleanFileUrl = l.fileUrl;
+          if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 250000) {
+            cleanFileUrl = '';
+          }
+          return {
+            ...l,
+            fileUrl: cleanFileUrl,
+          };
+        });
+        const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
+        await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
+      } catch(e) {
+        console.warn("Firestore sync failed", e);
+      }
+    }, 5000); // 5 seconds debounce
   } catch (err) {
     console.warn('IndexedDB save fallback to localStorage:', err);
     try {

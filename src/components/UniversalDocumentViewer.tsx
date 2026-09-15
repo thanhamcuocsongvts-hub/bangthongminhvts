@@ -82,7 +82,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
     const rows = lesson.sheetData.sheets[selectedSheet] || [];
     if (!tableSearch.trim()) return rows;
 
-    const term = tableSearch.toLowerCase();
+    const term = tableSearch?.toLowerCase();
     return rows.filter((row, idx) => {
       if (idx === 0) return true; // Keep header
       return row.some((cell) => String(cell || '').toLowerCase().includes(term));

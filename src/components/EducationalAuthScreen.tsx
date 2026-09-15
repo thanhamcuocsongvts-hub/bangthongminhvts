@@ -84,7 +84,7 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
       (t) =>
         (t.username?.toLowerCase() === identifier ||
           t.email?.toLowerCase() === identifier ||
-          t.id.toLowerCase() === identifier) &&
+          t.id?.toLowerCase() === identifier) &&
         (t.password === cleanPassword || (!t.password && cleanPassword === '123456') || identifier === 'admin')
     );
 

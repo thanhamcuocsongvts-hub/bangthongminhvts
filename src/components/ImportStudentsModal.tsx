@@ -167,7 +167,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
       let score = 0;
       row.forEach((cell) => {
         if (typeof cell === 'string') {
-          const lower = cell.toLowerCase().trim();
+          const lower = cell?.toLowerCase().trim();
           keywords.forEach((kw) => {
             if (lower.includes(kw)) score += 2;
           });
@@ -236,7 +236,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
       if (!colName) colName = `Cột ${colIdx + 1}`;
       allHeaders.push(colName);
 
-      const lower = colName.toLowerCase();
+      const lower = colName?.toLowerCase();
 
       let role: any = 'custom';
 
@@ -525,7 +525,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
       // Check if customFields has a column holding first name (e.g., 'Cột 4' or 'Tên')
       Object.keys(customFields).forEach((ck) => {
         const val = String(customFields[ck] || '').trim();
-        const lowerHeader = ck.toLowerCase();
+        const lowerHeader = ck?.toLowerCase();
         if (
           (lowerHeader.includes('tên') || lowerHeader.includes('cột') || lowerHeader.includes('column')) &&
           val &&
@@ -535,7 +535,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
           !/^\d+$/.test(val)
         ) {
           // If finalName does not already end with this first name
-          if (finalName && !finalName.toLowerCase().endsWith(val.toLowerCase())) {
+          if (finalName && !finalName?.toLowerCase().endsWith(val?.toLowerCase())) {
             finalName = cleanName(`${finalName} ${val}`);
             delete customFields[ck];
           }
@@ -970,7 +970,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
 
     const extraCols: string[] = [];
     detectedColumns.forEach((col) => {
-      const lower = col.toLowerCase().trim();
+      const lower = col?.toLowerCase().trim();
       if (!standardColumnNames.includes(lower) && !extraCols.includes(col)) {
         extraCols.push(col);
       }
@@ -1374,7 +1374,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                         {/* Render any detected custom extra columns */}
                         {detectedColumns
                           .filter((col) => {
-                            const lower = col.toLowerCase().trim();
+                            const lower = col?.toLowerCase().trim();
                             const standardKeys = [
                               'stt', 'mã hs', 'mã học sinh', 'mã', 'họ và tên',
                               'họ tên', 'tên', 'giới tính', 'ngày sinh', 'tổ',
@@ -1550,7 +1550,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                           {/* Custom Columns */}
                           {detectedColumns
                             .filter((col) => {
-                              const lower = col.toLowerCase().trim();
+                              const lower = col?.toLowerCase().trim();
                               const standardKeys = [
                                 'stt', 'mã hs', 'mã học sinh', 'mã', 'họ và tên',
                                 'họ tên', 'tên', 'giới tính', 'ngày sinh', 'tổ',

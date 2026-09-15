@@ -64,8 +64,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const subjects = ['Tất cả', 'Sinh học', 'Vật lý', 'Toán học', 'Hóa học', 'Lịch sử', 'Ngữ văn', 'Tiếng Anh'];
 
   const filteredLessons = lessons.filter((l) => {
-    const matchSearch = l.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      l.subject.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchSearch = l.title?.toLowerCase().includes(searchTerm?.toLowerCase()) ||
+      l.subject?.toLowerCase().includes(searchTerm?.toLowerCase());
     const matchSub = selectedSubject === 'Tất cả' || l.subject === selectedSubject;
     return matchSearch && matchSub;
   });

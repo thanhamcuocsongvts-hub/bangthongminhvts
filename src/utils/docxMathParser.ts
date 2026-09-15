@@ -131,13 +131,13 @@ export function ommlNodeToLatex(node: Element): string {
     let chrVal = chrEl ? chrEl.getAttribute('m:val') || chrEl.getAttribute('val') || '∫' : '∫';
 
     let opLatex = '\\int';
-    if (chrVal === '∑' || chrVal.toLowerCase().includes('sum')) opLatex = '\\sum';
-    else if (chrVal === '∏' || chrVal.toLowerCase().includes('prod')) opLatex = '\\prod';
+    if (chrVal === '∑' || chrVal?.toLowerCase().includes('sum')) opLatex = '\\sum';
+    else if (chrVal === '∏' || chrVal?.toLowerCase().includes('prod')) opLatex = '\\prod';
     else if (chrVal === '∬') opLatex = '\\iint';
     else if (chrVal === '∭') opLatex = '\\iiint';
     else if (chrVal === '∮') opLatex = '\\oint';
-    else if (chrVal === '⋃' || chrVal.toLowerCase().includes('cup')) opLatex = '\\bigcup';
-    else if (chrVal === '⋂' || chrVal.toLowerCase().includes('cap')) opLatex = '\\bigcap';
+    else if (chrVal === '⋃' || chrVal?.toLowerCase().includes('cup')) opLatex = '\\bigcup';
+    else if (chrVal === '⋂' || chrVal?.toLowerCase().includes('cap')) opLatex = '\\bigcap';
 
     const subLatex = subEl ? ommlNodeToLatex(subEl).trim() : '';
     const supLatex = supEl ? ommlNodeToLatex(supEl).trim() : '';
@@ -183,7 +183,7 @@ export function ommlNodeToLatex(node: Element): string {
     const eLatex = eEl ? ommlNodeToLatex(eEl).trim() : '';
 
     if (/^(sin|cos|tan|cot|ln|log|exp|lim|min|max)$/i.test(fNameLatex)) {
-      return `\\${fNameLatex.toLowerCase()} ${eLatex}`;
+      return `\\${fNameLatex?.toLowerCase()} ${eLatex}`;
     }
     return `${fNameLatex} ${eLatex}`;
   }

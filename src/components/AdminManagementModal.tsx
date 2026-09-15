@@ -174,8 +174,8 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
     e.preventDefault();
     if (!newName.trim()) return;
 
-    const email = newEmail.trim() || `${newUsername || newName.toLowerCase().replace(/\s+/g, '')}@truongthpt.edu.vn`;
-    const username = newUsername.trim() || newName.toLowerCase().replace(/\s+/g, '');
+    const email = newEmail.trim() || `${newUsername || newName?.toLowerCase().replace(/\s+/g, '')}@truongthpt.edu.vn`;
+    const username = newUsername.trim() || newName?.toLowerCase().replace(/\s+/g, '');
 
     const newTeacher: TeacherProfile = {
       id: 'teacher_' + Date.now(),
@@ -210,13 +210,13 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
   // Filter teachers
   const filteredTeachers = teachers.filter((t) => {
     const matchesSubject = selectedSubject === 'all' || t.subject === selectedSubject;
-    const q = searchQuery.toLowerCase().trim();
+    const q = searchQuery?.toLowerCase().trim();
     if (!q) return matchesSubject;
     const matchesSearch =
-      t.name.toLowerCase().includes(q) ||
-      (t.username && t.username.toLowerCase().includes(q)) ||
-      t.email.toLowerCase().includes(q) ||
-      (t.school && t.school.toLowerCase().includes(q)) ||
+      t.name?.toLowerCase().includes(q) ||
+      (t.username && t.username?.toLowerCase().includes(q)) ||
+      t.email?.toLowerCase().includes(q) ||
+      (t.school && t.school?.toLowerCase().includes(q)) ||
       (t.phone && t.phone.includes(q));
     return matchesSubject && matchesSearch;
   });

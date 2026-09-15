@@ -335,7 +335,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     if (!file) return;
 
     let fileCategory: 'image' | 'pdf' | 'word' | 'text' = 'text';
-    const fileName = file.name.toLowerCase();
+    const fileName = file.name?.toLowerCase();
 
     if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(fileName) || file.type.startsWith('image/')) {
       fileCategory = 'image';
