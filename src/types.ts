@@ -272,6 +272,7 @@ export interface TeacherProfile {
   phone?: string;
   avatar?: string;
   role?: 'admin' | 'teacher';
+  status?: 'pending' | 'approved';
   subject: SubjectType;
   school: string;
   classes: ClassRoom[];

@@ -390,6 +390,11 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                             QUẢN TRỊ VIÊN
                           </span>
                         )}
+                        {t.status === 'pending' && !isAdmin && (
+                          <span className="px-2 py-0.5 rounded-md bg-orange-100 text-orange-800 text-[10px] font-black border border-orange-300 animate-pulse">
+                            CHỜ DUYỆT
+                          </span>
+                        )}
                         {isActive && (
                           <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-300">
                             Đang Đăng Nhập

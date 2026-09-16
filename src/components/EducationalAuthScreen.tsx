@@ -89,6 +89,10 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
     );
 
     if (matched) {
+      if (matched.role !== 'admin' && matched.status === 'pending') {
+        setLoginError('Tài khoản của bạn đang chờ phê duyệt. Vui lòng liên hệ quản trị viên.');
+        return;
+      }
       onSelectTeacher(matched);
       showToast('Đăng nhập thành công!');
       if (onClose) setTimeout(onClose, 600);
@@ -133,14 +137,18 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
       school: regSchool.trim() || 'Trường THPT',
       password: regPassword,
       avatar: regSubject === 'Toán học' || regSubject === 'Vật lý' || regSubject === 'Tin học' ? '👨‍🏫' : '👩‍🏫',
+      status: 'pending',
       classes: [],
       createdAt: new Date().toISOString(),
     };
 
     onAddNewTeacher(newTeacher);
-    onSelectTeacher(newTeacher);
-    showToast('Tạo tài khoản giáo viên thành công!');
-    if (onClose) setTimeout(onClose, 600);
+    
+    // Switch back to login panel and show pending toast
+    setTab('login');
+    setLoginIdentifier(username);
+    setLoginPassword('');
+    showToast('Đăng ký thành công! Vui lòng chờ Quản trị viên phê duyệt.');
   };
 
   return (
