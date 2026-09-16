@@ -114,6 +114,9 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   }, [isOverlayAnnotation, isSplitMode]);
 
   const togglePresentationFullscreen = () => {
+    // Dispatch event to app to hide header
+    window.dispatchEvent(new CustomEvent('toggle-app-fullscreen'));
+    
     const el = document.getElementById('presentation-viewport');
     if (!el) return;
     if (!document.fullscreenElement) {

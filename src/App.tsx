@@ -334,6 +334,13 @@ export default function App() {
   }, [fetchRoom]);
 
   // Fullscreen toggle
+  // Fullscreen Listener for Presentation
+  useEffect(() => {
+    const handleToggle = () => handleToggleFullscreen();
+    window.addEventListener('toggle-app-fullscreen', handleToggle);
+    return () => window.removeEventListener('toggle-app-fullscreen', handleToggle);
+  }, [isFullscreen]);
+
   const handleToggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
@@ -649,29 +656,31 @@ export default function App() {
   return (
     <div className="w-screen h-screen flex flex-col bg-[#f8fafc] text-slate-800 overflow-hidden select-none">
       {/* 75-Inch Top Navigation Header Bar */}
-      <HeaderBar
-        syncStatus={syncStatus}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        textScale={textScale}
-        onTextScaleChange={setTextScale}
-        roomPin={roomState?.pin || '758899'}
-        onOpenQR={() => setShowQRModal(true)}
-        onOpenExport={() => setShowExportModal(true)}
-        onOpenTeacherAuth={() => setShowTeacherAuthModal(true)}
-        onOpenProfile={() => setShowProfileModal(true)}
-        onOpenAdmin={() => setShowAdminModal(true)}
-        onOpenRandomPicker={() => {
-          setPickerClassroom(activeTeacher?.classes?.[0] || null);
-          setShowRandomPickerModal(true);
-        }}
-        onSwitchToStudentView={() => setIsStudentMode(true)}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={handleToggleFullscreen}
-        activeLessonTitle={currentLesson.title}
-        activeTeacher={activeTeacher || null}
-        onLogout={handleLogout}
-      />
+      {(!isFullscreen || activeTab !== 'presentation') && (
+        <HeaderBar
+          syncStatus={syncStatus}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          textScale={textScale}
+          onTextScaleChange={setTextScale}
+          roomPin={roomState?.pin || '758899'}
+          onOpenQR={() => setShowQRModal(true)}
+          onOpenExport={() => setShowExportModal(true)}
+          onOpenTeacherAuth={() => setShowTeacherAuthModal(true)}
+          onOpenProfile={() => setShowProfileModal(true)}
+          onOpenAdmin={() => setShowAdminModal(true)}
+          onOpenRandomPicker={() => {
+            setPickerClassroom(activeTeacher?.classes?.[0] || null);
+            setShowRandomPickerModal(true);
+          }}
+          onSwitchToStudentView={() => setIsStudentMode(true)}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={handleToggleFullscreen}
+          activeLessonTitle={currentLesson.title}
+          activeTeacher={activeTeacher || null}
+          onLogout={handleLogout}
+        />
+      )}
 
       {/* Main Interactive Screen Content */}
       <main className="flex-1 p-3 md:p-4 overflow-hidden relative bg-[#f8fafc]">

@@ -87,7 +87,7 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
         
         const sanitizedLessons = lessons.map((l) => {
           let cleanFileUrl = l.fileUrl;
-          if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 250000) {
+          if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 26214400) {
             cleanFileUrl = '';
           }
           return {
