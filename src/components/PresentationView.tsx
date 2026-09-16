@@ -24,6 +24,7 @@ import {
   FileCode,
   File,
   ChevronDown,
+  ChevronUp,
   RotateCcw,
 } from 'lucide-react';
 import { LessonDoc, SlideItem, TextScale, TeacherProfile } from '../types';
@@ -67,6 +68,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   const [whiteboardTheme, setWhiteboardTheme] = useState<'blackboard' | 'slate' | 'graph' | 'white'>('blackboard');
   const [presentationMode, setPresentationMode] = useState<'original' | 'slides'>('original');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState<boolean>(false);
 
   // File Upload states
   const [isUploadingFile, setIsUploadingFile] = useState<boolean>(false);
@@ -311,6 +313,18 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
       } flex flex-col bg-slate-950 overflow-hidden border border-slate-800 shadow-2xl transition-all select-none`}
     >
       {/* Hidden File Input for Teacher Uploads */}
+      {/* Floating expand button when collapsed */}
+      {isToolbarCollapsed && (
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-50 p-1">
+          <button
+            onClick={() => setIsToolbarCollapsed(false)}
+            className="px-4 py-1 rounded-b-xl bg-slate-900/90 border border-t-0 border-slate-700 text-slate-300 hover:text-white shadow-lg backdrop-blur-md flex items-center justify-center cursor-pointer transition-all hover:bg-slate-800"
+            title="Hiện thanh công cụ (Toolbar)"
+          >
+            <ChevronDown className="w-5 h-5" />
+          </button>
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -320,6 +334,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
       />
 
       {/* Top Slide Control Strip */}
+      {!isToolbarCollapsed && (
       <div className="flex items-center justify-between px-4 md:px-6 py-2.5 bg-slate-900/95 border-b border-slate-800 z-30 flex-wrap gap-2 text-white">
         <div className="flex items-center gap-2 md:gap-3 flex-wrap">
           {/* Mode Switcher: Chiếu File Gốc vs Chiếu Slide */}
@@ -511,6 +526,16 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             <span className="hidden sm:inline">Phát trắc nghiệm</span>
           </button>
 
+          {/* Collapse Toolbar Button */}
+          <button
+            onClick={() => setIsToolbarCollapsed(true)}
+            className="p-2 rounded-xl border border-slate-700 bg-slate-800 text-amber-400 hover:bg-slate-700 hover:text-amber-300 text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+            title="Thu gọn thanh công cụ lên trên"
+          >
+            <ChevronUp className="w-4 h-4 stroke-[2.5]" />
+            <span className="hidden xl:inline">Thu gọn</span>
+          </button>
+
           {/* Fullscreen Toggle Button */}
           <button
             id="toggle-presentation-fullscreen-btn"
@@ -520,14 +545,14 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
                 ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md ring-2 ring-amber-300 font-black'
                 : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700 hover:text-white'
             }`}
-            title={isFullscreen ? 'Thu nhỏ cửa sổ bài giảng (Phím Esc)' : 'Phóng toàn màn hình 75 inch bài giảng'}
+            title={isFullscreen ? 'Thoát toàn màn hình (Phím Esc)' : 'Phóng toàn màn hình 75 inch bài giảng'}
           >
             {isFullscreen ? (
               <Minimize2 className="w-4 h-4 text-slate-950 stroke-[2.5]" />
             ) : (
               <Maximize2 className="w-4 h-4" />
             )}
-            <span className="hidden xl:inline">{isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}</span>
+            <span className="hidden xl:inline">{isFullscreen ? 'Thoát Toàn Màn Hình' : 'Toàn màn hình'}</span>
           </button>
 
           {/* Close Presentation Button */}
@@ -544,6 +569,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
         </div>
       </div>
 
+      )}
       {/* Upload & Progress Floating Toast */}
       {uploadToast && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 bg-slate-950/95 border-2 border-emerald-500/80 text-emerald-200 px-5 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-2.5 text-xs md:text-sm font-bold animate-fade-in">
