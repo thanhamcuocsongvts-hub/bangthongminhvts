@@ -654,7 +654,7 @@ export default function App() {
   const joinUrl = `${window.location.origin}/?mode=student&room=${roomState?.pin || '758899'}`;
 
   return (
-    <div className="w-screen h-screen flex flex-col bg-[#f8fafc] text-slate-800 overflow-hidden select-none">
+    <div className="w-screen h-dvh flex flex-col bg-[#f8fafc] text-slate-800 overflow-hidden select-none">
       {/* 75-Inch Top Navigation Header Bar */}
       {(!isFullscreen || activeTab !== 'presentation') && (
         <HeaderBar

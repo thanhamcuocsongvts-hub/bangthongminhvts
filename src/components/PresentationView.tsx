@@ -15,7 +15,7 @@ import {
   FileText,
   Presentation as PresentationIcon,
   Pen,
-  UploadCloud,
+  UploadCloud, Cloud,
   FolderOpen,
   FileUp,
   Sigma,
@@ -31,6 +31,7 @@ import { LessonDoc, SlideItem, TextScale, TeacherProfile } from '../types';
 import { TouchWhiteboard } from './TouchWhiteboard';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
+import { TeacherFileManager } from './TeacherFileManager';
 import { ScopeConstraintModal, ScopeActionType } from './ScopeConstraintModal';
 import { parseUploadedFileToLesson } from '../utils/fileParser';
 
@@ -75,6 +76,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   const [uploadToast, setUploadToast] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
   const [showDocPicker, setShowDocPicker] = useState<boolean>(false);
+  const [showCloudStorageModal, setShowCloudStorageModal] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // AI Scope Constraint Modal states
@@ -309,7 +311,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={`relative w-full ${
-        isFullscreen ? 'h-screen rounded-none' : 'h-[calc(100vh-100px)] rounded-3xl'
+        isFullscreen ? 'h-dvh rounded-none' : 'h-[calc(100vh-100px)] rounded-3xl'
       } flex flex-col bg-slate-950 overflow-hidden border border-slate-800 shadow-2xl transition-all select-none`}
     >
       {/* Hidden File Input for Teacher Uploads */}
@@ -385,22 +387,31 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
           </button>
 
           {/* Document Switcher Dropdown */}
+          <button
+            onClick={() => setShowCloudStorageModal(true)}
+            className="px-3 py-1.5 rounded-xl border border-indigo-600/50 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-100 text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-xs"
+            title="Mở Kho Tài Liệu Giáo Viên (Firebase Cloud)"
+          >
+            <Cloud className="w-4 h-4 text-indigo-400" />
+            <span className="hidden sm:inline">Kho Đám Mây</span>
+          </button>
+          
           {allLessons.length > 0 && (
             <div className="relative">
               <button
                 onClick={() => setShowDocPicker(!showDocPicker)}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                title="Chọn nhanh bài giảng khác trong danh sách"
+                className="px-3 py-1.5 rounded-xl border border-amber-600/50 bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-xs"
+                title="Chọn tệp từ Kho bài giảng đã lưu"
               >
-                <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+                <FolderOpen className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">Chọn Từ Kho:</span>
                 <span className="max-w-[140px] truncate">{lesson.title}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
               </button>
-
               {showDocPicker && (
                 <div className="absolute top-full left-0 mt-1.5 w-72 max-h-80 overflow-y-auto bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 z-50 flex flex-col gap-1 custom-scrollbar">
                   <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                    Chọn Bài Giảng Trình Chiếu ({allLessons.length})
+                    Kho Bài Giảng Của Bạn ({allLessons.length})
                   </div>
                   {allLessons.map((l) => (
                     <button
@@ -533,7 +544,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             title="Thu gọn thanh công cụ lên trên"
           >
             <ChevronUp className="w-4 h-4 stroke-[2.5]" />
-            <span className="hidden xl:inline">Thu gọn</span>
+            <span className="hidden sm:inline">Ẩn Thanh Công Cụ</span>
           </button>
 
           {/* Fullscreen Toggle Button */}
@@ -870,6 +881,28 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
               >
                 Đóng
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* Cloud Storage Modal */}
+      {showCloudStorageModal && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-4xl bg-slate-950 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden animate-fade-in relative">
+            <button
+              onClick={() => setShowCloudStorageModal(false)}
+              className="absolute top-4 right-4 p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors z-10"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="p-2">
+              <TeacherFileManager onSelectFile={(l) => {
+                onSelectLesson?.(l);
+                setCurrentSlideIndex(0);
+                setShowCloudStorageModal(false);
+              }} />
             </div>
           </div>
         </div>

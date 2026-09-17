@@ -41,7 +41,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint } from '../types';
-import { isFunctionGraphTool, drawFunctionGraph } from '../utils/mathGraphRenderer';
+import { isFunctionGraphTool, drawFunctionGraph, getGraphBounds } from '../utils/mathGraphRenderer';
 
 interface TouchWhiteboardProps {
   id?: string;
@@ -79,6 +79,8 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   const [redoStack, setRedoStack] = useState<WhiteboardStroke[]>([]);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const currentPointsRef = useRef<StrokePoint[]>([]);
+  const activePointersRef = useRef<Map<number, {y: number, x: number}>>(new Map());
+  const scrollTargetRef = useRef<Element | null>(null);
 
   // Text items support
   const [texts, setTexts] = useState<WhiteboardText[]>([]);
@@ -176,6 +178,25 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       };
     }
 
+    if (isFunctionGraphTool(stroke.tool)) {
+      let renderPts = stroke.points;
+      if (!stroke.points || stroke.points.length === 1) {
+        const p = stroke.points && stroke.points[0] ? stroke.points[0] : { x: 150, y: 150 };
+        renderPts = [p, { x: p.x + 300, y: p.y + 240 }];
+      }
+      const b = getGraphBounds(renderPts, stroke.scale || 1);
+      return {
+        minX: b.minX,
+        maxX: b.maxX,
+        minY: b.minY,
+        maxY: b.maxY,
+        centerX: b.cx,
+        centerY: b.cy,
+        width: b.width,
+        height: b.height,
+      };
+    }
+    
     if (!stroke.points || stroke.points.length === 0) return null;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     stroke.points.forEach((p) => {
@@ -917,6 +938,19 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
   // Pointer event handlers with anti-jitter low-pass filter
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    
+    // Find scroll target on first touch
+    if (!scrollTargetRef.current) {
+      // Try to find the presentation scrollable area
+      scrollTargetRef.current = document.querySelector('.overflow-y-auto') || document.documentElement;
+    }
+
+    if (activePointersRef.current.size === 2) {
+      // 2 fingers - stop drawing, prepare for pan
+      setIsDrawing(false);
+      return;
+    }
     if (activeTool === 'select') {
       const point = getCanvasCoords(e);
       // Hit-test on geometric shapes & math graphs (never select freehand handwriting)
@@ -1000,6 +1034,23 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activePointersRef.current.has(e.pointerId)) {
+      const prev = activePointersRef.current.get(e.pointerId)!;
+      const dy = e.clientY - prev.y;
+      const dx = e.clientX - prev.x;
+      
+      // Update pointer position
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      // If 2 fingers, pan the scroll target
+      if (activePointersRef.current.size === 2) {
+        if (scrollTargetRef.current) {
+          scrollTargetRef.current.scrollBy(-dx, -dy);
+        }
+        return;
+      }
+    }
+
     const rawPoint = getCanvasCoords(e);
 
     if (activeTool === 'laser') {
@@ -1113,7 +1164,12 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     });
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e && e.pointerId != null) {
+      activePointersRef.current.delete(e.pointerId);
+    } else {
+      activePointersRef.current.clear();
+    }
     if (activeTool === 'laser') return;
     if (!isDrawing || currentPointsRef.current.length === 0) {
       setIsDrawing(false);
@@ -1218,6 +1274,8 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         onPointerMove={activeTool === 'select' ? undefined : handlePointerMove}
         onPointerUp={activeTool === 'select' ? undefined : handlePointerUp}
         onPointerLeave={activeTool === 'select' ? undefined : handlePointerUp}
+        onContextMenu={(e) => e.preventDefault()}
+        style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
         className={`absolute inset-0 w-full h-full ${
           activeTool === 'select'
             ? 'pointer-events-none cursor-default'
@@ -1882,7 +1940,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       {!isDockCollapsed ? (
         <div
           ref={dockRef}
-          className="absolute bottom-6 md:bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] animate-fade-in flex justify-center"
+          className="absolute bottom-8 md:bottom-12 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] animate-fade-in flex justify-center"
         >
           <div className="bg-slate-950/95 backdrop-blur-2xl px-3.5 py-2 rounded-2xl md:rounded-3xl border-2 border-white/25 shadow-2xl flex items-center gap-1 sm:gap-2 text-white shrink-0">
             {/* 1. Main Drawing Tools */}
@@ -2771,7 +2829,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         </div>
       ) : (
         /* Collapsed Floating Dock at Bottom-Right (matching Blackboard view) */
-        <div className="absolute bottom-6 md:bottom-8 right-6 z-40 pointer-events-auto animate-fade-in flex items-center gap-2">
+        <div className="absolute bottom-8 md:bottom-12 right-6 z-40 pointer-events-auto animate-fade-in flex items-center gap-2">
           <button
             id="touch-expand-dock-btn"
             onClick={() => setIsDockCollapsed(false)}
