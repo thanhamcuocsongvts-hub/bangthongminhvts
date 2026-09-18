@@ -87,6 +87,7 @@ export interface LessonDoc {
   slides: SlideItem[];
   quizzes: QuizQuestion[];
   fileUrl?: string; // Blob or Data URL to view original PDF / Doc / Image / Media
+  source?: 'cloud' | 'local';
   fileType?: 'pdf' | 'docx' | 'image' | 'xlsx' | 'pptx' | 'text' | 'other';
   fileName?: string;
   fileSize?: string;

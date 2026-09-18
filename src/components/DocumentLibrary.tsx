@@ -74,9 +74,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     if (!files || files.length === 0) return;
     const file = files[0];
 
-    // File size safety check: Ensure fast sync and stability
-    if (file.size > 20 * 1024 * 1024) {
-      setErrorMessage('Tệp quá lớn (> 20MB). Hệ thống không hỗ trợ tải lên file dung lượng cao để đảm bảo đồng bộ đám mây. Vui lòng giảm dung lượng hoặc lưu trên Google Drive/OneDrive rồi gửi link thay thế.');
+    // File size safety check: Allow up to 50MB for Firebase Storage
+    if (file.size > 50 * 1024 * 1024) {
+      setErrorMessage('Tệp quá lớn (> 50MB). Vui lòng chọn tệp nhỏ hơn để đảm bảo tốc độ tải lên đám mây.');
       return;
     }
 
@@ -87,10 +87,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     try {
       const newDoc = await parseUploadedFileToLesson(file, activeTeacher?.name, activeTeacher?.id);
       onAddLesson(newDoc);
-      if (file.size > 20 * 1024 * 1024) {
-        setUploadStatus(`Đã nạp "${newDoc.title}". (Lưu ý: Tệp > 20MB nên chỉ được lưu cục bộ trên máy này, Tivi trường sẽ chỉ nhận được tên bài giảng)`);
+      if (newDoc.fileUrl?.startsWith('http')) {
+        setUploadStatus(`Đã tải lên Firebase và đồng bộ thành công tài liệu "${newDoc.title}"!`);
       } else {
-        setUploadStatus(`Đã nạp và đồng bộ Đám mây thành công tài liệu "${newDoc.title}"!`);
+        setUploadStatus(`Đã nạp "${newDoc.title}".`);
       }
       setTimeout(() => setUploadStatus(null), 5000);
     } catch (err: any) {

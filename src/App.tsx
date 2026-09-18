@@ -15,6 +15,7 @@ import {
 import { HeaderBar, ActiveTab } from './components/HeaderBar';
 import { ClassroomBlackboardView } from './components/ClassroomBlackboardView';
 import { PresentationView } from './components/PresentationView';
+import { PPTPresentationMode } from './components/PPTPresentationMode';
 import { DocumentReaderView } from './components/DocumentReaderView';
 import { TouchWhiteboard } from './components/TouchWhiteboard';
 import { LiveQuizHub } from './components/LiveQuizHub';
@@ -735,6 +736,23 @@ export default function App() {
                   );
                 }}
                 onOpenExportModal={() => setShowExportModal(true)}
+              />
+            )}
+
+            {/* Tab: PPT Presentation Mode */}
+            {activeTab === 'ppt_mode' && (
+              <PPTPresentationMode
+                onSelectLesson={(lesson) => {
+                  setLessons((prev) => {
+                    if (!prev.find((l) => l.id === lesson.id)) {
+                      return [lesson, ...prev];
+                    }
+                    return prev;
+                  });
+                  setActiveLessonId(lesson.id);
+                }}
+                activeLessonUrl={currentLesson?.fileUrl}
+                activeLessonTitle={currentLesson?.title}
               />
             )}
 

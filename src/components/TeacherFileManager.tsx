@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, addDoc, deleteDoc, doc, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, storage } from '../lib/firebase';
 import { File, Upload, Trash2, Loader2, Play } from 'lucide-react';
 import { LessonDoc } from '../types';
@@ -11,11 +12,14 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  const fetchFiles = async () => {
-    if (!auth.currentUser) return;
+  const fetchFiles = async (user) => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const q = query(collection(db, 'TaiLieuGiaoVien'), where('uid', '==', auth.currentUser.uid));
+      const q = query(collection(db, 'TaiLieuGiaoVien'), where('uid', '==', user.uid));
       const querySnapshot = await getDocs(q);
       const docs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setFiles(docs.sort((a: any, b: any) => b.createdAt?.toMillis() - a.createdAt?.toMillis()));
@@ -27,8 +31,16 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
   };
 
   useEffect(() => {
-    fetchFiles();
-  }, [auth.currentUser]);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchFiles(user);
+      } else {
+        setFiles([]);
+        setLoading(false);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0] || !auth.currentUser) return;
@@ -68,7 +80,7 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
           });
           setUploading(false);
           setProgress(0);
-          fetchFiles();
+          fetchFiles(auth.currentUser);
         } catch (error) {
           console.error("Error saving doc:", error);
           setUploading(false);
@@ -139,8 +151,15 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
                         source: 'cloud',
                         fileUrl: f.url,
                         fileType: ext === 'pdf' ? 'pdf' : ['ppt', 'pptx'].includes(ext) ? 'pptx' : ['doc', 'docx'].includes(ext) ? 'docx' : 'other',
-                        rawText: ''
-                      });
+                        rawText: '',
+                        subject: 'Khác',
+                        grade: 'Mọi lớp',
+                        lastModified: new Date().toISOString(),
+                        syncedToCloud: true,
+                        author: 'Giáo viên',
+                        slides: [],
+                        quizzes: []
+                      } as any);
                     }}
                     className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white transition-colors"
                     title="Mở Trình Chiếu"

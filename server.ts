@@ -13,17 +13,29 @@ const PORT = 3000;
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
+// Health Check Endpoint
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 // Persistent Cloud Storage Directories
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
+try {
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+} catch (e) { console.warn('Could not create UPLOADS_DIR', e); }
 app.use("/uploads", express.static(UPLOADS_DIR));
 
 const DATA_DIR = path.join(process.cwd(), "data");
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (e) { console.warn('Could not create DATA_DIR', e); }
 const TEACHERS_FILE = path.join(DATA_DIR, "teachers.json");
 const LESSONS_FILE = path.join(DATA_DIR, "cloud_lessons.json");
 const DOCUMENTS_FILE = path.join(DATA_DIR, "cloud_documents.json");
@@ -2021,7 +2033,8 @@ ensureRoom("758899");
 
 // Integrate Vite Middleware
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  const isProd = process.env.NODE_ENV === "production" || process.env.K_SERVICE || process.env.CLOUD_RUN_JOB || fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'));
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

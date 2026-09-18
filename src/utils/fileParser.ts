@@ -3,6 +3,9 @@ import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
 import { LessonDoc, SubjectType, SlideItem, QuizQuestion, ExtractedDocSummary } from '../types';
 import { parseDocxWithFullMathAndMedia, extractTextFromDocBinary } from './docxMathParser';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { auth, storage, db } from '../lib/firebase';
+import { collection, addDoc, Timestamp } from 'firebase/firestore';
 
 if (typeof window !== 'undefined' && 'Worker' in window) {
   try {
@@ -68,28 +71,31 @@ export async function parseUploadedFileToLesson(
 
   const fileDataUrl = await readAsDataUrl();
 
-  // Cross-device Cloud Persistence: Upload file to server /api/documents/upload
+  // Cross-device Cloud Persistence: Upload file to Firebase Storage
   let serverFileUrl = '';
-  try {
-    const uploadRes = await fetch('/api/documents/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fileName: file.name,
-        fileType: ext,
-        base64Data: fileDataUrl,
-        fileSize: sizeFormatted,
-        teacherId: teacherId || null,
-      }),
-    });
-    if (uploadRes.ok) {
-      const resData = await uploadRes.json();
-      if (resData.fileUrl) {
-        serverFileUrl = resData.fileUrl;
+  if (auth.currentUser) {
+    try {
+      const storageRef = ref(storage, `TaiLieuGiaoVien/${auth.currentUser.uid}/${Date.now()}_${file.name}`);
+      // For very large files, uploadBytesResumable might be better, but uploadBytes works for ~20MB
+      await uploadBytes(storageRef, file);
+      serverFileUrl = await getDownloadURL(storageRef);
+      
+      // Also save to TaiLieuGiaoVien collection for consistency with the TeacherFileManager
+      try {
+        await addDoc(collection(db, 'TaiLieuGiaoVien'), {
+          uid: auth.currentUser.uid,
+          name: file.name,
+          url: serverFileUrl,
+          size: file.size,
+          type: ext,
+          createdAt: Timestamp.now()
+        });
+      } catch (e) {
+        console.warn("Failed to save to TaiLieuGiaoVien collection", e);
       }
+    } catch (err) {
+      console.warn('Firebase document upload notice:', err);
     }
-  } catch (err) {
-    console.warn('Backend document upload notice:', err);
   }
 
   let effectiveFileUrl = serverFileUrl || fileDataUrl;
