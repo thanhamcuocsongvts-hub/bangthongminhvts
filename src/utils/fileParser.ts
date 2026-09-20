@@ -1,6 +1,7 @@
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
+import JSZip from 'jszip';
 import { LessonDoc, SubjectType, SlideItem, QuizQuestion, ExtractedDocSummary } from '../types';
 import { parseDocxWithFullMathAndMedia, extractTextFromDocBinary } from './docxMathParser';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -106,7 +107,7 @@ export async function parseUploadedFileToLesson(
   let rawText = '';
   let detectedSubject: SubjectType = 'Toán học';
   let detectedGrade = 'Lớp 12';
-  const slides: SlideItem[] = [];
+  let slides: SlideItem[] = [];
   const quizzes: QuizQuestion[] = [];
   let extractedSummary: ExtractedDocSummary | undefined = undefined;
 
@@ -237,7 +238,67 @@ export async function parseUploadedFileToLesson(
     }
   } else if (ext === 'pptx' || ext === 'ppt') {
     fileType = 'pptx';
-    rawText = `Bài thuyết trình PowerPoint: ${file.name} (${sizeFormatted})\nĐã nạp tệp trình chiếu. Thầy/Cô có thể bấm "Tạo Slide Giảng Dạy" để AI trích xuất nội dung sang slide tương tác 75".`;
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      const isZip = bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+
+      if (isZip) {
+        const zip = await JSZip.loadAsync(buffer);
+        const slideFiles = Object.keys(zip.files)
+          .filter((f) => /^ppt\/slides\/slide\d+\.xml$/i.test(f))
+          .sort((a, b) => {
+            const numA = parseInt(a.match(/slide(\d+)\.xml/i)?.[1] || '0', 10);
+            const numB = parseInt(b.match(/slide(\d+)\.xml/i)?.[1] || '0', 10);
+            return numA - numB;
+          });
+
+        if (slideFiles.length > 0) {
+          const parsedSlides: SlideItem[] = [];
+          const textRuns: string[] = [];
+
+          for (let i = 0; i < slideFiles.length; i++) {
+            const xml = await zip.files[slideFiles[i]].async('text');
+            const paragraphs: string[] = [];
+            const pRegex = /<a:p(?:\s+[^>]*)?>([\s\S]*?)<\/a:p>/gi;
+            let pMatch;
+            while ((pMatch = pRegex.exec(xml)) !== null) {
+              const pXml = pMatch[1];
+              const tRegex = /<a:t(?:\s+[^>]*)?>([\s\S]*?)<\/a:t>/gi;
+              let tMatch;
+              const textParts: string[] = [];
+              while ((tMatch = tRegex.exec(pXml)) !== null) {
+                if (tMatch[1]) textParts.push(tMatch[1]);
+              }
+              const pText = textParts.join('').trim();
+              if (pText) paragraphs.push(pText);
+            }
+
+            const slideTitle = paragraphs[0] || `Slide ${i + 1}`;
+            const subtitle = paragraphs.length > 1 && paragraphs[1].length < 120 ? paragraphs[1] : '';
+            const contentLines = subtitle ? paragraphs.slice(2) : paragraphs.slice(1);
+            const content = contentLines.length > 0 ? contentLines.join('\n') : (paragraphs[0] || '');
+
+            parsedSlides.push({
+              id: `slide_pptx_${Date.now()}_${i + 1}`,
+              title: slideTitle,
+              subtitle,
+              content,
+            });
+
+            textRuns.push(`=== Slide ${i + 1}: ${slideTitle} ===\n${paragraphs.join('\n')}`);
+          }
+
+          slides = parsedSlides;
+          rawText = textRuns.join('\n\n');
+        }
+      }
+    } catch (e) {
+      console.warn('PPTX slide extraction notice:', e);
+    }
+    if (!rawText) {
+      rawText = `Bài thuyết trình PowerPoint: ${file.name} (${sizeFormatted})\nĐã nạp tệp trình chiếu thành công. Thầy/Cô có thể bắt đầu trình chiếu toàn màn hình trên Tivi 75" hoặc bấm "Tạo Slide Giảng Dạy" để AI trích xuất sang slide tương tác.`;
+    }
   } else if (['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg'].includes(ext)) {
     fileType = 'image';
     rawText = `Hình ảnh tài liệu: ${file.name} (${sizeFormatted})\nĐã sẵn sàng hiển thị và phóng to trên màn hình tương tác.`;

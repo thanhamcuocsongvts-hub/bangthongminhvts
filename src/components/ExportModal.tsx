@@ -21,6 +21,7 @@ import {
   exportElementToHDImage,
   exportElementToPDF,
   exportLessonJSON,
+  exportOriginalLessonFile,
 } from '../utils/exportUtils';
 
 interface ExportModalProps {
@@ -189,6 +190,32 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <X className="w-6 h-6" />
           </button>
         </div>
+
+        {/* Original Uploaded File Download */}
+        {lesson && (
+          <div className="p-4 rounded-2xl bg-indigo-50/90 border border-indigo-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Download className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">
+                  Tải Về Tệp Gốc Của Bài Giảng ({lesson.fileName || `${lesson.title}.${lesson.fileType || 'docx'}`})
+                </h4>
+                <p className="text-xs text-slate-600">
+                  Tải về chính xác file nguyên bản như lúc bạn đưa lên ứng dụng.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => exportOriginalLessonFile(lesson)}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shrink-0 shadow-md shadow-indigo-600/20 cursor-pointer transition-all active:scale-95 flex items-center gap-1.5"
+            >
+              <Download className="w-4 h-4" />
+              <span>Tải Tệp Gốc</span>
+            </button>
+          </div>
+        )}
 
         {/* 6 Grid Export Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

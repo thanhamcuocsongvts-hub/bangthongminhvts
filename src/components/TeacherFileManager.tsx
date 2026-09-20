@@ -148,6 +148,8 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
                       onSelectFile({
                         id: f.id,
                         title: f.name,
+                        fileName: f.name,
+                        fileSize: `${(f.size / 1024 / 1024).toFixed(2)} MB`,
                         source: 'cloud',
                         fileUrl: f.url,
                         fileType: ext === 'pdf' ? 'pdf' : ['ppt', 'pptx'].includes(ext) ? 'pptx' : ['doc', 'docx'].includes(ext) ? 'docx' : 'other',

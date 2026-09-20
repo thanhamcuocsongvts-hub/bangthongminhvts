@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   BookOpen,
   Sparkles,
@@ -30,10 +30,14 @@ import {
   Sigma,
   Trash2,
   Compass,
+  FolderOpen,
+  Upload,
+  X,
+  FileUp,
 } from 'lucide-react';
 import { LessonDoc, TextScale, ExtractedDocSummary, SlideItem, QuizQuestion } from '../types';
 import { exportLessonToWord } from '../utils/exportUtils';
-import { cleanDocumentText } from '../utils/fileParser';
+import { cleanDocumentText, parseUploadedFileToLesson } from '../utils/fileParser';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
 import { ScopeConstraintModal, ScopeActionType } from './ScopeConstraintModal';
@@ -46,6 +50,9 @@ interface DocumentReaderViewProps {
   onLaunchSlides: () => void;
   onLaunchQuiz: () => void;
   onSendToAIChat: (prompt: string) => void;
+  allLessons?: LessonDoc[];
+  onSelectLesson?: (lesson: LessonDoc) => void;
+  onAddNewLesson?: (lesson: LessonDoc) => void;
 }
 
 export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
@@ -56,6 +63,9 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
   onLaunchSlides,
   onLaunchQuiz,
   onSendToAIChat,
+  allLessons = [],
+  onSelectLesson,
+  onAddNewLesson,
 }) => {
   // Always default to 'original' viewer if fileUrl is available or it's a PDF/Image/Doc/XLSX
   const [activeViewMode, setActiveViewMode] = useState<'original' | 'extracted' | 'notes'>('original');
@@ -64,6 +74,12 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
   const [pdfZoom, setPdfZoom] = useState<number>(100);
   const [pdfRotation, setPdfRotation] = useState<number>(0);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+
+  // Open file modal states
+  const [showOpenFileModal, setShowOpenFileModal] = useState<boolean>(false);
+  const [fileSearchTerm, setFileSearchTerm] = useState<string>('');
+  const [isUploadingNew, setIsUploadingNew] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // On-Demand AI Extraction States
   const [isExtractingFormulas, setIsExtractingFormulas] = useState<boolean>(false);
@@ -334,6 +350,16 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
 
         {/* Quick Launch Buttons */}
         <div className="flex items-center gap-2">
+          {/* Open other file button */}
+          <button
+            onClick={() => setShowOpenFileModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            title="Mở tài liệu Word, PDF, PowerPoint, Excel khác từ máy tính hoặc Kho bài giảng"
+          >
+            <FolderOpen className="w-4 h-4" />
+            <span>Mở File Khác</span>
+          </button>
+
           {lesson.slides && lesson.slides.length > 0 && (
             <button
               onClick={onLaunchSlides}
@@ -472,6 +498,7 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
             lesson={lesson}
             onLaunchSlides={onLaunchSlides}
             onLaunchQuiz={onLaunchQuiz}
+            onOpenFile={() => setShowOpenFileModal(true)}
           />
         </div>
       )}
@@ -687,6 +714,166 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
             isGeneratingQuiz
           }
         />
+      )}
+
+      {/* OPEN FILE / SWITCH DOCUMENT MODAL FOR TEACHERS */}
+      {showOpenFileModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20">
+                  <FolderOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Mở Tài Liệu Khác</h3>
+                  <p className="text-xs text-slate-500">
+                    Tải tệp mới từ máy tính / USB hoặc chọn từ danh sách bài giảng
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowOpenFileModal(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+              {/* Option A: Upload New File */}
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                  Tải lên tệp mới từ Máy tính / USB
+                </h4>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".docx,.doc,.pdf,.pptx,.ppt,.xlsx,.xls,image/*"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setIsUploadingNew(true);
+                    try {
+                      const newLesson = await parseUploadedFileToLesson(file);
+                      if (onAddNewLesson) onAddNewLesson(newLesson);
+                      if (onSelectLesson) onSelectLesson(newLesson);
+                      setShowOpenFileModal(false);
+                    } catch (err: any) {
+                      alert('Không thể mở tệp: ' + (err.message || 'Vui lòng kiểm tra lại định dạng tệp'));
+                    } finally {
+                      setIsUploadingNew(false);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }
+                  }}
+                  className="hidden"
+                />
+
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-blue-300 hover:border-blue-500 bg-blue-50/50 hover:bg-blue-50 rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3 group"
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-white shadow-md flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
+                    {isUploadingNew ? (
+                      <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Upload className="w-6 h-6" />
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-blue-700 block">
+                      {isUploadingNew ? 'Đang đọc và giải mã tài liệu...' : 'Chạm để chọn tệp từ máy tính / USB'}
+                    </span>
+                    <span className="text-xs text-slate-500 mt-1 block">
+                      Hỗ trợ Word (.docx, .doc), PDF (.pdf), PowerPoint (.pptx, .ppt), Excel (.xlsx), Hình ảnh
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Option B: Existing Lessons List */}
+              {allLessons.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Kho bài giảng có sẵn ({allLessons.length})
+                    </h4>
+                    <div className="relative w-48">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={fileSearchTerm}
+                        onChange={(e) => setFileSearchTerm(e.target.value)}
+                        placeholder="Tìm bài giảng..."
+                        className="w-full pl-8 pr-3 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {allLessons
+                      .filter((l) =>
+                        !fileSearchTerm ||
+                        l.title.toLowerCase().includes(fileSearchTerm.toLowerCase()) ||
+                        l.subject?.toLowerCase().includes(fileSearchTerm.toLowerCase())
+                      )
+                      .map((l) => {
+                        const isCurrent = l.id === lesson.id;
+                        return (
+                          <div
+                            key={l.id}
+                            onClick={() => {
+                              if (onSelectLesson) onSelectLesson(l);
+                              setShowOpenFileModal(false);
+                            }}
+                            className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer ${
+                              isCurrent
+                                ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-400/30'
+                                : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/80 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-700 shadow-2xs shrink-0 uppercase">
+                                {l.fileType || 'DOC'}
+                              </span>
+                              <div className="min-w-0">
+                                <h5 className="text-sm font-bold text-slate-900 truncate">
+                                  {l.title}
+                                </h5>
+                                <p className="text-xs text-slate-500 truncate">
+                                  {l.subject || 'Chung'} • {l.fileSize || 'Sẵn sàng'}
+                                </p>
+                              </div>
+                            </div>
+                            {isCurrent ? (
+                              <span className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[11px] font-bold">
+                                Đang mở
+                              </span>
+                            ) : (
+                              <span className="text-xs font-bold text-blue-600 hover:underline">
+                                Mở tệp
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end">
+              <button
+                onClick={() => setShowOpenFileModal(false)}
+                className="px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs cursor-pointer transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

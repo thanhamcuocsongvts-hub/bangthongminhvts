@@ -65,7 +65,6 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     { id: 'whiteboard', label: 'Bảng Xanh & Bút Viết', icon: <PenTool className="w-5 h-5 text-emerald-600" /> },
     { id: 'gradebook', label: 'Quản Lý Lớp Học', icon: <Users className="w-5 h-5 text-blue-600" /> },
     { id: 'documents', label: 'Kho Bài Giảng', icon: <FolderOpen className="w-5 h-5 text-amber-600" /> },
-    { id: 'presentation', label: 'Giáo Án PDF/Word', icon: <Presentation className="w-5 h-5 text-indigo-600" /> },
     { id: 'ppt_mode', label: 'Trình Chiếu PPT', icon: <MonitorPlay className="w-5 h-5 text-orange-500" /> },
     { id: 'reader', label: 'Mở Tài Liệu', icon: <BookOpen className="w-5 h-5 text-blue-600" /> },
     { id: 'quiz', label: 'Trắc Nghiệm Tức Thì', icon: <CheckSquare className="w-5 h-5 text-amber-500" /> },

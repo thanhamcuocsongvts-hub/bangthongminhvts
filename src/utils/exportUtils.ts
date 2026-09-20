@@ -419,3 +419,95 @@ export function exportLessonJSON(lesson: LessonDoc) {
   downloadAnchor.click();
   downloadAnchor.remove();
 }
+
+/**
+ * 8. Export/Download Original Uploaded File (Word .docx, PDF, PowerPoint .pptx, Excel .xlsx, Image, etc.)
+ * Ensures that whatever file format was uploaded, clicking download gives back the EXACT ORIGINAL FILE
+ * with its correct filename and extension, rather than a .json file.
+ */
+export async function exportOriginalLessonFile(lesson: LessonDoc): Promise<void> {
+  // 1. Determine clean original filename
+  let filename = lesson.fileName || lesson.title;
+  const extMap: Record<string, string> = {
+    docx: 'docx',
+    pdf: 'pdf',
+    pptx: 'pptx',
+    xlsx: 'xlsx',
+    image: 'png',
+    text: 'txt',
+  };
+
+  // If filename doesn't include an extension, append according to fileType
+  if (!filename.includes('.')) {
+    const ext = lesson.fileType ? extMap[lesson.fileType] || 'docx' : 'docx';
+    filename = `${filename}.${ext}`;
+  }
+
+  // 2. If lesson has fileUrl (Data URL, Blob URL, Firebase Storage URL)
+  if (lesson.fileUrl) {
+    try {
+      // If it's a data URL or blob URL:
+      if (lesson.fileUrl.startsWith('data:') || lesson.fileUrl.startsWith('blob:')) {
+        const response = await fetch(lesson.fileUrl);
+        const blob = await response.blob();
+        saveAs(blob, filename);
+        return;
+      }
+
+      // If it's a remote URL (Firebase Storage or external server):
+      const res = await fetch(lesson.fileUrl);
+      if (res.ok) {
+        const blob = await res.blob();
+        saveAs(blob, filename);
+        return;
+      }
+    } catch (err) {
+      console.warn('Direct blob fetch failed, falling back to anchor download:', err);
+      const link = document.createElement('a');
+      link.href = lesson.fileUrl;
+      link.download = filename;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return;
+    }
+  }
+
+  // 3. Fallback for lessons created from scratch without uploaded file:
+  if (lesson.fileType === 'docx' || !lesson.fileType) {
+    await exportLessonToWord(lesson);
+    return;
+  }
+  if (lesson.fileType === 'pptx') {
+    await exportLessonToPowerPoint(lesson);
+    return;
+  }
+  if (lesson.fileType === 'xlsx' && lesson.sheetData) {
+    const wb = XLSX.utils.book_new();
+    const sData = lesson.sheetData;
+    sData.sheetNames.forEach((name) => {
+      const data = sData.sheets[name] || [];
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    });
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/octet-stream' });
+    saveAs(blob, filename);
+    return;
+  }
+  if (lesson.fileType === 'pdf') {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text(lesson.title, 14, 20);
+    doc.setFontSize(12);
+    const split = doc.splitTextToSize(lesson.rawText || '', 180);
+    doc.text(split, 14, 30);
+    doc.save(filename);
+    return;
+  }
+
+  // Last resort: JSON export
+  exportLessonJSON(lesson);
+}
+

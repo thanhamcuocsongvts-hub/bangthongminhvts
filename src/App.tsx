@@ -157,26 +157,35 @@ export default function App() {
           const cloudLessons = docSnap.data().lessons;
           if (Array.isArray(cloudLessons)) {
             setLessons((prev) => {
-              const localMap = new Map();
+              const localMap = new Map<string, any>();
               prev.forEach((l) => localMap.set(l.id, l));
 
-              const merged = cloudLessons.map((cloudL: any) => {
+              const cloudIds = new Set(cloudLessons.map((c: any) => c.id));
+
+              // 1. Merge cloud lessons, preserving local rich data (dataUrls, rawText, slides)
+              const mergedCloud = cloudLessons.map((cloudL: any) => {
                 if (localMap.has(cloudL.id)) {
                   const localL = localMap.get(cloudL.id);
-                  if (!cloudL.fileUrl && localL.fileUrl) {
-                    cloudL.fileUrl = localL.fileUrl; // Preserve local dataUrl if cloud stripped it
-                  }
-                  if (!cloudL.rawText && localL.rawText) {
-                    cloudL.rawText = localL.rawText;
-                  }
+                  return {
+                    ...cloudL,
+                    fileUrl: localL.fileUrl || cloudL.fileUrl,
+                    rawText: localL.rawText || cloudL.rawText,
+                    slides: (localL.slides && localL.slides.length > 0) ? localL.slides : cloudL.slides,
+                  };
                 }
                 return cloudL;
               });
 
+              // 2. CRITICAL BUGFIX: Never drop local user-uploaded/opened lessons!
+              // Any lesson in prev that hasn't synced to Firestore yet MUST be kept.
+              const localOnly = prev.filter((l) => !cloudIds.has(l.id));
+              const allLessons = [...localOnly, ...mergedCloud];
+
               try {
-                localStorage.setItem('smartboard_lessons', JSON.stringify(merged));
+                localStorage.setItem('smartboard_lessons', JSON.stringify(allLessons));
               } catch {}
-              return merged;
+              saveLessonsToDB(allLessons).catch(() => {});
+              return allLessons;
             });
           }
        }
@@ -276,15 +285,18 @@ export default function App() {
     loadLessonsFromDB()
       .then((dbLessons) => {
         if (dbLessons && dbLessons.length > 0) {
-          setLessons(dbLessons);
+          setLessons((prev) => {
+            const dbIds = new Set(dbLessons.map((d: any) => d.id));
+            const freshLocal = prev.filter((p) => !dbIds.has(p.id));
+            const merged = [...freshLocal, ...dbLessons];
+            return merged;
+          });
         }
       })
       .catch((err) => {
         console.warn('IndexedDB initial load note:', err);
       })
       .finally(() => setIsLessonsLoaded(true));
-
-
   }, []);
 
     // Save to LocalStorage & IndexedDB (Bypassing browser 5MB quota with IndexedDB)
@@ -298,12 +310,34 @@ export default function App() {
     saveLessonsToDB(lessons).catch((err) => {
       console.error('Failed to sync to IndexedDB:', err);
     });
-  }, [lessons, isGuestMode]);
+  }, [lessons, isGuestMode, isLessonsLoaded]);
 
   useEffect(() => {
     if (isGuestMode) return;
     localStorage.setItem('smartboard_active_lesson', activeLessonId);
   }, [activeLessonId, isGuestMode]);
+
+  // Centralized, bulletproof Lesson Selector & Inserter
+  const handleSelectLesson = useCallback((lesson: LessonDoc) => {
+    setActiveLessonId(lesson.id);
+    try {
+      localStorage.setItem('smartboard_active_lesson', lesson.id);
+    } catch {}
+    setLessons((prev) => {
+      const idx = prev.findIndex((l) => l.id === lesson.id);
+      let next: LessonDoc[];
+      if (idx >= 0) {
+        next = prev.map((l) => (l.id === lesson.id ? { ...l, ...lesson } : l));
+      } else {
+        next = [lesson, ...prev];
+      }
+      try {
+        localStorage.setItem('smartboard_lessons', JSON.stringify(next));
+      } catch {}
+      saveLessonsToDB(next).catch(() => {});
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (isGuestMode) return;
@@ -488,13 +522,8 @@ export default function App() {
       syncTeachersToCloud(next);
 
       // CRITICAL: Synchronize directly with the server so other computers/devices instantly get the class and student list!
-      
-
-      
-
-      try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
+      syncTeachersToCloud(next);
+      return next;
     });
   };
 
@@ -504,9 +533,7 @@ export default function App() {
       const next = prev.filter((t) => t.id !== teacherId);
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
       syncTeachersToCloud(next);
-      try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
+      return next;
     });
     if (activeTeacherId === teacherId) {
       setActiveTeacherId('');
@@ -520,11 +547,8 @@ export default function App() {
       const next = prev.map((t) => (t.id === teacherId ? { ...t, password: newPassword } : t));
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
       syncTeachersToCloud(next);
-      try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
+      return next;
     });
-    
   };
 
   // Logout Teacher
@@ -742,17 +766,12 @@ export default function App() {
             {/* Tab: PPT Presentation Mode */}
             {activeTab === 'ppt_mode' && (
               <PPTPresentationMode
-                onSelectLesson={(lesson) => {
-                  setLessons((prev) => {
-                    if (!prev.find((l) => l.id === lesson.id)) {
-                      return [lesson, ...prev];
-                    }
-                    return prev;
-                  });
-                  setActiveLessonId(lesson.id);
-                }}
+                onSelectLesson={handleSelectLesson}
+                activeLesson={currentLesson}
                 activeLessonUrl={currentLesson?.fileUrl}
                 activeLessonTitle={currentLesson?.title}
+                activeTeacher={activeTeacher}
+                onSwitchToReader={() => setActiveTab('reader')}
               />
             )}
 
@@ -761,6 +780,9 @@ export default function App() {
               <DocumentReaderView
                 lesson={currentLesson}
                 textScale={textScale}
+                allLessons={lessons}
+                onSelectLesson={handleSelectLesson}
+                onAddNewLesson={handleSelectLesson}
                 onUpdateLesson={(updatedDoc) => {
                   setLessons((prev) =>
                     prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
@@ -778,7 +800,7 @@ export default function App() {
                   });
                   setActiveTab('whiteboard');
                 }}
-                onLaunchSlides={() => setActiveTab('presentation')}
+                onLaunchSlides={() => setActiveTab('ppt_mode')}
                 onLaunchQuiz={() => setActiveTab('quiz')}
                 onSendToAIChat={(prompt) => {
                   setActiveTab('ai_chat');
@@ -794,11 +816,15 @@ export default function App() {
                 activeTeacher={activeTeacher || null}
                 lessons={lessons.filter(l => l.author === activeTeacher?.name) || []}
                 activeLessonId={activeLessonId}
-                onSelectLesson={setActiveLessonId}
-                onAddLesson={(newDoc) => {
-                  setLessons((prev) => [newDoc, ...prev]);
-                  setActiveLessonId(newDoc.id);
+                onSelectLesson={(id) => {
+                  const target = lessons.find((l) => l.id === id);
+                  if (target) {
+                    handleSelectLesson(target);
+                  } else {
+                    setActiveLessonId(id);
+                  }
                 }}
+                onAddLesson={handleSelectLesson}
                 onUpdateLesson={(updatedDoc) => {
                   setLessons((prev) =>
                     prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
@@ -817,7 +843,7 @@ export default function App() {
                   });
                   
                 }}
-                onSwitchToPresentation={() => setActiveTab('presentation')}
+                onSwitchToPresentation={() => setActiveTab('ppt_mode')}
                 onSwitchToReader={() => setActiveTab('reader')}
                 onOpenRandomPicker={() => {
                   setPickerClassroom(activeTeacher?.classes?.[0] || null);
@@ -942,7 +968,17 @@ export default function App() {
                 activeLessonId={activeLessonId}
                 onSelectLesson={(id) => {
                   setActiveLessonId(id);
-                  setActiveTab('presentation');
+                  const sel = lessons.find((l) => l.id === id);
+                  const isPpt =
+                    sel?.fileType === 'pptx' ||
+                    sel?.fileType === 'ppt' ||
+                    sel?.fileName?.toLowerCase().endsWith('.pptx') ||
+                    sel?.fileName?.toLowerCase().endsWith('.ppt');
+                  if (isPpt) {
+                    setActiveTab('ppt_mode');
+                  } else {
+                    setActiveTab('reader');
+                  }
                 }}
                 onAddLesson={(newDoc) => {
                   const docWithAuthor = {

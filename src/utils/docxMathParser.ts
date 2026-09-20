@@ -402,27 +402,11 @@ function parseParagraphElement(
 }
 
 /**
- * Format Question & Choice lines nicely so options A, B, C, D have distinct badges
+ * Format paragraph lines cleanly matching authentic Word document styling
  */
 function formatQuestionAndChoiceHtml(pHtml: string, pText: string): string {
-  const trimmedText = pText.trim();
-
-  // Question Heading (e.g. "Câu 1.", "Câu 2:", "Bài 1:", "Ví dụ 1:")
-  const isQuestionHeading = /^[\s]*(câu|bài|ví dụ|đề bài|phần)\s+\d+[\.\:\-]/i.test(trimmedText);
-  if (isQuestionHeading) {
-    return `<div class="mt-5 mb-2.5 p-3 rounded-2xl bg-indigo-50/80 border-l-4 border-indigo-600 font-bold text-slate-900 text-sm md:text-base shadow-2xs">${pHtml}</div>`;
-  }
-
-  // Option lines (e.g. "A. ... B. ... C. ... D. ...")
-  let formattedHtml = pHtml;
-
-  // Replace isolated A. B. C. D. with distinct option pills if needed
-  formattedHtml = formattedHtml.replace(
-    /(^|\s|&emsp;|\t)(<strong>)?\s*([A-D])\s*[\.\:\)](<\/strong>)?\s*/g,
-    '$1<span class="inline-flex items-center justify-center font-bold px-2 py-0.5 mx-1 rounded-md bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs shadow-2xs">$3.</span> '
-  );
-
-  return `<p class="my-2 leading-relaxed text-slate-800 text-sm md:text-base">${formattedHtml}</p>`;
+  if (!pHtml.trim()) return '<p class="my-2">&nbsp;</p>';
+  return `<p class="my-2.5 leading-relaxed text-slate-900 text-base">${pHtml}</p>`;
 }
 
 /**

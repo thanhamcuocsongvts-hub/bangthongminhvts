@@ -2033,8 +2033,7 @@ ensureRoom("758899");
 
 // Integrate Vite Middleware
 async function startServer() {
-  const isProd = process.env.NODE_ENV === "production" || process.env.K_SERVICE || process.env.CLOUD_RUN_JOB || fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'));
-  if (!isProd) {
+  if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -2044,7 +2043,12 @@ async function startServer() {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+      const indexPath = path.join(distPath, "index.html");
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(500).send("Build output not found. Please run 'npm run build'.");
+      }
     });
   }
 

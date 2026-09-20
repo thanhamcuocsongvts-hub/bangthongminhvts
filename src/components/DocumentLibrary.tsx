@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   UploadCloud,
+  Upload,
   FileText,
   Plus,
   Trash2,
@@ -19,7 +20,7 @@ import {
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { LessonDoc, SubjectType } from '../types';
-import { exportLessonJSON } from '../utils/exportUtils';
+import { exportOriginalLessonFile, exportLessonJSON } from '../utils/exportUtils';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
 
 import { TeacherProfile } from '../types';
@@ -164,12 +165,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           </button>
 
           <button
-            id="create-lesson-btn"
-            onClick={() => setShowCreateModal(true)}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/20"
+            id="upload-file-btn"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/20 cursor-pointer"
+            title="Tải lên tệp tài liệu: Word, Excel, PowerPoint, PDF, Ảnh"
           >
-            <Plus className="w-5 h-5" />
-            <span>Soạn Bài Mới</span>
+            <Upload className="w-5 h-5" />
+            <span>Up File Mới</span>
           </button>
         </div>
       </div>
@@ -337,9 +339,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                 </button>
 
                 <button
-                  onClick={() => exportLessonJSON(lesson)}
-                  title="Tải gói sao lưu JSON"
-                  className="p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all border border-slate-200"
+                  onClick={() => exportOriginalLessonFile(lesson)}
+                  title={`Tải về tệp gốc: ${lesson.fileName || lesson.title}`}
+                  className="p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 transition-all border border-slate-200 hover:border-indigo-300"
                 >
                   <Download className="w-4 h-4" />
                 </button>

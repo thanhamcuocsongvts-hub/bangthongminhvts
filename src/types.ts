@@ -8,6 +8,7 @@ export interface SlideItem {
   keyTakeaway?: string;
   formula?: string;
   imageUrl?: string;
+  image?: string;
   imageCaption?: string;
   notes?: string;
 }
@@ -88,7 +89,7 @@ export interface LessonDoc {
   quizzes: QuizQuestion[];
   fileUrl?: string; // Blob or Data URL to view original PDF / Doc / Image / Media
   source?: 'cloud' | 'local';
-  fileType?: 'pdf' | 'docx' | 'image' | 'xlsx' | 'pptx' | 'text' | 'other';
+  fileType?: 'pdf' | 'docx' | 'image' | 'xlsx' | 'pptx' | 'ppt' | 'text' | 'other';
   fileName?: string;
   fileSize?: string;
   extractedSummary?: ExtractedDocSummary;

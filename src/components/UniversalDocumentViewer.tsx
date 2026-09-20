@@ -1,17 +1,18 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   X, ZoomIn, ZoomOut, Search, Info,
   FileText, ChevronRight, Download, MonitorPlay,
-  Share2, Maximize, FileSpreadsheet, RotateCw, Layers, Pen, Check, Copy, ExternalLink, Table
+  Share2, Maximize, FileSpreadsheet, RotateCw, Layers, Pen, Check, Copy, ExternalLink, Table,
+  FolderOpen, ChevronDown
 } from 'lucide-react';
-import DocViewer, { DocViewerRenderers } from '@cyntler/react-doc-viewer';
-import '@cyntler/react-doc-viewer/dist/index.css';
 import { LessonDoc } from '../types';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { cleanDocumentText } from '../utils/fileParser';
 import { PDFCanvasViewer } from './PDFCanvasViewer';
 import { PPTXViewer } from './PPTXViewer';
+import { DocxViewer } from './DocxViewer';
 import { TouchWhiteboard } from './TouchWhiteboard';
+import { exportOriginalLessonFile } from '../utils/exportUtils';
 
 interface UniversalDocumentViewerProps {
   lesson: LessonDoc;
@@ -22,6 +23,7 @@ interface UniversalDocumentViewerProps {
   isAnnotating?: boolean;
   onToggleAnnotating?: () => void;
   onFullscreenRequest?: () => void;
+  onOpenFile?: () => void;
 }
 
 export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = ({
@@ -33,8 +35,11 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   isAnnotating: propIsAnnotating,
   onToggleAnnotating,
   onFullscreenRequest,
+  onOpenFile,
 }) => {
   const [zoom, setZoom] = useState<number>(initialZoom);
+  const [showZoomMenu, setShowZoomMenu] = useState<boolean>(false);
+  const [isPinching, setIsPinching] = useState<boolean>(false);
   const [rotation, setRotation] = useState<number>(0);
   const [invertColors, setInvertColors] = useState<boolean>(false);
   const [selectedSheet, setSelectedSheet] = useState<string>(() => {
@@ -47,6 +52,47 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
 
   const effectiveAnnotating = propIsAnnotating !== undefined ? propIsAnnotating : internalAnnotating;
   const toggleAnnotating = onToggleAnnotating || (() => setInternalAnnotating((prev) => !prev));
+
+  // Touch Pinch-to-Zoom tracking
+  const touchStartDistRef = useRef<number | null>(null);
+  const touchStartZoomRef = useRef<number>(100);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      touchStartDistRef.current = dist;
+      touchStartZoomRef.current = zoom;
+      setIsPinching(true);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && touchStartDistRef.current) {
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const ratio = currentDist / touchStartDistRef.current;
+      const targetZoom = Math.round(Math.min(300, Math.max(40, touchStartZoomRef.current * ratio)));
+      setZoom(targetZoom);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartDistRef.current = null;
+    setIsPinching(false);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 10 : -10;
+      setZoom((prev) => Math.min(300, Math.max(40, prev + delta)));
+    }
+  };
 
   const fileType = lesson.fileType || 'other';
 
@@ -90,6 +136,34 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
     xl: 'text-lg md:text-xl',
   };
 
+  // 1. High-fidelity Microsoft Word (.docx) native paper viewer
+  if (fileType === 'docx') {
+    return (
+      <DocxViewer
+        fileUrl={lesson.fileUrl}
+        lesson={lesson}
+        title={lesson.title}
+        isAnnotating={effectiveAnnotating}
+        onToggleAnnotating={toggleAnnotating}
+        onFullscreenRequest={onFullscreenRequest}
+        onLaunchQuiz={onLaunchQuiz}
+        onOpenFile={onOpenFile}
+      />
+    );
+  }
+
+  // 2. High-fidelity Microsoft PowerPoint (.pptx, .ppt) presentation viewer
+  if (fileType === 'pptx') {
+    return (
+      <PPTXViewer
+        url={lesson.fileUrl}
+        lesson={lesson}
+        title={lesson.title}
+        onFullscreen={onFullscreenRequest}
+      />
+    );
+  }
+
   return (
     <div className="w-full h-full flex flex-col bg-slate-900 text-slate-100 rounded-2xl overflow-hidden border border-slate-700/60 shadow-inner relative select-text">
       {/* Universal Document Toolbar */}
@@ -106,32 +180,93 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
 
         {/* Center/Right: Controls for Specific Types */}
         <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Mở File Khác button */}
+          {onOpenFile && (
+            <button
+              onClick={onOpenFile}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1 text-[11px] shadow-sm transition-all cursor-pointer"
+              title="Mở tài liệu khác từ Máy tính / USB hoặc Kho bài giảng"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span>Mở File Khác</span>
+            </button>
+          )}
+
           {/* Zoom Controls (Images, PDF, Word, Excel) */}
-          <div className="flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded-lg border border-white/10">
+          <div className="relative flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded-lg border border-white/10">
             <button
               onClick={() => setZoom((prev) => Math.max(40, prev - 15))}
-              className="p-1 rounded hover:bg-white/20 text-slate-300 transition-colors"
+              className="p-1 rounded hover:bg-white/20 text-slate-300 transition-colors cursor-pointer"
               title="Thu nhỏ (-)"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="font-mono font-bold text-amber-400 min-w-[36px] text-center text-[11px]">
-              {zoom}%
-            </span>
+
+            <button
+              onClick={() => setShowZoomMenu((prev) => !prev)}
+              className="font-mono font-bold text-amber-400 min-w-[45px] text-center text-[11px] hover:bg-white/10 px-1 py-0.5 rounded transition-colors flex items-center justify-center gap-0.5 cursor-pointer"
+              title="Chọn tỷ lệ thu phóng theo phần trăm"
+            >
+              <span>{zoom}%</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+
             <button
               onClick={() => setZoom((prev) => Math.min(300, prev + 15))}
-              className="p-1 rounded hover:bg-white/20 text-slate-300 transition-colors"
+              className="p-1 rounded hover:bg-white/20 text-slate-300 transition-colors cursor-pointer"
               title="Phóng to (+)"
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
+
             <button
               onClick={() => setZoom(100)}
-              className="px-1.5 py-0.5 rounded text-[10px] text-slate-400 hover:text-white font-bold"
+              className="px-1.5 py-0.5 rounded text-[10px] text-slate-400 hover:text-white font-bold cursor-pointer"
               title="Đặt lại 100%"
             >
               100%
             </button>
+
+            {/* Percentage Presets Dropdown */}
+            {showZoomMenu && (
+              <div
+                className="absolute top-full mt-1.5 right-0 z-50 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2 w-48 text-xs space-y-1"
+                onMouseLeave={() => setShowZoomMenu(false)}
+              >
+                <div className="px-2 py-1 text-[11px] font-bold text-slate-400 border-b border-slate-800 flex items-center justify-between">
+                  <span>Tỷ lệ thu phóng</span>
+                  <span className="text-amber-400 font-mono">{zoom}%</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1 pt-1">
+                  {[50, 75, 90, 100, 125, 150, 175, 200, 250, 300].map((preset) => (
+                    <button
+                      key={preset}
+                      onClick={() => {
+                        setZoom(preset);
+                        setShowZoomMenu(false);
+                      }}
+                      className={`px-2 py-1.5 rounded-lg text-left font-mono font-bold text-xs flex items-center justify-between transition-colors ${
+                        zoom === preset
+                          ? 'bg-blue-600 text-white'
+                          : 'hover:bg-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <span>{preset}%</span>
+                      {zoom === preset && <Check className="w-3 h-3" />}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    setZoom(100);
+                    setShowZoomMenu(false);
+                  }}
+                  className="w-full text-center py-1.5 mt-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px] border border-slate-700"
+                >
+                  Mặc định (100%)
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Rotate (Image & PDF) */}
@@ -160,8 +295,8 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
             </button>
           )}
 
-          {/* Font Size for Word / Text */}
-          {(fileType === 'docx' || fileType === 'text' || fileType === 'other') && (
+          {/* Font Size for Text */}
+          {(fileType === 'text' || fileType === 'other') && (
             <div className="flex items-center gap-0.5 bg-white/10 p-0.5 rounded-lg">
               {(['sm', 'md', 'lg', 'xl'] as const).map((s) => (
                 <button
@@ -204,6 +339,16 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
 
+          {/* Download Original File */}
+          <button
+            onClick={() => exportOriginalLessonFile(lesson)}
+            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 font-bold flex items-center gap-1 text-[11px] transition-all cursor-pointer"
+            title={`Tải về máy tệp gốc: ${lesson.fileName || lesson.title}`}
+          >
+            <Download className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden sm:inline">Tải Tệp Gốc</span>
+          </button>
+
           {/* External Window Link */}
           {lesson.fileUrl && (
             <a
@@ -233,6 +378,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
               touch1.clientY - touch2.clientY
             );
             (e.currentTarget as any)._pinchStartZoom = zoom;
+            setIsPinching(true);
           }
         }}
         onTouchMove={(e) => {
@@ -253,6 +399,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
           if (e.touches.length < 2) {
             delete (e.currentTarget as any)._pinchStartDist;
             delete (e.currentTarget as any)._pinchStartZoom;
+            setIsPinching(false);
           }
         }}
         onWheel={(e) => {
@@ -263,6 +410,13 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
           }
         }}
       >
+        {/* Floating Pinch-To-Zoom Badge Indicator */}
+        {isPinching && (
+          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 text-white border border-slate-700 px-4 py-2 rounded-2xl shadow-2xl backdrop-blur-md flex items-center gap-2 text-sm font-bold animate-pulse pointer-events-none">
+            <span className="text-amber-400">🔍 Phóng to/Thu nhỏ 2 ngón tay:</span>
+            <span className="font-mono text-base text-cyan-300">{zoom}%</span>
+          </div>
+        )}
         {/* Interactive Annotation Drawing Layer with Full Toolbar, Fluorescent Colors & Shapes (when standalone) */}
         {effectiveAnnotating && fileType !== 'pdf' && !onToggleAnnotating && (
           <div className="absolute inset-0 z-40 pointer-events-none">
@@ -447,69 +601,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
           />
         )}
 
-        {/* ========================================================= */}
-        {/* 4. LOCAL DOCX VIEWER                                      */}
-        {/* ========================================================= */}
-        {fileType === 'docx' ? (
-          <div
-            className="flex-1 w-full h-full overflow-y-auto p-3 md:p-6 flex justify-center bg-slate-950/80 custom-scrollbar scroll-smooth overscroll-contain touch-pan-y"
-            style={{ WebkitOverflowScrolling: 'touch' }}
-          >
-            <div
-              className={`w-full max-w-4xl bg-white text-slate-900 rounded-2xl p-6 md:p-10 shadow-2xl border border-slate-300 font-serif leading-relaxed ${fontSizeClasses[fontSize]} transition-all`}
-            >
-              {/* Document Header Bar */}
-              <div className="pb-6 mb-6 border-b border-slate-300 font-sans not-italic flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl md:text-2xl font-black text-slate-900">{lesson.title}</h2>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {lesson.subject} • {lesson.grade} • Giáo viên: {lesson.author}
-                  </p>
-                </div>
-                <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
-                  Microsoft Word (.docx)
-                </span>
-              </div>
-
-              {/* Render HTML or Cleaned Text */}
-              {lesson.htmlContent ? (
-                <div
-                  className="prose prose-slate max-w-none prose-headings:font-sans prose-headings:font-black prose-p:leading-relaxed prose-table:border-collapse prose-td:border prose-td:p-2 prose-th:border prose-th:bg-slate-100 prose-th:p-2 select-text"
-                  style={{
-                    fontSize: `${(zoom / 100) * 15}px`,
-                    lineHeight: 1.7,
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: lesson.htmlContent.replace(
-                      /<img([^>]*?)src=["']data:image\/(wmf|x-wmf)[^"']*["']([^>]*?)>/gi,
-                      ''
-                    ),
-                  }}
-                />
-              ) : (
-                <div
-                  className="whitespace-pre-line space-y-3 font-sans"
-                  style={{ fontSize: `${(zoom / 100) * 15}px` }}
-                >
-                  <MathFormulaRenderer content={cleanDocumentText(lesson.rawText) || 'Không có nội dung văn bản'} />
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {/* ========================================================= */}
-                {/* 5. POWERPOINT PRESENTATION VIEWER (.PPTX, .PPT)           */}
-        {/* ========================================================= */}
-        {fileType === 'pptx' && lesson.fileUrl ? (
-          <PPTXViewer url={lesson.fileUrl} />
-        ) : fileType === 'pptx' ? (
-          <div className="flex-1 w-full h-full flex items-center justify-center bg-slate-950 text-slate-400">
-            Không tìm thấy đường dẫn tệp.
-          </div>
-        ) : null}
-
-        {/* 6. PLAIN TEXT / CODE / OTHER FALLBACK                     */}
+        {/* 4. PLAIN TEXT / CODE / OTHER FALLBACK                     */}
         {/* ========================================================= */}
         {(fileType === 'text' || fileType === 'other') && (
           <div className="flex-1 w-full h-full overflow-y-auto p-4 md:p-8 flex justify-center bg-slate-950">
