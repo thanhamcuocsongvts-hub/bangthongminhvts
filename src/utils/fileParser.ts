@@ -7,6 +7,7 @@ import { parseDocxWithFullMathAndMedia, extractTextFromDocBinary } from './docxM
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, storage, db } from '../lib/firebase';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { signInAnonymously } from 'firebase/auth';
 
 if (typeof window !== 'undefined' && 'Worker' in window) {
   try {
@@ -14,6 +15,75 @@ if (typeof window !== 'undefined' && 'Worker' in window) {
   } catch (e) {
     console.warn('PDF Worker init notice:', e);
   }
+}
+
+/**
+ * Decode XML Entities and normalize Vietnamese Unicode NFC
+ */
+export function decodeXmlEntities(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ''; }
+    })
+    .replace(/&#([0-9]+);/g, (_, dec) => {
+      try { return String.fromCodePoint(parseInt(dec, 10)); } catch { return ''; }
+    })
+    .normalize('NFC');
+}
+
+/**
+ * Convert Office Open XML Math (OMML) blocks into clean KaTeX LaTeX syntax
+ */
+export function convertOmmlToLatex(xml: string): string {
+  if (!xml) return '';
+  return xml.replace(/<m:oMath(?:Para)?(?:\s+[^>]*)?>([\s\S]*?)<\/m:oMath(?:Para)?>/gi, (_, mathContent) => {
+    let math = mathContent;
+
+    // Fractions: <m:f><m:num>...</m:num><m:den>...</m:den></m:f> -> \frac{num}{den}
+    math = math.replace(/<m:f(?:\s+[^>]*)?>[\s\S]*?<m:num(?:\s+[^>]*)?>([\s\S]*?)<\/m:num>[\s\S]*?<m:den(?:\s+[^>]*)?>([\s\S]*?)<\/m:den>[\s\S]*?<\/m:f>/gi, (__m, num, den) => {
+      const n = (num.match(/<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi) || []).map((t: string) => t.replace(/<\/?m:t(?:\s+[^>]*)?>/gi, '')).join('');
+      const d = (den.match(/<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi) || []).map((t: string) => t.replace(/<\/?m:t(?:\s+[^>]*)?>/gi, '')).join('');
+      return `\\frac{${n.trim()}}{${d.trim()}}`;
+    });
+
+    // Radicals: <m:rad><m:deg>...</m:deg><m:e>...</m:e></m:rad> -> \sqrt[deg]{e}
+    math = math.replace(/<m:rad(?:\s+[^>]*)?>[\s\S]*?(?:<m:deg(?:\s+[^>]*)?>([\s\S]*?)<\/m:deg>)?[\s\S]*?<m:e(?:\s+[^>]*)?>([\s\S]*?)<\/m:e>[\s\S]*?<\/m:rad>/gi, (__m, deg, expr) => {
+      const d = deg ? (deg.match(/<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi) || []).map((t: string) => t.replace(/<\/?m:t(?:\s+[^>]*)?>/gi, '')).join('').trim() : '';
+      const e = (expr.match(/<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi) || []).map((t: string) => t.replace(/<\/?m:t(?:\s+[^>]*)?>/gi, '')).join('').trim();
+      return d ? `\\sqrt[${d}]{${e}}` : `\\sqrt{${e}}`;
+    });
+
+    // Superscripts: <m:sSup><m:e>...</m:e><m:sup>...</m:sup></m:sSup> -> {base}^{sup}
+    math = math.replace(/<m:sSup(?:\s+[^>]*)?>[\s\S]*?<m:e(?:\s+[^>]*)?>([\s\S]*?)<\/m:e>[\s\S]*?<m:sup(?:\s+[^>]*)?>([\s\S]*?)<\/m:sup>[\s\S]*?<\/m:sSup>/gi, (__m, base, sup) => {
+      const b = (base.match(/<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi) || []).map((t: string) => t.replace(/<\/?m:t(?:\s+[^>]*)?>/gi, '')).join('').trim();
+      const s = (sup.match(/<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi) || []).map((t: string) => t.replace(/<\/?m:t(?:\s+[^>]*)?>/gi, '')).join('').trim();
+      return `{${b}}^{${s}}`;
+    });
+
+    // Subscripts: <m:sSub><m:e>...</m:e><m:sub>...</m:sub></m:sSub> -> {base}_{sub}
+    math = math.replace(/<m:sSub(?:\s+[^>]*)?>[\s\S]*?<m:e(?:\s+[^>]*)?>([\s\S]*?)<\/m:e>[\s\S]*?<m:sub(?:\s+[^>]*)?>([\s\S]*?)<\/m:sub>[\s\S]*?<\/m:sSub>/gi, (__m, base, sub) => {
+      const b = (base.match(/<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi) || []).map((t: string) => t.replace(/<\/?m:t(?:\s+[^>]*)?>/gi, '')).join('').trim();
+      const s = (sub.match(/<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi) || []).map((t: string) => t.replace(/<\/?m:t(?:\s+[^>]*)?>/gi, '')).join('').trim();
+      return `{${b}}_{${s}}`;
+    });
+
+    // Extract all <m:t> text nodes in order
+    const tokens: string[] = [];
+    const tRegex = /<m:t(?:\s+[^>]*)?>([\s\S]*?)<\/m:t>/gi;
+    let tMatch;
+    while ((tMatch = tRegex.exec(math)) !== null) {
+      if (tMatch[1]) tokens.push(tMatch[1]);
+    }
+
+    const formula = decodeXmlEntities(tokens.join('')).trim();
+    return formula ? `$${formula}$` : '';
+  });
 }
 
 /**
@@ -72,31 +142,59 @@ export async function parseUploadedFileToLesson(
 
   const fileDataUrl = await readAsDataUrl();
 
-  // Cross-device Cloud Persistence: Upload file to Firebase Storage
+  // Cross-device Cloud Persistence:
+  // 1. First upload directly to server storage (/api/documents/upload)
   let serverFileUrl = '';
-  if (auth.currentUser) {
-    try {
-      const storageRef = ref(storage, `TaiLieuGiaoVien/${auth.currentUser.uid}/${Date.now()}_${file.name}`);
-      // For very large files, uploadBytesResumable might be better, but uploadBytes works for ~20MB
-      await uploadBytes(storageRef, file);
-      serverFileUrl = await getDownloadURL(storageRef);
-      
-      // Also save to TaiLieuGiaoVien collection for consistency with the TeacherFileManager
-      try {
-        await addDoc(collection(db, 'TaiLieuGiaoVien'), {
-          uid: auth.currentUser.uid,
-          name: file.name,
-          url: serverFileUrl,
-          size: file.size,
-          type: ext,
-          createdAt: Timestamp.now()
-        });
-      } catch (e) {
-        console.warn("Failed to save to TaiLieuGiaoVien collection", e);
+  try {
+    const uploadRes = await fetch('/api/documents/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: file.name,
+        fileType: ext,
+        base64Data: fileDataUrl,
+        fileSize: sizeFormatted,
+        teacherId: teacherId || 'current_teacher',
+      }),
+    });
+    if (uploadRes.ok) {
+      const uploadJson = await uploadRes.json();
+      if (uploadJson.fileUrl) {
+        serverFileUrl = uploadJson.fileUrl;
       }
-    } catch (err) {
-      console.warn('Firebase document upload notice:', err);
     }
+  } catch (apiErr) {
+    console.warn('Local server document upload notice:', apiErr);
+  }
+
+  // 2. Also sync to Firebase Storage & Firestore TaiLieuGiaoVien collection for cross-device access
+  try {
+    let currentUser = auth.currentUser;
+    if (!currentUser) {
+      try {
+        const userCred = await signInAnonymously(auth);
+        currentUser = userCred.user;
+      } catch (authErr) {
+        console.warn('Anonymous auth sign-in notice:', authErr);
+      }
+    }
+    if (currentUser) {
+      const storageRef = ref(storage, `TaiLieuGiaoVien/${currentUser.uid}/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const fbUrl = await getDownloadURL(storageRef);
+      if (!serverFileUrl) serverFileUrl = fbUrl;
+
+      await addDoc(collection(db, 'TaiLieuGiaoVien'), {
+        uid: currentUser.uid,
+        name: file.name,
+        url: fbUrl || serverFileUrl,
+        size: file.size,
+        type: ext,
+        createdAt: Timestamp.now(),
+      });
+    }
+  } catch (fbErr) {
+    console.warn('Firebase document sync notice:', fbErr);
   }
 
   let effectiveFileUrl = serverFileUrl || fileDataUrl;
@@ -258,22 +356,40 @@ export async function parseUploadedFileToLesson(
           const textRuns: string[] = [];
 
           for (let i = 0; i < slideFiles.length; i++) {
-            const xml = await zip.files[slideFiles[i]].async('text');
+            const rawXml = await zip.files[slideFiles[i]].async('text');
+            // 1. Transform Office Math (OMML) blocks into clean LaTeX before parsing runs
+            const processedXml = convertOmmlToLatex(rawXml);
+
             const paragraphs: string[] = [];
+            const slideFormulas: string[] = [];
+
+            // Match all paragraphs in shapes, tables, and group shapes
             const pRegex = /<a:p(?:\s+[^>]*)?>([\s\S]*?)<\/a:p>/gi;
             let pMatch;
-            while ((pMatch = pRegex.exec(xml)) !== null) {
+            while ((pMatch = pRegex.exec(processedXml)) !== null) {
               const pXml = pMatch[1];
-              const tRegex = /<a:t(?:\s+[^>]*)?>([\s\S]*?)<\/a:t>/gi;
-              let tMatch;
+              // Extract text runs <a:t>, math runs <m:t>, word runs <w:t>, and field runs
+              const runRegex = /<(?:a:t|m:t|w:t)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:a:t|m:t|w:t)>|(\$[^$]+\$)/gi;
+              let rMatch;
               const textParts: string[] = [];
-              while ((tMatch = tRegex.exec(pXml)) !== null) {
-                if (tMatch[1]) textParts.push(tMatch[1]);
+              while ((rMatch = runRegex.exec(pXml)) !== null) {
+                if (rMatch[1]) {
+                  textParts.push(decodeXmlEntities(rMatch[1]));
+                } else if (rMatch[2]) {
+                  // Direct LaTeX formula token from convertOmmlToLatex
+                  textParts.push(` ${rMatch[2]} `);
+                }
               }
-              const pText = textParts.join('').trim();
-              if (pText) paragraphs.push(pText);
+              const pText = textParts.join('').replace(/\s+/g, ' ').trim();
+              if (pText) {
+                paragraphs.push(pText);
+                if (pText.includes('$') || /(=|<|>|\\frac|\\sqrt|f\(x\)|lim|min|max|\[.*?;.*?\])/.test(pText)) {
+                  slideFormulas.push(pText);
+                }
+              }
             }
 
+            // Also check for slide title from title placeholder if available
             const slideTitle = paragraphs[0] || `Slide ${i + 1}`;
             const subtitle = paragraphs.length > 1 && paragraphs[1].length < 120 ? paragraphs[1] : '';
             const contentLines = subtitle ? paragraphs.slice(2) : paragraphs.slice(1);
@@ -284,6 +400,7 @@ export async function parseUploadedFileToLesson(
               title: slideTitle,
               subtitle,
               content,
+              formula: slideFormulas.length > 0 ? slideFormulas.slice(0, 3).join('\n') : undefined,
             });
 
             textRuns.push(`=== Slide ${i + 1}: ${slideTitle} ===\n${paragraphs.join('\n')}`);

@@ -87,7 +87,8 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
         
         const sanitizedLessons = lessons.map((l) => {
           let cleanFileUrl = l.fileUrl;
-          if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 26214400) {
+          // Firestore document limit is 1MB. Any Base64 data: URL over 500KB must not be stored in firestore document
+          if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 500000) {
             cleanFileUrl = '';
           }
           return {
@@ -102,7 +103,7 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
         console.warn("Firestore sync failed", e);
         window.dispatchEvent(new CustomEvent('sync-status', { detail: 'error' }));
       }
-    }, 2000);
+    }, 1500);
   } catch (err) {
     console.warn('IndexedDB save fallback to localStorage:', err);
     try {
@@ -115,12 +116,27 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
 
 /**
  * Load lesson documents from Firestore, backend API, IndexedDB, or LocalStorage
+ * Perfectly merges cloud lessons from server and Firestore so any machine sees all uploaded files!
  */
 export async function loadLessonsFromDB(): Promise<any[] | null> {
-  let cloudLessons: any[] | null = null;
-  let localLessons: any[] | null = null;
+  const allLessonsMap = new Map<string, any>();
 
-  // 1. Try Firestore
+  // 1. Fetch from backend API (/api/lessons) - shared across all devices
+  try {
+    const res = await fetch('/api/lessons');
+    if (res.ok) {
+      const json = await res.json();
+      if (json && Array.isArray(json.lessons)) {
+        json.lessons.forEach((l: any) => {
+          if (l && l.id) allLessonsMap.set(l.id, l);
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("Backend /api/lessons read failed", e);
+  }
+
+  // 2. Fetch from Firestore global store
   try {
     const authModule = await import('../lib/firebase');
     const firestoreModule = await import('firebase/firestore');
@@ -129,70 +145,75 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
     const docSnap = await getDoc(doc(db, 'global_store', 'smartboard_lessons'));
     if (docSnap.exists()) {
       const data = docSnap.data();
-      if (data && Array.isArray(data.lessons) && data.lessons.length > 0) {
-        cloudLessons = data.lessons;
+      if (data && Array.isArray(data.lessons)) {
+        data.lessons.forEach((cl: any) => {
+          if (cl && cl.id) {
+            if (allLessonsMap.has(cl.id)) {
+              const existing = allLessonsMap.get(cl.id);
+              allLessonsMap.set(cl.id, {
+                ...cl,
+                fileUrl: existing.fileUrl || cl.fileUrl,
+                rawText: existing.rawText || cl.rawText,
+                slides: (existing.slides && existing.slides.length > 0) ? existing.slides : cl.slides,
+              });
+            } else {
+              allLessonsMap.set(cl.id, cl);
+            }
+          }
+        });
       }
     }
   } catch(e) {
     console.warn("Firestore read failed", e);
   }
 
-  // 2. Try IndexedDB
+  // 3. Fetch from local IndexedDB cache
   try {
     const db = await openDB();
     const tx = db.transaction(STORE_LESSONS, 'readonly');
     const store = tx.objectStore(STORE_LESSONS);
-    localLessons = await new Promise((resolve) => {
+    const localLessons: any[] = await new Promise((resolve) => {
       const req = store.getAll();
-      req.onsuccess = () => resolve(req.result && req.result.length > 0 ? req.result : null);
-      req.onerror = () => resolve(null);
+      req.onsuccess = () => resolve(req.result && req.result.length > 0 ? req.result : []);
+      req.onerror = () => resolve([]);
+    });
+
+    localLessons.forEach((ll: any) => {
+      if (ll && ll.id) {
+        if (allLessonsMap.has(ll.id)) {
+          const cloud = allLessonsMap.get(ll.id);
+          allLessonsMap.set(ll.id, {
+            ...cloud,
+            fileUrl: ll.fileUrl || cloud.fileUrl,
+            rawText: ll.rawText || cloud.rawText,
+            slides: (ll.slides && ll.slides.length > 0) ? ll.slides : cloud.slides,
+          });
+        } else {
+          allLessonsMap.set(ll.id, ll);
+        }
+      }
     });
   } catch(e) {
     console.warn("IndexedDB read failed", e);
   }
 
-  // Merge Cloud and Local Data
-  if (cloudLessons) {
-    if (localLessons && localLessons.length > 0) {
-      const localMap = new Map();
-      localLessons.forEach(l => localMap.set(l.id, l));
-      cloudLessons.forEach(cl => {
-        if (localMap.has(cl.id)) {
-          const ll = localMap.get(cl.id);
-          if (!cl.fileUrl && ll.fileUrl) cl.fileUrl = ll.fileUrl;
-          if (!cl.rawText && ll.rawText) cl.rawText = ll.rawText;
+  // 4. Check LocalStorage fallback
+  if (allLessonsMap.size === 0) {
+    const ls = localStorage.getItem('smartboard_lessons');
+    if (ls) {
+      try {
+        const parsed = JSON.parse(ls);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          parsed.forEach((l: any) => allLessonsMap.set(l.id, l));
         }
-      });
-    }
-    return cloudLessons;
-  }
-
-  if (localLessons) {
-    return localLessons;
-  }
-
-  // 3. Try Server backend API
-  try {
-    const res = await fetch('/api/lessons');
-    if (res.ok) {
-      const json = await res.json();
-      if (json && Array.isArray(json.lessons) && json.lessons.length > 0) {
-        return json.lessons;
-      }
-    }
-  } catch(e) {
-    console.warn("Backend read failed", e);
-  }
-
-  const ls = localStorage.getItem('smartboard_lessons');
-  if (ls) {
-    try {
-      return JSON.parse(ls);
-    } catch (e) {
-      return null;
+      } catch {}
     }
   }
-  
+
+  if (allLessonsMap.size > 0) {
+    return Array.from(allLessonsMap.values());
+  }
+
   return null;
 }
 

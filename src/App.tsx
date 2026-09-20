@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DEFAULT_LESSONS } from './data/defaultLessons';
 import { DEFAULT_TEACHERS, ADMIN_TEACHER } from './data/defaultTeachers';
@@ -184,7 +184,7 @@ export default function App() {
               try {
                 localStorage.setItem('smartboard_lessons', JSON.stringify(allLessons));
               } catch {}
-              saveLessonsToDB(allLessons).catch(() => {});
+              // NOTE: Do not call saveLessonsToDB here to avoid infinite onSnapshot write loops
               return allLessons;
             });
           }
@@ -236,6 +236,16 @@ export default function App() {
     return localStorage.getItem('smartboard_active_lesson') || (DEFAULT_LESSONS[0]?.id || '');
   });
 
+  const [activeOpenedLesson, setActiveOpenedLesson] = useState<LessonDoc | null>(() => {
+    const saved = localStorage.getItem('smartboard_active_lesson_obj');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return null;
+  });
+
   const emptyFallbackLesson: LessonDoc = {
     id: 'empty_lesson',
     title: 'Chưa có tài liệu bài giảng',
@@ -249,8 +259,16 @@ export default function App() {
     quizzes: [],
   };
 
-  const currentLesson =
-    (lessons || []).find((l) => l.id === activeLessonId) || lessons?.[0] || emptyFallbackLesson;
+  const currentLesson = useMemo(() => {
+    if (activeOpenedLesson) {
+      const found = (lessons || []).find((l) => l.id === activeOpenedLesson.id);
+      return found ? { ...activeOpenedLesson, ...found } : activeOpenedLesson;
+    }
+    const found = (lessons || []).find((l) => l.id === activeLessonId);
+    if (found) return found;
+    if (lessons && lessons.length > 0) return lessons[0];
+    return emptyFallbackLesson;
+  }, [activeOpenedLesson, lessons, activeLessonId]);
 
   // Active Tab & Display Settings (Defaults to Classroom Blackboard upon login)
   const [activeTab, setActiveTab] = useState<ActiveTab>('whiteboard');
@@ -319,9 +337,21 @@ export default function App() {
 
   // Centralized, bulletproof Lesson Selector & Inserter
   const handleSelectLesson = useCallback((lesson: LessonDoc) => {
+    setActiveOpenedLesson(lesson);
     setActiveLessonId(lesson.id);
     try {
       localStorage.setItem('smartboard_active_lesson', lesson.id);
+      localStorage.setItem('smartboard_active_lesson_obj', JSON.stringify({
+        id: lesson.id,
+        title: lesson.title,
+        fileName: lesson.fileName,
+        fileUrl: lesson.fileUrl,
+        fileType: lesson.fileType,
+        subject: lesson.subject,
+        grade: lesson.grade,
+        slides: lesson.slides,
+        rawText: lesson.rawText,
+      }));
     } catch {}
     setLessons((prev) => {
       const idx = prev.findIndex((l) => l.id === lesson.id);
@@ -722,34 +752,15 @@ export default function App() {
             {activeTab === 'presentation' && (
               <PresentationView
                 lesson={currentLesson}
-                allLessons={lessons.filter(l => !activeTeacher?.name || l.author === activeTeacher?.name || !l.author || l.author === 'Giáo viên')}
+                allLessons={lessons}
                 textScale={textScale}
                 activeTeacher={activeTeacher}
-                onSelectLesson={(doc) => setActiveLessonId(doc.id)}
-                onAddLesson={(newDoc) => {
-                  const docWithAuthor = {
-                    ...newDoc,
-                    author: activeTeacher?.name || newDoc.author || 'Giáo viên',
-                  };
-                  setLessons((prev) => {
-                    const next = [docWithAuthor, ...prev.filter(x => x.id !== docWithAuthor.id)];
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
-                  });
-                  setActiveLessonId(docWithAuthor.id);
-                }}
+                onSelectLesson={handleSelectLesson}
+                onAddLesson={handleSelectLesson}
                 onUpdateLesson={(updatedDoc) => {
-                  setLessons((prev) => {
-                    const next = prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l));
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
-                  });
+                  setLessons((prev) =>
+                    prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
+                  );
                 }}
                 onLaunchQuiz={() => setActiveTab('quiz')}
                 onClosePresentation={() => { setActiveLessonId(''); setActiveTab('documents'); }}
@@ -964,11 +975,15 @@ export default function App() {
             {activeTab === 'documents' && (
               <DocumentLibrary
                 activeTeacher={activeTeacher}
-                lessons={lessons.filter(l => !activeTeacher?.name || l.author === activeTeacher?.name || !l.author || l.author === 'Giáo viên')}
+                lessons={lessons}
                 activeLessonId={activeLessonId}
                 onSelectLesson={(id) => {
-                  setActiveLessonId(id);
                   const sel = lessons.find((l) => l.id === id);
+                  if (sel) {
+                    handleSelectLesson(sel);
+                  } else {
+                    setActiveLessonId(id);
+                  }
                   const isPpt =
                     sel?.fileType === 'pptx' ||
                     sel?.fileType === 'ppt' ||
@@ -985,15 +1000,7 @@ export default function App() {
                     ...newDoc,
                     author: activeTeacher?.name || newDoc.author || 'Giáo viên',
                   };
-                  setLessons((prev) => {
-                    const next = [docWithAuthor, ...prev.filter(x => x.id !== docWithAuthor.id)];
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
-                  });
-                  setActiveLessonId(docWithAuthor.id);
+                  handleSelectLesson(docWithAuthor);
                 }}
                 onDeleteLesson={(id) => {
                   setLessons((prev) => {

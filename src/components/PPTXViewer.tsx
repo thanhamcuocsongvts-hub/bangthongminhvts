@@ -30,6 +30,70 @@ import JSZip from 'jszip';
 import { init } from 'pptx-preview';
 import { exportOriginalLessonFile } from '../utils/exportUtils';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
+import { decodeXmlEntities, convertOmmlToLatex } from '../utils/fileParser';
+
+/**
+ * Ensures all text in PPTX rendered DOM has high contrast and is completely visible.
+ * Solves the issue where PPTX text had matching white/transparent colors or zero opacity.
+ */
+function healSlideDom(container: HTMLElement | null) {
+  if (!container) return;
+  try {
+    const textEls = container.querySelectorAll('p, span, div, text, tspan, a, h1, h2, h3, h4, h5, h6');
+    textEls.forEach((node) => {
+      const el = node as HTMLElement;
+      // Skip pptx-preview toolbar buttons that we intentionally hide
+      if (
+        el.classList.contains('pptx-preview-wrapper-next') ||
+        el.classList.contains('pptx-preview-wrapper-pre') ||
+        el.classList.contains('pptx-preview-wrapper-pagination')
+      ) {
+        return;
+      }
+
+      const style = window.getComputedStyle(el);
+      // If opacity was set to 0 or very faint by broken PPT animations, make it visible
+      if (parseFloat(style.opacity || '1') < 0.2) {
+        el.style.opacity = '1';
+      }
+
+      // Check text color contrast
+      const col = style.color?.toLowerCase() || '';
+      const isWhiteOrNearWhite =
+        col.includes('rgb(255, 255, 255)') ||
+        col.includes('rgba(255, 255, 255') ||
+        col === '#fff' ||
+        col === '#ffffff';
+
+      if (isWhiteOrNearWhite) {
+        // Inspect parent background
+        let parent: HTMLElement | null = el.parentElement;
+        let hasDarkBg = false;
+        while (parent && parent !== container) {
+          const bg = window.getComputedStyle(parent).backgroundColor;
+          if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+            const rgb = bg.match(/\d+/g);
+            if (rgb && rgb.length >= 3) {
+              const lum = (parseInt(rgb[0]) * 299 + parseInt(rgb[1]) * 587 + parseInt(rgb[2]) * 114) / 1000;
+              if (lum < 130) {
+                hasDarkBg = true;
+                break;
+              }
+            }
+          }
+          parent = parent.parentElement;
+        }
+
+        if (!hasDarkBg) {
+          el.style.color = '#0f172a';
+          el.style.textShadow = 'none';
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('healSlideDom notice:', e);
+  }
+}
 
 interface PPTXViewerProps {
   url?: string;
@@ -170,8 +234,11 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
           if (slideFiles.length > 0) {
             const extractedSlides: SlideItem[] = [];
             for (let i = 0; i < slideFiles.length; i++) {
-              const xml = await zip.files[slideFiles[i]].async('text');
+              const rawXml = await zip.files[slideFiles[i]].async('text');
+              const xml = convertOmmlToLatex(rawXml);
               const paragraphs: string[] = [];
+              const formulas: string[] = [];
+
               const pRegex = /<a:p(?:\s+[^>]*)?>([\s\S]*?)<\/a:p>/gi;
               let pMatch;
               while ((pMatch = pRegex.exec(xml)) !== null) {
@@ -180,7 +247,13 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
                 let tMatch;
                 const textParts: string[] = [];
                 while ((tMatch = tRegex.exec(pXml)) !== null) {
-                  if (tMatch[1]) textParts.push(tMatch[1]);
+                  if (tMatch[1]) {
+                    const decoded = decodeXmlEntities(tMatch[1]);
+                    textParts.push(decoded);
+                    if (decoded.includes('$')) {
+                      formulas.push(decoded);
+                    }
+                  }
                 }
                 const paragraphText = textParts.join('').trim();
                 if (paragraphText) paragraphs.push(paragraphText);
@@ -216,6 +289,7 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
                 title: slideTitle,
                 subtitle,
                 content,
+                formula: formulas.length > 0 ? formulas.join(' ; ') : undefined,
                 image: slideImg,
               });
             }
@@ -273,8 +347,15 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
                 pointer-events: none !important;
                 opacity: 0 !important;
               }
+              .pptx-preview-wrapper * {
+                -webkit-font-smoothing: antialiased;
+              }
             `;
             pptxMountRef.current.appendChild(hideStyles);
+
+            // Heal text contrast and visibility
+            healSlideDom(pptxMountRef.current);
+            setTimeout(() => healSlideDom(pptxMountRef.current), 150);
 
             if (previewer.slideCount && previewer.slideCount > 0) {
               setTotalSlides(previewer.slideCount);
@@ -356,6 +437,8 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
       if (renderEngine === 'pptx-preview' && previewerInstanceRef.current) {
         try {
           previewerInstanceRef.current.renderSingleSlide?.(index);
+          setTimeout(() => healSlideDom(pptxMountRef.current), 60);
+          setTimeout(() => healSlideDom(pptxMountRef.current), 200);
         } catch (e) {
           console.warn('Previewer renderSingleSlide error:', e);
         }
@@ -736,6 +819,26 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
             title="Office Online Viewer"
             allowFullScreen
           />
+        )}
+
+        {/* FLOATING FORMULA BAR (Shows extracted KaTeX math formulas when in pptx-preview mode) */}
+        {renderEngine === 'pptx-preview' && currentSlide?.formula && (
+          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 max-w-2xl w-[92%] bg-slate-950/95 border border-indigo-500/50 backdrop-blur-xl rounded-2xl px-4 py-2.5 shadow-2xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 overflow-x-auto custom-scrollbar flex-1 pr-2">
+              <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="font-bold text-xs text-indigo-300 font-mono shrink-0">Công Thức:</span>
+              <div className="text-white text-sm">
+                <MathFormulaRenderer text={currentSlide.formula} />
+              </div>
+            </div>
+            <button
+              onClick={() => setRenderEngine('smart-deck')}
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shrink-0 transition-colors shadow-sm"
+              title="Chuyển sang chế độ SmartDeck 4K để xem toàn bộ công thức và slide cực nét"
+            >
+              Xem 4K KaTeX
+            </button>
+          </div>
         )}
 
         {/* LIVE PEN DRAWING CANVAS OVERLAY */}
