@@ -26,6 +26,7 @@ import {
   ChevronDown,
   ChevronUp,
   RotateCcw,
+  BookmarkPlus,
 } from 'lucide-react';
 import { LessonDoc, SlideItem, TextScale, TeacherProfile } from '../types';
 import { TouchWhiteboard } from './TouchWhiteboard';
@@ -42,6 +43,9 @@ interface PresentationViewProps {
   activeTeacher?: TeacherProfile | null;
   onSelectLesson?: (lesson: LessonDoc) => void;
   onAddLesson?: (lesson: LessonDoc) => void;
+  onOpenTemporaryLesson?: (lesson: LessonDoc) => void;
+  onSaveToLibrary?: (lesson: LessonDoc) => void;
+  isSavedInLibrary?: boolean;
   onUpdateLesson?: (lesson: LessonDoc) => void;
   onLaunchQuiz: () => void;
   onAskAIAboutSlide: (slide: SlideItem) => void;
@@ -56,6 +60,9 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   activeTeacher,
   onSelectLesson,
   onAddLesson,
+  onOpenTemporaryLesson,
+  onSaveToLibrary,
+  isSavedInLibrary = false,
   onUpdateLesson,
   onLaunchQuiz,
   onAskAIAboutSlide,
@@ -138,12 +145,16 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
     setUploadToast(`Đang nạp tệp "${file.name}" cho màn hình trình chiếu...`);
     try {
       const newDoc = await parseUploadedFileToLesson(file, activeTeacher?.name || lesson.author, activeTeacher?.id);
-      onAddLesson?.(newDoc);
-      onSelectLesson?.(newDoc);
+      if (onOpenTemporaryLesson) {
+        onOpenTemporaryLesson(newDoc);
+      } else {
+        onAddLesson?.(newDoc);
+        onSelectLesson?.(newDoc);
+      }
       setCurrentSlideIndex(0);
       setPresentationMode(newDoc.slides && newDoc.slides.length > 0 ? 'slides' : 'original');
-      setUploadToast(`Đã nạp thành công bài giảng "${newDoc.title}"!`);
-      setTimeout(() => setUploadToast(null), 3500);
+      setUploadToast(`Đã mở tệp trình chiếu "${newDoc.title}" (Chưa lưu vào Kho bài giảng. Bấm 'Lưu Vào Kho' nếu muốn lưu).`);
+      setTimeout(() => setUploadToast(null), 4500);
     } catch (err: any) {
       console.error('Error parsing presentation file:', err);
       alert(`Không thể đọc tệp "${file.name}": ${err.message || 'Lỗi định dạng tệp'}`);
@@ -373,18 +384,41 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploadingFile}
             className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-700/30 transition-all cursor-pointer active:scale-95 border border-emerald-400/40"
-            title="Tải tệp Word, PowerPoint, Excel, PDF hoặc Hình ảnh lên trình chiếu ngay"
+            title="Tải tệp Word, PowerPoint, Excel, PDF hoặc Hình ảnh lên trình chiếu ngay (Chỉ xem trực tiếp, không tự động lưu)"
           >
             {isUploadingFile ? (
               <Loader2 className="w-4 h-4 animate-spin text-white" />
             ) : (
               <UploadCloud className="w-4 h-4 text-emerald-200" />
             )}
-            <span>Tải Lên Tệp Chiếu</span>
+            <span>Mở Tệp Từ Máy</span>
             <span className="hidden sm:inline-block text-[10px] uppercase font-mono px-1 py-0.2 bg-emerald-700/80 rounded">
               Word/PPT/Excel/PDF
             </span>
           </button>
+
+          {/* Save to library button if viewing temporary file */}
+          {onSaveToLibrary && lesson && (
+            isSavedInLibrary ? (
+              <span className="px-3 py-1.5 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-xs font-bold flex items-center gap-1.5 shadow-xs">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">Đã Lưu Kho</span>
+              </span>
+            ) : (
+              <button
+                onClick={() => {
+                  onSaveToLibrary(lesson);
+                  setUploadToast(`Đã lưu "${lesson.title}" vào Kho Bài Giảng thành công!`);
+                  setTimeout(() => setUploadToast(null), 3500);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-700/30 transition-all cursor-pointer border border-emerald-400/40"
+                title="Lưu tệp đang trình chiếu này vào Kho Bài Giảng"
+              >
+                <BookmarkPlus className="w-4 h-4 text-emerald-200" />
+                <span>Lưu Vào Kho Bài Giảng</span>
+              </button>
+            )
+          )}
 
           {/* Document Switcher Dropdown */}
           <button

@@ -59,6 +59,7 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  BookmarkPlus,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile, BlackboardBackground } from '../types';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
@@ -83,6 +84,9 @@ interface ClassroomBlackboardViewProps {
   activeLessonId?: string;
   onSelectLesson?: (id: string) => void;
   onAddLesson?: (newDoc: LessonDoc) => void;
+  onOpenTemporaryLesson?: (lesson: LessonDoc) => void;
+  onSaveToLibrary?: (lesson: LessonDoc) => void;
+  isSavedInLibrary?: boolean;
   onUpdateLesson?: (updatedDoc: LessonDoc) => void;
   onDeleteLesson?: (id: string) => void;
   onSwitchToPresentation?: () => void;
@@ -98,6 +102,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   activeLessonId,
   onSelectLesson,
   onAddLesson,
+  onOpenTemporaryLesson,
+  onSaveToLibrary,
+  isSavedInLibrary = false,
   onUpdateLesson,
   onDeleteLesson,
   onSwitchToPresentation,
@@ -1679,8 +1686,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     try {
       setIsProcessingUpload(true);
       const newDoc = await parseUploadedFileToLesson(file);
-      onAddLesson?.(newDoc);
-      onSelectLesson?.(newDoc.id);
+      if (onOpenTemporaryLesson) {
+        onOpenTemporaryLesson(newDoc);
+      } else {
+        onAddLesson?.(newDoc);
+        onSelectLesson?.(newDoc.id);
+      }
       setIsCornerDocOpen(true);
       setCornerDocTab('original');
       setCornerDocSlideIdx(0);
@@ -2172,6 +2183,19 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 </span>
               </div>
               <div className="flex items-center gap-1 shrink-0">
+                {onSaveToLibrary && currentLesson && !isSavedInLibrary && (
+                  <button
+                    onClick={() => {
+                      onSaveToLibrary(currentLesson);
+                    }}
+                    title="Lưu bài giảng này vào Kho Bài Giảng"
+                    className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <BookmarkPlus className="w-3 h-3" />
+                    <span className="hidden sm:inline">Lưu Vào Kho</span>
+                  </button>
+                )}
+
                 {/* Switch to Split Screen Button */}
                 <button
                   onClick={() => {
@@ -3268,6 +3292,19 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {onSaveToLibrary && currentLesson && !isSavedInLibrary && (
+                <button
+                  onClick={() => {
+                    onSaveToLibrary(currentLesson);
+                  }}
+                  title="Lưu bài giảng này vào Kho Bài Giảng"
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <BookmarkPlus className="w-3.5 h-3.5" />
+                  <span>Lưu Vào Kho</span>
+                </button>
+              )}
+
               {/* Ratio toggle */}
               <button
                 onClick={() =>

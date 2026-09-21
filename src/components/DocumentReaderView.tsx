@@ -34,6 +34,7 @@ import {
   Upload,
   X,
   FileUp,
+  BookmarkPlus,
 } from 'lucide-react';
 import { LessonDoc, TextScale, ExtractedDocSummary, SlideItem, QuizQuestion } from '../types';
 import { exportLessonToWord } from '../utils/exportUtils';
@@ -53,6 +54,9 @@ interface DocumentReaderViewProps {
   allLessons?: LessonDoc[];
   onSelectLesson?: (lesson: LessonDoc) => void;
   onAddNewLesson?: (lesson: LessonDoc) => void;
+  onOpenTemporaryLesson?: (lesson: LessonDoc) => void;
+  onSaveToLibrary?: (lesson: LessonDoc) => void;
+  isSavedInLibrary?: boolean;
 }
 
 export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
@@ -66,6 +70,9 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
   allLessons = [],
   onSelectLesson,
   onAddNewLesson,
+  onOpenTemporaryLesson,
+  onSaveToLibrary,
+  isSavedInLibrary = false,
 }) => {
   // Always default to 'original' viewer if fileUrl is available or it's a PDF/Image/Doc/XLSX
   const [activeViewMode, setActiveViewMode] = useState<'original' | 'extracted' | 'notes'>('original');
@@ -77,8 +84,10 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
 
   // Open file modal states
   const [showOpenFileModal, setShowOpenFileModal] = useState<boolean>(false);
+  const [showDeleteDocModal, setShowDeleteDocModal] = useState<boolean>(false);
   const [fileSearchTerm, setFileSearchTerm] = useState<string>('');
   const [isUploadingNew, setIsUploadingNew] = useState<boolean>(false);
+  const [savedToast, setSavedToast] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // On-Demand AI Extraction States
@@ -325,8 +334,14 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
   return (
     <div
       id="doc-reader-viewport"
-      className="w-full h-[calc(100vh-100px)] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-md p-4 md:p-6 space-y-4"
+      className="relative w-full h-[calc(100vh-100px)] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-md p-4 md:p-6 space-y-4"
     >
+      {savedToast && (
+        <div className="absolute top-4 right-4 z-50 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-xl flex items-center gap-2 animate-fade-in border border-emerald-400">
+          <Check className="w-4 h-4" />
+          <span>Đã lưu tài liệu vào Kho Bài Giảng thành công!</span>
+        </div>
+      )}
       {/* Top Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
         <div className="flex items-center gap-3">
@@ -350,6 +365,29 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
 
         {/* Quick Launch Buttons */}
         <div className="flex items-center gap-2">
+          {/* Save to library button if viewing temporary file */}
+          {onSaveToLibrary && lesson && (
+            isSavedInLibrary ? (
+              <span className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-700 text-xs font-bold flex items-center gap-1.5 shadow-xs">
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden sm:inline">Đã Có Trong Kho</span>
+              </span>
+            ) : (
+              <button
+                onClick={() => {
+                  onSaveToLibrary(lesson);
+                  setSavedToast(true);
+                  setTimeout(() => setSavedToast(false), 3500);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                title="Lưu tài liệu đang mở này vào Kho Bài Giảng"
+              >
+                <BookmarkPlus className="w-4 h-4" />
+                <span>Lưu Vào Kho Bài Giảng</span>
+              </button>
+            )
+          )}
+
           {/* Open other file button */}
           <button
             onClick={() => setShowOpenFileModal(true)}
@@ -382,12 +420,9 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
 
           {onDeleteLesson && (
             <button
-              onClick={() => {
-                if (window.confirm(`Thầy/Cô có chắc chắn muốn xóa tài liệu "${lesson.title}" không?`)) {
-                  onDeleteLesson(lesson.id);
-                }
-              }}
-              className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 border border-rose-200 transition-all shadow-xs"
+              type="button"
+              onClick={() => setShowDeleteDocModal(true)}
+              className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 border border-rose-200 transition-all shadow-xs cursor-pointer active:scale-95"
               title="Xóa tài liệu này khỏi hệ thống"
             >
               <Trash2 className="w-4 h-4 text-rose-600" />
@@ -757,8 +792,12 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
                     setIsUploadingNew(true);
                     try {
                       const newLesson = await parseUploadedFileToLesson(file);
-                      if (onAddNewLesson) onAddNewLesson(newLesson);
-                      if (onSelectLesson) onSelectLesson(newLesson);
+                      if (onOpenTemporaryLesson) {
+                        onOpenTemporaryLesson(newLesson);
+                      } else {
+                        if (onAddNewLesson) onAddNewLesson(newLesson);
+                        if (onSelectLesson) onSelectLesson(newLesson);
+                      }
                       setShowOpenFileModal(false);
                     } catch (err: any) {
                       alert('Không thể mở tệp: ' + (err.message || 'Vui lòng kiểm tra lại định dạng tệp'));
@@ -870,6 +909,57 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
                 className="px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs cursor-pointer transition-colors"
               >
                 Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Xác nhận xóa tài liệu (Không dùng window.confirm) */}
+      {showDeleteDocModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Xác Nhận Xóa Tài Liệu</h3>
+                  <p className="text-xs text-slate-500">Gỡ bỏ tệp khỏi hệ thống</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteDocModal(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-700 leading-relaxed">
+              Thầy/Cô có chắc chắn muốn xóa tài liệu <span className="font-bold text-slate-900">"{lesson.title}"</span> khỏi hệ thống không?
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteDocModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-bold transition-all cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteDocModal(false);
+                  if (onDeleteLesson) onDeleteLesson(lesson.id);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-md shadow-rose-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác Nhận Xóa</span>
               </button>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   UploadCloud,
   Upload,
@@ -15,15 +15,15 @@ import {
   Sparkles,
   Download,
   AlertCircle,
+  AlertTriangle,
   Loader2,
+  X,
 } from 'lucide-react';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
-import { LessonDoc, SubjectType } from '../types';
+import { LessonDoc, SubjectType, TeacherProfile } from '../types';
 import { exportOriginalLessonFile, exportLessonJSON } from '../utils/exportUtils';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
-
-import { TeacherProfile } from '../types';
 
 interface DocumentLibraryProps {
   lessons: LessonDoc[];
@@ -32,6 +32,7 @@ interface DocumentLibraryProps {
   onSelectLesson: (id: string) => void;
   onAddLesson: (newDoc: LessonDoc) => void;
   onDeleteLesson: (id: string) => void;
+  onCleanLibrary?: () => void;
   onSyncToCloud: () => Promise<void>;
   isSyncing: boolean;
 }
@@ -42,6 +43,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   onSelectLesson,
   onAddLesson,
   onDeleteLesson,
+  onCleanLibrary,
   onSyncToCloud,
   isSyncing,
   activeTeacher,
@@ -53,6 +55,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [lessonToDelete, setLessonToDelete] = useState<LessonDoc | null>(null);
+  const [showCleanModal, setShowCleanModal] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // New Lesson State for Modal
@@ -64,9 +68,31 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
   const subjects = ['Tất cả', 'Sinh học', 'Vật lý', 'Toán học', 'Hóa học', 'Lịch sử', 'Ngữ văn', 'Tiếng Anh'];
 
-  const filteredLessons = lessons.filter((l) => {
-    const matchSearch = l.title?.toLowerCase().includes(searchTerm?.toLowerCase()) ||
-      l.subject?.toLowerCase().includes(searchTerm?.toLowerCase());
+  // Sanitize and deduplicate lessons
+  const sanitizedLessons = useMemo(() => {
+    const valid = (lessons || []).filter(
+      (l) => l && l.id && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
+    );
+    const seen = new Set<string>();
+    const deduped: LessonDoc[] = [];
+    for (const item of valid) {
+      const key = item.title.trim().toLowerCase();
+      if (key === 'tài liệu bài giảng đính kèm.' && (!item.slides || item.slides.length === 0) && !item.fileUrl) {
+        continue;
+      }
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(item);
+      }
+    }
+    return deduped;
+  }, [lessons]);
+
+  const filteredLessons = sanitizedLessons.filter((l) => {
+    const matchSearch =
+      l.title?.toLowerCase().includes(searchTerm?.toLowerCase()) ||
+      l.subject?.toLowerCase().includes(searchTerm?.toLowerCase()) ||
+      l.fileName?.toLowerCase().includes(searchTerm?.toLowerCase());
     const matchSub = selectedSubject === 'Tất cả' || l.subject === selectedSubject;
     return matchSearch && matchSub;
   });
@@ -151,8 +177,21 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           <h1 className="text-2xl md:text-3xl font-black text-slate-900">Quản Lý Tài Liệu Lớp Học</h1>
         </div>
 
-        {/* Top Actions: Cloud Sync & Create Lesson */}
-        <div className="flex items-center gap-3">
+        {/* Top Actions: Cloud Sync, Clean Library, & Create Lesson */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {onCleanLibrary && (
+            <button
+              id="clean-library-btn"
+              type="button"
+              onClick={() => setShowCleanModal(true)}
+              className="px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-sm font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer active:scale-95"
+              title="Dọn dẹp và xóa các bài giảng trùng lặp, bài giảng rỗng"
+            >
+              <Sparkles className="w-4 h-4 text-amber-600" />
+              <span>Dọn Dẹp Kho</span>
+            </button>
+          )}
+
           <button
             id="cloud-sync-btn"
             onClick={onSyncToCloud}
@@ -174,6 +213,19 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             <span>Up File Mới</span>
           </button>
         </div>
+      </div>
+
+      {/* Helpful Policy Banner */}
+      <div className="px-4 py-2.5 rounded-2xl bg-indigo-50/70 border border-indigo-200/60 text-indigo-900 text-xs font-medium flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span>
+            <b>Lưu ý lưu trữ:</b> Kho bài giảng chỉ lưu trữ các tệp được tải lên từ mục này. Các tệp mở từ máy tính để trình chiếu sẽ không tự ý lưu vào kho trừ khi Thầy/Cô bấm <b>"Lưu Vào Kho Bài Giảng"</b>.
+          </span>
+        </div>
+        <span className="text-indigo-700 font-bold shrink-0">
+          {filteredLessons.length} bài giảng trong kho
+        </span>
       </div>
 
       {/* Upload Feedback Status Alerts */}
@@ -347,9 +399,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                 </button>
 
                 <button
-                  onClick={() => onDeleteLesson(lesson.id)}
-                  title="Xóa bài giảng"
-                  className="p-2.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-rose-600 transition-all border border-slate-200"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLessonToDelete(lesson);
+                  }}
+                  title="Xóa bài giảng khỏi Kho"
+                  className="p-2.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-rose-600 transition-all border border-slate-200 hover:border-rose-300 cursor-pointer active:scale-95"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -451,6 +507,149 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Xác nhận xóa bài giảng (Hoạt động hoàn hảo trong iFrame & màn hình tương tác) */}
+      {lessonToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Xóa Bài Giảng Khỏi Kho</h3>
+                  <p className="text-xs text-slate-500">Giải phóng dung lượng bộ nhớ</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLessonToDelete(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
+              <p className="text-sm font-bold text-slate-900 line-clamp-2">
+                {lessonToDelete.title}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">
+                  {lessonToDelete.subject}
+                </span>
+                <span>•</span>
+                <span>{lessonToDelete.grade}</span>
+                {lessonToDelete.fileSize && (
+                  <>
+                    <span>•</span>
+                    <span>{lessonToDelete.fileSize}</span>
+                  </>
+                )}
+                {lessonToDelete.slides && lessonToDelete.slides.length > 0 && (
+                  <>
+                    <span>•</span>
+                    <span>{lessonToDelete.slides.length} slides</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <p className="text-xs text-rose-600 font-medium leading-relaxed">
+              Thầy/Cô có chắc chắn muốn xóa bài giảng này? Bài giảng sẽ được gỡ khỏi danh sách lưu trữ trên máy và Cloud.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setLessonToDelete(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-bold transition-all cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const targetId = lessonToDelete.id;
+                  const targetTitle = lessonToDelete.title;
+                  setLessonToDelete(null);
+                  onDeleteLesson(targetId);
+                  setUploadStatus(`Đã xóa thành công bài giảng "${targetTitle}" khỏi Kho!`);
+                  setTimeout(() => setUploadStatus(null), 3500);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-md shadow-rose-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác Nhận Xóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Xác nhận dọn dẹp kho bài giảng */}
+      {showCleanModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-6 h-6 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Dọn Dẹp Kho Bài Giảng</h3>
+                  <p className="text-xs text-slate-500">Tối ưu hóa và làm sạch bộ nhớ</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCleanModal(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200 text-xs text-amber-900 space-y-2 leading-relaxed">
+              <p className="font-bold flex items-center gap-1.5 text-amber-950">
+                <AlertCircle className="w-4 h-4 text-amber-600" />
+                Hệ thống sẽ thực hiện các thao tác:
+              </p>
+              <ul className="list-disc pl-4 space-y-1 text-slate-700">
+                <li>Tự động xóa các bài giảng trống không có dữ liệu nội dung.</li>
+                <li>Lọc bỏ các bản ghi trùng lặp tiêu đề hoặc cùng một tệp tải lên nhiều lần.</li>
+                <li>Đồng bộ lại cấu trúc dữ liệu để tăng tốc độ tải bài giảng trên SmartBoard.</li>
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCleanModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-bold transition-all cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCleanModal(false);
+                  if (onCleanLibrary) {
+                    onCleanLibrary();
+                    setUploadStatus('Đã dọn dẹp kho bài giảng: loại bỏ các bài rỗng và tệp trùng lặp thành công!');
+                    setTimeout(() => setUploadStatus(null), 4000);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold shadow-md shadow-amber-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Tiến Hành Dọn Dẹp</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

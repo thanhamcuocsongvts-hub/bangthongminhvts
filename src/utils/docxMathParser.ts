@@ -1,5 +1,7 @@
 import JSZip from 'jszip';
 import katex from 'katex';
+import { wmfToSvgDataUrl } from './wmfToSvg';
+import { extractMathTypeLatex } from './mtefParser';
 
 /**
  * Helper to convert OMML (Office Open XML Math Markup) node to LaTeX
@@ -272,12 +274,13 @@ export function renderLatexToHtml(latex: string, isBlock = false): string {
 }
 
 /**
- * Parse an element inside a paragraph (handles runs, tabs, drawings, OMML math)
+ * Parse an element inside a paragraph (handles runs, tabs, drawings, OMML math, and MathType OLE objects)
  */
 function parseParagraphElement(
   element: Element,
   mediaMap: Record<string, string>,
-  collectedImages: string[]
+  collectedImages: string[],
+  oleMathMap: Record<string, string> = {}
 ): { html: string; text: string } {
   let html = '';
   let text = '';
@@ -295,9 +298,61 @@ function parseParagraphElement(
     return { html, text };
   }
 
-  // 2. Run (<w:r>)
+  // 2. MathType / OLE Objects (<w:object>, <o:OLEObject>, <v:shape>, <v:imagedata>, <w:pict>)
+  if (tagName === 'object' || tagName === 'pict') {
+    // 2a. Check if it references an OLE Math Object with extracted LaTeX
+    const oleObj = element.querySelector('o\\:OLEObject, OLEObject');
+    const oleId = oleObj?.getAttribute('r:id') || oleObj?.getAttribute('id') || '';
+    const imgData = element.querySelector('v\\:imagedata, imagedata');
+    const imgId = imgData?.getAttribute('r:id') || imgData?.getAttribute('id') || '';
+
+    if (oleId && oleMathMap[oleId]) {
+      const latex = oleMathMap[oleId];
+      const mathHtml = renderLatexToHtml(latex, false);
+      html += ` <span class="mathtype-formula math-inline inline-block my-0.5 align-middle font-serif text-indigo-950 font-medium">${mathHtml}</span> `;
+      text += ` $${latex}$ `;
+      return { html, text };
+    }
+
+    // 2b. Check if we have an image / converted WMF SVG
+    const resolvedImg = (imgId && mediaMap[imgId]) || (oleId && mediaMap[oleId]);
+    if (resolvedImg) {
+      html += ` <img src="${resolvedImg}" alt="Công thức MathType" class="mathtype-img inline-block align-middle my-0.5 max-h-12 max-w-full" /> `;
+      text += ' [Công thức] ';
+      return { html, text };
+    }
+  }
+
+  // 3. Run (<w:r>)
   if (tagName === 'r') {
-    // Check if run has child math object
+    // Check if run has MathType object
+    const objectChildren = element.querySelectorAll('w\\:object, object, o\\:OLEObject, OLEObject, w\\:pict, pict');
+    if (objectChildren.length > 0) {
+      for (let i = 0; i < objectChildren.length; i++) {
+        const obj = objectChildren[i];
+        const oleObj = obj.querySelector('o\\:OLEObject, OLEObject') || (obj.localName === 'OLEObject' ? obj : null);
+        const oleId = oleObj?.getAttribute('r:id') || oleObj?.getAttribute('id') || '';
+        const imgData = obj.querySelector('v\\:imagedata, imagedata');
+        const imgId = imgData?.getAttribute('r:id') || imgData?.getAttribute('id') || '';
+
+        if (oleId && oleMathMap[oleId]) {
+          const latex = oleMathMap[oleId];
+          const mathHtml = renderLatexToHtml(latex, false);
+          html += ` <span class="mathtype-formula math-inline inline-block my-0.5 align-middle font-serif text-indigo-950 font-medium">${mathHtml}</span> `;
+          text += ` $${latex}$ `;
+          return { html, text };
+        }
+
+        const resolvedImg = (imgId && mediaMap[imgId]) || (oleId && mediaMap[oleId]);
+        if (resolvedImg) {
+          html += ` <img src="${resolvedImg}" alt="Công thức MathType" class="mathtype-img inline-block align-middle my-0.5 max-h-12 max-w-full" /> `;
+          text += ' [Công thức] ';
+          return { html, text };
+        }
+      }
+    }
+
+    // Check if run has child OMML math object
     const mathChildren = element.querySelectorAll('m\\:oMath, oMath, m\\:oMathPara, oMathPara');
     if (mathChildren.length > 0) {
       mathChildren.forEach((mEl) => {
@@ -364,7 +419,7 @@ function parseParagraphElement(
     return { html, text };
   }
 
-  // 3. Tab (<w:tab>)
+  // 4. Tab (<w:tab>)
   if (tagName === 'tab') {
     return {
       html: '<span class="inline-block w-8 md:w-12">&emsp;&emsp;</span>',
@@ -372,12 +427,12 @@ function parseParagraphElement(
     };
   }
 
-  // 4. Break (<w:br>)
+  // 5. Break (<w:br>)
   if (tagName === 'br') {
     return { html: '<br/>', text: '\n' };
   }
 
-  // 5. Drawings / Pictures (<w:drawing>, <w:pict>)
+  // 6. Drawings / Pictures (<w:drawing>, <w:pict>)
   if (tagName === 'drawing' || tagName === 'pict') {
     const blip = element.querySelector('a\\:blip, blip');
     const embedId = blip?.getAttribute('r:embed') || blip?.getAttribute('embed');
@@ -391,9 +446,9 @@ function parseParagraphElement(
     return { html, text };
   }
 
-  // 6. Structured Document Tag or other wrappers (<w:sdt>, etc.)
+  // 7. Structured Document Tag or other wrappers (<w:sdt>, etc.)
   for (let i = 0; i < element.children.length; i++) {
-    const res = parseParagraphElement(element.children[i], mediaMap, collectedImages);
+    const res = parseParagraphElement(element.children[i], mediaMap, collectedImages, oleMathMap);
     html += res.html;
     text += res.text;
   }
@@ -423,9 +478,10 @@ export async function parseDocxWithFullMathAndMedia(arrayBuffer: ArrayBuffer): P
   try {
     const zip = await JSZip.loadAsync(arrayBuffer);
 
-    // 1. Extract and map media relations (word/_rels/document.xml.rels)
+    // 1. Extract and map media relations & OLE MathType objects (word/_rels/document.xml.rels)
     const relsXmlStr = await zip.file('word/_rels/document.xml.rels')?.async('string');
-    const mediaMap: Record<string, string> = {}; // rId -> base64 DataURL
+    const mediaMap: Record<string, string> = {}; // rId -> base64 DataURL or SVG DataURL
+    const oleMathMap: Record<string, string> = {}; // rId -> extracted LaTeX from MathType
 
     if (relsXmlStr) {
       const parser = new DOMParser();
@@ -438,18 +494,62 @@ export async function parseDocxWithFullMathAndMedia(arrayBuffer: ArrayBuffer): P
         const target = rel.getAttribute('Target');
         const type = rel.getAttribute('Type') || '';
 
-        if (id && target && (type.includes('image') || target.startsWith('media/'))) {
+        if (id && target) {
           const mediaPath = target.startsWith('/') ? target.slice(1) : `word/${target.replace(/^word\//, '')}`;
-          const mediaFile = zip.file(mediaPath) || zip.file(`word/${target}`) || zip.file(target);
-          if (mediaFile) {
-            const ext = mediaPath.split('.').pop()?.toLowerCase() || 'png';
-            if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
-              const base64 = await mediaFile.async('base64');
+          const fileInZip = zip.file(mediaPath) || zip.file(`word/${target}`) || zip.file(target);
+
+          if (fileInZip) {
+            const ext = mediaPath.split('.').pop()?.toLowerCase() || '';
+
+            // Handle WMF and EMF Vector Graphics (MathType formulas and Word drawings)
+            if (ext === 'wmf' || ext === 'emf') {
+              try {
+                const wmfBytes = await fileInZip.async('uint8array');
+                const svgUrl = wmfToSvgDataUrl(wmfBytes);
+                if (svgUrl) {
+                  mediaMap[id] = svgUrl;
+                }
+              } catch (wmfErr) {
+                console.warn('WMF decode notice for', mediaPath, wmfErr);
+              }
+            } else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+              // Standard raster images
+              const base64 = await fileInZip.async('base64');
               const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
               mediaMap[id] = `data:${mime};base64,${base64}`;
+            } else if (type.includes('oleObject') || target.includes('embeddings/') || ext === 'bin') {
+              // MathType OLE Binary Object
+              try {
+                const oleBytes = await fileInZip.async('uint8array');
+                const latex = extractMathTypeLatex(oleBytes);
+                if (latex) {
+                  oleMathMap[id] = latex;
+                }
+              } catch (oleErr) {
+                console.warn('OLE MathType decode notice for', mediaPath, oleErr);
+              }
             }
           }
         }
+      }
+    }
+
+    // 1b. Also scan any unmapped embeddings/oleObject*.bin
+    const embeddingFiles = Object.keys(zip.files).filter((fn) => /embeddings\/.*oleObject.*\.bin$/i.test(fn));
+    for (const fn of embeddingFiles) {
+      try {
+        const fileObj = zip.file(fn);
+        if (fileObj) {
+          const oleBytes = await fileObj.async('uint8array');
+          const latex = extractMathTypeLatex(oleBytes);
+          if (latex) {
+            // Map by filename as well
+            const shortName = fn.split('/').pop() || fn;
+            oleMathMap[shortName] = latex;
+          }
+        }
+      } catch (embErr) {
+        // ignore
       }
     }
 
@@ -487,7 +587,7 @@ export async function parseDocxWithFullMathAndMedia(arrayBuffer: ArrayBuffer): P
           const cTag = child.localName || child.tagName;
           if (cTag === 'pPr') continue; // Skip paragraph properties
 
-          const res = parseParagraphElement(child, mediaMap, collectedImages);
+          const res = parseParagraphElement(child, mediaMap, collectedImages, oleMathMap);
           pHtml += res.html;
           pText += res.text;
         }
@@ -518,7 +618,7 @@ export async function parseDocxWithFullMathAndMedia(arrayBuffer: ArrayBuffer): P
               for (let i = 0; i < cp.children.length; i++) {
                 const child = cp.children[i];
                 if ((child.localName || child.tagName) === 'pPr') continue;
-                const res = parseParagraphElement(child, mediaMap, collectedImages);
+                const res = parseParagraphElement(child, mediaMap, collectedImages, oleMathMap);
                 cellHtml += res.html;
                 cellText += res.text;
               }

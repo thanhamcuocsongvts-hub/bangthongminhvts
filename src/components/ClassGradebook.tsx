@@ -107,6 +107,8 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   const [showAddColumnModal, setShowAddColumnModal] = useState<boolean>(false);
   const [newColumnName, setNewColumnName] = useState<string>('');
   const [conductStudentId, setConductStudentId] = useState<string | undefined>(undefined);
+  const [studentToDelete, setStudentToDelete] = useState<ClassStudent | null>(null);
+  const [columnToDelete, setColumnToDelete] = useState<string | null>(null);
 
   // Form states
   const [newStudentName, setNewStudentName] = useState<string>('');
@@ -342,7 +344,6 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   // Delete student
   const handleDeleteStudent = (studentId: string) => {
     if (!currentClass) return;
-    if (!confirm('Thầy/Cô có chắc chắn muốn xóa học sinh này khỏi danh sách lớp?')) return;
 
     const updatedStudents = (currentClass.students || []).filter((st) => st.id !== studentId);
     const updatedClasses = classes.map((c) =>
@@ -551,7 +552,6 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
 
   const handleDeleteCustomColumn = (colName: string) => {
     if (!currentClass) return;
-    if (!confirm(`Thầy/Cô có chắc muốn xóa cột "${colName}" khỏi bảng?`)) return;
 
     const updatedCols = (currentClass.customColumns || []).filter((c) => c !== colName);
     const updatedStudents = (currentClass.students || []).map((st) => {
@@ -940,8 +940,9 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                       <div className="flex items-center justify-between gap-1">
                         <span className="truncate" title={colName}>{colName}</span>
                         <button
-                          onClick={() => handleDeleteCustomColumn(colName)}
-                          className="text-slate-400 hover:text-rose-600 p-0.5 rounded cursor-pointer"
+                          type="button"
+                          onClick={() => setColumnToDelete(colName)}
+                          className="text-slate-400 hover:text-rose-600 p-0.5 rounded cursor-pointer transition-colors"
                           title="Xóa cột này"
                         >
                           <X className="w-3 h-3" />
@@ -1419,7 +1420,8 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                     {/* Delete */}
                     <td className="py-2.5 px-2 text-center">
                       <button
-                        onClick={() => handleDeleteStudent(st.id)}
+                        type="button"
+                        onClick={() => setStudentToDelete(st)}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                         title="Xóa học sinh"
                       >
@@ -1941,6 +1943,110 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                   Xác Nhận Cộng Vào Cột Điểm
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Xác nhận xóa học sinh */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Xác Nhận Xóa Học Sinh</h3>
+                  <p className="text-xs text-slate-500">Gỡ bỏ khỏi danh sách lớp {currentClass?.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStudentToDelete(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-700 leading-relaxed">
+              Thầy/Cô có chắc chắn muốn xóa học sinh <span className="font-bold text-slate-900">"{studentToDelete.name}"</span> (Mã: {studentToDelete.code}) khỏi danh sách lớp không?
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setStudentToDelete(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-bold transition-all cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const targetId = studentToDelete.id;
+                  setStudentToDelete(null);
+                  handleDeleteStudent(targetId);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-md shadow-rose-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác Nhận Xóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Xác nhận xóa cột điểm tùy chỉnh */}
+      {columnToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Xóa Cột Tùy Chỉnh</h3>
+                  <p className="text-xs text-slate-500">Xóa cột khỏi sổ điểm</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setColumnToDelete(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-700 leading-relaxed">
+              Thầy/Cô có chắc chắn muốn xóa cột <span className="font-bold text-slate-900">"{columnToDelete}"</span> khỏi bảng điểm? Dữ liệu đã nhập trong cột này sẽ bị gỡ bỏ.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setColumnToDelete(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-bold transition-all cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const targetCol = columnToDelete;
+                  setColumnToDelete(null);
+                  handleDeleteCustomColumn(targetCol);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-md shadow-rose-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác Nhận Xóa</span>
+              </button>
             </div>
           </div>
         </div>

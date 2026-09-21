@@ -14,12 +14,17 @@ import {
   Loader2,
   CheckCircle2,
   BookOpen,
+  BookmarkPlus,
+  Check,
 } from 'lucide-react';
 import { LessonDoc, TeacherProfile } from '../types';
 import { parseUploadedFileToLesson } from '../utils/fileParser';
 
 interface PPTPresentationModeProps {
   onSelectLesson: (lesson: LessonDoc) => void;
+  onOpenTemporaryLesson?: (lesson: LessonDoc) => void;
+  onSaveToLibrary?: (lesson: LessonDoc) => void;
+  isSavedInLibrary?: boolean;
   activeLesson?: LessonDoc;
   activeLessonUrl?: string;
   activeLessonTitle?: string;
@@ -29,6 +34,9 @@ interface PPTPresentationModeProps {
 
 export const PPTPresentationMode: React.FC<PPTPresentationModeProps> = ({
   onSelectLesson,
+  onOpenTemporaryLesson,
+  onSaveToLibrary,
+  isSavedInLibrary = false,
   activeLesson,
   activeLessonUrl,
   activeLessonTitle,
@@ -39,6 +47,7 @@ export const PPTPresentationMode: React.FC<PPTPresentationModeProps> = ({
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [savedToast, setSavedToast] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const effectiveLesson = activeLesson;
@@ -72,7 +81,7 @@ export const PPTPresentationMode: React.FC<PPTPresentationModeProps> = ({
         (effectiveLesson.slides && effectiveLesson.slides.length > 0))
   );
 
-  // Direct file upload handler
+  // Direct file upload handler - does NOT auto-save to Kho Bài Giảng
   const handleFileUpload = async (file: File) => {
     setIsUploading(true);
     setUploadError(null);
@@ -82,7 +91,11 @@ export const PPTPresentationMode: React.FC<PPTPresentationModeProps> = ({
         activeTeacher?.name || 'Giáo viên',
         activeTeacher?.id
       );
-      onSelectLesson(newDoc);
+      if (onOpenTemporaryLesson) {
+        onOpenTemporaryLesson(newDoc);
+      } else {
+        onSelectLesson(newDoc);
+      }
       setShowFileManager(false);
     } catch (err: any) {
       console.error('Upload PPT error:', err);
@@ -305,8 +318,8 @@ export const PPTPresentationMode: React.FC<PPTPresentationModeProps> = ({
         </div>
       ) : (
         <div className="w-full h-full relative flex flex-col">
-          {/* Top subtle bar to switch file */}
-          <div className="absolute top-4 left-4 z-40 flex items-center gap-2">
+          {/* Top subtle bar to switch file and save to library */}
+          <div className="absolute top-4 left-4 z-40 flex items-center gap-2.5">
             <button
               onClick={() => setShowFileManager(true)}
               className="px-3 py-1.5 bg-slate-900/90 hover:bg-slate-800 backdrop-blur-md text-white text-xs font-bold rounded-xl border border-slate-700 shadow-xl flex items-center gap-2 transition-all cursor-pointer"
@@ -314,7 +327,36 @@ export const PPTPresentationMode: React.FC<PPTPresentationModeProps> = ({
               <MonitorPlay className="w-4 h-4 text-orange-400" />
               <span>Đổi Bài Giảng Khác</span>
             </button>
+
+            {onSaveToLibrary && effectiveLesson && (
+              isSavedInLibrary ? (
+                <span className="px-3 py-1.5 bg-emerald-950/80 backdrop-blur-md text-emerald-400 text-xs font-bold rounded-xl border border-emerald-500/40 shadow-xl flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Đã có trong Kho</span>
+                </span>
+              ) : (
+                <button
+                  onClick={() => {
+                    onSaveToLibrary(effectiveLesson);
+                    setSavedToast(true);
+                    setTimeout(() => setSavedToast(false), 3500);
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 backdrop-blur-md text-white text-xs font-bold rounded-xl border border-emerald-500 shadow-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Lưu bài giảng này vào Kho Bài Giảng để dùng lại lần sau"
+                >
+                  <BookmarkPlus className="w-3.5 h-3.5" />
+                  <span>Lưu Vào Kho Bài Giảng</span>
+                </button>
+              )
+            )}
           </div>
+
+          {savedToast && (
+            <div className="absolute top-16 left-4 z-50 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-xl flex items-center gap-2 animate-fade-in border border-emerald-400">
+              <Check className="w-4 h-4" />
+              <span>Đã lưu bài giảng vào Kho Bài Giảng thành công!</span>
+            </div>
+          )}
 
           <PPTXViewer
             url={effectiveUrl}

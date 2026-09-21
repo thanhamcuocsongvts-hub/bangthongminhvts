@@ -452,15 +452,18 @@ app.delete("/api/documents/:id", (req, res) => {
   res.json({ success: true, documents: cloudDocumentsStore });
 });
 
-// 4. Get all cloud lessons
+// 4. Get all cloud lessons (only valid lessons, filter out teacher objects or corrupt items)
 app.get("/api/lessons", (req, res) => {
-  res.json({ success: true, lessons: cloudLessonsStore });
+  const sanitized = cloudLessonsStore.filter(
+    (l) => l && l.id && typeof l.title === "string" && l.title.trim().length > 0 && !l.username && !l.classes
+  );
+  res.json({ success: true, lessons: sanitized });
 });
 
 // 5. Save or update a single lesson on Cloud
 app.post("/api/lessons", (req, res) => {
   const lesson = req.body;
-  if (!lesson || !lesson.id) {
+  if (!lesson || !lesson.id || typeof lesson.title !== "string" || !lesson.title.trim() || lesson.username) {
     return res.status(400).json({ error: "Dữ liệu bài giảng không hợp lệ" });
   }
   const idx = cloudLessonsStore.findIndex((l) => l.id === lesson.id);
@@ -478,23 +481,33 @@ app.post("/api/lessons", (req, res) => {
   res.json({ success: true, lesson: updatedLesson, lessons: cloudLessonsStore });
 });
 
-// 6. Bulk Sync Lessons to Cloud
+// 6. Bulk Sync Lessons to Cloud (with replaceAll support for cleanup)
 app.post("/api/lessons/sync", (req, res) => {
-  const { lessons } = req.body;
+  const { lessons, replaceAll } = req.body;
   if (Array.isArray(lessons)) {
-    lessons.forEach((incoming) => {
-      if (!incoming || !incoming.id) return;
-      const idx = cloudLessonsStore.findIndex((l) => l.id === incoming.id);
-      const syncedDoc = {
-        ...incoming,
+    const validIncoming = lessons.filter(
+      (incoming) => incoming && incoming.id && typeof incoming.title === "string" && incoming.title.trim().length > 0 && !incoming.username && !incoming.classes
+    );
+
+    if (replaceAll) {
+      cloudLessonsStore = validIncoming.map((doc) => ({
+        ...doc,
         syncedToCloud: true,
-      };
-      if (idx >= 0) {
-        cloudLessonsStore[idx] = syncedDoc;
-      } else {
-        cloudLessonsStore.push(syncedDoc);
-      }
-    });
+      }));
+    } else {
+      validIncoming.forEach((incoming) => {
+        const idx = cloudLessonsStore.findIndex((l) => l.id === incoming.id);
+        const syncedDoc = {
+          ...incoming,
+          syncedToCloud: true,
+        };
+        if (idx >= 0) {
+          cloudLessonsStore[idx] = syncedDoc;
+        } else {
+          cloudLessonsStore.push(syncedDoc);
+        }
+      });
+    }
     writeJsonFileSync(LESSONS_FILE, cloudLessonsStore);
   }
   res.json({ success: true, lessons: cloudLessonsStore });

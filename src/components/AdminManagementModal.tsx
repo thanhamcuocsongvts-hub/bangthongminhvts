@@ -67,6 +67,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
 
   // Reset Password Dialog State
   const [resettingTeacher, setResettingTeacher] = useState<TeacherProfile | null>(null);
+  const [teacherToDelete, setTeacherToDelete] = useState<TeacherProfile | null>(null);
   const [customNewPassword, setCustomNewPassword] = useState('123456');
 
   // Add New Teacher State
@@ -543,16 +544,8 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                     {!isAdmin ? (
                       <button
                         type="button"
-                        onClick={() => {
-                          if (window.confirm(`Thầy/Cô có chắc chắn muốn xóa tài khoản giáo viên "${t.name}"? Dữ liệu lớp học của giáo viên này sẽ bị xóa khỏi hệ thống.`)) {
-                            onDeleteTeacher(t.id);
-                            fetch(`/api/teachers/${t.id}`, { method: 'DELETE' }).catch((err) =>
-                              console.warn('Delete teacher server warning:', err)
-                            );
-                            showToast(`Đã xóa tài khoản ${t.name}.`);
-                          }
-                        }}
-                        className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all"
+                        onClick={() => setTeacherToDelete(t)}
+                        className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all cursor-pointer active:scale-95"
                         title="Xóa tài khoản này"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -949,6 +942,62 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Xác nhận xóa tài khoản giáo viên */}
+      {teacherToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Xóa Tài Khoản Giáo Viên</h3>
+                  <p className="text-xs text-slate-500">Thao tác quản trị hệ thống</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTeacherToDelete(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-700 leading-relaxed">
+              Thầy/Cô có chắc chắn muốn xóa tài khoản giáo viên <span className="font-bold text-slate-900">"{teacherToDelete.name}"</span>? Toàn bộ dữ liệu lớp học của giáo viên này sẽ bị xóa khỏi hệ thống.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setTeacherToDelete(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-bold transition-all cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = teacherToDelete;
+                  setTeacherToDelete(null);
+                  onDeleteTeacher(target.id);
+                  fetch(`/api/teachers/${target.id}`, { method: 'DELETE' }).catch((err) =>
+                    console.warn('Delete teacher server warning:', err)
+                  );
+                  showToast(`Đã xóa tài khoản ${target.name}.`);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-md shadow-rose-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác Nhận Xóa</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -42,6 +42,10 @@ function openDB(): Promise<IDBDatabase> {
  */
 export async function saveLessonsToDB(lessons: any[]): Promise<void> {
   try {
+    const validLessons = (lessons || []).filter(
+      (l: any) => l && l.id && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
+    );
+
     const db = await openDB();
     const tx = db.transaction(STORE_LESSONS, 'readwrite');
     const store = tx.objectStore(STORE_LESSONS);
@@ -53,7 +57,7 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
       clearReq.onerror = () => reject(clearReq.error);
     });
 
-    for (const item of lessons) {
+    for (const item of validLessons) {
       store.put(item);
     }
 
@@ -67,7 +71,7 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
       fetch('/api/lessons/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lessons }),
+        body: JSON.stringify({ lessons: validLessons, replaceAll: true }),
       }).catch(() => {});
     } catch {}
 
@@ -85,7 +89,7 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
         const db = authModule.db;
         const { doc, setDoc } = firestoreModule;
         
-        const sanitizedLessons = lessons.map((l) => {
+        const sanitizedLessons = validLessons.map((l: any) => {
           let cleanFileUrl = l.fileUrl;
           // Firestore document limit is 1MB. Any Base64 data: URL over 500KB must not be stored in firestore document
           if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 500000) {
@@ -107,7 +111,10 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
   } catch (err) {
     console.warn('IndexedDB save fallback to localStorage:', err);
     try {
-      localStorage.setItem('smartboard_lessons', JSON.stringify(lessons));
+      const validFallback = (lessons || []).filter(
+        (l: any) => l && l.id && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
+      );
+      localStorage.setItem('smartboard_lessons', JSON.stringify(validFallback));
     } catch (lsErr) {
       console.error('LocalStorage quota exceeded for lessons:', lsErr);
     }
@@ -211,7 +218,19 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
   }
 
   if (allLessonsMap.size > 0) {
-    return Array.from(allLessonsMap.values());
+    const valid = Array.from(allLessonsMap.values()).filter(
+      (l: any) => l && l.id && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
+    );
+    const seen = new Set<string>();
+    const deduped: any[] = [];
+    for (const item of valid) {
+      const key = item.title.trim().toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(item);
+      }
+    }
+    return deduped;
   }
 
   return null;
