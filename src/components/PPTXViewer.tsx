@@ -243,20 +243,25 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
               let pMatch;
               while ((pMatch = pRegex.exec(xml)) !== null) {
                 const pXml = pMatch[1];
-                const tRegex = /<a:t(?:\s+[^>]*)?>([\s\S]*?)<\/a:t>/gi;
-                let tMatch;
+                // Match text runs <a:t>, <m:t>, <w:t>, and math formulas ($...$) from convertOmmlToLatex
+                const runRegex = /<(?:a:t|m:t|w:t)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:a:t|m:t|w:t)>|(\$[^$]+\$)/gi;
+                let rMatch;
                 const textParts: string[] = [];
-                while ((tMatch = tRegex.exec(pXml)) !== null) {
-                  if (tMatch[1]) {
-                    const decoded = decodeXmlEntities(tMatch[1]);
-                    textParts.push(decoded);
-                    if (decoded.includes('$')) {
-                      formulas.push(decoded);
-                    }
+                while ((rMatch = runRegex.exec(pXml)) !== null) {
+                  if (rMatch[1]) {
+                    textParts.push(decodeXmlEntities(rMatch[1]));
+                  } else if (rMatch[2]) {
+                    textParts.push(` ${rMatch[2]} `);
+                    formulas.push(rMatch[2]);
                   }
                 }
-                const paragraphText = textParts.join('').trim();
-                if (paragraphText) paragraphs.push(paragraphText);
+                const paragraphText = textParts.join('').replace(/\s+/g, ' ').trim();
+                if (paragraphText) {
+                  paragraphs.push(paragraphText);
+                  if (paragraphText.includes('$')) {
+                    formulas.push(paragraphText);
+                  }
+                }
               }
 
               // Extract slide image if present
@@ -747,10 +752,20 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
               </div>
 
               <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight leading-tight mb-4 text-balance">
-                {currentSlide.title}
+                <MathFormulaRenderer text={currentSlide.title} />
               </h1>
               {currentSlide.subtitle && (
-                <h2 className="text-lg md:text-2xl font-semibold text-indigo-300 mb-6">{currentSlide.subtitle}</h2>
+                <h2 className="text-lg md:text-2xl font-semibold text-indigo-300 mb-6">
+                  <MathFormulaRenderer text={currentSlide.subtitle} />
+                </h2>
+              )}
+              {currentSlide.formula && (
+                <div className="mb-4 px-4 py-3 rounded-2xl bg-indigo-950/80 border border-indigo-500/40 text-amber-300 font-mono text-base md:text-lg shadow-lg flex items-center gap-3 backdrop-blur-md">
+                  <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
+                  <div className="overflow-x-auto custom-scrollbar">
+                    <MathFormulaRenderer text={currentSlide.formula} />
+                  </div>
+                </div>
               )}
             </div>
 

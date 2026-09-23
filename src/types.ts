@@ -128,6 +128,8 @@ export type WhiteboardTool =
   | 'cylinder'
   | 'revolution_cylinder'
   | 'sphere'
+  | 'shape_curved_trapezoid_area'
+  | 'shape_solid_revolution_volume'
   | 'func_linear'
   | 'func_quadratic_up'
   | 'func_quadratic_down'
@@ -137,14 +139,29 @@ export type WhiteboardTool =
   | 'func_cubic_noextrema_neg'
   | 'func_cubic_inflection_pos'
   | 'func_cubic_inflection_neg'
+  | 'func_biquadratic_3extrema_pos'
+  | 'func_biquadratic_3extrema_neg'
+  | 'func_biquadratic_1extremum_pos'
+  | 'func_biquadratic_1extremum_neg'
   | 'func_rational_pos'
   | 'func_rational_neg'
+  | 'func_rational_pos_right'
+  | 'func_rational_neg_left'
   | 'func_frac21'
+  | 'func_frac21_neg_slope'
+  | 'func_frac21_noextrema_pos'
+  | 'func_frac21_noextrema_neg'
   | 'func_exp_pos'
   | 'func_exp_neg'
   | 'func_log_pos'
   | 'func_log_neg'
+  | 'func_custom_equation'
   | 'phys_oscillation'
+  | 'phys_shm_displacement'
+  | 'phys_shm_velocity'
+  | 'phys_shm_acceleration'
+  | 'phys_shm_energy'
+  | 'phys_shm_damped'
   | 'phys_projectile'
   | 'phys_wave'
   | 'text';
@@ -180,6 +197,9 @@ export interface WhiteboardStroke {
   graphOffsetX?: number; // For pan feature on graphs
   graphOffsetY?: number; // For pan feature on graphs
   graphScale?: number;   // For zoom feature on graphs
+  customEquation?: string; // Math/Physics formula entered by teacher (e.g. y = 2x^3 - 3x + 1)
+  hatchPattern?: boolean;  // Tô sọc chéo cho hình thang cong
+  fillColor?: string;      // Màu tô diện tích / thể tích
 }
 
 export interface ChatMessage {

@@ -273,6 +273,55 @@ export function renderLatexToHtml(latex: string, isBlock = false): string {
   }
 }
 
+function getLocalName(el: Element): string {
+  return el.localName || el.tagName.split(':').pop() || '';
+}
+
+function findChildByLocalNames(element: Element, localNames: string[]): Element | null {
+  for (let i = 0; i < element.children.length; i++) {
+    const child = element.children[i];
+    const name = getLocalName(child);
+    if (localNames.includes(name)) return child;
+    const found = findChildByLocalNames(child, localNames);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findChildrenByLocalNames(element: Element, localNames: string[]): Element[] {
+  const result: Element[] = [];
+  function recurse(el: Element) {
+    for (let i = 0; i < el.children.length; i++) {
+      const child = el.children[i];
+      const name = getLocalName(child);
+      if (localNames.includes(name)) {
+        result.push(child);
+      }
+      recurse(child);
+    }
+  }
+  recurse(element);
+  return result;
+}
+
+function getAttrValue(element: Element, ...attrNames: string[]): string {
+  for (const name of attrNames) {
+    const val = element.getAttribute(name);
+    if (val) return val;
+  }
+  for (let i = 0; i < element.attributes.length; i++) {
+    const attr = element.attributes[i];
+    const local = attr.localName || attr.name.split(':').pop() || '';
+    for (const name of attrNames) {
+      const bare = name.split(':').pop() || name;
+      if (local.toLowerCase() === bare.toLowerCase()) {
+        return attr.value;
+      }
+    }
+  }
+  return '';
+}
+
 /**
  * Parse an element inside a paragraph (handles runs, tabs, drawings, OMML math, and MathType OLE objects)
  */
@@ -285,7 +334,7 @@ function parseParagraphElement(
   let html = '';
   let text = '';
 
-  const tagName = element.localName || element.tagName;
+  const tagName = getLocalName(element);
 
   // 1. Math Object (<m:oMath> or <m:oMathPara>)
   if (tagName === 'oMath' || tagName === 'oMathPara') {
@@ -299,12 +348,12 @@ function parseParagraphElement(
   }
 
   // 2. MathType / OLE Objects (<w:object>, <o:OLEObject>, <v:shape>, <v:imagedata>, <w:pict>)
-  if (tagName === 'object' || tagName === 'pict') {
+  if (tagName === 'object' || tagName === 'pict' || tagName === 'OLEObject') {
     // 2a. Check if it references an OLE Math Object with extracted LaTeX
-    const oleObj = element.querySelector('o\\:OLEObject, OLEObject');
-    const oleId = oleObj?.getAttribute('r:id') || oleObj?.getAttribute('id') || '';
-    const imgData = element.querySelector('v\\:imagedata, imagedata');
-    const imgId = imgData?.getAttribute('r:id') || imgData?.getAttribute('id') || '';
+    const oleObj = tagName === 'OLEObject' ? element : findChildByLocalNames(element, ['OLEObject']);
+    const oleId = oleObj ? getAttrValue(oleObj, 'r:id', 'id') : '';
+    const imgData = findChildByLocalNames(element, ['imagedata']);
+    const imgId = imgData ? getAttrValue(imgData, 'r:id', 'id') : '';
 
     if (oleId && oleMathMap[oleId]) {
       const latex = oleMathMap[oleId];
@@ -326,14 +375,14 @@ function parseParagraphElement(
   // 3. Run (<w:r>)
   if (tagName === 'r') {
     // Check if run has MathType object
-    const objectChildren = element.querySelectorAll('w\\:object, object, o\\:OLEObject, OLEObject, w\\:pict, pict');
+    const objectChildren = findChildrenByLocalNames(element, ['object', 'pict', 'OLEObject']);
     if (objectChildren.length > 0) {
       for (let i = 0; i < objectChildren.length; i++) {
         const obj = objectChildren[i];
-        const oleObj = obj.querySelector('o\\:OLEObject, OLEObject') || (obj.localName === 'OLEObject' ? obj : null);
-        const oleId = oleObj?.getAttribute('r:id') || oleObj?.getAttribute('id') || '';
-        const imgData = obj.querySelector('v\\:imagedata, imagedata');
-        const imgId = imgData?.getAttribute('r:id') || imgData?.getAttribute('id') || '';
+        const oleObj = findChildByLocalNames(obj, ['OLEObject']) || (getLocalName(obj) === 'OLEObject' ? obj : null);
+        const oleId = oleObj ? getAttrValue(oleObj, 'r:id', 'id') : '';
+        const imgData = findChildByLocalNames(obj, ['imagedata']);
+        const imgId = imgData ? getAttrValue(imgData, 'r:id', 'id') : '';
 
         if (oleId && oleMathMap[oleId]) {
           const latex = oleMathMap[oleId];
@@ -353,7 +402,7 @@ function parseParagraphElement(
     }
 
     // Check if run has child OMML math object
-    const mathChildren = element.querySelectorAll('m\\:oMath, oMath, m\\:oMathPara, oMathPara');
+    const mathChildren = findChildrenByLocalNames(element, ['oMath', 'oMathPara']);
     if (mathChildren.length > 0) {
       mathChildren.forEach((mEl) => {
         const latex = ommlNodeToLatex(mEl).trim();
@@ -366,27 +415,27 @@ function parseParagraphElement(
       return { html, text };
     }
 
-    const isBold = !!element.querySelector('w\\:b, b');
-    const isItalic = !!element.querySelector('w\\:i, i');
-    const isUnderline = !!element.querySelector('w\\:u, u');
+    const isBold = !!findChildByLocalNames(element, ['b']);
+    const isItalic = !!findChildByLocalNames(element, ['i']);
+    const isUnderline = !!findChildByLocalNames(element, ['u']);
 
     // Check for tabs inside run (<w:tab/>)
-    const hasTab = !!element.querySelector('w\\:tab, tab');
+    const hasTab = !!findChildByLocalNames(element, ['tab']);
     if (hasTab) {
       html += '<span class="inline-block w-8 md:w-12">&emsp;&emsp;</span>';
       text += '\t';
     }
 
     // Check for line breaks inside run (<w:br/>)
-    const hasBr = !!element.querySelector('w\\:br, br');
+    const hasBr = !!findChildByLocalNames(element, ['br']);
     if (hasBr) {
       html += '<br/>';
       text += '\n';
     }
 
     // Check for images inside run
-    const blip = element.querySelector('a\\:blip, blip');
-    const embedId = blip?.getAttribute('r:embed') || blip?.getAttribute('embed');
+    const blip = findChildByLocalNames(element, ['blip']);
+    const embedId = blip ? getAttrValue(blip, 'r:embed', 'embed') : '';
     if (embedId && mediaMap[embedId]) {
       const imgSrc = mediaMap[embedId];
       if (!collectedImages.includes(imgSrc)) {
@@ -396,7 +445,7 @@ function parseParagraphElement(
     }
 
     // Text nodes inside run
-    const tNodes = element.querySelectorAll('w\\:t, t');
+    const tNodes = findChildrenByLocalNames(element, ['t']);
     let rText = '';
     tNodes.forEach((t) => {
       rText += t.textContent || '';
@@ -434,8 +483,8 @@ function parseParagraphElement(
 
   // 6. Drawings / Pictures (<w:drawing>, <w:pict>)
   if (tagName === 'drawing' || tagName === 'pict') {
-    const blip = element.querySelector('a\\:blip, blip');
-    const embedId = blip?.getAttribute('r:embed') || blip?.getAttribute('embed');
+    const blip = findChildByLocalNames(element, ['blip']);
+    const embedId = blip ? getAttrValue(blip, 'r:embed', 'embed') : '';
     if (embedId && mediaMap[embedId]) {
       const imgSrc = mediaMap[embedId];
       if (!collectedImages.includes(imgSrc)) {
@@ -562,7 +611,10 @@ export async function parseDocxWithFullMathAndMedia(arrayBuffer: ArrayBuffer): P
     const parser = new DOMParser();
     const docXml = parser.parseFromString(docXmlStr, 'application/xml');
 
-    const bodyEl = docXml.querySelector('w\\:body, body');
+    const bodyEl =
+      docXml.getElementsByTagNameNS('*', 'body')[0] ||
+      docXml.getElementsByTagName('w:body')[0] ||
+      docXml.getElementsByTagName('body')[0];
     if (!bodyEl) {
       throw new Error('Không tìm thấy thẻ body trong document.xml.');
     }
@@ -575,7 +627,7 @@ export async function parseDocxWithFullMathAndMedia(arrayBuffer: ArrayBuffer): P
     const bodyChildren = Array.from(bodyEl.children);
 
     bodyChildren.forEach((node) => {
-      const nodeTag = node.localName || node.tagName;
+      const nodeTag = getLocalName(node);
 
       // 1. PARAGRAPH (<w:p>)
       if (nodeTag === 'p') {
@@ -584,7 +636,7 @@ export async function parseDocxWithFullMathAndMedia(arrayBuffer: ArrayBuffer): P
 
         for (let i = 0; i < node.children.length; i++) {
           const child = node.children[i];
-          const cTag = child.localName || child.tagName;
+          const cTag = getLocalName(child);
           if (cTag === 'pPr') continue; // Skip paragraph properties
 
           const res = parseParagraphElement(child, mediaMap, collectedImages, oleMathMap);
@@ -603,21 +655,21 @@ export async function parseDocxWithFullMathAndMedia(arrayBuffer: ArrayBuffer): P
       // 2. TABLE (<w:tbl>)
       if (nodeTag === 'tbl') {
         let tableHtml = '<div class="my-4 overflow-x-auto"><table class="min-w-full border-collapse border border-slate-300 rounded-xl bg-white text-xs md:text-sm">';
-        const rows = Array.from(node.querySelectorAll('w\\:tr, tr'));
+        const rows = findChildrenByLocalNames(node, ['tr']);
 
         rows.forEach((row, rIdx) => {
           tableHtml += `<tr class="${rIdx === 0 ? 'bg-slate-100 font-bold' : 'hover:bg-slate-50'}">`;
-          const cells = Array.from(row.querySelectorAll('w\\:tc, tc'));
+          const cells = findChildrenByLocalNames(row, ['tc']);
 
           cells.forEach((cell) => {
             let cellHtml = '';
             let cellText = '';
-            const cellParas = Array.from(cell.querySelectorAll('w\\:p, p'));
+            const cellParas = findChildrenByLocalNames(cell, ['p']);
 
             cellParas.forEach((cp) => {
               for (let i = 0; i < cp.children.length; i++) {
                 const child = cp.children[i];
-                if ((child.localName || child.tagName) === 'pPr') continue;
+                if (getLocalName(child) === 'pPr') continue;
                 const res = parseParagraphElement(child, mediaMap, collectedImages, oleMathMap);
                 cellHtml += res.html;
                 cellText += res.text;

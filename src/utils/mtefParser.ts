@@ -30,34 +30,51 @@ const MTEF_ENCODING_DEF = 13;
 export function extractMtefFromOleBuffer(buffer: ArrayBuffer | Uint8Array): Uint8Array | null {
   try {
     const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-    if (bytes.length < 32) return null;
+    if (bytes.length < 16) return null;
 
-    // 1. Search for direct MTEF version byte sequence
-    // Header format: [0x1c, 0x00, 0x00, 0x00] followed by MathType header (28 bytes) and MTEF magic (ver 3 or 5, plat 1, prod 1)
-    for (let i = 0; i < bytes.length - 10; i++) {
-      // Check for MTEF signature: version 3, 4, or 5, platform 1 (Windows) or 2 (Mac), product 1 (MathType) or 2 (Equation Editor)
+    // 1. Direct 28-byte Equation Native header check: [0x1c, 0x00, ...] followed by MTEF version (3 or 5)
+    if (bytes[0] === 0x1c && bytes[1] === 0x00 && bytes.length > 28) {
+      const ver = bytes[28];
+      if ((ver === 3 || ver === 5) && (bytes[29] === 1 || bytes[29] === 2)) {
+        return bytes.subarray(28);
+      }
+    }
+
+    // 2. Search for MTEF header signature: version (3 or 5), platform (1 or 2), product (1 or 2)
+    for (let i = 0; i < bytes.length - 8; i++) {
+      const ver = bytes[i];
+      const plat = bytes[i + 1];
+      const prod = bytes[i + 2];
+      const pVer = bytes[i + 3];
+      const pSub = bytes[i + 4];
+
       if (
-        (bytes[i] === 3 || bytes[i] === 5) &&
-        (bytes[i + 1] === 1 || bytes[i + 1] === 2) &&
-        (bytes[i + 2] === 1 || bytes[i + 2] === 2)
+        (ver === 3 || ver === 5) &&
+        (plat === 1 || plat === 2) &&
+        (prod === 1 || prod === 2) &&
+        pVer <= 20 &&
+        pSub <= 20
       ) {
-        // Potential MTEF stream found
         return bytes.subarray(i);
       }
     }
 
-    // 2. Search for "Equation Native" stream in Compound File Directory
-    const textDecoder = new TextDecoder('utf-8', { fatal: false });
-    const headerStr = textDecoder.decode(bytes.subarray(0, Math.min(2048, bytes.length)));
-    if (headerStr.includes('Equation Native') || headerStr.includes('MathType')) {
-      const idx = headerStr.indexOf('Equation Native');
-      if (idx !== -1) {
-        for (let i = idx; i < bytes.length - 10; i++) {
+    // 3. Search for "Equation Native" in UTF-16LE or ASCII within OLE Compound Document
+    for (let i = 0; i < bytes.length - 30; i++) {
+      // Check UTF-16LE for "Eq" (0x45 0x00 0x71 0x00)
+      if (
+        bytes[i] === 0x45 && bytes[i + 1] === 0x00 &&
+        bytes[i + 2] === 0x71 && bytes[i + 3] === 0x00
+      ) {
+        // Look ahead for MTEF version byte sequence within next 512 bytes
+        const searchLimit = Math.min(bytes.length - 5, i + 512);
+        for (let j = i; j < searchLimit; j++) {
           if (
-            (bytes[i] === 3 || bytes[i] === 5) &&
-            (bytes[i + 1] === 1 || bytes[i + 1] === 2)
+            (bytes[j] === 3 || bytes[j] === 5) &&
+            (bytes[j + 1] === 1 || bytes[j + 1] === 2) &&
+            (bytes[j + 2] === 1 || bytes[j + 2] === 2)
           ) {
-            return bytes.subarray(i);
+            return bytes.subarray(j);
           }
         }
       }
@@ -178,7 +195,7 @@ export function parseMtefToLatex(mtefBytes: Uint8Array): string {
     function parseTemplate(): string {
       const tmplOptions = readByte();
       const selector = readByte();
-      const variation = readByte();
+      const variation = readWord();
 
       switch (selector) {
         // 0: Parentheses, Brackets, Braces

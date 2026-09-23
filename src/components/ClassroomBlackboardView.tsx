@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Pen,
   Highlighter,
@@ -60,11 +60,18 @@ import {
   ArrowLeft,
   ArrowRight,
   BookmarkPlus,
+  Activity,
+  Waves,
+  Calculator,
+  FunctionSquare,
+  Pencil,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile, BlackboardBackground } from '../types';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
 import { computeDefaultVertices, updateVertexWithConstraints, drawShapeWithVertices } from '../utils/geometryVertices';
 import { isFunctionGraphTool, drawFunctionGraph } from '../utils/mathGraphRenderer';
+import { compileMathExpression } from '../utils/mathExpressionParser';
+import katex from 'katex';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
 import { BlackboardWordTextBox, BlackboardTextBox } from './BlackboardWordTextBox';
@@ -131,20 +138,25 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const [activeTool, setActiveTool] = useState<WhiteboardTool>('pen');
   const [activeColor, setActiveColor] = useState<string>('#ffffff');
   const [strokeSize, setStrokeSize] = useState<number>(2);
-  const [isDrawing, setIsDrawing] = useState<boolean>(false);
-  const [currentPoints, setCurrentPoints] = useState<StrokePoint[]>([]);
 
-  // Chuyển đổi công cụ vẽ: tất cả về mặc định 2p, riêng Khăn Lau là 50p
+  // Chuyển đổi công cụ vẽ: Bắt buộc tất cả các công cụ khác tự động về 2p, riêng Khăn Lau là 50p
   const handleToolChange = (tool: WhiteboardTool) => {
     setActiveTool(tool);
     if (tool === 'eraser') {
       setStrokeSize(50);
     } else {
-      if (strokeSize === 50) {
-        setStrokeSize(2);
-      }
+      setStrokeSize(2);
     }
   };
+
+  // Tự động đồng bộ: Khi giáo viên bấm bất kỳ tính năng/công cụ nào khác thì tự động về 2p, chỉ có khăn lau là 50p
+  useEffect(() => {
+    if (activeTool === 'eraser') {
+      setStrokeSize(50);
+    } else {
+      setStrokeSize(2);
+    }
+  }, [activeTool]);
 
   // Modals & Shape Popovers
   const [showShapePicker, setShowShapePicker] = useState<boolean>(false);
@@ -221,6 +233,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const activePointsRef = useRef<StrokePoint[]>([]);
   const isDrawingRef = useRef<boolean>(false);
 
+  // 2-finger touch panning on 75" TV touch screen
+  const twoFingerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const isTwoFingerPanningRef = useRef<boolean>(false);
+  const twoFingerCooldownUntilRef = useRef<number>(0);
+
   // Laser pointer position state
   const [laserPos, setLaserPos] = useState<{ x: number; y: number } | null>(null);
   const laserTimeoutRef = useRef<any>(null);
@@ -237,6 +254,169 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   ]);
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
 
+  // Custom Equation Dialog state (Hàm số toán học & vật lý do giáo viên tự nhập)
+  const [showEquationModal, setShowEquationModal] = useState<boolean>(false);
+  const [equationInput, setEquationInput] = useState<string>('y = 2x^3 - 3x + 1');
+  const [editingEquationStrokeId, setEditingEquationStrokeId] = useState<string | null>(null);
+
+  // Memoized MathType-style parser & KaTeX HTML preview
+  const parsedEquation = useMemo(() => {
+    return compileMathExpression(equationInput);
+  }, [equationInput]);
+
+  const equationKatexHtml = useMemo(() => {
+    if (!parsedEquation.latex) return null;
+    try {
+      return katex.renderToString(parsedEquation.latex, {
+        displayMode: true,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch {
+      return null;
+    }
+  }, [parsedEquation.latex]);
+
+  // Helper to adjust graph scale (Zoom in / out)
+  const handleZoomGraph = (strokeId: string, delta: number) => {
+    setPages((prev) => {
+      const up = [...prev];
+      const curr = up[currentPageIndex];
+      if (!curr) return prev;
+      const newStrokes = curr.strokes.map((s) => {
+        if (s.id !== strokeId) return s;
+        const currentGScale = s.graphScale || 1.0;
+        const newScale = Math.max(0.3, Math.min(4.0, Number((currentGScale + delta).toFixed(2))));
+        return { ...s, graphScale: newScale };
+      });
+      up[currentPageIndex] = { ...curr, strokes: newStrokes };
+      return up;
+    });
+  };
+
+  // Helper to pan graph Ox / Oy coordinate system
+  const handlePanGraph = (strokeId: string, dx: number, dy: number) => {
+    setPages((prev) => {
+      const up = [...prev];
+      const curr = up[currentPageIndex];
+      if (!curr) return prev;
+      const newStrokes = curr.strokes.map((s) => {
+        if (s.id !== strokeId) return s;
+        const curX = s.graphOffsetX || 0;
+        const curY = s.graphOffsetY || 0;
+        return {
+          ...s,
+          graphOffsetX: curX + dx,
+          graphOffsetY: curY + dy,
+        };
+      });
+      up[currentPageIndex] = { ...curr, strokes: newStrokes };
+      return up;
+    });
+  };
+
+  // Helper to reset graph Ox / Oy origin to center
+  const handleResetGraphOrigin = (strokeId: string) => {
+    setPages((prev) => {
+      const up = [...prev];
+      const curr = up[currentPageIndex];
+      if (!curr) return prev;
+      const newStrokes = curr.strokes.map((s) => {
+        if (s.id !== strokeId) return s;
+        return {
+          ...s,
+          graphOffsetX: 0,
+          graphOffsetY: 0,
+          graphScale: 1.0,
+        };
+      });
+      up[currentPageIndex] = { ...curr, strokes: newStrokes };
+      return up;
+    });
+  };
+
+  // Helper to toggle hatch pattern for integral/volume shapes
+  const handleToggleHatch = (strokeId: string) => {
+    setPages((prev) => {
+      const up = [...prev];
+      const curr = up[currentPageIndex];
+      if (!curr) return prev;
+      const newStrokes = curr.strokes.map((s) => {
+        if (s.id !== strokeId) return s;
+        const curHatch = s.hatchPattern ?? true;
+        return { ...s, hatchPattern: !curHatch };
+      });
+      up[currentPageIndex] = { ...curr, strokes: newStrokes };
+      return up;
+    });
+  };
+
+  // Helper to insert or update custom equation graph
+  const handleApplyEquationGraph = (eqFormula: string) => {
+    const trimmed = eqFormula.trim();
+    if (!trimmed) return;
+
+    if (editingEquationStrokeId) {
+      setPages((prev) => {
+        const up = [...prev];
+        const curr = up[currentPageIndex];
+        if (!curr) return prev;
+        const newStrokes = curr.strokes.map((s) =>
+          s.id === editingEquationStrokeId ? { ...s, customEquation: trimmed } : s
+        );
+        up[currentPageIndex] = { ...curr, strokes: newStrokes };
+        return up;
+      });
+      setEditingEquationStrokeId(null);
+      setShowEquationModal(false);
+      return;
+    }
+
+    // Insert new graph centered in the board viewport
+    const canvas = canvasRef.current;
+    const viewW = canvas?.clientWidth || 1000;
+    const viewH = canvas?.clientHeight || 600;
+    const cx = boardScrollX + viewW / 2;
+    const cy = boardScrollY + viewH / 2;
+    const gw = 400;
+    const gh = 300;
+    const p1: StrokePoint = { x: cx - gw / 2, y: cy - gh / 2, pressure: 0.5 };
+    const p2: StrokePoint = { x: cx + gw / 2, y: cy + gh / 2, pressure: 0.5 };
+
+    const newStroke: WhiteboardStroke = {
+      id: `stroke_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      tool: 'func_custom_equation',
+      points: [p1, p2],
+      color: activeColor || '#38bdf8',
+      size: strokeSize || 2.5,
+      timestamp: Date.now(),
+      rotation: 0,
+      centerX: cx,
+      centerY: cy,
+      scale: 1,
+      graphScale: 1,
+      graphOffsetX: 0,
+      graphOffsetY: 0,
+      customEquation: trimmed,
+    };
+
+    setPages((prev) => {
+      const up = [...prev];
+      const curr = up[currentPageIndex];
+      if (!curr) return prev;
+      up[currentPageIndex] = {
+        ...curr,
+        strokes: [...curr.strokes, newStroke],
+        redoStack: [],
+      };
+      return up;
+    });
+
+    setSelectedStrokeId(newStroke.id);
+    setIsStrokeToolbarExpanded(true);
+    setShowEquationModal(false);
+  };
+
   const currentPage = pages[currentPageIndex] || pages[0];
   const strokes = currentPage.strokes;
   const redoStack = currentPage.redoStack;
@@ -250,13 +430,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       `Tài liệu: ${currentLesson.title}\nLoại tệp: ${currentLesson.fileType?.toUpperCase() || 'Tài liệu'} (${currentLesson.fileSize || 'Sẵn sàng'})\nĐã sẵn sàng hiển thị trực tiếp trên SmartBoard 75 Pro.`
     : '';
 
-  // Chalk Palette Colors (Tổng cộng 17 màu - gồm 3 màu dạ quang siêu sáng cực nét)
+  // Chalk Palette Colors (14 màu phấn bảng sư phạm tiêu chuẩn & mở rộng)
   const chalkPalette = [
-    // 3 MÀU DẠ QUANG SIÊU SÁNG PHÁT SÁNG TRÊN BẢNG (FLUORESCENT / NEON)
-    { label: 'Dạ Quang Vàng Chanh', value: '#ccff00', isFluorescent: true, desc: 'Dạ quang siêu sáng chói' },
-    { label: 'Dạ Quang Hồng Neon', value: '#ff007f', isFluorescent: true, desc: 'Dạ quang hồng phát sáng' },
-    { label: 'Dạ Quang Xanh Ngọc', value: '#00ffff', isFluorescent: true, desc: 'Dạ quang lân tinh rực rỡ' },
-    // 14 MÀU PHẤN & BÚT BẢNG TIÊU CHUẨN & MỞ RỘNG
     { label: 'Phấn Trắng', value: '#ffffff' },
     { label: 'Phấn Vàng Hoàng Yến', value: '#facc15' },
     { label: 'Vàng Hổ Phách Gold', value: '#f59e0b' },
@@ -304,7 +479,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     canvas.style.width = `${targetWidth}px`;
     canvas.style.height = `${targetHeight}px`;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { desynchronized: true });
     if (ctx) {
       ctx.scale(dpr, dpr);
       redrawCanvas(ctx);
@@ -459,7 +634,15 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     centerX?: number,
     centerY?: number,
     scale: number = 1,
-    customVertices?: StrokeVertex[]
+    customVertices?: StrokeVertex[],
+    graphOptions?: {
+      graphOffsetX?: number;
+      graphOffsetY?: number;
+      graphScale?: number;
+      customEquation?: string;
+      hatchPattern?: boolean;
+      fillColor?: string;
+    }
   ) => {
     if ((!points || points.length === 0) && (!customVertices || customVertices.length === 0)) return;
 
@@ -532,10 +715,18 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         const p = points && points.length > 0 ? points[0] : { x: 150, y: 150, pressure: 0.5 };
         renderPts = [
           p,
-          { x: p.x + 300, y: p.y + 240, pressure: 0.5 },
+          { x: p.x + 380, y: p.y + 280, pressure: 0.5 },
         ];
       }
-      drawFunctionGraph(ctx, tool, renderPts, color, size, scale);
+      drawFunctionGraph(ctx, tool, renderPts, color, size, scale, {
+        scale,
+        graphOffsetX: graphOptions?.graphOffsetX,
+        graphOffsetY: graphOptions?.graphOffsetY,
+        graphScale: graphOptions?.graphScale,
+        customEquation: graphOptions?.customEquation,
+        hatchPattern: graphOptions?.hatchPattern,
+        fillColor: graphOptions?.fillColor,
+      });
       ctx.restore();
       return;
     }
@@ -868,7 +1059,15 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             stroke.centerX,
             stroke.centerY,
             stroke.scale || 1,
-            stroke.customVertices
+            stroke.customVertices,
+            {
+              graphOffsetX: stroke.graphOffsetX,
+              graphOffsetY: stroke.graphOffsetY,
+              graphScale: stroke.graphScale,
+              customEquation: stroke.customEquation,
+              hatchPattern: stroke.hatchPattern,
+              fillColor: stroke.fillColor,
+            }
           );
         } catch (err) {
           console.warn('Safe catch in renderSingleStroke:', err);
@@ -890,6 +1089,89 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     if (!ctx) return;
     redrawCanvas(ctx);
   }, [redrawCanvas, strokes, texts, selectedTextId, selectedStrokeId, currentPageIndex, boardScrollX, boardScrollY]);
+
+  // 2-Finger Touch gesture handler on 75" touch TV: smooth scrolling up/down/left/right without mouse
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        e.preventDefault();
+        isTwoFingerPanningRef.current = true;
+        // Abort single-finger stroke if one was started
+        if (isDrawingRef.current) {
+          isDrawingRef.current = false;
+          activePointsRef.current = [];
+          const ctx = canvas.getContext('2d');
+          if (ctx) redrawCanvas(ctx);
+        }
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        twoFingerStartRef.current = {
+          x: (t0.clientX + t1.clientX) / 2,
+          y: (t0.clientY + t1.clientY) / 2,
+        };
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        e.preventDefault();
+        isTwoFingerPanningRef.current = true;
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const currentMidX = (t0.clientX + t1.clientX) / 2;
+        const currentMidY = (t0.clientY + t1.clientY) / 2;
+
+        if (twoFingerStartRef.current) {
+          const deltaX = twoFingerStartRef.current.x - currentMidX;
+          const deltaY = twoFingerStartRef.current.y - currentMidY;
+
+          setBoardScrollY((prev) => {
+            const next = Math.max(0, prev + deltaY);
+            if (next > boardExtraHeight) {
+              setBoardExtraHeight((h) => h + 800);
+            }
+            return next;
+          });
+
+          setBoardScrollX((prev) => {
+            const next = Math.max(0, prev + deltaX);
+            if (next > boardExtraWidth) {
+              setBoardExtraWidth((w) => w + 800);
+            }
+            return next;
+          });
+        }
+        twoFingerStartRef.current = { x: currentMidX, y: currentMidY };
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        twoFingerStartRef.current = null;
+        twoFingerCooldownUntilRef.current = Date.now() + 250;
+        setTimeout(() => {
+          if (e.touches.length === 0) {
+            isTwoFingerPanningRef.current = false;
+          }
+        }, 250);
+      }
+    };
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+      canvas.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [redrawCanvas, boardExtraHeight, boardExtraWidth]);
 
   // Ultra-smooth vertex dragging with parallel geometric constraints
   const handleVertexDrag = useCallback(
@@ -1024,8 +1306,18 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
   // Pointer Event Handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Chống va chạm thao tác cuộn 2 ngón tay trên màn hình Tivi cảm ứng
+    if (isTwoFingerPanningRef.current || Date.now() < twoFingerCooldownUntilRef.current) {
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch (_) {}
+
+    e.preventDefault();
 
     const rect = canvas.getBoundingClientRect();
     const canvasX = e.clientX - rect.left;
@@ -1106,10 +1398,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
 
     isDrawingRef.current = true;
-    setIsDrawing(true);
     const startPt = { x, y, pressure: e.pressure || 0.5 };
     activePointsRef.current = [startPt];
-    setCurrentPoints([startPt]);
 
     // For freehand pen/eraser/highlighter, draw initial dot immediately
     const ctx = canvas.getContext('2d');
@@ -1133,6 +1423,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (isTwoFingerPanningRef.current || Date.now() < twoFingerCooldownUntilRef.current) {
+      return;
+    }
+    e.preventDefault();
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -1349,7 +1644,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       redrawCanvas(ctx);
       ctx.save();
       ctx.translate(-boardScrollX, -boardScrollY);
-      renderSingleStroke(ctx, activeTool, pts, activeColor, strokeSize);
+      renderSingleStroke(ctx, activeTool, pts, activeColor, strokeSize, 0, undefined, undefined, 1, undefined, {
+        customEquation: activeTool === 'func_custom_equation' ? equationInput : undefined,
+        hatchPattern: activeTool === 'shape_curved_trapezoid_area' ? true : undefined,
+        fillColor: (activeTool === 'shape_curved_trapezoid_area' || activeTool === 'shape_solid_revolution_volume') ? 'rgba(56, 189, 248, 0.25)' : undefined,
+      });
       ctx.restore();
     }
   };
@@ -1413,7 +1712,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     resizeStrokeStartRef.current = null;
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e?: React.PointerEvent<HTMLCanvasElement>) => {
     // 1. Finalize Word Text Box marquee drag
     if (newTextBoxDrag) {
       const minX = Math.min(newTextBoxDrag.startX, newTextBoxDrag.curX);
@@ -1496,27 +1795,46 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return;
     }
 
+    const canvas = canvasRef.current;
+    if (canvas && e) {
+      try {
+        canvas.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+    }
+
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
-    setIsDrawing(false);
 
     const completedPoints = [...activePointsRef.current];
     activePointsRef.current = [];
-    setCurrentPoints([]);
 
     if (completedPoints.length > 0) {
+      let finalPoints = completedPoints;
+      if (isFunctionGraphTool(activeTool) && completedPoints.length <= 2) {
+        const p0 = completedPoints[0];
+        const p1 = completedPoints[completedPoints.length - 1];
+        const dx = Math.abs(p1.x - p0.x);
+        const dy = Math.abs(p1.y - p0.y);
+        if (dx < 50 && dy < 50) {
+          finalPoints = [
+            { x: p0.x - 190, y: p0.y - 140, pressure: 0.5 },
+            { x: p0.x + 190, y: p0.y + 140, pressure: 0.5 },
+          ];
+        }
+      }
+
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      completedPoints.forEach((p) => {
+      finalPoints.forEach((p) => {
         if (p.x < minX) minX = p.x;
         if (p.x > maxX) maxX = p.x;
         if (p.y < minY) minY = p.y;
         if (p.y > maxY) maxY = p.y;
       });
 
-      const initialVertices = computeDefaultVertices(activeTool, completedPoints);
+      const initialVertices = computeDefaultVertices(activeTool, finalPoints);
       const tempStroke: WhiteboardStroke = {
         id: 'temp',
-        points: completedPoints,
+        points: finalPoints,
         color: activeColor,
         size: strokeSize,
         tool: activeTool,
@@ -1525,6 +1843,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         centerX: (minX + maxX) / 2,
         centerY: (minY + maxY) / 2,
         scale: 1,
+        graphScale: 1,
+        graphOffsetX: 0,
+        graphOffsetY: 0,
+        customEquation: activeTool === 'func_custom_equation' ? equationInput : undefined,
+        hatchPattern: activeTool === 'shape_curved_trapezoid_area' ? true : undefined,
+        fillColor: (activeTool === 'shape_curved_trapezoid_area' || activeTool === 'shape_solid_revolution_volume') ? 'rgba(56, 189, 248, 0.25)' : undefined,
         customVertices: initialVertices && initialVertices.length > 0 ? initialVertices : undefined,
       };
       const bounds = getStrokeBounds(tempStroke);
@@ -1552,6 +1876,21 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         setSelectedStrokeId(newStroke.id);
         setIsStrokeToolbarExpanded(true);
       }
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      try {
+        canvas.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+    }
+    if (isDrawingRef.current) {
+      isDrawingRef.current = false;
+      activePointsRef.current = [];
+      const ctx = canvas?.getContext('2d');
+      if (ctx) redrawCanvas(ctx);
     }
   };
 
@@ -1835,7 +2174,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       className={`relative w-full overflow-hidden transition-all duration-300 select-none flex ${
         isFullBoard
           ? 'fixed inset-0 z-50 h-screen w-screen rounded-none'
-          : 'h-[calc(100vh-80px)] min-h-[580px] rounded-3xl'
+          : 'h-full w-full min-h-[500px] rounded-2xl md:rounded-3xl'
       } ${getBackgroundClass()}`}
     >
       {/* Hidden File Input */}
@@ -2130,6 +2469,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
           style={getCanvasCursorStyle()}
           className={`absolute inset-0 w-full h-full touch-canvas z-10 ${getCanvasCursorClass()}`}
         />
@@ -2647,12 +2987,23 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   } catch (_) {}
                   setIsDraggingStroke(false);
                 }}
+                onWheel={(e) => {
+                  if (isFunctionGraphTool(selectedStroke.tool)) {
+                    e.stopPropagation();
+                    const zoomDelta = e.deltaY < 0 ? 0.1 : -0.1;
+                    handleZoomGraph(selectedStroke.id, zoomDelta);
+                  }
+                }}
                 className="absolute inset-0 cursor-move pointer-events-auto bg-cyan-400/10 hover:bg-cyan-400/20 active:bg-cyan-400/30 rounded-2xl transition-colors border-2 border-cyan-400/40 touch-none select-none flex items-center justify-center group"
-                title="Chạm và kéo để di chuyển hình mượt mà (hoặc dùng 4 nút điều hướng / phím mũi tên)"
+                title={
+                  isFunctionGraphTool(selectedStroke.tool)
+                    ? 'Kéo di chuyển • Cuộn chuột để phóng to/thu nhỏ hệ trục • Dùng thanh công cụ để chỉnh gốc'
+                    : 'Chạm và kéo để di chuyển hình mượt mà (hoặc dùng 4 nút điều hướng / phím mũi tên)'
+                }
               >
                 <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-slate-950/85 px-2.5 py-1 rounded-full text-cyan-300 text-[11px] font-bold shadow-lg flex items-center gap-1.5 pointer-events-none">
                   <Move className="w-3.5 h-3.5" />
-                  Kéo di chuyển hình
+                  {isFunctionGraphTool(selectedStroke.tool) ? 'Kéo đồ thị • Cuộn để zoom trục' : 'Kéo di chuyển hình'}
                 </div>
               </div>
 
@@ -2846,6 +3197,35 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                       🎯 Giữa
                     </button>
                   </div>
+
+                  {/* Mini Graph Zoom in Compact Toolbar */}
+                  {isFunctionGraphTool(selectedStroke.tool) && (
+                    <div className="flex items-center gap-1 bg-amber-500/20 px-2 py-0.5 rounded-xl border border-amber-400/40">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleZoomGraph(selectedStroke.id, -0.15);
+                        }}
+                        className="p-1 hover:bg-white/20 rounded-md text-amber-200"
+                        title="Thu nhỏ hệ trục Ox / Oy"
+                      >
+                        <ZoomOut className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-[10px] font-mono font-bold text-amber-300">
+                        {Math.round((selectedStroke.graphScale || 1.0) * 100)}%
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleZoomGraph(selectedStroke.id, 0.15);
+                        }}
+                        className="p-1 hover:bg-white/20 rounded-md text-amber-200"
+                        title="Phóng to hệ trục Ox / Oy"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Color Dot indicator */}
                   <div
@@ -3157,7 +3537,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                       }`}
                       style={{
                         backgroundColor: cp.value,
-                        boxShadow: cp.isFluorescent ? `0 0 6px ${cp.value}` : undefined,
                       }}
                       title={cp.label}
                     />
@@ -3229,6 +3608,137 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     100%
                   </button>
                 </div>
+
+                {/* Specialized Math & Physics Graph Controls */}
+                {isFunctionGraphTool(selectedStroke.tool) && (
+                  <>
+                    <div className="h-5 w-px bg-white/20 mx-1" />
+
+                    {/* Ox / Oy Axes Zoom */}
+                    <div className="flex items-center gap-1 bg-amber-500/15 border border-amber-400/40 px-2 py-0.5 rounded-xl">
+                      <span className="text-[10px] font-bold text-amber-300 mr-0.5">Trục:</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleZoomGraph(selectedStroke.id, -0.15);
+                        }}
+                        className="p-1 hover:bg-white/20 rounded-lg text-amber-200 cursor-pointer"
+                        title="Thu nhỏ hệ trục tọa độ Ox / Oy"
+                      >
+                        <ZoomOut className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-[10px] font-mono text-amber-300 font-bold min-w-[32px] text-center">
+                        {Math.round((selectedStroke.graphScale || 1.0) * 100)}%
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleZoomGraph(selectedStroke.id, 0.15);
+                        }}
+                        className="p-1 hover:bg-white/20 rounded-lg text-amber-200 cursor-pointer"
+                        title="Phóng to hệ trục tọa độ Ox / Oy"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleZoomGraph(selectedStroke.id, 1.0 - (selectedStroke.graphScale || 1.0));
+                        }}
+                        className="px-1.5 py-0.5 bg-amber-500/30 hover:bg-amber-500/50 rounded text-[9.5px] font-bold text-amber-200 cursor-pointer"
+                        title="Đặt lại zoom trục 100%"
+                      >
+                        100%
+                      </button>
+                    </div>
+
+                    {/* Ox / Oy Axes Pan (Dời trục) */}
+                    <div className="flex items-center gap-0.5 bg-cyan-500/15 border border-cyan-400/40 px-2 py-0.5 rounded-xl">
+                      <span className="text-[10px] font-bold text-cyan-300 mr-1">Dời trục:</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePanGraph(selectedStroke.id, -20, 0);
+                        }}
+                        className="p-1 hover:bg-white/20 rounded text-cyan-200 cursor-pointer"
+                        title="Dời trục Ox sang trái"
+                      >
+                        <ArrowLeft className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePanGraph(selectedStroke.id, 0, -20);
+                        }}
+                        className="p-1 hover:bg-white/20 rounded text-cyan-200 cursor-pointer"
+                        title="Dời trục Oy lên trên"
+                      >
+                        <ArrowUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePanGraph(selectedStroke.id, 0, 20);
+                        }}
+                        className="p-1 hover:bg-white/20 rounded text-cyan-200 cursor-pointer"
+                        title="Dời trục Oy xuống dưới"
+                      >
+                        <ArrowDown className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePanGraph(selectedStroke.id, 20, 0);
+                        }}
+                        className="p-1 hover:bg-white/20 rounded text-cyan-200 cursor-pointer"
+                        title="Dời trục Ox sang phải"
+                      >
+                        <ArrowRight className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleResetGraphOrigin(selectedStroke.id);
+                        }}
+                        className="px-1.5 py-0.5 bg-cyan-500/30 hover:bg-cyan-500/50 rounded text-[9.5px] font-bold text-cyan-200 ml-0.5 cursor-pointer"
+                        title="Đặt lại gốc tọa độ O(0,0) về chính giữa"
+                      >
+                        🎯 Gốc
+                      </button>
+                    </div>
+
+                    {/* Hatch Pattern Toggle for Curved Trapezoid / Solid of Revolution */}
+                    {(selectedStroke.tool === 'shape_curved_trapezoid_area' ||
+                      selectedStroke.tool === 'shape_solid_revolution_volume') && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleHatch(selectedStroke.id);
+                        }}
+                        className="px-2 py-1 bg-emerald-500/25 hover:bg-emerald-500/40 border border-emerald-400/50 rounded-xl text-emerald-200 text-[10.5px] font-bold flex items-center gap-1 cursor-pointer"
+                        title="Chuyển đổi tô sọc chéo chuẩn SGK hoặc tô màu mịn"
+                      >
+                        <Layers className="w-3.5 h-3.5 text-emerald-300" />
+                        <span>{selectedStroke.hatchPattern !== false ? 'Tô Sọc Chéo' : 'Tô Màu Mịn'}</span>
+                      </button>
+                    )}
+
+                    {/* Edit Custom Equation Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingEquationStrokeId(selectedStroke.id);
+                        setEquationInput(selectedStroke.customEquation || 'y = 2x^3 - 3x + 1');
+                        setShowEquationModal(true);
+                      }}
+                      className="px-2.5 py-1 bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/50 rounded-xl text-amber-200 text-[10.5px] font-bold flex items-center gap-1 cursor-pointer"
+                      title="Sửa công thức toán học hoặc phương trình dao động vật lý"
+                    >
+                      <Pencil className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Sửa Công Thức</span>
+                    </button>
+                  </>
+                )}
 
                 <div className="h-5 w-px bg-white/20 mx-1" />
 
@@ -3359,10 +3869,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         </div>
       )}
 
-      {/* AUTHENTIC BOTTOM CHALK & TOOL DOCK (75 INCH TOUCH OPTIMIZED) */}
-      {!isDockCollapsed && (
-        <div className="absolute bottom-6 md:bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] animate-fade-in flex justify-center">
-          <div className="bg-slate-950/95 backdrop-blur-2xl px-3.5 py-2 rounded-2xl md:rounded-3xl border-2 border-white/25 shadow-2xl flex items-center gap-1 sm:gap-2 text-white shrink-0">
+      {/* AUTHENTIC BOTTOM CHALK & TOOL DOCK (75 INCH TOUCH OPTIMIZED - ALWAYS VISIBLE) */}
+      <div className="absolute bottom-2.5 sm:bottom-3 md:bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] flex justify-center">
+        <div className="bg-slate-950/95 backdrop-blur-2xl px-3.5 py-2 rounded-2xl md:rounded-3xl border-2 border-white/25 shadow-2xl flex items-center gap-1 sm:gap-2 text-white shrink-0">
           {/* Main Drawing Tools */}
           <div className="flex items-center gap-1 shrink-0">
             {/* 1. Chọn (Select) - Always visible label */}
@@ -3396,21 +3905,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <span className="text-[11px] font-bold">Phấn</span>
             </button>
 
-            {/* 3. Bút Dạ Quang */}
-            <button
-              onClick={() => handleToolChange('highlighter')}
-              className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 ${
-                activeTool === 'highlighter'
-                  ? 'bg-amber-500 text-white shadow-md ring-2 ring-amber-300'
-                  : 'hover:bg-white/10 text-slate-300'
-              }`}
-              title="Bút dạ quang đánh dấu"
-            >
-              <Highlighter className="w-4 h-4" />
-              <span className="hidden sm:inline text-[11px] font-bold">Dạ Quang</span>
-            </button>
-
-            {/* 4. Khăn Lau Bảng (Towel icon & 50p fast erase) */}
+            {/* 3. Khăn Lau Bảng (Towel icon & 50p fast erase) */}
             <button
               onClick={() => handleToolChange('eraser')}
               className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 ${
@@ -3734,6 +4229,44 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     </button>
                   </div>
                 </div>
+
+                {/* 3. Calculus: Curved Trapezoid Area & Solid of Revolution */}
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-emerald-300 mb-1.5 block">
+                    3. Ứng Dụng Tích Phân & Tròn Xoay (Chuẩn SGK 12)
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => {
+                        setActiveTool('shape_curved_trapezoid_area');
+                        setShowShapePicker(false);
+                      }}
+                      className={`p-2 rounded-xl text-xs flex flex-col items-center gap-1 transition-all ${
+                        activeTool === 'shape_curved_trapezoid_area' ? 'bg-emerald-600 text-white ring-2 ring-emerald-300' : 'bg-white/5 hover:bg-white/15 text-slate-200'
+                      }`}
+                      title="Diện tích hình thang cong giới hạn bởi y=f(x), trục hoành và hai đường thẳng x=a, x=b (có tô sọc chéo / tô màu)"
+                    >
+                      <Sigma className="w-4 h-4 text-emerald-300" />
+                      <span className="text-[10px] font-bold">Hình Thang Cong (S)</span>
+                      <span className="text-[8.5px] text-emerald-200/80">Tô sọc chéo / Tô màu</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('shape_solid_revolution_volume');
+                        setShowShapePicker(false);
+                      }}
+                      className={`p-2 rounded-xl text-xs flex flex-col items-center gap-1 transition-all ${
+                        activeTool === 'shape_solid_revolution_volume' ? 'bg-emerald-600 text-white ring-2 ring-emerald-300' : 'bg-white/5 hover:bg-white/15 text-slate-200'
+                      }`}
+                      title="Thể tích khối tròn xoay tạo thành khi quay hình phẳng quanh trục Ox"
+                    >
+                      <Box className="w-4 h-4 text-emerald-300" />
+                      <span className="text-[10px] font-bold">Vật Thể Tròn Xoay (V)</span>
+                      <span className="text-[8.5px] text-emerald-200/80">Quay quanh trục Ox</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -3752,6 +4285,27 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
+
+                {/* Custom Equation Formula Input Banner */}
+                <button
+                  onClick={() => {
+                    setEditingEquationStrokeId(null);
+                    setShowEquationModal(true);
+                    setShowFunctionPicker(false);
+                  }}
+                  className="w-full p-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black shadow-lg flex items-center justify-between transition-transform active:scale-98 cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-xl bg-slate-950/20 flex items-center justify-center">
+                      <Calculator className="w-4 h-4 text-slate-950" />
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xs font-black tracking-wide">NHẬP CÔNG THỨC HÀM SỐ (TOÁN & VẬT LÝ)</div>
+                      <div className="text-[10px] font-medium opacity-90">Tự do nhập hàm y = f(x), ly độ x(t), vận tốc, gia tốc</div>
+                    </div>
+                  </div>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-950/25 font-bold">Mở Bảng Nhập →</span>
+                </button>
 
                 {/* 1. Linear & Quadratic */}
                 <div>
@@ -3904,12 +4458,80 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   </div>
                 </div>
 
-                {/* 3. Rational Functions */}
+                {/* 3. Biquadratic Functions: y = ax^4 + bx^2 + c */}
                 <div>
                   <span className="text-[10px] font-black uppercase text-amber-300 mb-1.5 block tracking-wide">
-                    3. Hàm Phân Thức Hữu Tỉ (Nhất Biến & Bậc 2 / Bậc 1)
+                    3. Hàm Trùng Phương y = ax⁴ + bx² + c (4 Trường Hợp Chuẩn SGK)
                   </span>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_biquadratic_3extrema_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_biquadratic_3extrema_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-amber-300">a &gt; 0, ab &lt; 0</span>
+                      <span className="text-[9.5px] text-slate-300">3 Cực Trị (Chữ W)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_biquadratic_3extrema_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_biquadratic_3extrema_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-rose-300">a &lt; 0, ab &lt; 0</span>
+                      <span className="text-[9.5px] text-slate-300">3 Cực Trị (Chữ M)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_biquadratic_1extremum_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_biquadratic_1extremum_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-emerald-300">a &gt; 0, ab ≥ 0</span>
+                      <span className="text-[9.5px] text-slate-300">1 Cực Tiểu (Chữ U)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_biquadratic_1extremum_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_biquadratic_1extremum_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-[11px] text-sky-300">a &lt; 0, ab ≥ 0</span>
+                      <span className="text-[9.5px] text-slate-300">1 Cực Đại (Úp)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. Rational Functions: y = (ax+b)/(cx+d) */}
+                <div>
+                  <span className="text-[10px] font-black uppercase text-amber-300 mb-1.5 block tracking-wide">
+                    4. Hàm Nhất Biến y = (ax+b)/(cx+d) (Đủ 4 Dạng Đồ Thị Chuẩn SGK)
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <button
                       onClick={() => {
                         setActiveTool('func_rational_pos');
@@ -3920,9 +4542,26 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                           ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
                           : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
                       }`}
+                      title="Hàm nhất biến đồng biến, tiệm cận đứng bên trái trục tung (x = -1)"
                     >
-                      <span className="font-mono font-bold text-[11px] text-cyan-300">(ax+b)/(cx+d)</span>
-                      <span className="text-[9.5px] text-slate-300">Đồng biến (ad-bc &gt; 0)</span>
+                      <span className="font-mono font-bold text-[11px] text-cyan-300">Đồng Biến (x = -1)</span>
+                      <span className="text-[9.5px] text-slate-300">ad - bc &gt; 0, x &lt; 0</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_rational_pos_right');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_rational_pos_right'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Hàm nhất biến đồng biến, tiệm cận đứng bên phải trục tung (x = 1)"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-cyan-300">Đồng Biến (x = 1)</span>
+                      <span className="text-[9.5px] text-slate-300">ad - bc &gt; 0, x &gt; 0</span>
                     </button>
 
                     <button
@@ -3935,11 +4574,36 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                           ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
                           : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
                       }`}
+                      title="Hàm nhất biến nghịch biến, tiệm cận đứng bên phải trục tung (x = 1)"
                     >
-                      <span className="font-mono font-bold text-[11px] text-cyan-300">(ax+b)/(cx+d)</span>
-                      <span className="text-[9.5px] text-slate-300">Nghịch biến (ad-bc &lt; 0)</span>
+                      <span className="font-mono font-bold text-[11px] text-rose-300">Nghịch Biến (x = 1)</span>
+                      <span className="text-[9.5px] text-slate-300">ad - bc &lt; 0, x &gt; 0</span>
                     </button>
 
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_rational_neg_left');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_rational_neg_left'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Hàm nhất biến nghịch biến, tiệm cận đứng bên trái trục tung (x = -1)"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-rose-300">Nghịch Biến (x = -1)</span>
+                      <span className="text-[9.5px] text-slate-300">ad - bc &lt; 0, x &lt; 0</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 5. Degree 2 over Degree 1 Rational Functions */}
+                <div>
+                  <span className="text-[10px] font-black uppercase text-amber-300 mb-1.5 block tracking-wide">
+                    5. Hàm Phân Thức Bậc 2 / Bậc 1 (Đủ 4 Dạng Tiệm Cận Xiên SGK 12)
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <button
                       onClick={() => {
                         setActiveTool('func_frac21');
@@ -3950,17 +4614,66 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                           ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
                           : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
                       }`}
+                      title="Có 2 cực trị, tiệm cận xiên dốc lên (hệ số góc m > 0)"
                     >
-                      <span className="font-mono font-bold text-[11px] text-cyan-300">Bậc 2 / Bậc 1</span>
-                      <span className="text-[9.5px] text-slate-300">Tiệm Cận Xiên</span>
+                      <span className="font-mono font-bold text-[11px] text-emerald-300">2 Cực Trị (m &gt; 0)</span>
+                      <span className="text-[9.5px] text-slate-300">TCX dốc lên (C.Đại & C.Tiểu)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_frac21_neg_slope');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_frac21_neg_slope'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Có 2 cực trị, tiệm cận xiên dốc xuống (hệ số góc m < 0)"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-amber-300">2 Cực Trị (m &lt; 0)</span>
+                      <span className="text-[9.5px] text-slate-300">TCX dốc xuống (C.Tiểu & C.Đại)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_frac21_noextrema_pos');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_frac21_noextrema_pos'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Không có cực trị, luôn đồng biến trên từng khoảng xác định (m > 0)"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-sky-300">Đơn Điệu (m &gt; 0)</span>
+                      <span className="text-[9.5px] text-slate-300">Không cực trị (Đồng biến)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('func_frac21_noextrema_neg');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'func_frac21_noextrema_neg'
+                          ? 'bg-amber-500 text-slate-950 font-black border-amber-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Không có cực trị, luôn nghịch biến trên từng khoảng xác định (m < 0)"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-purple-300">Đơn Điệu (m &lt; 0)</span>
+                      <span className="text-[9.5px] text-slate-300">Không cực trị (Nghịch biến)</span>
                     </button>
                   </div>
                 </div>
 
-                {/* 4. Exponential & Logarithmic Functions */}
+                {/* 6. Exponential & Logarithmic Functions */}
                 <div>
                   <span className="text-[10px] font-black uppercase text-amber-300 mb-1.5 block tracking-wide">
-                    4. Hàm Số Mũ & Hàm Số Logarit
+                    6. Hàm Số Mũ & Hàm Số Logarit
                   </span>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <button
@@ -4024,6 +4737,130 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     </button>
                   </div>
                 </div>
+
+                {/* 7. Physics: Harmonic Motion & Waves */}
+                <div>
+                  <span className="text-[10px] font-black uppercase text-cyan-300 mb-1.5 block tracking-wide flex items-center gap-1">
+                    <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                    7. Bộ Môn Vật Lý: Dao Động Điều Hòa & Sóng (SGK Chuẩn)
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <button
+                      onClick={() => {
+                        setActiveTool('phys_shm_displacement');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'phys_shm_displacement'
+                          ? 'bg-cyan-500 text-slate-950 font-black border-cyan-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Ly độ dao động x = A·cos(ωt + φ)"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-cyan-300">x = A·cos(ωt + φ)</span>
+                      <span className="text-[9.5px] text-slate-300">Ly Độ (x - t)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('phys_shm_velocity');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'phys_shm_velocity'
+                          ? 'bg-cyan-500 text-slate-950 font-black border-cyan-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Vận tốc dao động v = -ωA·sin(ωt + φ) (sớm pha π/2 so với x)"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-emerald-300">v = -ωA·sin(...)</span>
+                      <span className="text-[9.5px] text-slate-300">Vận Tốc (v - t)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('phys_shm_acceleration');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'phys_shm_acceleration'
+                          ? 'bg-cyan-500 text-slate-950 font-black border-cyan-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Gia tốc dao động a = -ω²x (ngược pha so với x)"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-rose-300">a = -ω²x</span>
+                      <span className="text-[9.5px] text-slate-300">Gia Tốc (a - t)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('phys_shm_energy');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'phys_shm_energy'
+                          ? 'bg-cyan-500 text-slate-950 font-black border-cyan-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Biểu đồ Động năng Wđ và Thế năng Wt biến thiên tuần hoàn chu kỳ T/2"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-amber-300">Wđ & Wt (Năng lượng)</span>
+                      <span className="text-[9.5px] text-slate-300">Tuần hoàn T/2</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('phys_shm_damped');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'phys_shm_damped'
+                          ? 'bg-cyan-500 text-slate-950 font-black border-cyan-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Dao động tắt dần với biên độ giảm dần theo thời gian"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-purple-300">A(t) Giảm Dần</span>
+                      <span className="text-[9.5px] text-slate-300">Dao Động Tắt Dần</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('phys_projectile');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                        activeTool === 'phys_projectile'
+                          ? 'bg-cyan-500 text-slate-950 font-black border-cyan-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Quỹ đạo chuyển động ném ngang / ném xiên dạng Parabol"
+                    >
+                      <span className="font-mono font-bold text-[11px] text-orange-300">Ném Ngang / Xiên</span>
+                      <span className="text-[9.5px] text-slate-300">Quỹ Đạo Parabol</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setActiveTool('phys_wave');
+                        setShowFunctionPicker(false);
+                      }}
+                      className={`p-2 rounded-2xl text-xs flex flex-col items-center gap-0.5 border transition-all col-span-2 sm:col-span-3 ${
+                        activeTool === 'phys_wave'
+                          ? 'bg-cyan-500 text-slate-950 font-black border-cyan-300 shadow-md'
+                          : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                      }`}
+                      title="Sóng dừng trên sợi dây với các nút sóng và bụng sóng rõ rệt"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Waves className="w-3.5 h-3.5 text-cyan-300" />
+                        <span className="font-mono font-bold text-[11px] text-cyan-200">Sóng Dừng (Bụng Sóng & Nút Sóng)</span>
+                      </div>
+                      <span className="text-[9.5px] text-slate-300">Mô hình bó sóng 2 đầu cố định</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -4065,7 +4902,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   <div className="flex items-center gap-1.5">
                     <Palette className="w-4 h-4 text-amber-400" />
                     <span className="text-[11px] font-black uppercase text-slate-200 tracking-wider">
-                      BẢNG MÀU PHẤN & DẠ QUANG (17 MÀU)
+                      BẢNG MÀU PHẤN VIẾT BẢNG (14 MÀU)
                     </span>
                   </div>
                   <button
@@ -4120,55 +4957,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   </div>
                 </div>
 
-                {/* 3 MÀU DẠ QUANG SIÊU SÁNG PHÁT SÁNG CỰC ĐẸP TRÊN BẢNG */}
-                <div className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-cyan-500/15 border border-amber-400/40 space-y-1.5 shadow-inner">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase text-amber-300 tracking-wider flex items-center gap-1">
-                      <span>✨</span> 3 MÀU DẠ QUANG SIÊU SÁNG
-                    </span>
-                    <span className="text-[8.5px] px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 font-bold border border-amber-400/30">
-                      Glow Luminescent
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {chalkPalette.filter((cp) => cp.isFluorescent).map((cp) => (
-                      <button
-                        key={cp.value}
-                        onClick={() => {
-                          setActiveColor(cp.value);
-                          if (activeTool === 'eraser') setActiveTool('pen');
-                          setShowColorPopover(false);
-                        }}
-                        className={`p-2 rounded-2xl flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                          activeColor === cp.value
-                            ? 'bg-white/25 ring-2 ring-white scale-105 shadow-lg'
-                            : 'hover:bg-white/10 hover:scale-102'
-                        }`}
-                      >
-                        <div
-                          className="w-7 h-7 rounded-full border-2 border-white shadow-lg relative flex items-center justify-center"
-                          style={{
-                            backgroundColor: cp.value,
-                            boxShadow: `0 0 10px ${cp.value}, inset 0 0 4px #ffffff`,
-                          }}
-                        >
-                          <span className="text-[9px] drop-shadow-md">✨</span>
-                        </div>
-                        <span className="text-[9.5px] font-black text-center text-white leading-tight">
-                          {cp.label.replace('Dạ Quang ', '')}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 {/* 14 MÀU PHẤN TIÊU CHUẨN */}
                 <div className="space-y-1.5">
                   <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
-                    MÀU PHẤN BẢNG TIÊU CHUẨN (14 MÀU)
+                    MÀU PHẤN BẢNG TIÊU CHUẨN SƯ PHẠM
                   </span>
-                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-[190px] overflow-y-auto pr-1 custom-scrollbar-none">
-                    {chalkPalette.filter((cp) => !cp.isFluorescent).map((cp) => (
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar-none">
+                    {chalkPalette.map((cp) => (
                       <button
                         key={cp.value}
                         onClick={() => {
@@ -4184,7 +4979,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                         }`}
                       >
                         <div
-                          className="w-5 h-5 rounded-full border border-white/70 shadow-inner"
+                          className="w-6 h-6 rounded-full border border-white/70 shadow-inner"
                           style={{ backgroundColor: cp.value }}
                         />
                         <span className="text-[8.5px] font-bold text-slate-300 truncate max-w-[52px] text-center">
@@ -4323,47 +5118,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 <Dices className="w-4 h-4" />
               </button>
             )}
-            {/* Close / Collapse Toolbar Button */}
-            <button
-              onClick={() => {
-                setIsDockCollapsed(true);
-                setShowShapePicker(false);
-                setShowFunctionPicker(false);
-                setShowColorPopover(false);
-                setShowSizePopover(false);
-              }}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-amber-300 hover:text-white transition-all ml-1 flex items-center gap-1 text-xs font-bold border border-white/20 shadow-md active:scale-95 cursor-pointer shrink-0"
-              title="Thu gọn toàn bộ thanh công cụ viết bảng"
-            >
-              <ChevronDown className="w-4 h-4 text-amber-400" />
-              <span className="text-[11px] font-bold">Thu Gọn</span>
-            </button>
           </div>
         </div>
       </div>
-      )}
-
-      {/* Floating Restore Toolbar Button when collapsed - Moved to Bottom Right */}
-      {isDockCollapsed && (
-        <div className="absolute bottom-6 md:bottom-8 right-6 z-40 pointer-events-auto animate-fade-in">
-          <button
-            onClick={() => setIsDockCollapsed(false)}
-            className="px-4 py-2.5 rounded-2xl bg-slate-950/95 hover:bg-indigo-600 border-2 border-indigo-400/80 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-2xl backdrop-blur-xl transition-all hover:scale-105 active:scale-95 cursor-pointer ring-4 ring-indigo-500/20"
-            title="Nhấp để hiển thị lại toàn bộ thanh công cụ viết bảng"
-          >
-            <div
-              className="w-3.5 h-3.5 rounded-full border border-white shrink-0"
-              style={{
-                backgroundColor: activeColor,
-                boxShadow: (activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff') ? `0 0 8px ${activeColor}` : undefined,
-              }}
-            />
-            <Pen className="w-4 h-4 text-emerald-400" />
-            <span>Mở Thanh Công Cụ Viết Bảng</span>
-            <ChevronUp className="w-4 h-4 text-amber-300" />
-          </button>
-        </div>
-      )}
 
       {/* MODAL: CONFIRM CLEAR BOARD */}
       {showClearBoardModal && (
@@ -4521,6 +5278,363 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: NHẬP HÀM SỐ TOÁN HỌC & CÔNG THỨC VẬT LÝ (CHUẨN MATHTYPE & PI TOÁN HỌC) */}
+      {showEquationModal && (
+        <div className="fixed inset-0 z-[65] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-amber-500/80 rounded-3xl max-w-2xl w-full p-6 shadow-2xl text-white space-y-4 animate-scale-up max-h-[92vh] overflow-y-auto custom-scrollbar">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400">
+                  <Calculator className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-amber-300 flex items-center gap-2">
+                    <span>{editingEquationStrokeId ? 'CHỈNH SỬA CÔNG THỨC ĐỒ THỊ' : 'VẼ ĐỒ THỊ THEO HÀM SỐ / PHƯƠNG TRÌNH'}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-400/30">
+                      MathType Standard
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Nhập tự nhiên chuẩn MathType &bull; Tự động nhân ngầm định &bull; Ký hiệu &pi; chuẩn toán học
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEquationModal(false);
+                  setEditingEquationStrokeId(null);
+                }}
+                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Input formula field */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black uppercase text-amber-300 tracking-wider flex items-center gap-1.5">
+                  <Sigma className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Công thức hàm số (Nhập tự nhiên như MathType):</span>
+                </label>
+                <span className="text-[11px] font-medium text-slate-400">
+                  Hỗ trợ biến x hoặc biến thời gian t
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={equationInput}
+                  onChange={(e) => {
+                    // Auto-normalize physical typing 'pi' or 'PI' into standard math 'π'
+                    let val = e.target.value;
+                    val = val.replace(/\bpi\b/gi, 'π').replace(/([0-9xt\)])pi/gi, '$1π');
+                    setEquationInput(val);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleApplyEquationGraph(equationInput);
+                    }
+                  }}
+                  placeholder="Ví dụ: y = 2x³ - 3x + 1 hoặc x = 4cos(2πt - π/3)"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/90 border-2 border-amber-500/60 focus:border-amber-400 text-white font-mono text-base outline-none shadow-inner placeholder:text-slate-600 transition-all tracking-wide"
+                  autoFocus
+                />
+              </div>
+              <p className="text-[11px] text-slate-400 italic">
+                * Thầy/Cô có thể gõ trực tiếp như sách giáo khoa: <span className="text-amber-300 font-mono">4cos(2πt)</span>, <span className="text-amber-300 font-mono">2x³ - 3x + 1</span>, <span className="text-amber-300 font-mono">(2x+1)/(x-1)</span> mà không cần gõ dấu '*' nhân.
+              </p>
+            </div>
+
+            {/* LIVE MATHTYPE / SGK FORMULA PREVIEW (KATEX RENDERED) */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-amber-500/30 space-y-2 shadow-inner">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black uppercase text-amber-300 tracking-wider flex items-center gap-1.5">
+                  <FunctionSquare className="w-3.5 h-3.5 text-amber-400" />
+                  <span>XEM TRƯỚC ĐỊNH DẠNG (CHUẨN MATHTYPE / TOÁN HỌC SGK)</span>
+                </span>
+                {parsedEquation.error ? (
+                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40 flex items-center gap-1">
+                    <span>⚠️</span> Đang hoàn thiện công thức
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 flex items-center gap-1">
+                    <span>✓</span> Chuẩn MathType &bull; Sẵn sàng vẽ
+                  </span>
+                )}
+              </div>
+
+              {/* KaTeX math display container */}
+              <div className="min-h-[58px] bg-slate-900/90 rounded-xl px-4 py-3 flex items-center justify-center border border-white/10 text-white overflow-x-auto custom-scrollbar">
+                {equationKatexHtml ? (
+                  <div
+                    className="text-lg md:text-xl text-amber-200 select-all"
+                    dangerouslySetInnerHTML={{ __html: equationKatexHtml }}
+                  />
+                ) : (
+                  <span className="text-sm font-mono text-slate-400">
+                    {parsedEquation.displayFormula || equationInput}
+                  </span>
+                )}
+              </div>
+
+              {/* Value verification test & variable info */}
+              {!parsedEquation.error && parsedEquation.sampleTest && (
+                <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 px-1 pt-0.5 gap-2 border-t border-white/5">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                    <span>Hàm theo {parsedEquation.variableName === 't' ? 'biến thời gian (t)' : 'biến số (x)'}</span>
+                  </span>
+                  <span className="font-mono text-cyan-300 bg-cyan-950/40 px-2 py-0.5 rounded-lg border border-cyan-800/40">
+                    {parsedEquation.variableName === 't'
+                      ? `Kiểm tra giá trị: x(0) = ${parsedEquation.sampleTest.at0 ?? 'N/A'}, x(1) = ${parsedEquation.sampleTest.at1 ?? 'N/A'}`
+                      : `Kiểm tra giá trị: y(0) = ${parsedEquation.sampleTest.at0 ?? 'N/A'}, y(1) = ${parsedEquation.sampleTest.at1 ?? 'N/A'}`}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* VIRTUAL MATHTYPE KEYPAD (TOUCH-OPTIMIZED FOR 75 INCH SCREEN) */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold uppercase text-slate-400 block">
+                Bàn phím ký hiệu nhanh (Tiện lợi chạm trên bảng 75 inch):
+              </span>
+              
+              <div className="space-y-1.5">
+                {/* Row 1: Variables, Constants, Superscripts */}
+                <div className="grid grid-cols-8 gap-1.5 font-mono text-xs font-bold">
+                  {/* Variable x */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + 'x')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-cyan-300"
+                    title="Biến số x"
+                  >
+                    x
+                  </button>
+
+                  {/* Variable t */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + 't')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-cyan-300"
+                    title="Biến thời gian t (Vật lý)"
+                  >
+                    t
+                  </button>
+
+                  {/* MATHEMATICAL PI SYMBOL π - HIGHLIGHTED */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + 'π')}
+                    className="p-2 rounded-xl bg-amber-500/25 hover:bg-amber-500 hover:text-slate-950 text-amber-300 transition-all border-2 border-amber-400/80 text-center active:scale-95 cursor-pointer font-serif text-sm font-bold shadow-md shadow-amber-500/20"
+                    title="Số Pi chuẩn toán học (π ≈ 3.14159)"
+                  >
+                    &pi;
+                  </button>
+
+                  {/* Euler constant e */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + 'e')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-amber-200"
+                    title="Cơ số tự nhiên e (e ≈ 2.718)"
+                  >
+                    e
+                  </button>
+
+                  {/* x² (Square) */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '^2')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-emerald-300"
+                    title="Bình phương (^2)"
+                  >
+                    x²
+                  </button>
+
+                  {/* x³ (Cube) */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '^3')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-emerald-300"
+                    title="Lập phương (^3)"
+                  >
+                    x³
+                  </button>
+
+                  {/* Power ^ */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '^')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-emerald-300"
+                    title="Mũ lũy thừa (^)"
+                  >
+                    ^
+                  </button>
+
+                  {/* Square Root √( */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '√(')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-purple-300"
+                    title="Căn bậc hai √(...)"
+                  >
+                    &radic;(
+                  </button>
+                </div>
+
+                {/* Row 2: Basic Operators, Parentheses, Editing */}
+                <div className="grid grid-cols-8 gap-1.5 font-mono text-xs font-bold">
+                  {/* + */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '+')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer"
+                  >
+                    +
+                  </button>
+
+                  {/* - */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '-')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer"
+                  >
+                    -
+                  </button>
+
+                  {/* Multiply · */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '*')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer"
+                    title="Dấu nhân (* hoặc ·)"
+                  >
+                    &times;
+                  </button>
+
+                  {/* Division / Fraction */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '/')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer"
+                    title="Chia / Phân số"
+                  >
+                    /
+                  </button>
+
+                  {/* Open Paren ( */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + '(')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-amber-200"
+                  >
+                    (
+                  </button>
+
+                  {/* Close Paren ) */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev + ')')}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-amber-200"
+                  >
+                    )
+                  </button>
+
+                  {/* Backspace Delete button */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput((prev) => prev.slice(0, -1))}
+                    className="p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white transition-all border border-rose-500/30 text-center active:scale-95 cursor-pointer"
+                    title="Xóa ký tự vừa nhập"
+                  >
+                    &larr; Xóa
+                  </button>
+
+                  {/* Clear All C */}
+                  <button
+                    type="button"
+                    onClick={() => setEquationInput('')}
+                    className="p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white transition-all border border-rose-500/30 text-center active:scale-95 cursor-pointer"
+                    title="Xóa toàn bộ công thức"
+                  >
+                    C
+                  </button>
+                </div>
+
+                {/* Row 3: Trigonometric & Advanced Functions */}
+                <div className="grid grid-cols-7 gap-1.5 font-mono text-xs font-bold">
+                  {['sin(', 'cos(', 'tan(', 'cot(', 'ln(', 'exp(', 'abs('].map((sym) => (
+                    <button
+                      key={sym}
+                      type="button"
+                      onClick={() => setEquationInput((prev) => prev + sym)}
+                      className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-cyan-200"
+                    >
+                      {sym}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Sample Presets (Standard Textbook & Physics Oscillations without '*' and with 'π') */}
+            <div className="space-y-2">
+              <span className="text-[11px] font-bold uppercase text-slate-400 block">
+                Mẫu hàm số & Dao động phổ biến (Chuẩn SGK & MathType):
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: 'Bậc 3: 2x³ - 3x + 1', val: 'y = 2x^3 - 3x + 1' },
+                  { label: 'Trùng phương: x⁴ - 2x² - 1', val: 'y = x^4 - 2x^2 - 1' },
+                  { label: 'Trùng phương: -x⁴ + 2x² + 1', val: 'y = -x^4 + 2x^2 + 1' },
+                  { label: 'Nhất biến: (2x+1)/(x-1)', val: 'y = (2x+1)/(x-1)' },
+                  { label: 'Lượng giác: 2sin(2x)', val: 'y = 2sin(2x)' },
+                  { label: 'Vật lý: Ly độ 4cos(2πt)', val: 'x = 4cos(2πt)' },
+                  { label: 'Vật lý: Dao động 4cos(2πt - π/3)', val: 'x = 4cos(2πt - π/3)' },
+                  { label: 'Vật lý: Vận tốc -8π sin(2πt)', val: 'v = -8π sin(2πt)' },
+                  { label: 'Vật lý: Dao động tắt dần', val: 'x = 4e^(-0.2t)cos(2πt)' },
+                  { label: 'Căn thức: √(4 - x²)', val: 'y = √(4 - x^2)' },
+                  { label: 'Parabol ném ngang', val: 'y = -0.049x^2 + 5' },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => setEquationInput(preset.val)}
+                    className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-amber-400 text-[11px] text-slate-300 hover:text-amber-300 transition-all active:scale-95 cursor-pointer"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEquationModal(false);
+                  setEditingEquationStrokeId(null);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              >
+                Đóng
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyEquationGraph(equationInput)}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <TrendingUp className="w-4 h-4" />
+                <span>{editingEquationStrokeId ? 'Cập Nhật Đồ Thị' : 'Vẽ Đồ Thị Lên Bảng Xanh'}</span>
+              </button>
             </div>
           </div>
         </div>

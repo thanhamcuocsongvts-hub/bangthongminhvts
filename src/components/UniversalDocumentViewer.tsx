@@ -95,6 +95,9 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   };
 
   const fileType = lesson.fileType || 'other';
+  const ext = (lesson.fileName || '').split('.').pop()?.toLowerCase() || '';
+  const isDocx = fileType === 'docx' || ext === 'docx' || ext === 'doc';
+  const isPptx = fileType === 'pptx' || ext === 'pptx' || ext === 'ppt';
 
   // Excel Sheet processing
   const currentSheetRows = useMemo(() => {
@@ -136,8 +139,8 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
     xl: 'text-lg md:text-xl',
   };
 
-  // 1. High-fidelity Microsoft Word (.docx) native paper viewer
-  if (fileType === 'docx') {
+  // 1. High-fidelity Microsoft Word (.docx, .doc) native paper viewer
+  if (isDocx) {
     return (
       <DocxViewer
         fileUrl={lesson.fileUrl}
@@ -153,7 +156,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   }
 
   // 2. High-fidelity Microsoft PowerPoint (.pptx, .ppt) presentation viewer
-  if (fileType === 'pptx') {
+  if (isPptx) {
     return (
       <PPTXViewer
         url={lesson.fileUrl}

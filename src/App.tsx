@@ -802,7 +802,7 @@ export default function App() {
       )}
 
       {/* Main Interactive Screen Content */}
-      <main className="flex-1 p-3 md:p-4 overflow-hidden relative bg-[#f8fafc]">
+      <main className={`flex-1 ${activeTab === 'whiteboard' ? 'p-0.5 sm:p-1 md:p-1.5' : 'p-3 md:p-4'} overflow-hidden relative bg-[#f8fafc]`}>
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
