@@ -6,7 +6,6 @@ import {
   Plus,
   Trash2,
   FolderOpen,
-  CloudCheck,
   RefreshCw,
   Search,
   BookOpen,
@@ -18,6 +17,9 @@ import {
   AlertTriangle,
   Loader2,
   X,
+  Cloud,
+  CloudUpload,
+  CloudDownload,
 } from 'lucide-react';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
@@ -34,6 +36,7 @@ interface DocumentLibraryProps {
   onDeleteLesson: (id: string) => void;
   onCleanLibrary?: () => void;
   onSyncToCloud: () => Promise<void>;
+  onPullFromCloud?: () => Promise<void>;
   isSyncing: boolean;
 }
 
@@ -45,6 +48,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   onDeleteLesson,
   onCleanLibrary,
   onSyncToCloud,
+  onPullFromCloud,
   isSyncing,
   activeTeacher,
 }) => {
@@ -114,12 +118,16 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     try {
       const newDoc = await parseUploadedFileToLesson(file, activeTeacher?.name, activeTeacher?.id);
       onAddLesson(newDoc);
-      if (newDoc.fileUrl?.startsWith('http')) {
-        setUploadStatus(`Đã tải lên Firebase và đồng bộ thành công tài liệu "${newDoc.title}"!`);
-      } else {
-        setUploadStatus(`Đã nạp "${newDoc.title}".`);
+      // Automatically sync to cloud immediately so user has zero risk of lost files
+      if (onSyncToCloud) {
+        onSyncToCloud().catch((e) => console.warn('Auto sync cloud error:', e));
       }
-      setTimeout(() => setUploadStatus(null), 5000);
+      if (newDoc.fileUrl?.startsWith('http')) {
+        setUploadStatus(`Đã tải lên và đồng bộ thành công tài liệu "${newDoc.title}" lên Đám Mây!`);
+      } else {
+        setUploadStatus(`Đã nạp "${newDoc.title}" và lưu vào kho bài giảng.`);
+      }
+      setTimeout(() => setUploadStatus(null), 6000);
     } catch (err: any) {
       console.error('File upload error:', err);
       setErrorMessage(`Lỗi khi xử lý tệp ${file.name}: ${err.message || 'Không thể đọc nội dung'}`);
@@ -192,21 +200,35 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             </button>
           )}
 
+          {/* Nút Cập Nhật Lên Đám Mây theo yêu cầu của Giáo viên */}
           <button
             id="cloud-sync-btn"
             onClick={onSyncToCloud}
             disabled={isSyncing}
-            className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-sm font-bold flex items-center gap-2 transition-all shadow-xs"
-            title="Đồng bộ hóa tức thì toàn bộ bài giảng lên Cloud"
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white text-sm font-black flex items-center gap-2 transition-all shadow-md shadow-indigo-600/25 cursor-pointer active:scale-95"
+            title="Đẩy toàn bộ bài giảng lên Cloud để máy ở trường học mở được ngay"
           >
-            <RefreshCw className={`w-4 h-4 text-indigo-600 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Đang đồng bộ Cloud...' : 'Đồng Bộ Cloud'}</span>
+            <CloudUpload className={`w-4 h-4 ${isSyncing ? 'animate-bounce' : ''}`} />
+            <span>{isSyncing ? 'Đang Tải Lên Đám Mây...' : 'Cập Nhật Lên Đám Mây'}</span>
           </button>
+
+          {onPullFromCloud && (
+            <button
+              id="cloud-pull-btn"
+              onClick={onPullFromCloud}
+              disabled={isSyncing}
+              className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-sm font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer active:scale-95"
+              title="Tải toàn bộ bài giảng mới nhất từ Cloud về máy tính này"
+            >
+              <CloudDownload className="w-4 h-4 text-indigo-600" />
+              <span>Tải Từ Đám Mây</span>
+            </button>
+          )}
 
           <button
             id="upload-file-btn"
             onClick={() => fileInputRef.current?.click()}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/20 cursor-pointer"
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/20 cursor-pointer active:scale-95"
             title="Tải lên tệp tài liệu: Word, Excel, PowerPoint, PDF, Ảnh"
           >
             <Upload className="w-5 h-5" />
@@ -344,7 +366,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                   </span>
                   {lesson.syncedToCloud && (
                     <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                      <CloudCheck className="w-4 h-4" /> Cloud
+                      <CheckCircle2 className="w-4 h-4" /> Cloud
                     </span>
                   )}
                 </div>

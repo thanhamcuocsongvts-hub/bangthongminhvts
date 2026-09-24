@@ -23,6 +23,10 @@ import {
   GraduationCap,
   Calendar,
   Layers,
+  Cloud,
+  CloudUpload,
+  CloudDownload,
+  RefreshCw,
 } from 'lucide-react';
 import { ClassRoom, ClassStudent, TeacherProfile, ConductRecord, SemesterScoreDetail } from '../types';
 import { exportGradebookToExcel } from '../utils/exportUtils';
@@ -34,6 +38,10 @@ interface ClassGradebookProps {
   teacher: TeacherProfile;
   onUpdateTeacher: (updatedTeacher: TeacherProfile) => void;
   onLaunchRandomPicker: (classRoom: ClassRoom) => void;
+  onForceSyncToCloud?: () => Promise<void> | void;
+  onForcePullFromCloud?: () => Promise<void> | void;
+  isCloudSyncing?: boolean;
+  syncStatus?: 'synced' | 'syncing' | 'offline' | 'error';
 }
 
 type SemesterTab = 'hk1' | 'hk2' | 'year' | 'all';
@@ -88,11 +96,32 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   teacher,
   onUpdateTeacher,
   onLaunchRandomPicker,
+  onForceSyncToCloud,
+  onForcePullFromCloud,
+  isCloudSyncing = false,
+  syncStatus = 'synced',
 }) => {
   const classes = teacher?.classes || [];
   const [activeClassId, setActiveClassId] = useState<string>(classes[0]?.id || '');
   const [activeSemester, setActiveSemester] = useState<SemesterTab>('hk1');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [cloudSyncBanner, setCloudSyncBanner] = useState<string | null>(null);
+
+  const handleManualSyncCloud = async () => {
+    if (onForceSyncToCloud) {
+      await onForceSyncToCloud();
+      setCloudSyncBanner('☁️ Đã cập nhật và lưu trữ toàn bộ danh sách lớp lên Đám Mây thành công! Bạn có thể yên tâm mở trên máy tính ở trường học.');
+      setTimeout(() => setCloudSyncBanner(null), 6000);
+    }
+  };
+
+  const handleManualPullCloud = async () => {
+    if (onForcePullFromCloud) {
+      await onForcePullFromCloud();
+      setCloudSyncBanner('🔄 Đã tải và cập nhật toàn bộ danh sách học sinh mới nhất từ Đám Mây về máy tính này!');
+      setTimeout(() => setCloudSyncBanner(null), 6000);
+    }
+  };
 
   // Modals
   const [showAddStudentModal, setShowAddStudentModal] = useState<boolean>(false);
@@ -482,6 +511,12 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
       });
     }
 
+    if (onForceSyncToCloud) {
+      onForceSyncToCloud();
+      setCloudSyncBanner('☁️ Đã nạp thành công và tự động đồng bộ danh sách học sinh lên Đám Mây!');
+      setTimeout(() => setCloudSyncBanner(null), 6000);
+    }
+
     setShowImportModal(false);
   };
 
@@ -577,6 +612,22 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
 
   return (
     <div className="w-full h-full overflow-y-auto overflow-x-auto p-3 md:p-5 space-y-5 pb-16 select-none text-slate-800 animate-fade-in custom-scrollbar">
+      {/* Cloud Sync Status Banner */}
+      {cloudSyncBanner && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs md:text-sm font-bold flex items-center justify-between shadow-sm animate-fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>{cloudSyncBanner}</span>
+          </div>
+          <button
+            onClick={() => setCloudSyncBanner(null)}
+            className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Top Banner & Quick Class Actions */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-5 md:p-6 rounded-3xl border border-slate-200 shadow-xs">
         <div className="flex items-center gap-4">
@@ -633,6 +684,29 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
             <FileSpreadsheet className="w-4 h-4 text-white" />
             <span>Nhập File / Ảnh DS Lớp</span>
           </button>
+
+          {/* Nút Cập Nhật Lên Đám Mây theo yêu cầu đặc biệt của Giáo viên */}
+          <button
+            onClick={handleManualSyncCloud}
+            disabled={isCloudSyncing}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-indigo-500/25 transition-all active:scale-95 cursor-pointer"
+            title="Cập nhật toàn bộ danh sách lớp và điểm số lên Đám Mây để mở được trên máy tính ở trường học"
+          >
+            <CloudUpload className={`w-4 h-4 ${isCloudSyncing ? 'animate-bounce' : ''}`} />
+            <span>{isCloudSyncing ? 'Đang Đẩy Lên Mây...' : 'Cập Nhật Lên Đám Mây'}</span>
+          </button>
+
+          {onForcePullFromCloud && (
+            <button
+              onClick={handleManualPullCloud}
+              disabled={isCloudSyncing}
+              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+              title="Tải danh sách học sinh mới nhất từ Đám Mây về máy tính này"
+            >
+              <CloudDownload className="w-4 h-4 text-indigo-600" />
+              <span>Tải Từ Đám Mây</span>
+            </button>
+          )}
 
           {currentClass && (
             <button

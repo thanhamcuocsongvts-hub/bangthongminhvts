@@ -196,6 +196,8 @@ export interface WhiteboardStroke {
   customVertices?: StrokeVertex[];
   graphOffsetX?: number; // For pan feature on graphs
   graphOffsetY?: number; // For pan feature on graphs
+  graphCenterX?: number;
+  graphCenterY?: number;
   graphScale?: number;   // For zoom feature on graphs
   customEquation?: string; // Math/Physics formula entered by teacher (e.g. y = 2x^3 - 3x + 1)
   hatchPattern?: boolean;  // Tô sọc chéo cho hình thang cong

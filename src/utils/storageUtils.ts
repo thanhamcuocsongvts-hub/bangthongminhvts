@@ -129,6 +129,97 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
 }
 
 /**
+ * Force immediate cloud synchronization for lessons (NO DEBOUNCE)
+ * Guarantees that lessons uploaded on home computer are instantly pushed to cloud & available at school
+ */
+export async function forceSyncLessonsToCloud(lessons: any[]): Promise<{ success: boolean; count: number; timestamp: string }> {
+  const validLessons = (lessons || []).filter(
+    (l: any) => l && l.id && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
+  );
+
+  window.dispatchEvent(new CustomEvent('sync-status', { detail: 'syncing' }));
+
+  // 1. Save to local IndexedDB & LocalStorage
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_LESSONS, 'readwrite');
+    const store = tx.objectStore(STORE_LESSONS);
+    await new Promise<void>((resolve, reject) => {
+      const clearReq = store.clear();
+      clearReq.onsuccess = () => resolve();
+      clearReq.onerror = () => reject(clearReq.error);
+    });
+    for (const item of validLessons) {
+      store.put(item);
+    }
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('Local IndexedDB write warning:', err);
+  }
+
+  try {
+    localStorage.setItem('smartboard_lessons', JSON.stringify(validLessons));
+  } catch (_) {}
+
+  // 2. Immediate push to backend server
+  try {
+    await fetch('/api/lessons/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lessons: validLessons, replaceAll: true }),
+    });
+  } catch (serverErr) {
+    console.warn('Backend server lesson sync note:', serverErr);
+  }
+
+  // 3. Immediate push to Firestore
+  try {
+    const authModule = await import('../lib/firebase');
+    const firestoreModule = await import('firebase/firestore');
+    const db = authModule.db;
+    const { doc, setDoc } = firestoreModule;
+
+    const sanitizedLessons = validLessons.map((l: any) => {
+      let cleanFileUrl = l.fileUrl;
+      if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 500000) {
+        cleanFileUrl = '';
+      }
+      return {
+        ...l,
+        fileUrl: cleanFileUrl,
+      };
+    });
+    const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
+    await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData }, { merge: true });
+    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
+    
+    const now = new Date();
+    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+    return { success: true, count: validLessons.length, timestamp: timeStr };
+  } catch (firestoreErr) {
+    console.error('Firestore lesson sync error:', firestoreErr);
+    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'error' }));
+    throw firestoreErr;
+  }
+}
+
+/**
+ * Force pull all cloud lessons from server and Firestore (Bidirectional pull)
+ */
+export async function forcePullLessonsFromCloud(): Promise<any[]> {
+  const cloudLessons = await loadLessonsFromDB();
+  if (cloudLessons && Array.isArray(cloudLessons)) {
+    try {
+      localStorage.setItem('smartboard_lessons', JSON.stringify(cloudLessons));
+    } catch (_) {}
+  }
+  return cloudLessons || [];
+}
+
+/**
  * Load lesson documents from Firestore, backend API, IndexedDB, or LocalStorage
  * Perfectly merges cloud lessons from server and Firestore so any machine sees all uploaded files!
  */

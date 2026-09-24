@@ -34,7 +34,7 @@ import { AdminManagementModal } from './components/AdminManagementModal';
 import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { QRCodeSVG } from 'qrcode.react';
-import { loadLessonsFromDB, saveLessonsToDB } from './utils/storageUtils';
+import { loadLessonsFromDB, saveLessonsToDB, forceSyncLessonsToCloud, forcePullLessonsFromCloud } from './utils/storageUtils';
 import { db, auth } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
@@ -51,18 +51,18 @@ export default function App() {
     return params.get('room') || '758899';
   });
 
-
-    const syncTeachersToCloud = async (newTeachers: any[]) => {
+  const syncTeachersToCloud = async (newTeachers: any[], immediate: boolean = false) => {
     setSyncStatus('syncing');
     if ((window as any).teacherSyncTimeout) clearTimeout((window as any).teacherSyncTimeout);
-    (window as any).teacherSyncTimeout = setTimeout(async () => {
+
+    const runSync = async () => {
       if (!navigator.onLine) {
         setSyncStatus('offline');
         return;
       }
       try {
         const sanitized = JSON.parse(JSON.stringify(newTeachers));
-        await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: sanitized }, { merge: true });
+        await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: sanitized, updatedAt: new Date().toISOString() }, { merge: true });
         fetch('/api/teachers/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -73,7 +73,39 @@ export default function App() {
         console.warn('Sync to Firestore failed:', e);
         setSyncStatus('error');
       }
-    }, 2000);
+    };
+
+    if (immediate) {
+      await runSync();
+    } else {
+      (window as any).teacherSyncTimeout = setTimeout(runSync, 1000);
+    }
+  };
+
+  const pullTeachersFromCloud = async () => {
+    setSyncStatus('syncing');
+    try {
+      const snap = await getDoc(doc(db, 'global_store', 'smartboard_data'));
+      if (snap.exists() && snap.data().teachers) {
+        const cloudTeachers = snap.data().teachers;
+        setTeachers(cloudTeachers);
+        localStorage.setItem('smartboard_teachers', JSON.stringify(cloudTeachers));
+        setSyncStatus('synced');
+        return;
+      }
+      const res = await fetch('/api/teachers/sync');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.teachers) {
+          setTeachers(data.teachers);
+          localStorage.setItem('smartboard_teachers', JSON.stringify(data.teachers));
+          setSyncStatus('synced');
+        }
+      }
+    } catch (e) {
+      console.warn('Pull teachers error:', e);
+      setSyncStatus('error');
+    }
   };
 
 
@@ -464,20 +496,33 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchRoom]);
 
-  // Fullscreen toggle
-  // Fullscreen Listener for Presentation
+  // Fullscreen toggle & Listener
+  useEffect(() => {
+    const handleFSChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFSChange);
+    document.addEventListener('webkitfullscreenchange', handleFSChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFSChange);
+      document.removeEventListener('webkitfullscreenchange', handleFSChange);
+    };
+  }, []);
+
   useEffect(() => {
     const handleToggle = () => handleToggleFullscreen();
     window.addEventListener('toggle-app-fullscreen', handleToggle);
     return () => window.removeEventListener('toggle-app-fullscreen', handleToggle);
-  }, [isFullscreen]);
+  }, []);
 
   const handleToggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
       setIsFullscreen(true);
     } else {
-      document.exitFullscreen().catch(() => {});
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
       setIsFullscreen(false);
     }
   };
@@ -502,13 +547,31 @@ export default function App() {
     }
   }, [activeLessonId, currentLesson]);
 
-  // Real Cloud Sync to Server
+  // Real Cloud Sync to Server & Firestore
   const handleSyncToCloud = async () => {
     setIsSyncingCloud(true);
     try {
-      await saveLessonsToDB(lessons);
+      await forceSyncLessonsToCloud(lessons);
+      setSyncStatus('synced');
     } catch (err) {
       console.error('Cloud sync error:', err);
+      setSyncStatus('error');
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  const handlePullLessonsFromCloud = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const pulled = await forcePullLessonsFromCloud();
+      if (pulled && pulled.length > 0) {
+        setLessons(pulled);
+      }
+      setSyncStatus('synced');
+    } catch (err) {
+      console.error('Cloud pull error:', err);
+      setSyncStatus('error');
     } finally {
       setIsSyncingCloud(false);
     }
@@ -775,31 +838,29 @@ export default function App() {
   return (
     <div className="w-screen h-dvh flex flex-col bg-[#f8fafc] text-slate-800 overflow-hidden select-none">
       {/* 75-Inch Top Navigation Header Bar */}
-      {!isFullscreen && (
-        <HeaderBar
-          syncStatus={syncStatus}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          textScale={textScale}
-          onTextScaleChange={setTextScale}
-          roomPin={roomState?.pin || '758899'}
-          onOpenQR={() => setShowQRModal(true)}
-          onOpenExport={() => setShowExportModal(true)}
-          onOpenTeacherAuth={() => setShowTeacherAuthModal(true)}
-          onOpenProfile={() => setShowProfileModal(true)}
-          onOpenAdmin={() => setShowAdminModal(true)}
-          onOpenRandomPicker={() => {
-            setPickerClassroom(activeTeacher?.classes?.[0] || null);
-            setShowRandomPickerModal(true);
-          }}
-          onSwitchToStudentView={() => setIsStudentMode(true)}
-          isFullscreen={isFullscreen}
-          onToggleFullscreen={handleToggleFullscreen}
-          activeLessonTitle={currentLesson.title}
-          activeTeacher={activeTeacher || null}
-          onLogout={handleLogout}
-        />
-      )}
+      <HeaderBar
+        syncStatus={syncStatus}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        textScale={textScale}
+        onTextScaleChange={setTextScale}
+        roomPin={roomState?.pin || '758899'}
+        onOpenQR={() => setShowQRModal(true)}
+        onOpenExport={() => setShowExportModal(true)}
+        onOpenTeacherAuth={() => setShowTeacherAuthModal(true)}
+        onOpenProfile={() => setShowProfileModal(true)}
+        onOpenAdmin={() => setShowAdminModal(true)}
+        onOpenRandomPicker={() => {
+          setPickerClassroom(activeTeacher?.classes?.[0] || null);
+          setShowRandomPickerModal(true);
+        }}
+        onSwitchToStudentView={() => setIsStudentMode(true)}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={handleToggleFullscreen}
+        activeLessonTitle={currentLesson.title}
+        activeTeacher={activeTeacher || null}
+        onLogout={handleLogout}
+      />
 
       {/* Main Interactive Screen Content */}
       <main className={`flex-1 ${activeTab === 'whiteboard' ? 'p-0.5 sm:p-1 md:p-1.5' : 'p-3 md:p-4'} overflow-hidden relative bg-[#f8fafc]`}>
@@ -989,6 +1050,10 @@ export default function App() {
                   setPickerClassroom(cls);
                   setShowRandomPickerModal(true);
                 }}
+                onForceSyncToCloud={() => syncTeachersToCloud(teachers, true)}
+                onForcePullFromCloud={pullTeachersFromCloud}
+                isCloudSyncing={syncStatus === 'syncing'}
+                syncStatus={syncStatus}
               />
             )}
 
@@ -1005,17 +1070,15 @@ export default function App() {
                   } else {
                     setActiveLessonId(id);
                   }
-                  const isPpt =
-                    sel?.fileType === 'pptx' ||
-                    sel?.fileType === 'ppt' ||
-                    sel?.fileName?.toLowerCase().endsWith('.pptx') ||
-                    sel?.fileName?.toLowerCase().endsWith('.ppt');
                   setActiveTab('reader');
                 }}
                 onAddLesson={(newDoc) => {
                   handleSaveToLibrary(newDoc);
                 }}
                 onCleanLibrary={handleCleanLibrary}
+                onSyncToCloud={handleSyncToCloud}
+                onPullFromCloud={handlePullLessonsFromCloud}
+                isSyncing={isSyncingCloud}
                 onDeleteLesson={(id) => {
                   if (activeOpenedLesson && activeOpenedLesson.id === id) {
                     setActiveOpenedLesson(null);
@@ -1034,8 +1097,6 @@ export default function App() {
                     return next;
                   });
                 }}
-                onSyncToCloud={handleSyncToCloud}
-                isSyncing={isSyncingCloud}
               />
             )}
           </motion.div>

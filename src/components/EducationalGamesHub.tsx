@@ -684,6 +684,92 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 };
 
 /* ========================================================================= */
+/* QUICK POINT ADJUSTER COMPONENT (-2, -1, +1, +2, +10 ĐIỂM)                 */
+/* ========================================================================= */
+interface QuickPointAdjusterProps {
+  onAdjust: (delta: number) => void;
+  title?: string;
+  targetName?: string | null;
+}
+
+const QuickPointAdjuster: React.FC<QuickPointAdjusterProps> = ({ onAdjust, title = 'Chấm Điểm Thi Đua', targetName }) => {
+  const [lastFeedback, setLastFeedback] = useState<string | null>(null);
+
+  const handleClick = (pts: number) => {
+    onAdjust(pts);
+    const label = pts > 0 ? `+${pts} điểm` : `${pts} điểm`;
+    setLastFeedback(`Đã ${pts > 0 ? 'cộng' : 'trừ'} ${label} ${targetName ? `cho ${targetName}` : ''}`);
+    if (pts > 0) {
+      confetti({
+        particleCount: pts >= 10 ? 80 : 35,
+        spread: 60,
+        origin: { y: 0.7 },
+      });
+    }
+    setTimeout(() => setLastFeedback(null), 2500);
+  };
+
+  return (
+    <div className="flex flex-col gap-2 p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 shadow-inner">
+      <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+        <span className="flex items-center gap-1.5 text-amber-300">
+          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+          <span>{title}</span>
+          {targetName && <span className="text-white bg-indigo-950 border border-indigo-500/40 px-2 py-0.5 rounded-md font-extrabold">{targetName}</span>}
+        </span>
+        {lastFeedback && (
+          <span className="text-emerald-400 font-extrabold animate-pulse text-xs">{lastFeedback}</span>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => handleClick(-2)}
+          className="px-2.5 py-1.5 rounded-xl bg-rose-950/70 hover:bg-rose-900 border border-rose-600/60 text-rose-300 hover:text-white font-mono font-black text-xs transition-all active:scale-95 shadow-xs cursor-pointer"
+          title="Trừ 2 điểm"
+        >
+          -2 điểm
+        </button>
+        <button
+          type="button"
+          onClick={() => handleClick(-1)}
+          className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/80 border border-rose-500/40 text-rose-300 hover:text-white font-mono font-black text-xs transition-all active:scale-95 shadow-xs cursor-pointer"
+          title="Trừ 1 điểm"
+        >
+          -1 điểm
+        </button>
+        <button
+          type="button"
+          onClick={() => handleClick(1)}
+          className="px-2.5 py-1.5 rounded-xl bg-indigo-950/60 hover:bg-indigo-700 border border-indigo-500/50 text-indigo-300 hover:text-white font-mono font-black text-xs transition-all active:scale-95 shadow-xs cursor-pointer"
+          title="Cộng 1 điểm"
+        >
+          +1 điểm
+        </button>
+        <button
+          type="button"
+          onClick={() => handleClick(2)}
+          className="px-2.5 py-1.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-600 border border-emerald-500/50 text-emerald-300 hover:text-white font-mono font-black text-xs transition-all active:scale-95 shadow-xs cursor-pointer"
+          title="Cộng 2 điểm"
+        >
+          +2 điểm
+        </button>
+        <button
+          type="button"
+          onClick={() => handleClick(10)}
+          className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:opacity-95 text-slate-950 font-mono font-black text-xs transition-all active:scale-95 shadow-md shadow-amber-500/20 flex items-center gap-1 cursor-pointer"
+          title="Thưởng xuất sắc 10 điểm!"
+        >
+          <span>⭐</span>
+          <span>10 điểm</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ========================================================================= */
 /* GAME 1: ĐUA XE TRI THỨC (KNOWLEDGE GRAND PRIX TURBO)                      */
 /* ========================================================================= */
 interface GrandPrixRacingGameProps {
@@ -709,10 +795,26 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
   const [selectedTeam, setSelectedTeam] = useState<string>('team_red');
   const [revealed, setRevealed] = useState<boolean>(false);
   const [winnerTeam, setWinnerTeam] = useState<string | null>(null);
+  const [targetGoal, setTargetGoal] = useState<number>(10); // Default 10 laps for longer engaging race
 
-  const TARGET_GOAL = 5; // 5 steps to reach finish line
   const safeQuestions = normalizeGameQuestions(questions);
   const currentQ = safeQuestions[currentQIndex % safeQuestions.length];
+
+  const handleAdjustTeamScore = (teamId: string, delta: number) => {
+    setTeamScores((prev) => {
+      const current = prev[teamId] || 0;
+      const next = Math.max(0, current + delta);
+      if (next >= targetGoal && !winnerTeam) {
+        setWinnerTeam(teamId);
+        confetti({
+          particleCount: 160,
+          spread: 100,
+          origin: { y: 0.6 },
+        });
+      }
+      return { ...prev, [teamId]: next };
+    });
+  };
 
   const handleAnswerOption = (optKey: string) => {
     if (revealed || winnerTeam) return;
@@ -720,20 +822,7 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
 
     const isCorrect = optKey === currentQ.correctAnswer;
     if (isCorrect) {
-      const newScore = (teamScores[selectedTeam] || 0) + 1;
-      setTeamScores((prev) => ({
-        ...prev,
-        [selectedTeam]: newScore,
-      }));
-
-      if (newScore >= TARGET_GOAL) {
-        setWinnerTeam(selectedTeam);
-        confetti({
-          particleCount: 150,
-          spread: 100,
-          origin: { y: 0.6 },
-        });
-      }
+      handleAdjustTeamScore(selectedTeam, 1);
     }
   };
 
@@ -762,26 +851,47 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
     <div className="w-full max-w-6xl mx-auto flex flex-col gap-6 animate-fade-in">
       {/* Race Track Arena */}
       <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl relative overflow-hidden">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2">
             <Flame className="w-5 h-5 text-rose-500 animate-pulse" />
             <span className="font-extrabold text-sm uppercase tracking-wider text-rose-400">
-              Đường Đua Siêu Tốc • Đích 5 Điểm
+              Đường Đua Siêu Tốc • Đích {targetGoal} Điểm
             </span>
           </div>
-          <button
-            onClick={handleResetGame}
-            className="px-3 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Đua Lại Từ Đầu</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Laps / Target Selector */}
+            <div className="flex items-center bg-slate-950/80 rounded-xl p-0.5 border border-slate-800 text-xs">
+              <span className="px-2 py-1 text-slate-400 font-bold text-[11px]">Độ dài:</span>
+              {[5, 10, 15].map((laps) => (
+                <button
+                  key={laps}
+                  type="button"
+                  onClick={() => setTargetGoal(laps)}
+                  className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
+                    targetGoal === laps
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {laps} chặng
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={handleResetGame}
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Đua Lại Từ Đầu</span>
+            </button>
+          </div>
         </div>
 
         {/* 4 Lanes Track */}
         <div className="space-y-3.5">
           {TEAMS.map((t) => {
-            const progress = Math.min(100, ((teamScores[t.id] || 0) / TARGET_GOAL) * 100);
+            const progress = Math.min(100, ((teamScores[t.id] || 0) / targetGoal) * 100);
             const isTurn = selectedTeam === t.id && !winnerTeam;
 
             return (
@@ -804,7 +914,7 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
                     )}
                   </div>
                   <span className="font-mono text-slate-400">
-                    {teamScores[t.id] || 0}/{TARGET_GOAL} chặng
+                    {teamScores[t.id] || 0}/{targetGoal} chặng
                   </span>
                 </div>
 
@@ -837,6 +947,15 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
               </div>
             );
           })}
+        </div>
+
+        {/* Quick Point Adjuster for the Selected Team (-2, -1, +1, +2, +10) */}
+        <div className="mt-4 pt-3 border-t border-slate-800">
+          <QuickPointAdjuster
+            title={`Chấm Điểm Thi Đua Cho Đội Đang Chọn`}
+            targetName={TEAMS.find((t) => t.id === selectedTeam)?.name}
+            onAdjust={(delta) => handleAdjustTeamScore(selectedTeam, delta)}
+          />
         </div>
       </div>
 
@@ -1019,24 +1138,70 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
     return () => clearInterval(timer);
   }, [isTimerRunning, timerSeconds]);
 
-  // Draw the wheel on canvas
+  // Draw the wheel on canvas with Ultra HD / Retina Crispness & Golden LED Bezel
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    // Retina / 4K UHD support for crystal-sharp lines on 75" TV
+    const dpr = Math.max(2, window.devicePixelRatio || 2);
+    const cssSize = 360;
+    
+    if (canvas.width !== cssSize * dpr || canvas.height !== cssSize * dpr) {
+      canvas.width = cssSize * dpr;
+      canvas.height = cssSize * dpr;
+    }
+    canvas.style.width = `${cssSize}px`;
+    canvas.style.height = `${cssSize}px`;
+
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const width = cssSize;
+    const height = cssSize;
     const centerX = width / 2;
     const centerY = height / 2;
-    const radius = Math.min(centerX, centerY) - 12;
+    const outerRingRadius = cssSize / 2 - 3;
+    const radius = outerRingRadius - 14;
     const numSlices = slices.length;
     const arc = (2 * Math.PI) / numSlices;
 
     ctx.clearRect(0, 0, width, height);
 
-    // Colors palette
+    // 1. Draw Golden Metallic Outer Ring Bezel (Perfect Circle)
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, outerRingRadius, 0, 2 * Math.PI);
+    const gradRing = ctx.createRadialGradient(centerX, centerY, radius, centerX, centerY, outerRingRadius);
+    gradRing.addColorStop(0, '#f59e0b');
+    gradRing.addColorStop(0.4, '#fef08a');
+    gradRing.addColorStop(0.7, '#d97706');
+    gradRing.addColorStop(1, '#78350f');
+    ctx.fillStyle = gradRing;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#fef08a';
+    ctx.stroke();
+
+    // 2. Draw Golden LED Bulbs around perimeter (24 bulbs)
+    const numBulbs = 24;
+    for (let b = 0; b < numBulbs; b++) {
+      const bulbAngle = (b * 2 * Math.PI) / numBulbs;
+      const bulbDist = outerRingRadius - 7;
+      const bx = centerX + Math.cos(bulbAngle) * bulbDist;
+      const by = centerY + Math.sin(bulbAngle) * bulbDist;
+      ctx.beginPath();
+      ctx.arc(bx, by, 3, 0, 2 * Math.PI);
+      const isLit = (b + Math.floor(rotationAngle / 15)) % 2 === 0;
+      ctx.fillStyle = isLit ? '#ffffff' : '#fde047';
+      ctx.shadowColor = isLit ? '#ffffff' : '#f59e0b';
+      ctx.shadowBlur = isLit ? 6 : 2;
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
+    // 3. Colors palette
     const sliceColors = [
       '#6366f1',
       '#ec4899',
@@ -1071,30 +1236,36 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
       ctx.rotate(angle + arc / 2);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
       ctx.shadowColor = 'rgba(0,0,0,0.85)';
       ctx.shadowBlur = 4;
       const text = slices[i].length > 18 ? slices[i].slice(0, 16) + '...' : slices[i];
-      ctx.fillText(text, radius - 20, 5);
+      ctx.fillText(text, radius - 16, 4);
       ctx.restore();
     }
 
     ctx.restore();
 
-    // Center pin
+    // 4. Center Gold Hub / Pin
     ctx.beginPath();
-    ctx.arc(centerX, centerY, 24, 0, 2 * Math.PI);
-    ctx.fillStyle = '#1e1b4b';
+    ctx.arc(centerX, centerY, 26, 0, 2 * Math.PI);
+    const gradHub = ctx.createRadialGradient(centerX, centerY, 4, centerX, centerY, 26);
+    gradHub.addColorStop(0, '#fef08a');
+    gradHub.addColorStop(0.5, '#eab308');
+    gradHub.addColorStop(1, '#713f12');
+    ctx.fillStyle = gradHub;
     ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#ffffff';
     ctx.stroke();
 
-    ctx.fillStyle = '#facc15';
-    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = '#1e1b4b';
+    ctx.font = '900 11px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('QUAY', centerX, centerY);
+
+    ctx.restore();
   }, [slices, rotationAngle]);
 
   const handleSpin = () => {
@@ -1105,17 +1276,18 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
     setSelectedOption(null);
     setShowExplanation(false);
 
-    const randomDegrees = 1440 + Math.floor(Math.random() * 1800); // 4 to 9 full spins
+    // 5 to 9 full spins for suspense
+    const randomDegrees = 1800 + Math.floor(Math.random() * 1800);
     const finalAngle = rotationAngle + randomDegrees;
 
     const startTime = performance.now();
-    const duration = 4000;
+    const duration = 5500; // 5.5s exciting spin duration
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
       const progress = Math.min(1, elapsed / duration);
-      // Ease-out cubic
-      const ease = 1 - Math.pow(1 - progress, 3);
+      // Smooth cubic deceleration
+      const ease = 1 - Math.pow(1 - progress, 3.5);
       const current = rotationAngle + randomDegrees * ease;
       setRotationAngle(current);
 
@@ -1143,8 +1315,8 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
         }
 
         confetti({
-          particleCount: 100,
-          spread: 70,
+          particleCount: 120,
+          spread: 80,
           origin: { y: 0.6 },
         });
       }
@@ -1166,12 +1338,14 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
   };
 
   const handleAwardPoints = (points: number) => {
-    setAwardedScore(points);
-    confetti({
-      particleCount: 150,
-      spread: 100,
-      origin: { y: 0.6 },
-    });
+    setAwardedScore((prev) => (prev !== null ? prev + points : points));
+    if (points > 0) {
+      confetti({
+        particleCount: points >= 10 ? 100 : 45,
+        spread: 80,
+        origin: { y: 0.6 },
+      });
+    }
   };
 
   const handleNextQuestion = () => {
@@ -1247,15 +1421,17 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: The Wheel (5 cols on lg) */}
         <div className="lg:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-900/90 rounded-3xl border border-slate-800 shadow-xl">
-          <div className="relative flex flex-col items-center">
-            {/* Top Pointer Needle */}
-            <div className="w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[28px] border-t-amber-400 drop-shadow-lg z-20 -mb-3" />
+          <div className="relative flex flex-col items-center w-full max-w-[380px]">
+            {/* Top Pointer Needle (Clean 3D Golden Arrow Pointing Down) */}
+            <div className="flex flex-col items-center z-20 -mb-2">
+              <div className="w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[26px] border-t-amber-400 drop-shadow-[0_4px_8px_rgba(0,0,0,0.7)]" />
+              <div className="w-2.5 h-2.5 rounded-full bg-amber-200 -mt-6 shadow-xs" />
+            </div>
 
-            <div className="p-2.5 rounded-full bg-gradient-to-b from-amber-400 via-amber-500 to-amber-600 shadow-2xl border-4 border-slate-950">
+            {/* Wheel Canvas Container (Ultra HD Perfectly Circular Frame) */}
+            <div className="p-1.5 rounded-full bg-slate-950 shadow-[0_0_40px_rgba(245,158,11,0.35)] border-4 border-amber-500/80 aspect-square flex items-center justify-center">
               <canvas
                 ref={canvasRef}
-                width={340}
-                height={340}
                 className="rounded-full shadow-inner block"
               />
             </div>
@@ -1280,6 +1456,15 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
               <div className="text-xl font-black text-white">{winnerResult}</div>
             </div>
           )}
+
+          {/* Quick Point Adjuster for the Lucky Wheel */}
+          <div className="mt-4 w-full">
+            <QuickPointAdjuster
+              title="Chấm Điểm Nhanh Vòng Quay"
+              targetName={winnerStudent || winnerResult}
+              onAdjust={(pts) => handleAwardPoints(pts)}
+            />
+          </div>
         </div>
 
         {/* Right Column: Question Display & Interactive Stage (7 cols on lg) */}
@@ -1401,22 +1586,13 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
                   )}
                 </button>
 
-                {/* Chấm điểm cho học sinh */}
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleAwardPoints(100)}
-                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer active:scale-95"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Đúng (+100đ)</span>
-                  </button>
-                  <button
-                    onClick={() => handleAwardPoints(0)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    <span>Sai</span>
-                  </button>
+                {/* Chấm điểm cho học sinh (-2, -1, +1, +2, +10) */}
+                <div className="w-full sm:w-auto">
+                  <QuickPointAdjuster
+                    title={`Chấm Điểm Trả Lời`}
+                    targetName={winnerStudent || 'Học sinh'}
+                    onAdjust={(pts) => handleAwardPoints(pts)}
+                  />
                 </div>
               </div>
 
@@ -1477,12 +1653,12 @@ interface MysteryPuzzleGameProps {
 }
 
 const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
+  const [totalTiles, setTotalTiles] = useState<number>(12); // Default to 12 tiles for longer, richer game
   const [flippedTiles, setFlippedTiles] = useState<number[]>([]);
   const [selectedTile, setSelectedTile] = useState<number | null>(null);
   const [selectedOpt, setSelectedOpt] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
 
-  const TOTAL_TILES = 6;
   const safeQuestions = normalizeGameQuestions(questions);
   const currentQ = safeQuestions[(selectedTile || 0) % safeQuestions.length];
 
@@ -1522,21 +1698,48 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
     <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row gap-6 animate-fade-in">
       {/* Puzzle Board (Left) */}
       <div className="flex-1 p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col items-center">
-        <div className="w-full flex items-center justify-between mb-4">
+        <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-4">
           <span className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
             <Sparkles className="w-4 h-4" />
-            <span>Mảnh Ghép Bí Ẩn • {flippedTiles.length}/{TOTAL_TILES} đã mở</span>
+            <span>Mảnh Ghép Bí Ẩn • {flippedTiles.length}/{totalTiles} đã mở</span>
           </span>
-          <button
-            onClick={handleResetPuzzle}
-            className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold"
-          >
-            Đóng Lại
-          </button>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-slate-950/80 rounded-xl p-0.5 border border-slate-800 text-xs">
+              {[6, 12].map((tCount) => (
+                <button
+                  key={tCount}
+                  type="button"
+                  onClick={() => {
+                    setTotalTiles(tCount);
+                    handleResetPuzzle();
+                  }}
+                  className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
+                    totalTiles === tCount
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {tCount} mảnh
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={handleResetPuzzle}
+              className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold cursor-pointer"
+            >
+              Đóng Lại
+            </button>
+          </div>
         </div>
 
-        {/* The 6-tile grid hiding a secret educational illustration / theorem */}
-        <div className="relative w-full max-w-md aspect-4/3 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-2xl grid grid-cols-3 grid-rows-2 gap-1 p-1 bg-slate-950">
+        {/* The 6 or 12 tile grid hiding a secret educational illustration / theorem */}
+        <div
+          className={`relative w-full max-w-md aspect-4/3 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-2xl grid gap-1 p-1 bg-slate-950 ${
+            totalTiles === 12 ? 'grid-cols-4 grid-rows-3' : 'grid-cols-3 grid-rows-2'
+          }`}
+        >
           {/* Background Secret Picture (Solar system & science) */}
           <div className="absolute inset-0 z-0 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-br from-indigo-900 via-purple-950 to-slate-950">
             <div className="text-5xl mb-2">🪐 ☀️ 🔬 📐</div>
@@ -1546,8 +1749,8 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
             </p>
           </div>
 
-          {/* 6 Covering Mystery Tiles */}
-          {Array.from({ length: TOTAL_TILES }).map((_, idx) => {
+          {/* Covering Mystery Tiles */}
+          {Array.from({ length: totalTiles }).map((_, idx) => {
             const isFlipped = flippedTiles.includes(idx);
             const isCurrent = selectedTile === idx;
 
@@ -1555,7 +1758,7 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
               <div
                 key={idx}
                 onClick={() => handleTileClick(idx)}
-                className={`relative z-10 rounded-xl flex items-center justify-center transition-all cursor-pointer font-black text-xl select-none ${
+                className={`relative z-10 rounded-xl flex items-center justify-center transition-all cursor-pointer font-black text-lg select-none ${
                   isFlipped
                     ? 'opacity-0 pointer-events-none'
                     : isCurrent
@@ -1580,7 +1783,7 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
           <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-500">
             <HelpCircle className="w-12 h-12 mb-3 text-indigo-400 opacity-60" />
             <p className="font-bold text-slate-300">Chưa chọn mảnh ghép</p>
-            <p className="text-xs text-slate-500 mt-1">Hãy nhấp vào một mảnh ghép (1-6) bên trái</p>
+            <p className="text-xs text-slate-500 mt-1">Hãy nhấp vào một mảnh ghép (1-{totalTiles}) bên trái</p>
           </div>
         ) : (
           <div className="space-y-4 animate-fade-in">
@@ -1633,6 +1836,14 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
                   </button>
                 );
               })}
+            </div>
+
+            {/* Quick Point Adjuster for Mystery Puzzle */}
+            <div className="pt-2">
+              <QuickPointAdjuster
+                title={`Chấm Điểm Mảnh Ghép #${selectedTile + 1}`}
+                onAdjust={() => {}}
+              />
             </div>
           </div>
         )}
@@ -1846,6 +2057,14 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
             )}
           </div>
         )}
+
+        {/* Quick Point Adjuster for Millionaire Game */}
+        <div className="pt-2 border-t border-slate-800/80">
+          <QuickPointAdjuster
+            title={`Chấm Điểm Thí Sinh (Mốc Câu ${level})`}
+            onAdjust={() => {}}
+          />
+        </div>
       </div>
 
       {/* Right: The Millionaire Ladder */}

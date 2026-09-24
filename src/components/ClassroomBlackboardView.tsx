@@ -205,6 +205,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   // Selected Stroke & 360-Degree Rotation & Smooth Scaling State
   const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
   const [isStrokeToolbarExpanded, setIsStrokeToolbarExpanded] = useState<boolean>(false);
+  const [showRotateDropdown, setShowRotateDropdown] = useState<boolean>(false);
+  const [showColorPickerDropdown, setShowColorPickerDropdown] = useState<boolean>(false);
   const [isDraggingStroke, setIsDraggingStroke] = useState<boolean>(false);
   const [isResizingStroke, setIsResizingStroke] = useState<boolean>(false);
   const resizeStrokeStartRef = useRef<{
@@ -413,7 +415,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     });
 
     setSelectedStrokeId(newStroke.id);
-    setIsStrokeToolbarExpanded(true);
+    setIsStrokeToolbarExpanded(false);
+    setShowRotateDropdown(false);
+    setShowColorPickerDropdown(false);
     setShowEquationModal(false);
   };
 
@@ -1386,16 +1390,19 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         setSelectedTextId(null);
         setIsDraggingStroke(true);
         setIsDraggingText(false);
-        const bounds = getStrokeBounds(hitStroke)!;
+        const bounds = getStrokeBounds(hitStroke);
         dragStrokeStartRef.current = {
           startMouseX: e.clientX,
           startMouseY: e.clientY,
           origPoints: hitStroke.points ? hitStroke.points.map((p) => ({ ...p })) : [],
           origVertices: hitStroke.customVertices ? hitStroke.customVertices.map((v) => ({ ...v })) : undefined,
-          centerX: bounds.centerX,
-          centerY: bounds.centerY,
+          centerX: bounds?.centerX ?? 0,
+          centerY: bounds?.centerY ?? 0,
           origRotation: hitStroke.rotation || 0,
         };
+        try {
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        } catch (_) {}
         return;
       }
 
@@ -1422,6 +1429,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
 
     isDrawingRef.current = true;
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (_) {}
     const startPt = { x, y, pressure: e.pressure || 0.5 };
     activePointsRef.current = [startPt];
 
@@ -1524,6 +1534,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       const deltaY = e.clientY - dragStrokeStartRef.current.startMouseY;
       const origPts = dragStrokeStartRef.current.origPoints;
       const origVerts = dragStrokeStartRef.current.origVertices;
+      const origCenterX = dragStrokeStartRef.current.centerX ?? 0;
+      const origCenterY = dragStrokeStartRef.current.centerY ?? 0;
 
       if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
       strokeRafRef.current = requestAnimationFrame(() => {
@@ -1545,14 +1557,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     y: v.y + deltaY,
                   }))
                 : s.customVertices;
-              const newCenterX = dragStrokeStartRef.current!.centerX + deltaX;
-              const newCenterY = dragStrokeStartRef.current!.centerY + deltaY;
+              const newCenterX = origCenterX + deltaX;
+              const newCenterY = origCenterY + deltaY;
               return {
                 ...s,
                 points: movedPoints,
                 customVertices: movedVertices,
                 centerX: newCenterX,
                 centerY: newCenterY,
+                graphCenterX: s.graphCenterX !== undefined ? s.graphCenterX + deltaX : undefined,
+                graphCenterY: s.graphCenterY !== undefined ? s.graphCenterY + deltaY : undefined,
               };
             }
             return s;
@@ -2923,6 +2937,235 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               ? selectedStroke.customVertices
               : computeDefaultVertices(selectedStroke.tool, selectedStroke.points);
 
+          // Render Condensed Rotation Button & Popover
+          const renderRotateControl = () => (
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowRotateDropdown((prev) => !prev);
+                  setShowColorPickerDropdown(false);
+                }}
+                className={`px-2 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  showRotateDropdown
+                    ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                    : 'bg-white/10 hover:bg-white/20 text-amber-300'
+                }`}
+                title="Bấm để mở bảng xoay hình"
+              >
+                <RotateCw className="w-3.5 h-3.5 text-amber-400" />
+                <span>Xoay hình</span>
+                {Math.round(currentRotation) !== 0 && (
+                  <span className="text-[10px] font-mono text-amber-200 bg-amber-950/70 px-1 py-0.5 rounded">
+                    {Math.round(currentRotation)}°
+                  </span>
+                )}
+                <ChevronDown className={`w-3 h-3 transition-transform ${showRotateDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Xoay hình popover */}
+              {showRotateDropdown && (
+                <div
+                  className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-slate-950/98 backdrop-blur-md p-2.5 rounded-2xl border-2 border-amber-400/90 shadow-2xl z-50 flex flex-col gap-2 min-w-[220px]"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-amber-300 pb-1 border-b border-white/10">
+                    <span className="flex items-center gap-1">
+                      <RotateCw className="w-3.5 h-3.5 text-amber-400" />
+                      Góc xoay hình:
+                    </span>
+                    <span className="font-mono text-amber-200 bg-amber-900/60 px-1.5 py-0.5 rounded text-[11px]">
+                      {Math.round(currentRotation)}°
+                    </span>
+                  </div>
+
+                  {/* Rotation slider */}
+                  <div className="flex items-center gap-2 px-1">
+                    <input
+                      type="range"
+                      min="0"
+                      max="360"
+                      step="5"
+                      value={Math.round(((currentRotation % 360) + 360) % 360)}
+                      onChange={(e) => {
+                        const newAngle = Number(e.target.value);
+                        setPages((prev) => {
+                          const updated = [...prev];
+                          const curr = updated[currentPageIndex];
+                          if (!curr) return prev;
+                          const newStrokes = curr.strokes.map((s) =>
+                            s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s
+                          );
+                          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                          return updated;
+                        });
+                      }}
+                      className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-400"
+                    />
+                  </div>
+
+                  {/* Preset angle buttons */}
+                  <div className="grid grid-cols-4 gap-1 pt-1">
+                    {[
+                      { label: '0°', angle: 0 },
+                      { label: '45°', angle: 45 },
+                      { label: '90°', angle: 90 },
+                      { label: '180°', angle: 180 },
+                    ].map((p) => (
+                      <button
+                        key={p.label}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPages((prev) => {
+                            const updated = [...prev];
+                            const curr = updated[currentPageIndex];
+                            if (!curr) return prev;
+                            const newStrokes = curr.strokes.map((s) =>
+                              s.id === selectedStroke.id ? { ...s, rotation: p.angle } : s
+                            );
+                            updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                            return updated;
+                          });
+                        }}
+                        className="px-1.5 py-1 bg-white/10 hover:bg-amber-500/40 rounded-lg text-amber-200 text-[10.5px] font-bold text-center transition-colors"
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-1 pt-0.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const newAngle = (currentRotation - 15 + 360) % 360;
+                        setPages((prev) => {
+                          const updated = [...prev];
+                          const curr = updated[currentPageIndex];
+                          if (!curr) return prev;
+                          const newStrokes = curr.strokes.map((s) =>
+                            s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s
+                          );
+                          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                          return updated;
+                        });
+                      }}
+                      className="flex-1 py-1 bg-white/10 hover:bg-amber-500/30 rounded-lg text-amber-200 text-[10.5px] font-bold"
+                      title="Xoay ngược chiều 15°"
+                    >
+                      -15°
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const newAngle = (currentRotation + 15) % 360;
+                        setPages((prev) => {
+                          const updated = [...prev];
+                          const curr = updated[currentPageIndex];
+                          if (!curr) return prev;
+                          const newStrokes = curr.strokes.map((s) =>
+                            s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s
+                          );
+                          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                          return updated;
+                        });
+                      }}
+                      className="flex-1 py-1 bg-white/10 hover:bg-amber-500/30 rounded-lg text-amber-200 text-[10.5px] font-bold"
+                      title="Xoay thuận chiều 15°"
+                    >
+                      +15°
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowRotateDropdown(false);
+                      }}
+                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold"
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+
+          // Render Condensed Color Picker Button & Popover
+          const renderColorPickerControl = () => (
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowColorPickerDropdown((prev) => !prev);
+                  setShowRotateDropdown(false);
+                }}
+                className={`px-2 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  showColorPickerDropdown
+                    ? 'bg-white text-slate-950 shadow-md'
+                    : 'bg-white/10 hover:bg-white/20 text-slate-200'
+                }`}
+                title="Bấm để chọn màu sắc nét vẽ (Mặc định: Màu Trắng)"
+              >
+                <div
+                  className="w-3.5 h-3.5 rounded-full border border-white/80 shadow-xs shrink-0"
+                  style={{ backgroundColor: selectedStroke.color || '#ffffff' }}
+                />
+                <span className="text-[11px]">Màu</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${showColorPickerDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Color palette popover */}
+              {showColorPickerDropdown && (
+                <div
+                  className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-slate-950/98 backdrop-blur-md p-2.5 rounded-2xl border-2 border-cyan-400/90 shadow-2xl z-50 flex flex-col gap-2 min-w-[210px]"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-200 pb-1 border-b border-white/10">
+                    <span>Bảng màu phấn:</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowColorPickerDropdown(false);
+                      }}
+                      className="text-[10px] text-slate-400 hover:text-white px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-5 gap-1.5 py-1">
+                    {chalkPalette.map((cp) => (
+                      <button
+                        key={cp.value}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPages((prev) => {
+                            const updated = [...prev];
+                            const curr = updated[currentPageIndex];
+                            if (!curr) return prev;
+                            const newStrokes = curr.strokes.map((s) =>
+                              s.id === selectedStroke.id ? { ...s, color: cp.value } : s
+                            );
+                            updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                            return updated;
+                          });
+                          setShowColorPickerDropdown(false);
+                        }}
+                        className={`w-6 h-6 rounded-full border transition-transform flex items-center justify-center ${
+                          (selectedStroke.color || '#ffffff') === cp.value
+                            ? 'border-white scale-115 ring-2 ring-cyan-400'
+                            : 'border-transparent hover:scale-110'
+                        }`}
+                        style={{ backgroundColor: cp.value }}
+                        title={cp.label}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+
           return (
             <div
               className="absolute pointer-events-none z-40 animate-fade-in"
@@ -2947,20 +3190,22 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     startMouseY: e.clientY,
                     origPoints: selectedStroke.points ? selectedStroke.points.map((p) => ({ ...p })) : [],
                     origVertices: selectedStroke.customVertices ? selectedStroke.customVertices.map((v) => ({ ...v })) : undefined,
-                    centerX: bounds.centerX,
-                    centerY: bounds.centerY,
+                    centerX: bounds?.centerX ?? 0,
+                    centerY: bounds?.centerY ?? 0,
                     origRotation: selectedStroke.rotation || 0,
                   };
                 }}
                 onPointerMove={(e) => {
                   if (!isDraggingStroke || !dragStrokeStartRef.current || !selectedStrokeId) return;
                   e.stopPropagation();
-                  const deltaX = e.clientX - dragStrokeStartRef.current.startMouseX;
-                  const deltaY = e.clientY - dragStrokeStartRef.current.startMouseY;
-                  const origPts = dragStrokeStartRef.current.origPoints;
-                  const origVerts = dragStrokeStartRef.current.origVertices;
-                  const origCenterX = dragStrokeStartRef.current.centerX;
-                  const origCenterY = dragStrokeStartRef.current.centerY;
+                  const startData = dragStrokeStartRef.current;
+                  if (!startData) return;
+                  const deltaX = e.clientX - startData.startMouseX;
+                  const deltaY = e.clientY - startData.startMouseY;
+                  const origPts = startData.origPoints;
+                  const origVerts = startData.origVertices;
+                  const origCenterX = startData.centerX ?? 0;
+                  const origCenterY = startData.centerY ?? 0;
 
                   if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
                   strokeRafRef.current = requestAnimationFrame(() => {
@@ -3002,14 +3247,18 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   try {
                     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
                   } catch (_) {}
+                  if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
                   setIsDraggingStroke(false);
+                  dragStrokeStartRef.current = null;
                 }}
                 onPointerCancel={(e) => {
                   e.stopPropagation();
                   try {
                     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
                   } catch (_) {}
+                  if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
                   setIsDraggingStroke(false);
+                  dragStrokeStartRef.current = null;
                 }}
                 onWheel={(e) => {
                   if (isFunctionGraphTool(selectedStroke.tool)) {
@@ -3222,6 +3471,57 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     </button>
                   </div>
 
+                  {/* Mục Xoay hình gom gọn */}
+                  {renderRotateControl()}
+
+                  {/* Mục Bảng màu gom gọn (mặc định trắng) */}
+                  {renderColorPickerControl()}
+
+                  {/* Mini Scale */}
+                  <div className="flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded-xl">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const newScale = Math.max(0.3, currentScale - 0.15);
+                        setPages((prev) => {
+                          const updated = [...prev];
+                          const curr = updated[currentPageIndex];
+                          if (!curr) return prev;
+                          const newStrokes = curr.strokes.map((s) =>
+                            s.id === selectedStroke.id ? { ...s, scale: newScale } : s
+                          );
+                          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                          return updated;
+                        });
+                      }}
+                      className="p-1 hover:bg-white/20 rounded-md text-slate-300"
+                      title="Thu nhỏ hình"
+                    >
+                      <ZoomOut className="w-3 h-3" />
+                    </button>
+                    <span className="text-[10px] font-mono text-cyan-300">{Math.round(currentScale * 100)}%</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const newScale = Math.min(3.0, currentScale + 0.15);
+                        setPages((prev) => {
+                          const updated = [...prev];
+                          const curr = updated[currentPageIndex];
+                          if (!curr) return prev;
+                          const newStrokes = curr.strokes.map((s) =>
+                            s.id === selectedStroke.id ? { ...s, scale: newScale } : s
+                          );
+                          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+                          return updated;
+                        });
+                      }}
+                      className="p-1 hover:bg-white/20 rounded-md text-slate-300"
+                      title="Phóng to hình"
+                    >
+                      <ZoomIn className="w-3 h-3" />
+                    </button>
+                  </div>
+
                   {/* Mini Graph Zoom in Compact Toolbar */}
                   {isFunctionGraphTool(selectedStroke.tool) && (
                     <div className="flex items-center gap-1 bg-amber-500/20 px-2 py-0.5 rounded-xl border border-amber-400/40">
@@ -3233,10 +3533,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                         className="p-1 hover:bg-white/20 rounded-md text-amber-200"
                         title="Thu nhỏ hệ trục Ox / Oy"
                       >
-                        <ZoomOut className="w-3.5 h-3.5" />
+                        <ZoomOut className="w-3 h-3" />
                       </button>
                       <span className="text-[10px] font-mono font-bold text-amber-300">
-                        {Math.round((selectedStroke.graphScale || 1.0) * 100)}%
+                        Trục: {Math.round((selectedStroke.graphScale || 1.0) * 100)}%
                       </span>
                       <button
                         onClick={(e) => {
@@ -3246,17 +3546,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                         className="p-1 hover:bg-white/20 rounded-md text-amber-200"
                         title="Phóng to hệ trục Ox / Oy"
                       >
-                        <ZoomIn className="w-3.5 h-3.5" />
+                        <ZoomIn className="w-3 h-3" />
                       </button>
                     </div>
                   )}
-
-                  {/* Color Dot indicator */}
-                  <div
-                    className="w-4 h-4 rounded-full border border-white/80 shadow-xs shrink-0"
-                    style={{ backgroundColor: selectedStroke.color || '#ffffff' }}
-                    title="Màu sắc hiện tại"
-                  />
 
                   {/* Delete Button */}
                   <button
@@ -3271,6 +3564,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                         return updated;
                       });
                       setSelectedStrokeId(null);
+                      setShowRotateDropdown(false);
+                      setShowColorPickerDropdown(false);
                     }}
                     className="p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors flex items-center justify-center text-xs"
                     title="Xóa hình này"
@@ -3283,12 +3578,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     onClick={(e) => {
                       e.stopPropagation();
                       setIsStrokeToolbarExpanded(true);
+                      setShowRotateDropdown(false);
+                      setShowColorPickerDropdown(false);
                     }}
                     className="px-2.5 py-1 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 hover:text-white font-bold text-[11px] flex items-center gap-1.5 border border-cyan-400/50 transition-all cursor-pointer shadow-xs"
-                    title="Bấm để mở đầy đủ thanh công cụ: Xoay 360°, chọn màu, phóng to/thu nhỏ"
+                    title="Bấm để mở công cụ chi tiết (dời trục Ox/Oy, bước nhảy di chuyển, sửa công thức)"
                   >
                     <Sliders className="w-3.5 h-3.5 text-cyan-300" />
-                    <span>Mở rộng ▾</span>
+                    <span>Chi tiết ▾</span>
                   </button>
 
                   {/* Close button */}
@@ -3296,6 +3593,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedStrokeId(null);
+                      setShowRotateDropdown(false);
+                      setShowColorPickerDropdown(false);
                     }}
                     className="p-1 rounded-lg hover:bg-white/20 text-slate-300 hover:text-white transition-colors"
                     title="Bỏ chọn"
@@ -3314,6 +3613,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     onClick={(e) => {
                       e.stopPropagation();
                       setIsStrokeToolbarExpanded(false);
+                      setShowRotateDropdown(false);
+                      setShowColorPickerDropdown(false);
                     }}
                     className="px-2 py-1 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 rounded-xl text-[10.5px] font-black flex items-center gap-1 border border-cyan-400/40 cursor-pointer mr-0.5"
                     title="Thu gọn thanh công cụ lại"
@@ -3412,160 +3713,20 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
                   {/* Coordinates Badge */}
                   <span className="text-[10px] font-mono text-cyan-400/90 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-500/30 hidden md:inline">
-                    X:{Math.round(bounds.centerX)} Y:{Math.round(bounds.centerY)}
+                    X:{Math.round(bounds?.centerX ?? 0)} Y:{Math.round(bounds?.centerY ?? 0)}
                   </span>
                 </div>
 
                 <div className="h-5 w-px bg-white/20 mx-1" />
 
-                {/* 360-Degree Rotation Controls */}
-                <div className="flex items-center gap-1.5 bg-white/10 px-2 py-1 rounded-xl">
-                  <RotateCw className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="text-xs font-black text-amber-300 font-mono min-w-[36px] text-center">
-                    {Math.round(currentRotation)}°
-                  </span>
-
-                  {/* Rotation Slider 0° -> 360° */}
-                  <input
-                    type="range"
-                    min="0"
-                    max="360"
-                    step="5"
-                    value={Math.round((currentRotation % 360 + 360) % 360)}
-                    onChange={(e) => {
-                      const newAngle = Number(e.target.value);
-                      setPages((prev) => {
-                        const updated = [...prev];
-                        const curr = updated[currentPageIndex];
-                        if (!curr) return prev;
-                        const newStrokes = curr.strokes.map((s) =>
-                          s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s
-                        );
-                        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
-                        return updated;
-                      });
-                    }}
-                    className="w-20 md:w-28 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-400"
-                    title="Kéo trượt để xoay hình 0 - 360 độ"
-                  />
-
-                  {/* Quick Rotate Buttons */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const newAngle = (currentRotation - 15 + 360) % 360;
-                      setPages((prev) => {
-                        const updated = [...prev];
-                        const curr = updated[currentPageIndex];
-                        if (!curr) return prev;
-                        const newStrokes = curr.strokes.map((s) =>
-                          s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s
-                        );
-                        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
-                        return updated;
-                      });
-                    }}
-                    className="p-1 hover:bg-white/20 rounded-lg text-slate-200 text-[11px] font-bold"
-                    title="Xoay ngược chiều kim đồng hồ 15°"
-                  >
-                    -15°
-                  </button>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const newAngle = (currentRotation + 15) % 360;
-                      setPages((prev) => {
-                        const updated = [...prev];
-                        const curr = updated[currentPageIndex];
-                        if (!curr) return prev;
-                        const newStrokes = curr.strokes.map((s) =>
-                          s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s
-                        );
-                        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
-                        return updated;
-                      });
-                    }}
-                    className="p-1 hover:bg-white/20 rounded-lg text-slate-200 text-[11px] font-bold"
-                    title="Xoay thuận chiều kim đồng hồ 15°"
-                  >
-                    +15°
-                  </button>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const newAngle = (currentRotation + 90) % 360;
-                      setPages((prev) => {
-                        const updated = [...prev];
-                        const curr = updated[currentPageIndex];
-                        if (!curr) return prev;
-                        const newStrokes = curr.strokes.map((s) =>
-                          s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s
-                        );
-                        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
-                        return updated;
-                      });
-                    }}
-                    className="px-1.5 py-0.5 bg-amber-500/30 hover:bg-amber-500/50 rounded-lg text-amber-200 text-[10px] font-black"
-                    title="Xoay vuông góc 90°"
-                  >
-                    +90°
-                  </button>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const newAngle = (currentRotation + 180) % 360;
-                      setPages((prev) => {
-                        const updated = [...prev];
-                        const curr = updated[currentPageIndex];
-                        if (!curr) return prev;
-                        const newStrokes = curr.strokes.map((s) =>
-                          s.id === selectedStroke.id ? { ...s, rotation: newAngle } : s
-                        );
-                        updated[currentPageIndex] = { ...curr, strokes: newStrokes };
-                        return updated;
-                      });
-                    }}
-                    className="px-1.5 py-0.5 bg-amber-500/30 hover:bg-amber-500/50 rounded-lg text-amber-200 text-[10px] font-black"
-                    title="Lật ngược 180°"
-                  >
-                    180°
-                  </button>
-                </div>
+                {/* Xoay hình gom gọn */}
+                {renderRotateControl()}
 
                 <div className="h-5 w-px bg-white/20 mx-1" />
 
-                {/* Change Color Palette */}
-                <div className="flex items-center gap-1 max-w-[260px] sm:max-w-[340px] overflow-x-auto py-0.5 custom-scrollbar-none">
-                  {chalkPalette.map((cp) => (
-                    <button
-                      key={cp.value}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPages((prev) => {
-                          const updated = [...prev];
-                          const curr = updated[currentPageIndex];
-                          const newStrokes = curr.strokes.map((s) =>
-                            s.id === selectedStroke.id ? { ...s, color: cp.value } : s
-                          );
-                          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
-                          return updated;
-                        });
-                      }}
-                      className={`w-4 h-4 rounded-full border transition-transform shrink-0 ${
-                        selectedStroke.color === cp.value
-                          ? 'border-white scale-125 ring-2 ring-cyan-400'
-                          : 'border-transparent hover:scale-110'
-                      }`}
-                      style={{
-                        backgroundColor: cp.value,
-                      }}
-                      title={cp.label}
-                    />
-                  ))}
-                </div>
+                {/* Bảng màu gom gọn (mặc định trắng) */}
+                {renderColorPickerControl()}
+
 
                 <div className="h-5 w-px bg-white/20 mx-1" />
 
