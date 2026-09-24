@@ -65,7 +65,16 @@ import {
   Calculator,
   FunctionSquare,
   Pencil,
+  Feather,
+  Wand2,
 } from 'lucide-react';
+import {
+  filterPointJitter,
+  calculateDynamicStrokeWidth,
+  simplifyPoints,
+  cropStrokesToImage,
+  recognizeVietnameseHandwriting,
+} from '../utils/strokeSmoothing';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile, BlackboardBackground } from '../types';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
 import { computeDefaultVertices, updateVertexWithConstraints, drawShapeWithVertices } from '../utils/geometryVertices';
@@ -157,6 +166,20 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       setStrokeSize(2);
     }
   }, [activeTool]);
+
+  // Viết Chữ Đẹp (Smart Handwriting to Beautiful Calligraphy Font)
+  const [calligraphyFont, setCalligraphyFont] = useState<'calligraphy' | 'handwriting' | 'primary' | 'cursive'>('calligraphy');
+  const [showCalligraphyPopover, setShowCalligraphyPopover] = useState<boolean>(false);
+  const [autoConvertCalligraphy, setAutoConvertCalligraphy] = useState<boolean>(true);
+  const [isConvertingCalligraphy, setIsConvertingCalligraphy] = useState<boolean>(false);
+  const [calligraphyStatusBanner, setCalligraphyStatusBanner] = useState<string | null>(null);
+  const [lastConvertedInfo, setLastConvertedInfo] = useState<{
+    textBoxId: string;
+    replacedStrokes: WhiteboardStroke[];
+  } | null>(null);
+  const calligraphySessionStrokesRef = useRef<string[]>([]);
+  const calligraphyTimerRef = useRef<any>(null);
+  const lastPointerPointRef = useRef<{ x: number; y: number; pressure: number; time: number; width?: number } | null>(null);
 
   // Modals & Shape Popovers
   const [showShapePicker, setShowShapePicker] = useState<boolean>(false);
@@ -1276,6 +1299,193 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
   }, []);
 
+  // Viết Chữ Đẹp: Convert handwritten chalk strokes to beautiful calligraphy font text box
+  const handleConvertHandwritingToCalligraphy = useCallback(async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const strokeIds = [...calligraphySessionStrokesRef.current];
+    if (strokeIds.length === 0) return;
+
+    const currPage = pages[currentPageIndex];
+    if (!currPage) return;
+
+    const targetStrokes = currPage.strokes.filter((s) => strokeIds.includes(s.id));
+    if (targetStrokes.length === 0) return;
+
+    const allPoints: StrokePoint[] = [];
+    targetStrokes.forEach((s) => {
+      if (s.points) allPoints.push(...s.points);
+    });
+
+    if (allPoints.length < 3) return;
+
+    const crop = cropStrokesToImage(canvas, allPoints, boardScrollX, boardScrollY, 28);
+    if (!crop) return;
+
+    setIsConvertingCalligraphy(true);
+    setCalligraphyStatusBanner('✨ Đang nhận diện chữ viết tay để chuyển thành chữ đẹp...');
+
+    try {
+      const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, 'bài giảng lớp học, toán học, văn học, khoa học');
+      if (recognized && recognized.trim().length > 0) {
+        const text = recognized.trim();
+        const { bounds } = crop;
+        const calculatedSize = Math.max(26, Math.min(68, Math.round(bounds.height * 0.72)));
+
+        const newTextBox: BlackboardTextBox = {
+          id: `calligraphy_txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          x: Math.round(bounds.minX),
+          y: Math.round(bounds.minY),
+          width: Math.max(180, Math.round(bounds.width + 40)),
+          height: Math.max(60, Math.round(bounds.height + 24)),
+          text: text,
+          color: activeColor,
+          size: calculatedSize,
+          fontFamily: calligraphyFont,
+          bold: false,
+          italic: false,
+          underline: false,
+          align: 'left',
+          bgColor: 'transparent',
+          borderStyle: 'none',
+        };
+
+        setLastConvertedInfo({
+          textBoxId: newTextBox.id,
+          replacedStrokes: targetStrokes,
+        });
+
+        setPages((prev) => {
+          const updated = [...prev];
+          const curr = updated[currentPageIndex];
+          if (!curr) return prev;
+          const strokeIdSet = new Set(strokeIds);
+          const remainingStrokes = curr.strokes.filter((s) => !strokeIdSet.has(s.id));
+          return [
+            ...updated.slice(0, currentPageIndex),
+            {
+              ...curr,
+              strokes: remainingStrokes,
+              texts: [...(curr.texts || []), newTextBox],
+            },
+            ...updated.slice(currentPageIndex + 1),
+          ];
+        });
+
+        calligraphySessionStrokesRef.current = [];
+        setCalligraphyStatusBanner(`✨ Đã chuyển hóa thành công: "${text}"`);
+        setTimeout(() => setCalligraphyStatusBanner(null), 5000);
+      } else {
+        setCalligraphyStatusBanner(null);
+      }
+    } catch (err) {
+      console.warn('Calligraphy conversion error:', err);
+      setCalligraphyStatusBanner(null);
+    } finally {
+      setIsConvertingCalligraphy(false);
+    }
+  }, [pages, currentPageIndex, boardScrollX, boardScrollY, activeColor, calligraphyFont]);
+
+  // Undo Calligraphy: revert converted text box back to original handwritten chalk strokes
+  const handleUndoCalligraphy = useCallback(() => {
+    if (!lastConvertedInfo) return;
+    const { textBoxId, replacedStrokes } = lastConvertedInfo;
+    setPages((prev) => {
+      const updated = [...prev];
+      const curr = updated[currentPageIndex];
+      if (!curr) return prev;
+      const remainingTexts = (curr.texts || []).filter((t) => t.id !== textBoxId);
+      return [
+        ...updated.slice(0, currentPageIndex),
+        {
+          ...curr,
+          strokes: [...curr.strokes, ...replacedStrokes],
+          texts: remainingTexts,
+        },
+        ...updated.slice(currentPageIndex + 1),
+      ];
+    });
+    setLastConvertedInfo(null);
+    setCalligraphyStatusBanner('↩️ Đã hoàn tác về nét viết phấn ban đầu.');
+    setTimeout(() => setCalligraphyStatusBanner(null), 4000);
+  }, [lastConvertedInfo, currentPageIndex]);
+
+  // Convert a specific selected stroke to calligraphy text box
+  const convertSelectedStrokeToCalligraphy = useCallback(
+    async (stroke: WhiteboardStroke) => {
+      const canvas = canvasRef.current;
+      if (!canvas || !stroke.points || stroke.points.length === 0) return;
+
+      const crop = cropStrokesToImage(canvas, stroke.points, boardScrollX, boardScrollY, 28);
+      if (!crop) return;
+
+      setIsConvertingCalligraphy(true);
+      setCalligraphyStatusBanner('✨ Đang nhận diện chữ viết tay để chuyển thành chữ đẹp...');
+
+      try {
+        const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, 'bài giảng lớp học, toán học, văn học, khoa học');
+        if (recognized && recognized.trim().length > 0) {
+          const text = recognized.trim();
+          const { bounds } = crop;
+          const calculatedSize = Math.max(26, Math.min(68, Math.round(bounds.height * 0.72)));
+
+          const newTextBox: BlackboardTextBox = {
+            id: `calligraphy_txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            x: Math.round(bounds.minX),
+            y: Math.round(bounds.minY),
+            width: Math.max(180, Math.round(bounds.width + 40)),
+            height: Math.max(60, Math.round(bounds.height + 24)),
+            text: text,
+            color: stroke.color || activeColor,
+            size: calculatedSize,
+            fontFamily: calligraphyFont,
+            bold: false,
+            italic: false,
+            underline: false,
+            align: 'left',
+            bgColor: 'transparent',
+            borderStyle: 'none',
+          };
+
+          setLastConvertedInfo({
+            textBoxId: newTextBox.id,
+            replacedStrokes: [stroke],
+          });
+
+          setPages((prev) => {
+            const updated = [...prev];
+            const curr = updated[currentPageIndex];
+            if (!curr) return prev;
+            return [
+              ...updated.slice(0, currentPageIndex),
+              {
+                ...curr,
+                strokes: curr.strokes.filter((s) => s.id !== stroke.id),
+                texts: [...(curr.texts || []), newTextBox],
+              },
+              ...updated.slice(currentPageIndex + 1),
+            ];
+          });
+
+          setSelectedStrokeId(null);
+          setSelectedTextId(newTextBox.id);
+          setCalligraphyStatusBanner(`✨ Đã chuyển hóa thành công: "${text}"`);
+          setTimeout(() => setCalligraphyStatusBanner(null), 5000);
+        } else {
+          setCalligraphyStatusBanner('Không nhận diện được từ ngữ rõ ràng trong nét vẽ này.');
+          setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+        }
+      } catch (err) {
+        console.warn('Convert stroke to calligraphy error:', err);
+        setCalligraphyStatusBanner(null);
+      } finally {
+        setIsConvertingCalligraphy(false);
+      }
+    },
+    [boardScrollX, boardScrollY, activeColor, calligraphyFont, currentPageIndex]
+  );
+
   // Center selected stroke to the current visible viewport
   const handleCenterStroke = useCallback(() => {
     if (!selectedStrokeId) return;
@@ -1432,12 +1642,22 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     try {
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     } catch (_) {}
-    const startPt = { x, y, pressure: e.pressure || 0.5 };
+
+    const now = performance.now();
+    const filteredPt = filterPointJitter({ x, y, pressure: e.pressure || 0.5, time: now });
+    lastPointerPointRef.current = { ...filteredPt, width: strokeSize };
+    const startPt: StrokePoint = { x: filteredPt.x, y: filteredPt.y, pressure: filteredPt.pressure, time: now, width: strokeSize };
     activePointsRef.current = [startPt];
 
-    // For freehand pen/eraser/highlighter, draw initial dot immediately
+    // Clear active debounce timer while teacher continues writing
+    if (calligraphyTimerRef.current) {
+      clearTimeout(calligraphyTimerRef.current);
+      calligraphyTimerRef.current = null;
+    }
+
+    // For freehand pen/calligraphy/eraser/highlighter, draw initial dot immediately
     const ctx = canvas.getContext('2d');
-    if (ctx && (activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'eraser')) {
+    if (ctx && (activeTool === 'pen' || activeTool === 'calligraphy' || activeTool === 'highlighter' || activeTool === 'eraser')) {
       ctx.save();
       ctx.translate(-boardScrollX, -boardScrollY);
       ctx.lineCap = 'round';
@@ -1448,9 +1668,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       } else {
         ctx.fillStyle = activeColor;
         if (activeTool === 'highlighter') ctx.globalAlpha = 0.45;
+        else ctx.globalAlpha = 0.98;
       }
       ctx.beginPath();
-      ctx.arc(x, y, (activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize) / 2, 0, Math.PI * 2);
+      const dotRadius = (activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize) / 2;
+      ctx.arc(x, y, Math.max(1, dotRadius), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -1603,10 +1825,54 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    if (activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'eraser') {
-      // Incremental smooth bezier rendering for 120fps fluid drawing without clearing canvas
-      for (const pt of coalescedList) {
-        pts.push(pt);
+    if (activeTool === 'pen' || activeTool === 'calligraphy' || activeTool === 'highlighter' || activeTool === 'eraser') {
+      // Professional low-overhead incremental bezier drawing with anti-jitter and dynamic physics
+      const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
+      ctx.save();
+      ctx.translate(-boardScrollX, -boardScrollY);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      if (activeTool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = '#000';
+        ctx.fillStyle = '#000';
+        ctx.lineWidth = strokeSize;
+      } else {
+        ctx.strokeStyle = activeColor;
+        ctx.fillStyle = activeColor;
+        if (activeTool === 'highlighter') {
+          ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
+          ctx.lineWidth = strokeSize * 2.5;
+        } else {
+          ctx.globalAlpha = 0.98;
+          ctx.lineWidth = strokeSize;
+        }
+        if (isLiveFluo) {
+          ctx.shadowColor = activeColor;
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      for (const rawPt of coalescedList) {
+        const filtered = filterPointJitter(
+          { x: rawPt.x, y: rawPt.y, pressure: rawPt.pressure, time: performance.now() },
+          lastPointerPointRef.current || undefined
+        );
+        const dynWidth = calculateDynamicStrokeWidth(
+          activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize,
+          filtered,
+          lastPointerPointRef.current || undefined,
+          activeTool === 'calligraphy'
+        );
+        const ptWithWidth = { ...filtered, width: dynWidth };
+        lastPointerPointRef.current = ptWithWidth;
+        pts.push(ptWithWidth);
+
+        if (activeTool === 'calligraphy') {
+          ctx.lineWidth = dynWidth;
+        }
+
         if (pts.length >= 3) {
           const p0 = pts[pts.length - 3];
           const p1 = pts[pts.length - 2];
@@ -1616,66 +1882,21 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           const mid2X = (p1.x + p2.x) / 2;
           const mid2Y = (p1.y + p2.y) / 2;
 
-          const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
-
-          ctx.save();
-          ctx.translate(-boardScrollX, -boardScrollY);
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
-          if (activeTool === 'eraser') {
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.strokeStyle = '#000';
-          } else {
-            ctx.strokeStyle = activeColor;
-            if (activeTool === 'highlighter') {
-              ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
-              if (isLiveFluo) {
-                ctx.shadowColor = activeColor;
-                ctx.shadowBlur = 0;
-              }
-            } else if (isLiveFluo) {
-              ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 0;
-            }
-          }
           ctx.beginPath();
           ctx.moveTo(mid1X, mid1Y);
           ctx.quadraticCurveTo(p1.x, p1.y, mid2X, mid2Y);
           ctx.stroke();
-          ctx.restore();
         } else if (pts.length === 2) {
           const p0 = pts[0];
           const p1 = pts[1];
-          const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
-          ctx.save();
-          ctx.translate(-boardScrollX, -boardScrollY);
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
-          if (activeTool === 'eraser') {
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.strokeStyle = '#000';
-          } else {
-            ctx.strokeStyle = activeColor;
-            if (activeTool === 'highlighter') {
-              ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
-              if (isLiveFluo) {
-                ctx.shadowColor = activeColor;
-                ctx.shadowBlur = 0;
-              }
-            } else if (isLiveFluo) {
-              ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 0;
-            }
-          }
           ctx.beginPath();
           ctx.moveTo(p0.x, p0.y);
           ctx.lineTo(p1.x, p1.y);
           ctx.stroke();
-          ctx.restore();
         }
       }
+
+      ctx.restore();
     } else {
       // For geometric 2D/3D shapes, preview shape with full redraw
       pts.push(coalescedList[coalescedList.length - 1]);
@@ -1848,6 +2069,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     if (completedPoints.length > 0) {
       let finalPoints = completedPoints;
+      // High-precision RDP curve smoothing to remove infrared jitter & redundant samples
+      if (activeTool === 'pen' || activeTool === 'calligraphy' || activeTool === 'highlighter' || activeTool === 'eraser') {
+        finalPoints = simplifyPoints(completedPoints, 0.65);
+      }
       if (isFunctionGraphTool(activeTool) && completedPoints.length <= 2) {
         const p0 = completedPoints[0];
         const p1 = completedPoints[completedPoints.length - 1];
@@ -1908,6 +2133,17 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         };
         return updated;
       });
+
+      // Viết Chữ Đẹp: Track stroke and initiate debounced smart handwriting recognition
+      if (activeTool === 'calligraphy') {
+        calligraphySessionStrokesRef.current.push(newStroke.id);
+        if (autoConvertCalligraphy) {
+          if (calligraphyTimerRef.current) clearTimeout(calligraphyTimerRef.current);
+          calligraphyTimerRef.current = setTimeout(() => {
+            handleConvertHandwritingToCalligraphy();
+          }, 1400);
+        }
+      }
 
       // Automatically select function graphs so the user can easily zoom/scale and move them immediately
       if (isFunctionGraphTool(activeTool)) {
@@ -2527,6 +2763,45 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               ({Math.round(boardScrollX)}, {Math.round(boardScrollY)})
             </span>
           </button>
+        )}
+
+        {/* Floating Calligraphy Status / Indicator Banner */}
+        {(activeTool === 'calligraphy' || isConvertingCalligraphy || calligraphyStatusBanner) && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 px-4 py-2 bg-slate-900/95 backdrop-blur-md border border-purple-500/50 shadow-2xl rounded-full text-white text-xs font-semibold animate-in fade-in slide-in-from-top-2 pointer-events-auto">
+            <div className="flex items-center gap-1.5 text-purple-300">
+              <Feather className="w-4 h-4 text-purple-300" />
+              {isConvertingCalligraphy ? (
+                <div className="w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              )}
+            </div>
+            <span className="text-slate-200">
+              {calligraphyStatusBanner || (
+                <>
+                  Chế độ <strong className="text-purple-300">Viết Chữ Đẹp</strong>: Viết chữ lên bảng, ứng dụng sẽ tự động chuyển thành phông chữ viết tay nghệ thuật!
+                </>
+              )}
+            </span>
+            {lastConvertedInfo && (
+              <button
+                onClick={handleUndoCalligraphy}
+                className="ml-1 px-2.5 py-1 bg-rose-600/80 hover:bg-rose-500 rounded-full text-[10.5px] font-bold text-white transition-all shadow flex items-center gap-1 cursor-pointer"
+                title="Khôi phục lại nét vẽ phấn tay ban đầu"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Hoàn tác phấn</span>
+              </button>
+            )}
+            <button
+              onClick={() => handleConvertHandwritingToCalligraphy()}
+              disabled={isConvertingCalligraphy}
+              className="ml-1 px-3 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 rounded-full text-[10.5px] font-bold text-white transition-all shadow flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            >
+              <Wand2 className="w-3 h-3 text-amber-300" />
+              <span>Chuyển ngay</span>
+            </button>
+          </div>
         )}
 
         {/* Laser Pointer Animated Glow */}
@@ -3551,6 +3826,22 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     </div>
                   )}
 
+                  {/* Chuyển hóa nét vẽ thành chữ đẹp AI */}
+                  {selectedStroke.points && selectedStroke.points.length > 2 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        convertSelectedStrokeToCalligraphy(selectedStroke);
+                      }}
+                      disabled={isConvertingCalligraphy}
+                      className="flex items-center gap-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white px-2 py-1 rounded-xl text-xs font-bold shadow transition-all cursor-pointer disabled:opacity-50"
+                      title="Chuyển nét vẽ này thành phông chữ viết tay tuyệt đẹp"
+                    >
+                      <Wand2 className="w-3.5 h-3.5 text-amber-300" />
+                      <span>{isConvertingCalligraphy ? 'Đang chuyển...' : 'Chữ Đẹp'}</span>
+                    </button>
+                  )}
+
                   {/* Delete Button */}
                   <button
                     onClick={(e) => {
@@ -4089,6 +4380,129 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               </div>
               <span className="text-[11px] font-bold">Phấn</span>
             </button>
+
+            {/* 2b. Viết Chữ Đẹp (Smart Handwriting to Beautiful Font) */}
+            <div className="relative shrink-0 flex items-center">
+              <button
+                onClick={() => {
+                  handleToolChange('calligraphy');
+                  setShowCalligraphyPopover((prev) => !prev);
+                  setShowShapePicker(false);
+                  setShowFunctionPicker(false);
+                  setShowColorPopover(false);
+                  setShowSizePopover(false);
+                }}
+                className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                  activeTool === 'calligraphy'
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-2 ring-purple-400'
+                    : 'hover:bg-white/10 text-slate-300'
+                }`}
+                title="Viết chữ đẹp: Tự động chuyển nét viết bảng thành phông chữ viết tay nghệ thuật"
+              >
+                <div className="relative w-4 h-4 flex items-center justify-center">
+                  <Feather className="w-3.5 h-3.5 text-purple-200" />
+                  <Sparkles className="w-2.5 h-2.5 absolute -top-1 -right-1 text-amber-300 animate-pulse" />
+                </div>
+                <span className="text-[11px] font-bold">Chữ Đẹp</span>
+                <span className="text-[8px] px-1 py-0.5 bg-amber-400 text-slate-950 font-black rounded-full leading-none">AI</span>
+              </button>
+
+              {/* Calligraphy Options Popover */}
+              {showCalligraphyPopover && (
+                <div
+                  className="absolute bottom-full mb-3 left-0 w-80 bg-slate-900/98 backdrop-blur-xl border border-purple-500/50 rounded-2xl shadow-2xl p-3.5 z-50 text-white animate-in fade-in slide-in-from-bottom-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between pb-2.5 border-b border-white/10 mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-400/30">
+                        <Feather className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold flex items-center gap-1.5 text-white">
+                          Viết Chữ Đẹp
+                          <span className="text-[9px] px-1.5 py-0.5 bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 font-black rounded-md">AI OCR</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400">Viết tự do rồi ứng dụng tự động biến thành font chữ đẹp</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowCalligraphyPopover(false)}
+                      className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Font Selection */}
+                  <div className="text-[11px] font-semibold text-purple-300 mb-1.5">Chọn kiểu chữ viết tay:</div>
+                  <div className="grid grid-cols-2 gap-1.5 mb-3">
+                    {[
+                      { id: 'calligraphy', label: 'Thư Pháp Mềm Mại', sub: 'Dancing Script', sample: 'Nét chữ nghệ thuật' },
+                      { id: 'handwriting', label: 'Bút Mài Học Đường', sub: 'Caveat', sample: 'Thanh thoát giáo viên' },
+                      { id: 'primary', label: 'Nét Phấn Học Trò', sub: 'Mali', sample: 'Rõ ràng, tròn trịa' },
+                      { id: 'cursive', label: 'Nét Cọ Bay Bổng', sub: 'Marck Script', sample: 'Uốn lượn bay bổng' },
+                    ].map((font) => (
+                      <button
+                        key={font.id}
+                        onClick={() => setCalligraphyFont(font.id as any)}
+                        className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                          calligraphyFont === font.id
+                            ? 'bg-purple-600/30 border-purple-400 text-white shadow ring-1 ring-purple-400'
+                            : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold">{font.label}</div>
+                        <div className="text-[9px] text-slate-400 mb-1">{font.sub}</div>
+                        <div
+                          className="text-[13px] text-amber-200 truncate"
+                          style={{
+                            fontFamily:
+                              font.id === 'calligraphy'
+                                ? '"Dancing Script", cursive'
+                                : font.id === 'handwriting'
+                                ? '"Caveat", cursive'
+                                : font.id === 'primary'
+                                ? '"Mali", cursive'
+                                : '"Marck Script", cursive',
+                          }}
+                        >
+                          {font.sample}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Auto-convert toggle */}
+                  <div className="flex items-center justify-between bg-white/5 p-2 rounded-xl border border-white/10 mb-3">
+                    <span className="text-[11px] text-slate-300">Tự động chuyển khi viết xong:</span>
+                    <button
+                      onClick={() => setAutoConvertCalligraphy((v) => !v)}
+                      className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold transition-all cursor-pointer ${
+                        autoConvertCalligraphy
+                          ? 'bg-emerald-600 text-white shadow'
+                          : 'bg-slate-700 text-slate-300'
+                      }`}
+                    >
+                      {autoConvertCalligraphy ? 'Bật (sau 1.4s)' : 'Thủ công'}
+                    </button>
+                  </div>
+
+                  {/* Manual Convert Now button */}
+                  <button
+                    onClick={() => {
+                      setShowCalligraphyPopover(false);
+                      handleConvertHandwritingToCalligraphy();
+                    }}
+                    disabled={isConvertingCalligraphy}
+                    className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg hover:brightness-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Wand2 className="w-3.5 h-3.5 text-amber-300" />
+                    <span>{isConvertingCalligraphy ? 'Đang chuyển hóa...' : 'Chuyển thành chữ đẹp ngay'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* 3. Khăn Lau Bảng (Towel icon & 50p fast erase) */}
             <button

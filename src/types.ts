@@ -109,6 +109,7 @@ export interface LessonDoc {
 export type WhiteboardTool =
   | 'select'
   | 'pen'
+  | 'calligraphy'
   | 'highlighter'
   | 'eraser'
   | 'laser'
@@ -170,6 +171,8 @@ export interface StrokePoint {
   x: number;
   y: number;
   pressure?: number;
+  time?: number;
+  width?: number;
 }
 
 export interface StrokeVertex {

@@ -122,6 +122,33 @@ async function generateWithGemini(ai: any, params: any) {
   throw lastError;
 }
 
+// Ultra-low latency vision caller specifically for live classroom handwriting recognition
+async function generateFastVisionWithGemini(ai: any, params: any) {
+  const modelsToTry = [
+    "gemini-3.1-flash-lite", // Extremely fast multimodal inference
+    "gemini-flash-latest",
+    "gemini-3.8-flash",
+  ];
+  let lastError: any = null;
+
+  for (const model of modelsToTry) {
+    try {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Timeout after 7s for ${model}`)), 7000)
+      );
+      const callPromise = ai.models.generateContent({
+        ...params,
+        model,
+      });
+      return await Promise.race([callPromise, timeoutPromise]);
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[AI Notice] Fast vision model ${model} unavailable, trying next...`);
+    }
+  }
+  throw lastError;
+}
+
 // In-memory Classroom Rooms for live student interactions
 interface StudentSubmission {
   studentId: string;
@@ -519,6 +546,56 @@ app.delete("/api/lessons/:id", (req, res) => {
   cloudLessonsStore = cloudLessonsStore.filter((l) => l.id !== id);
   writeJsonFileSync(LESSONS_FILE, cloudLessonsStore);
   res.json({ success: true, lessons: cloudLessonsStore });
+});
+
+// AI Blackboard Handwriting Recognition Endpoint (Vietnamese Handwriting to Beautiful Text) - High Speed
+app.post("/api/ai/recognize-handwriting", async (req, res) => {
+  const { imageBase64, mimeType = "image/jpeg", context = "bài giảng lớp học" } = req.body;
+  try {
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Thiếu dữ liệu ảnh nét vẽ (imageBase64)" });
+    }
+
+    const ai = getGeminiClient();
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+
+    const response = await generateFastVisionWithGemini(ai, {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType,
+                data: cleanBase64,
+              },
+            },
+            {
+              text: `Đọc chính xác chữ viết tay tiếng Việt hoặc số/công thức toán học trong ảnh trên bảng lớp học.
+Chỉ trả về DUY NHẤT nội dung chữ đọc được, viết đúng chính tả tiếng Việt có dấu, KHÔNG giải thích, KHÔNG thêm từ ngữ nào khác, KHÔNG ngoặc kép thừa. Nếu không đọc được chữ, trả về "".`,
+            },
+          ],
+        },
+      ],
+      config: {
+        temperature: 0.0,
+        maxOutputTokens: 64,
+      },
+    });
+
+    let recognizedText = (response.text || "").trim();
+    // Clean potential markdown code blocks or quotes
+    recognizedText = recognizedText.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '');
+    if ((recognizedText.startsWith('"') && recognizedText.endsWith('"')) ||
+        (recognizedText.startsWith('“') && recognizedText.endsWith('”'))) {
+      recognizedText = recognizedText.slice(1, -1).trim();
+    }
+
+    res.json({ success: true, text: recognizedText });
+  } catch (error: any) {
+    console.warn("[AI Notice] Handwriting recognition unavailable:", error?.message || error);
+    res.json({ success: false, text: "", message: "Không nhận diện được chữ" });
+  }
 });
 
 // AI Query Endpoint (RAG from lesson materials & interactive classroom tutor)

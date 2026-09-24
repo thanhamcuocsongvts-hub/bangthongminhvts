@@ -27,7 +27,7 @@ export interface BlackboardTextBox {
   text: string;
   color: string;
   size: number;
-  fontFamily?: 'sans' | 'serif' | 'mono' | 'handwriting';
+  fontFamily?: 'sans' | 'serif' | 'mono' | 'handwriting' | 'calligraphy' | 'cursive' | 'primary';
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -84,12 +84,18 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
   // Quick font families mapping
   const getFontFamilyCss = () => {
     switch (fontFamily) {
+      case 'calligraphy':
+        return '"Dancing Script", "Caveat", cursive, sans-serif';
+      case 'cursive':
+        return '"Marck Script", "Dancing Script", cursive, sans-serif';
+      case 'primary':
+        return '"Mali", "Patrick Hand", cursive, sans-serif';
+      case 'handwriting':
+        return '"Caveat", "Patrick Hand", cursive, sans-serif';
       case 'serif':
         return '"Times New Roman", Times, "Be Vietnam Pro", serif';
       case 'mono':
         return 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-      case 'handwriting':
-        return '"Caveat", "Patrick Hand", "Comic Sans MS", cursive, sans-serif';
       case 'sans':
       default:
         return '"Be Vietnam Pro", Inter, system-ui, sans-serif';
@@ -260,12 +266,15 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
             value={fontFamily}
             onChange={(e) => onChange({ ...textBox, fontFamily: e.target.value as any })}
             className="bg-slate-800 text-white text-xs font-semibold px-2 py-1 rounded-lg border border-slate-700 outline-none focus:ring-1 focus:ring-cyan-400"
-            title="Kiểu phông chữ (Chuẩn Word & Sách Giáo Khoa)"
+            title="Kiểu phông chữ (Chuẩn Word, Sách Giáo Khoa & Chữ Viết Tay Tuyệt Đẹp)"
           >
+            <option value="calligraphy">✍️ Thư Pháp Mềm Mại (Dancing Script)</option>
+            <option value="handwriting">📝 Bút Mài Học Đường (Caveat)</option>
+            <option value="primary">🎒 Nét Phấn Học Trò (Mali)</option>
+            <option value="cursive">🖋️ Nét Cọ Nghệ Thuật (Marck Script)</option>
             <option value="sans">Phông Sans (Arial / Chuẩn)</option>
             <option value="serif">Phông Serif (Times New Roman / SGK)</option>
             <option value="mono">Phông Mono (Toán tin / Mã)</option>
-            <option value="handwriting">Phông Viết phấn (Phấn bảng)</option>
           </select>
 
           {/* Font Size A- / A+ */}

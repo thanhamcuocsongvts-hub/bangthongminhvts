@@ -1005,7 +1005,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     lastVelocityRef.current = 0;
 
     // Draw immediate responsive initial dot for freehand
-    if (['pen', 'highlighter', 'eraser'].includes(activeTool)) {
+    if (['pen', 'calligraphy', 'highlighter', 'eraser'].includes(activeTool)) {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -1067,7 +1067,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     const dist = Math.hypot(rawPoint.x - lastSmoothed.x, rawPoint.y - lastSmoothed.y);
 
     // Filter micro-jitter (< 1.4px)
-    if (dist < 1.4 && ['pen', 'highlighter', 'eraser'].includes(activeTool)) {
+    if (dist < 1.4 && ['pen', 'calligraphy', 'highlighter', 'eraser'].includes(activeTool)) {
       return;
     }
 
@@ -1109,7 +1109,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     window.currentRafRef.id = requestAnimationFrame(() => {
 
     // Freehand tools: Lightning-fast incremental Bezier rendering
-    if (['pen', 'highlighter', 'eraser'].includes(activeTool)) {
+    if (['pen', 'calligraphy', 'highlighter', 'eraser'].includes(activeTool)) {
       if (newPoints.length >= 3) {
         const p0 = newPoints[newPoints.length - 3];
         const p1 = newPoints[newPoints.length - 2];
