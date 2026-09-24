@@ -59,6 +59,13 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
 
     for (const item of validLessons) {
       store.put(item);
+      // If item contains large data: fileUrl, ensure it's also secured in STORE_FILES cache
+      if (item.fileUrl && (item.fileUrl.startsWith('data:') || item.fileUrl.startsWith('blob:'))) {
+        try {
+          const filesStore = tx.objectStore(STORE_FILES);
+          filesStore.put({ id: item.id, dataUrl: item.fileUrl, savedAt: Date.now() });
+        } catch (_) {}
+      }
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -200,6 +207,23 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
         }
       }
     });
+
+    // Check STORE_FILES for any lesson with missing fileUrl
+    const filesTx = db.transaction(STORE_FILES, 'readonly');
+    const filesStore = filesTx.objectStore(STORE_FILES);
+    for (const [id, lesson] of allLessonsMap.entries()) {
+      if (!lesson.fileUrl) {
+        const cachedFile: any = await new Promise((resolve) => {
+          const req = filesStore.get(id);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve(null);
+        });
+        if (cachedFile && cachedFile.dataUrl) {
+          lesson.fileUrl = cachedFile.dataUrl;
+          allLessonsMap.set(id, lesson);
+        }
+      }
+    }
   } catch(e) {
     console.warn("IndexedDB read failed", e);
   }

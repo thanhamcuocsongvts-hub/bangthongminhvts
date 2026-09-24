@@ -1847,7 +1847,8 @@ export function drawFunctionGraph(
       const originY = cy;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid, 't (s)', 'v (cm/s)');
 
-      const vmax = 2.8;
+      const maxAvailY = Math.max(16, (bottom - originY) * 0.72);
+      const vmax = Math.min(2.8, Math.max(1.2, maxAvailY / unitPx));
       const omega = 1.4;
       const T = (2 * Math.PI) / omega;
       const fn = (t: number) => (t >= 0 ? -vmax * Math.sin(omega * t) : NaN);
@@ -1877,7 +1878,8 @@ export function drawFunctionGraph(
       const originY = cy;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid, 't (s)', 'a (cm/s²)');
 
-      const amax = 2.8;
+      const maxAvailY = Math.max(16, (bottom - originY) * 0.72);
+      const amax = Math.min(2.8, Math.max(1.2, maxAvailY / unitPx));
       const omega = 1.4;
       const T = (2 * Math.PI) / omega;
       const fn = (t: number) => (t >= 0 ? -amax * Math.cos(omega * t) : NaN);

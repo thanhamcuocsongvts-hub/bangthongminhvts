@@ -192,15 +192,15 @@ export const DocxViewer: React.FC<DocxViewerProps> = ({
               setHasMathFormulas(true);
               setViewMode('math_mode');
             }
+            // Display immediately so teacher can start reading and solving formulas right away
+            setLoading(false);
           }
         } catch (deepErr) {
           console.warn('Deep MathType parse notice:', deepErr);
         }
 
         if (docContainerRef.current && arrayBuffer) {
-          setLoadingStatus('Đang chuẩn bị bố cục trang in Word...');
           docContainerRef.current.innerHTML = '';
-
           try {
             await renderAsync(arrayBuffer, docContainerRef.current, undefined, {
               className: 'docx',

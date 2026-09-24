@@ -258,18 +258,27 @@ export function ommlNodeToLatex(node: Element): string {
   return result;
 }
 
+const latexHtmlCache = new Map<string, string>();
+
 /**
- * Render a LaTeX formula to KaTeX HTML
+ * Render a LaTeX formula to KaTeX HTML with caching
  */
 export function renderLatexToHtml(latex: string, isBlock = false): string {
   if (!latex || !latex.trim()) return '';
+  const key = (isBlock ? 'B:' : 'I:') + latex.trim();
+  if (latexHtmlCache.has(key)) return latexHtmlCache.get(key)!;
   try {
-    return katex.renderToString(latex.trim(), {
+    const rendered = katex.renderToString(latex.trim(), {
       displayMode: isBlock,
       throwOnError: false,
     });
+    if (latexHtmlCache.size > 2500) latexHtmlCache.clear();
+    latexHtmlCache.set(key, rendered);
+    return rendered;
   } catch (e) {
-    return `<span class="font-mono text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded border border-indigo-200">${latex}</span>`;
+    const fallback = `<span class="font-mono text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded border border-indigo-200">${latex}</span>`;
+    latexHtmlCache.set(key, fallback);
+    return fallback;
   }
 }
 
@@ -374,14 +383,41 @@ function parseParagraphElement(
 
   // 3. Run (<w:r>)
   if (tagName === 'r') {
-    // Check if run has MathType object
-    const objectChildren = findChildrenByLocalNames(element, ['object', 'pict', 'OLEObject']);
-    if (objectChildren.length > 0) {
-      for (let i = 0; i < objectChildren.length; i++) {
-        const obj = objectChildren[i];
-        const oleObj = findChildByLocalNames(obj, ['OLEObject']) || (getLocalName(obj) === 'OLEObject' ? obj : null);
+    let isBold = false;
+    let isItalic = false;
+    let isUnderline = false;
+    let rText = '';
+
+    for (let i = 0; i < element.children.length; i++) {
+      const child = element.children[i];
+      const cTag = getLocalName(child);
+
+      if (cTag === 'rPr') {
+        for (let p = 0; p < child.children.length; p++) {
+          const pTag = getLocalName(child.children[p]);
+          if (pTag === 'b') isBold = true;
+          else if (pTag === 'i') isItalic = true;
+          else if (pTag === 'u') isUnderline = true;
+        }
+      } else if (cTag === 't') {
+        rText += child.textContent || '';
+      } else if (cTag === 'tab') {
+        html += '<span class="inline-block w-8 md:w-12">&emsp;&emsp;</span>';
+        text += '\t';
+      } else if (cTag === 'br') {
+        html += '<br/>';
+        text += '\n';
+      } else if (cTag === 'oMath' || cTag === 'oMathPara') {
+        const latex = ommlNodeToLatex(child).trim();
+        if (latex) {
+          const mathHtml = renderLatexToHtml(latex, false);
+          html += ` <span class="math-inline inline-block my-0.5 align-middle font-serif text-indigo-950 font-medium">${mathHtml}</span> `;
+          text += ` $${latex}$ `;
+        }
+      } else if (cTag === 'object' || cTag === 'pict' || cTag === 'OLEObject') {
+        const oleObj = cTag === 'OLEObject' ? child : findChildByLocalNames(child, ['OLEObject']);
         const oleId = oleObj ? getAttrValue(oleObj, 'r:id', 'id') : '';
-        const imgData = findChildByLocalNames(obj, ['imagedata']);
+        const imgData = findChildByLocalNames(child, ['imagedata']);
         const imgId = imgData ? getAttrValue(imgData, 'r:id', 'id') : '';
 
         if (oleId && oleMathMap[oleId]) {
@@ -389,67 +425,25 @@ function parseParagraphElement(
           const mathHtml = renderLatexToHtml(latex, false);
           html += ` <span class="mathtype-formula math-inline inline-block my-0.5 align-middle font-serif text-indigo-950 font-medium">${mathHtml}</span> `;
           text += ` $${latex}$ `;
-          return { html, text };
+        } else {
+          const resolvedImg = (imgId && mediaMap[imgId]) || (oleId && mediaMap[oleId]);
+          if (resolvedImg) {
+            html += ` <img src="${resolvedImg}" alt="Công thức MathType" class="mathtype-img inline-block align-middle my-0.5 max-h-12 max-w-full" /> `;
+            text += ' [Công thức] ';
+          }
         }
-
-        const resolvedImg = (imgId && mediaMap[imgId]) || (oleId && mediaMap[oleId]);
-        if (resolvedImg) {
-          html += ` <img src="${resolvedImg}" alt="Công thức MathType" class="mathtype-img inline-block align-middle my-0.5 max-h-12 max-w-full" /> `;
-          text += ' [Công thức] ';
-          return { html, text };
+      } else if (cTag === 'drawing') {
+        const blip = findChildByLocalNames(child, ['blip']);
+        const embedId = blip ? getAttrValue(blip, 'r:embed', 'embed') : '';
+        if (embedId && mediaMap[embedId]) {
+          const imgSrc = mediaMap[embedId];
+          if (!collectedImages.includes(imgSrc)) {
+            collectedImages.push(imgSrc);
+            html += `<div class="my-4 flex justify-center"><img src="${imgSrc}" alt="Hình minh họa bài tập" class="max-h-80 max-w-full rounded-2xl shadow-md border border-slate-200 object-contain bg-white p-1" /></div>`;
+          }
         }
       }
     }
-
-    // Check if run has child OMML math object
-    const mathChildren = findChildrenByLocalNames(element, ['oMath', 'oMathPara']);
-    if (mathChildren.length > 0) {
-      mathChildren.forEach((mEl) => {
-        const latex = ommlNodeToLatex(mEl).trim();
-        if (latex) {
-          const mathHtml = renderLatexToHtml(latex, false);
-          html += ` <span class="math-inline inline-block my-0.5 align-middle font-serif text-indigo-950 font-medium">${mathHtml}</span> `;
-          text += ` $${latex}$ `;
-        }
-      });
-      return { html, text };
-    }
-
-    const isBold = !!findChildByLocalNames(element, ['b']);
-    const isItalic = !!findChildByLocalNames(element, ['i']);
-    const isUnderline = !!findChildByLocalNames(element, ['u']);
-
-    // Check for tabs inside run (<w:tab/>)
-    const hasTab = !!findChildByLocalNames(element, ['tab']);
-    if (hasTab) {
-      html += '<span class="inline-block w-8 md:w-12">&emsp;&emsp;</span>';
-      text += '\t';
-    }
-
-    // Check for line breaks inside run (<w:br/>)
-    const hasBr = !!findChildByLocalNames(element, ['br']);
-    if (hasBr) {
-      html += '<br/>';
-      text += '\n';
-    }
-
-    // Check for images inside run
-    const blip = findChildByLocalNames(element, ['blip']);
-    const embedId = blip ? getAttrValue(blip, 'r:embed', 'embed') : '';
-    if (embedId && mediaMap[embedId]) {
-      const imgSrc = mediaMap[embedId];
-      if (!collectedImages.includes(imgSrc)) {
-        collectedImages.push(imgSrc);
-        html += `<div class="my-4 flex justify-center"><img src="${imgSrc}" alt="Hình minh họa bài tập" class="max-h-80 max-w-full rounded-2xl shadow-md border border-slate-200 object-contain bg-white p-1" /></div>`;
-      }
-    }
-
-    // Text nodes inside run
-    const tNodes = findChildrenByLocalNames(element, ['t']);
-    let rText = '';
-    tNodes.forEach((t) => {
-      rText += t.textContent || '';
-    });
 
     if (rText) {
       let styledText = rText

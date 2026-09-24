@@ -39,6 +39,7 @@ import {
   Timer,
   CheckCircle,
   Smartphone,
+  BarChart3,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
@@ -46,6 +47,7 @@ import mammoth from 'mammoth';
 import { QuizQuestion, RoomState, StudentSubmission, TextScale, ActiveStudent } from '../types';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
+import { AnalyticsDashboard } from './AnalyticsDashboard';
 
 interface LiveQuizHubProps {
   roomState: RoomState | null;
@@ -58,6 +60,7 @@ interface LiveQuizHubProps {
   onOpenAIQuizCreator?: () => void;
   currentLesson?: any;
   onApplyQuestions?: (questions: QuizQuestion[], quizTitle?: string) => Promise<void> | void;
+  onOpenExportModal?: () => void;
 }
 
 interface UploadedMatrixFile {
@@ -81,9 +84,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   onOpenAIQuizCreator,
   currentLesson,
   onApplyQuestions,
+  onOpenExportModal,
 }) => {
-  // Mode: Default to 'creator' or switch to 'live' or 'exam' (Chế độ phòng thi)
-  const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'exam'>('creator');
+  // Mode: Default to 'creator' or switch to 'live', 'exam', or 'analytics' (Biểu đồ phân tích)
+  const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'exam' | 'analytics'>('creator');
 
   // Exam Room Mode state (Chế độ phòng thi)
   const [examDurationMinutes, setExamDurationMinutes] = useState<number>(45);
@@ -664,6 +668,19 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   Khóa MH
                 </span>
               )}
+            </button>
+
+            <button
+              id="analytics-mode-nav-btn"
+              onClick={() => setActiveMode('analytics')}
+              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                activeMode === 'analytics'
+                  ? 'bg-teal-600 text-white shadow-md'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 text-teal-300" />
+              <span>Biểu Đồ Phân Tích</span>
             </button>
           </div>
 
@@ -1998,6 +2015,18 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
           </div>
         );
       })()}
+
+      {/* Analytics Dashboard Mode */}
+      {activeMode === 'analytics' && (
+        <div className="flex-1 overflow-y-auto bg-slate-50 p-4 md:p-6">
+          <AnalyticsDashboard
+            lesson={currentLesson || { title: 'Bài giảng hiện tại', quizzes: questions }}
+            roomState={roomState}
+            onOpenExportModal={onOpenExportModal || (() => {})}
+            onAskAIAboutResults={() => {}}
+          />
+        </div>
+      )}
 
       {/* QR Code Modal for Student Mobile Join */}
       {showQRModal && (

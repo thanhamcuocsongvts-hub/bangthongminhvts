@@ -69,7 +69,7 @@ import {
 import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile, BlackboardBackground } from '../types';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
 import { computeDefaultVertices, updateVertexWithConstraints, drawShapeWithVertices } from '../utils/geometryVertices';
-import { isFunctionGraphTool, drawFunctionGraph } from '../utils/mathGraphRenderer';
+import { isFunctionGraphTool, drawFunctionGraph, getGraphBounds } from '../utils/mathGraphRenderer';
 import { compileMathExpression } from '../utils/mathExpressionParser';
 import katex from 'katex';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
@@ -557,7 +557,31 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       };
     }
 
-    // 3. Calculation for 3D and 2D shapes with custom vertices
+    // 3. Calculation for Mathematical & Physical Function Graphs
+    if (isFunctionGraphTool(stroke.tool)) {
+      let renderPts = stroke.points;
+      if (!renderPts || renderPts.length === 1) {
+        const p = renderPts && renderPts.length > 0 ? renderPts[0] : { x: 150, y: 150, pressure: 0.5 };
+        renderPts = [
+          p,
+          { x: p.x + 380, y: p.y + 280, pressure: 0.5 },
+        ];
+      }
+      const b = getGraphBounds(renderPts, stroke.scale || 1);
+      const padding = 24; // Generous padding so all axis labels, projections, formulas & arrows are enclosed
+      return {
+        minX: b.minX - padding,
+        maxX: b.maxX + padding,
+        minY: b.minY - padding,
+        maxY: b.maxY + padding,
+        centerX: b.cx,
+        centerY: b.cy,
+        width: b.width + padding * 2,
+        height: b.height + padding * 2,
+      };
+    }
+
+    // 4. Calculation for 3D and 2D shapes with custom vertices
     if (stroke.customVertices && stroke.customVertices.length > 0) {
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       stroke.customVertices.forEach((v) => {
@@ -1874,7 +1898,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       // Automatically select function graphs so the user can easily zoom/scale and move them immediately
       if (isFunctionGraphTool(activeTool)) {
         setSelectedStrokeId(newStroke.id);
-        setIsStrokeToolbarExpanded(true);
+        setIsStrokeToolbarExpanded(false);
       }
     }
   };

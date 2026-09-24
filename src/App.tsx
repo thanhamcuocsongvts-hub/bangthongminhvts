@@ -775,7 +775,7 @@ export default function App() {
   return (
     <div className="w-screen h-dvh flex flex-col bg-[#f8fafc] text-slate-800 overflow-hidden select-none">
       {/* 75-Inch Top Navigation Header Bar */}
-      {(!isFullscreen || activeTab !== 'presentation') && (
+      {!isFullscreen && (
         <HeaderBar
           syncStatus={syncStatus}
           activeTab={activeTab}
@@ -812,53 +812,6 @@ export default function App() {
             transition={{ duration: 0.18, ease: 'easeOut' }}
             className="w-full h-full"
           >
-            {/* Tab 1: Presentation Mode */}
-            {activeTab === 'presentation' && (
-              <PresentationView
-                lesson={currentLesson}
-                allLessons={lessons}
-                textScale={textScale}
-                activeTeacher={activeTeacher}
-                onSelectLesson={handleSelectLesson}
-                onAddLesson={handleSaveToLibrary}
-                onOpenTemporaryLesson={handleOpenTemporaryLesson}
-                onSaveToLibrary={handleSaveToLibrary}
-                isSavedInLibrary={isCurrentLessonSavedInLibrary}
-                onUpdateLesson={(updatedDoc) => {
-                  setActiveOpenedLesson(updatedDoc);
-                  if (lessons.some((l) => l.id === updatedDoc.id)) {
-                    setLessons((prev) =>
-                      prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
-                    );
-                  }
-                }}
-                onLaunchQuiz={() => setActiveTab('quiz')}
-                onClosePresentation={() => { setActiveLessonId(''); setActiveTab('documents'); }}
-                onAskAIAboutSlide={(slide) => {
-                  setActiveTab('ai_chat');
-                  handleSendAIMessage(
-                    `Học sinh đang theo dõi slide "${slide.title}": ${slide.content}. Hãy giải thích cặn kẽ và cho thêm ví dụ trực quan về phần này.`
-                  );
-                }}
-                onOpenExportModal={() => setShowExportModal(true)}
-              />
-            )}
-
-            {/* Tab: PPT Presentation Mode */}
-            {activeTab === 'ppt_mode' && (
-              <PPTPresentationMode
-                onSelectLesson={handleSelectLesson}
-                onOpenTemporaryLesson={handleOpenTemporaryLesson}
-                onSaveToLibrary={handleSaveToLibrary}
-                isSavedInLibrary={isCurrentLessonSavedInLibrary}
-                activeLesson={currentLesson}
-                activeLessonUrl={currentLesson?.fileUrl}
-                activeLessonTitle={currentLesson?.title}
-                activeTeacher={activeTeacher}
-                onSwitchToReader={() => setActiveTab('reader')}
-              />
-            )}
-
             {/* Tab 2: Document Reader View (Open Doc directly & AI Key Points) */}
             {activeTab === 'reader' && (
               <DocumentReaderView
@@ -890,12 +843,9 @@ export default function App() {
                   });
                   setActiveTab('whiteboard');
                 }}
-                onLaunchSlides={() => setActiveTab('ppt_mode')}
+                onLaunchSlides={() => setActiveTab('whiteboard')}
                 onLaunchQuiz={() => setActiveTab('quiz')}
-                onSendToAIChat={(prompt) => {
-                  setActiveTab('ai_chat');
-                  handleSendAIMessage(prompt);
-                }}
+                onSendToAIChat={() => {}}
               />
             )}
 
@@ -937,7 +887,7 @@ export default function App() {
                     return next;
                   });
                 }}
-                onSwitchToPresentation={() => setActiveTab('ppt_mode')}
+                onSwitchToPresentation={() => setActiveTab('whiteboard')}
                 onSwitchToReader={() => setActiveTab('reader')}
                 onOpenRandomPicker={() => {
                   setPickerClassroom(activeTeacher?.classes?.[0] || null);
@@ -946,12 +896,13 @@ export default function App() {
               />
             )}
 
-            {/* Tab 4: Live Quiz Hub & Classroom Submission */}
+            {/* Tab 4: Live Quiz Hub & Classroom Submission (with embedded Analytics) */}
             {activeTab === 'quiz' && (
               <LiveQuizHub
                 roomState={roomState}
                 textScale={textScale}
                 onRefreshRoom={() => fetchRoom(roomState?.pin || '758899')}
+                onOpenExportModal={() => setShowExportModal(true)}
                 onControlRoom={async (idx, isLive) => {
                   await fetch(`/api/rooms/${roomState?.pin || '758899'}/control`, {
                     method: 'POST',
@@ -1029,19 +980,6 @@ export default function App() {
               <ExternalContentEmbedder />
             )}
 
-            {/* Tab 5: Analytics Dashboard & Learning Insights */}
-            {activeTab === 'analytics' && (
-              <AnalyticsDashboard
-                lesson={currentLesson}
-                roomState={roomState}
-                onOpenExportModal={() => setShowExportModal(true)}
-                onAskAIAboutResults={(summary) => {
-                  setActiveTab('ai_chat');
-                  handleSendAIMessage(summary);
-                }}
-              />
-            )}
-
             {/* Tab 6: Class Gradebook & Student Management */}
             {activeTab === 'gradebook' && (
               <ClassGradebook
@@ -1072,11 +1010,7 @@ export default function App() {
                     sel?.fileType === 'ppt' ||
                     sel?.fileName?.toLowerCase().endsWith('.pptx') ||
                     sel?.fileName?.toLowerCase().endsWith('.ppt');
-                  if (isPpt) {
-                    setActiveTab('ppt_mode');
-                  } else {
-                    setActiveTab('reader');
-                  }
+                  setActiveTab('reader');
                 }}
                 onAddLesson={(newDoc) => {
                   handleSaveToLibrary(newDoc);
@@ -1102,17 +1036,6 @@ export default function App() {
                 }}
                 onSyncToCloud={handleSyncToCloud}
                 isSyncing={isSyncingCloud}
-              />
-            )}
-
-            {/* Tab 8: AI Teacher Assistant & Instant Knowledge Extraction */}
-            {activeTab === 'ai_chat' && (
-              <AITeacherAssistant
-                lesson={currentLesson}
-                textScale={textScale}
-                messages={chatMessages}
-                onSendMessage={handleSendAIMessage}
-                isLoading={isAILoading}
               />
             )}
           </motion.div>

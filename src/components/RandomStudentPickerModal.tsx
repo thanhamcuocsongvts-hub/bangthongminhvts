@@ -18,19 +18,13 @@ import {
   Trophy,
   Play,
   RotateCcw,
-  UserPlus,
-  Layers,
-  HelpCircle,
   Crown,
-  Wand2,
-  Compass,
-  Gamepad2,
-  Smile,
-  Target,
-  Flag,
-  Fish,
   Crosshair,
-  Activity,
+  Flag,
+  Target,
+  Gamepad2,
+  Bomb,
+  Compass,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ClassRoom, ClassStudent } from '../types';
@@ -49,14 +43,20 @@ export type GameType =
   | 'wheel'
   | 'mystery_box'
   | 'space_rocket'
+  | 'laser_battle'
+  | 'time_bomb'
+  | 'olympia_climb'
+  | 'penalty_kick'
+  | 'claw_machine'
+  | 'super_darts'
+  | 'cosmic_warp'
   | 'magic_cards'
   | 'golden_egg'
   | 'treasure_chest'
   | 'sprint_race'
   | 'ocean_fishing'
   | 'archery_target'
-  | 'swimming_race'
-  | 'magic_hat';
+  | 'swimming_race';
 
 interface MysteryBoxItem {
   id: number;
@@ -66,61 +66,6 @@ interface MysteryBoxItem {
   title: string;
   assignedStudent: ClassStudent;
   isOpen: boolean;
-}
-
-interface MagicCardItem {
-  id: number;
-  icon: string;
-  color: string;
-  assignedStudent: ClassStudent;
-  isFlipped: boolean;
-}
-
-interface GoldenEggItem {
-  id: number;
-  isCracked: boolean;
-  assignedStudent: ClassStudent;
-  color: string;
-}
-
-interface TreasureChestItem {
-  id: number;
-  isOpen: boolean;
-  assignedStudent: ClassStudent;
-  gem: string;
-}
-
-interface RaceRunner {
-  id: number;
-  lane: number;
-  name: string;
-  emoji: string;
-  color: string;
-  laneBg: string;
-  progress: number; // 0 - 100
-  assignedStudent: ClassStudent;
-}
-
-interface SwimmingFish {
-  id: number;
-  name: string;
-  icon: string;
-  color: string;
-  bgGrad: string;
-  size: number;
-  isCaught: boolean;
-  assignedStudent: ClassStudent;
-}
-
-interface SwimmerLane {
-  id: number;
-  lane: number;
-  name: string;
-  emoji: string;
-  color: string;
-  laneBg: string;
-  progress: number;
-  assignedStudent: ClassStudent;
 }
 
 // 30 Sample Vietnamese student names for fast-start if class roster is empty
@@ -138,13 +83,11 @@ const SAMPLE_STUDENTS: ClassStudent[] = [
   { id: 'sample_11', code: 'HS11', name: 'Trịnh Hương Quỳnh', bonusPoints: 0, isCalled: false },
   { id: 'sample_12', code: 'HS12', name: 'Dương Tuấn Sang', bonusPoints: 0, isCalled: false },
   { id: 'sample_13', code: 'HS13', name: 'Lý Phương Thảo', bonusPoints: 0, isCalled: false },
-  { id: 'sample_14', code: 'HS14', name: 'Phan Anh Tuấn', bonusPoints: 0, isCalled: false },
-  { id: 'sample_15', code: 'HS15', name: 'Mai Khánh Vy', bonusPoints: 0, isCalled: false },
-  { id: 'sample_16', code: 'HS16', name: 'Hồ Công Vinh', bonusPoints: 0, isCalled: false },
-  { id: 'sample_17', code: 'HS17', name: 'Đinh Nhật Ánh', bonusPoints: 0, isCalled: false },
-  { id: 'sample_18', code: 'HS18', name: 'Võ Minh Châu', bonusPoints: 0, isCalled: false },
-  { id: 'sample_19', code: 'HS19', name: 'Tạ Tiến Đạt', bonusPoints: 0, isCalled: false },
-  { id: 'sample_20', code: 'HS20', name: 'Cao Ngọc Diệp', bonusPoints: 0, isCalled: false },
+  { id: 'sample_14', code: 'HS14', name: 'Mai Anh Tuấn', bonusPoints: 0, isCalled: false },
+  { id: 'sample_15', code: 'HS15', name: 'Đoàn Yến Vy', bonusPoints: 0, isCalled: false },
+  { id: 'sample_16', code: 'HS16', name: 'Phan Tấn Khang', bonusPoints: 0, isCalled: false },
+  { id: 'sample_17', code: 'HS17', name: 'Lâm Mỹ Duyên', bonusPoints: 0, isCalled: false },
+  { id: 'sample_18', code: 'HS18', name: 'Võ Minh Quân', bonusPoints: 0, isCalled: false },
 ];
 
 export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> = ({
@@ -157,73 +100,69 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   onSetOralScore,
 }) => {
   const [activeGame, setActiveGame] = useState<GameType>('wheel');
-  const [isSpinning, setIsSpinning] = useState<boolean>(false);
+  const [mode, setMode] = useState<'single' | 'group'>('single');
+  const [groupSize, setGroupSize] = useState<number>(3);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [excludeCalled, setExcludeCalled] = useState<boolean>(false);
+
+  // Results State
   const [selectedStudent, setSelectedStudent] = useState<ClassStudent | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<ClassStudent[]>([]);
-  const [excludeCalled, setExcludeCalled] = useState<boolean>(false);
-  const [mode, setMode] = useState<'single' | 'group'>('single');
-  const [groupSize, setGroupSize] = useState<number>(2);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [currentRotation, setCurrentRotation] = useState<number>(0);
-  const [shufflingName, setShufflingName] = useState<string>('');
 
-  // Game 2: Mystery Box State
+  // Wheel State
+  const [isSpinning, setIsSpinning] = useState<boolean>(false);
+  const [currentRotation, setCurrentRotation] = useState<number>(0);
+
+  // Mystery Box State
   const [boxes, setBoxes] = useState<MysteryBoxItem[]>([]);
   const [isShufflingBoxes, setIsShufflingBoxes] = useState<boolean>(false);
 
-  // Game 3: Space Rocket State
-  const [countdown, setCountdown] = useState<number | null>(null);
+  // Space Rocket State
   const [rocketStage, setRocketStage] = useState<'idle' | 'countdown' | 'launching' | 'winner'>('idle');
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [shufflingName, setShufflingName] = useState<string>('');
 
-  // Game 4: Magic Cards State
-  const [cards, setCards] = useState<MagicCardItem[]>([]);
-  const [isShufflingCards, setIsShufflingCards] = useState<boolean>(false);
+  // Game 4: Laser Battle Royale State
+  const [battleStage, setBattleStage] = useState<'idle' | 'scanning' | 'eliminating' | 'winner'>('idle');
+  const [battleSurvivors, setBattleSurvivors] = useState<string[]>([]);
+  const [activeLaserTarget, setActiveLaserTarget] = useState<string | null>(null);
 
-  // Game 5: Golden Eggs State
-  const [eggs, setEggs] = useState<GoldenEggItem[]>([]);
-  const [isShufflingEggs, setIsShufflingEggs] = useState<boolean>(false);
+  // Game 5: Ticking Time Bomb State
+  const [bombStage, setBombStage] = useState<'idle' | 'ticking' | 'detonated'>('idle');
+  const [bombHolderId, setBombHolderId] = useState<string | null>(null);
+  const [bombTicks, setBombTicks] = useState<number>(10);
 
-  // Game 6: Ocean Treasure Chests State
-  const [chests, setChests] = useState<TreasureChestItem[]>([]);
-  const [isShufflingChests, setIsShufflingChests] = useState<boolean>(false);
+  // Game 6: Olympia Mountain Race State
+  const [olympiaStage, setOlympiaStage] = useState<'idle' | 'rolling' | 'climbing' | 'winner'>('idle');
+  const [olympiaPositions, setOlympiaPositions] = useState<number[]>([0, 0, 0, 0]);
+  const [diceRollValue, setDiceRollValue] = useState<number>(1);
+  const [activeClimberIdx, setActiveClimberIdx] = useState<number>(0);
 
-  // Game 7: Sprint Track Race State (Chạy đua)
-  const [runners, setRunners] = useState<RaceRunner[]>([]);
-  const [raceStage, setRaceStage] = useState<'idle' | 'countdown' | 'running' | 'finish'>('idle');
-  const [raceCountdown, setRaceCountdown] = useState<number | null>(null);
+  // Game 7: Penalty Kick State
+  const [penaltyStage, setPenaltyStage] = useState<'idle' | 'aiming' | 'shooting' | 'goal'>('idle');
+  const [goalCorner, setGoalCorner] = useState<'top_left' | 'top_right' | 'bottom_left' | 'bottom_right'>('top_right');
+  const [goalKeeperDived, setGoalKeeperDived] = useState<string>('center');
 
-  // Game 8: Deep Sea Fishing State (Câu cá)
-  const [fishes, setFishes] = useState<SwimmingFish[]>([]);
-  const [fishingStage, setFishingStage] = useState<'idle' | 'casting' | 'hooked' | 'caught'>('idle');
-  const [caughtFish, setCaughtFish] = useState<SwimmingFish | null>(null);
+  // Game 8: Claw Machine State
+  const [clawStage, setClawStage] = useState<'idle' | 'moving' | 'dropping' | 'grabbing' | 'retrieving' | 'winner'>('idle');
+  const [clawPositionX, setClawPositionX] = useState<number>(50);
 
-  // Game 9: Archery Target Bullseye State (Bắn cung)
-  const [archeryStage, setArcheryStage] = useState<'idle' | 'aiming' | 'shooting' | 'hit'>('idle');
-  const [arrowScore, setArrowScore] = useState<number>(10);
-  const [arrowPos, setArrowPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
+  // Game 9: Dart Master State
+  const [dartStage, setDartStage] = useState<'idle' | 'aiming' | 'thrown' | 'bullseye'>('idle');
+  const [dartCoords, setDartCoords] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
 
-  // Game 10: Swimming Race State (Cuộc thi bơi lội vui nhộn)
-  const [swimmers, setSwimmers] = useState<SwimmerLane[]>([]);
-  const [swimmingStage, setSwimmingStage] = useState<'idle' | 'countdown' | 'swimming' | 'finish'>('idle');
-  const [swimmingCountdown, setSwimmingCountdown] = useState<number | null>(null);
-
-  // Legacy Game 10: Magician Magic Hat State (kept for fallback)
-  const [hatStage, setHatStage] = useState<'idle' | 'casting' | 'revealed'>('idle');
+  // Game 10: Cosmic Warp State
+  const [warpStage, setWarpStage] = useState<'idle' | 'charging' | 'warping' | 'teleported'>('idle');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
 
-  // Fallback if classroom has 0 students so games never break
+  // Valid student pool
   const rawRoster = classroom?.students && classroom.students.length > 0 ? classroom.students : SAMPLE_STUDENTS;
-  const isUsingSampleRoster = !classroom?.students || classroom.students.length === 0;
-
-  const studentsPool = excludeCalled
-    ? rawRoster.filter((s) => !s.isCalled)
-    : rawRoster;
-
+  const studentsPool = excludeCalled ? rawRoster.filter((s) => !s.isCalled) : rawRoster;
   const validStudents = studentsPool.length > 0 ? studentsPool : rawRoster;
 
-  // Web Audio Synthesizer for Touch Interaction
+  // Synthesized Sound Effects
   const playSound = (freq = 600, duration = 0.05, type: OscillatorType = 'sine') => {
     if (!soundEnabled) return;
     try {
@@ -241,271 +180,103 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     } catch (e) {}
   };
 
-  // Rocket Engine Rumbling Sound (Tiếng gầm rú "hụ... hụ... hụ... WHOOOOSH" tên lửa vũ trụ)
-  const playRocketEngineSound = (durationSeconds = 2.4) => {
-    if (!soundEnabled) return;
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const now = audioCtx.currentTime;
-
-      // 1. Rumbling engine oscillator
-      const osc1 = audioCtx.createOscillator();
-      const gain1 = audioCtx.createGain();
-      osc1.type = 'sawtooth';
-      osc1.frequency.setValueAtTime(65, now);
-      osc1.frequency.exponentialRampToValueAtTime(220, now + durationSeconds);
-
-      // 2. Heavy low engine rumble (hụ hụ) via LFO pulsation
-      const lfo = audioCtx.createOscillator();
-      const lfoGain = audioCtx.createGain();
-      lfo.frequency.setValueAtTime(9, now); // 9 Hz "hụ... hụ... hụ..." engine pulses
-      lfo.frequency.linearRampToValueAtTime(25, now + durationSeconds);
-      lfoGain.gain.setValueAtTime(35, now);
-      lfo.connect(lfoGain);
-      lfoGain.connect(osc1.frequency);
-
-      // 3. Noise for whooshing rocket plume
-      const bufferSize = Math.floor(audioCtx.sampleRate * durationSeconds);
-      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
-      const noise = audioCtx.createBufferSource();
-      noise.buffer = buffer;
-
-      const filter = audioCtx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(220, now);
-      filter.frequency.exponentialRampToValueAtTime(1600, now + durationSeconds);
-
-      const noiseGain = audioCtx.createGain();
-      noiseGain.gain.setValueAtTime(0.09, now);
-      noiseGain.gain.linearRampToValueAtTime(0.28, now + durationSeconds * 0.7);
-      noiseGain.gain.exponentialRampToValueAtTime(0.005, now + durationSeconds);
-
-      noise.connect(filter);
-      filter.connect(noiseGain);
-      noiseGain.connect(audioCtx.destination);
-
-      gain1.gain.setValueAtTime(0.15, now);
-      gain1.gain.linearRampToValueAtTime(0.32, now + durationSeconds * 0.75);
-      gain1.gain.exponentialRampToValueAtTime(0.001, now + durationSeconds);
-      osc1.connect(gain1);
-      gain1.connect(audioCtx.destination);
-
-      lfo.start(now);
-      osc1.start(now);
-      noise.start(now);
-
-      lfo.stop(now + durationSeconds);
-      osc1.stop(now + durationSeconds);
-      noise.stop(now + durationSeconds);
-    } catch (e) {}
-  };
-
   const playVictorySound = () => {
     if (!soundEnabled) return;
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+      const notes = [523.25, 659.25, 783.99, 1046.5];
       notes.forEach((freq, idx) => {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + idx * 0.09);
-        gain.gain.setValueAtTime(0.2, audioCtx.currentTime + idx * 0.09);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + idx * 0.09 + 0.35);
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + idx * 0.1);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime + idx * 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + idx * 0.1 + 0.35);
         osc.connect(gain);
         gain.connect(audioCtx.destination);
-        osc.start(audioCtx.currentTime + idx * 0.09);
-        osc.stop(audioCtx.currentTime + idx * 0.09 + 0.35);
+        osc.start(audioCtx.currentTime + idx * 0.1);
+        osc.stop(audioCtx.currentTime + idx * 0.1 + 0.35);
       });
     } catch (e) {}
   };
 
-  // Helper shuffle array
-  function shuffleArray<T>(arr: T[]): T[] {
-    const copy = [...arr];
-    for (let i = copy.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const temp = copy[i];
-      copy[i] = copy[j];
-      copy[j] = temp;
-    }
-    return copy;
-  }
+  const playExplosionSound = () => {
+    if (!soundEnabled) return;
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.exponentialRampToValueAtTime(30, now + 0.6);
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(now + 0.6);
+    } catch (e) {}
+  };
 
-  // Initialize Games whenever students change or game switches
-  useEffect(() => {
-    if (!isOpen) return;
-    initializeBoxes();
-    initializeCards();
-    initializeEggs();
-    initializeChests();
-    initializeRunners();
-    initializeFishes();
-    initializeSwimmers();
-  }, [isOpen, classroom, excludeCalled]);
-
+  // 1. Initialize Mystery Boxes
   const initializeBoxes = () => {
-    const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
-    const boxColors = [
-      { color: 'from-amber-400 to-orange-500', border: 'border-amber-300', icon: '🎁', title: 'Hộp Quà Vàng' },
-      { color: 'from-rose-400 to-red-500', border: 'border-rose-300', icon: '🎀', title: 'Hộp Quà Hồng' },
-      { color: 'from-indigo-400 to-blue-600', border: 'border-blue-300', icon: '📦', title: 'Hộp Quà Lam' },
-      { color: 'from-emerald-400 to-teal-600', border: 'border-emerald-300', icon: '💎', title: 'Hộp Ngọc Lục' },
-      { color: 'from-purple-400 to-violet-600', border: 'border-purple-300', icon: '🔮', title: 'Hộp Pha Lê' },
-      { color: 'from-pink-400 to-rose-600', border: 'border-pink-300', icon: '✨', title: 'Hộp May Mắn' },
-      { color: 'from-amber-500 to-yellow-600', border: 'border-yellow-300', icon: '👑', title: 'Hộp Vương Miện' },
-      { color: 'from-teal-400 to-cyan-600', border: 'border-cyan-300', icon: '🌟', title: 'Hộp Ngôi Sao' },
+    const icons = ['⭐', '💎', '🚀', '🔥', '👑', '🍀'];
+    const colors = [
+      'from-rose-500 to-pink-600',
+      'from-indigo-500 to-blue-600',
+      'from-emerald-500 to-teal-600',
+      'from-amber-500 to-orange-600',
+      'from-purple-500 to-violet-600',
+      'from-cyan-500 to-blue-600',
+    ];
+    const borderColors = [
+      'border-rose-400',
+      'border-indigo-400',
+      'border-emerald-400',
+      'border-amber-400',
+      'border-purple-400',
+      'border-cyan-400',
     ];
 
-    const newBoxes: MysteryBoxItem[] = boxColors.map((bc, idx) => ({
-      id: idx + 1,
-      color: bc.color,
-      borderColor: bc.border,
-      icon: bc.icon,
-      title: bc.title,
-      assignedStudent: shuffled[idx % shuffled.length],
-      isOpen: false,
-    }));
+    const shuffled = [...validStudents].sort(() => Math.random() - 0.5);
+    const newBoxes: MysteryBoxItem[] = [];
+    for (let i = 0; i < 6; i++) {
+      newBoxes.push({
+        id: i + 1,
+        color: colors[i % colors.length],
+        borderColor: borderColors[i % borderColors.length],
+        icon: icons[i % icons.length],
+        title: `Hộp Quà ${i + 1}`,
+        assignedStudent: shuffled[i % shuffled.length],
+        isOpen: false,
+      });
+    }
     setBoxes(newBoxes);
   };
 
-  const initializeCards = () => {
-    const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
-    const cardIcons = ['🃏', '🎴', '🔮', '✨', '⚡', '🌟'];
-    const cardColors = [
-      'from-purple-600 to-indigo-800',
-      'from-rose-600 to-red-800',
-      'from-emerald-600 to-teal-800',
-      'from-amber-600 to-orange-800',
-      'from-blue-600 to-cyan-800',
-      'from-fuchsia-600 to-pink-800',
-    ];
-
-    const newCards: MagicCardItem[] = Array.from({ length: 6 }).map((_, idx) => ({
-      id: idx + 1,
-      icon: cardIcons[idx % cardIcons.length],
-      color: cardColors[idx % cardColors.length],
-      assignedStudent: shuffled[idx % shuffled.length],
-      isFlipped: false,
-    }));
-    setCards(newCards);
-  };
-
-  const initializeEggs = () => {
-    const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
-    const eggColors = [
-      'from-amber-300 via-yellow-400 to-amber-500',
-      'from-yellow-200 via-amber-300 to-yellow-500',
-      'from-amber-400 via-yellow-500 to-orange-400',
-      'from-yellow-300 via-amber-400 to-yellow-600',
-      'from-amber-200 via-yellow-300 to-amber-500',
-      'from-yellow-400 via-amber-500 to-yellow-500',
-    ];
-    setEggs(
-      Array.from({ length: 6 }).map((_, idx) => ({
-        id: idx + 1,
-        isCracked: false,
-        assignedStudent: shuffled[idx % shuffled.length],
-        color: eggColors[idx % eggColors.length],
-      }))
-    );
-  };
-
-  const initializeChests = () => {
-    const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
-    const gems = ['💎 Kim Cương', '👑 Vương Miện', '🌟 Ngọc Bích', '🪙 Tiền Vàng', '🔮 Ngọc Trai', '🏆 Cúp Vàng'];
-    setChests(
-      Array.from({ length: 6 }).map((_, idx) => ({
-        id: idx + 1,
-        isOpen: false,
-        assignedStudent: shuffled[idx % shuffled.length],
-        gem: gems[idx % gems.length],
-      }))
-    );
-  };
-
-  const initializeRunners = () => {
-    const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
-    const runnerPresets = [
-      { name: 'Sư Tử Vàng', emoji: '🦁', color: 'from-amber-500 to-yellow-400', laneBg: 'bg-amber-500/20' },
-      { name: 'Báo Gấm Tốc Độ', emoji: '🐆', color: 'from-rose-500 to-orange-500', laneBg: 'bg-rose-500/20' },
-      { name: 'Tia Chớp Thần', emoji: '⚡', color: 'from-cyan-500 to-blue-600', laneBg: 'bg-cyan-500/20' },
-      { name: 'Đại Bàng Tung Cánh', emoji: '🦅', color: 'from-purple-500 to-indigo-600', laneBg: 'bg-purple-500/20' },
-    ];
-    setRunners(
-      runnerPresets.map((rp, idx) => ({
-        id: idx + 1,
-        lane: idx + 1,
-        name: rp.name,
-        emoji: rp.emoji,
-        color: rp.color,
-        laneBg: rp.laneBg,
-        progress: 0,
-        assignedStudent: shuffled[idx % shuffled.length],
-      }))
-    );
-    setRaceStage('idle');
-    setRaceCountdown(null);
-  };
-
-  const initializeFishes = () => {
-    const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
-    const fishPresets = [
-      { name: 'Cá Mập Thần Tài', icon: '🦈', color: 'text-cyan-400', bgGrad: 'from-cyan-600/30 to-blue-900/50', size: 1 },
-      { name: 'Cá Heo Vui Vẻ', icon: '🐬', color: 'text-sky-300', bgGrad: 'from-sky-500/30 to-indigo-900/50', size: 1 },
-      { name: 'Cá Hề Hoàng Kim', icon: '🐠', color: 'text-amber-400', bgGrad: 'from-amber-500/30 to-orange-900/50', size: 0.9 },
-      { name: 'Bạch Tuộc May Mắn', icon: '🐙', color: 'text-pink-400', bgGrad: 'from-pink-500/30 to-purple-900/50', size: 1.1 },
-      { name: 'Rùa Biển Phú Quý', icon: '🐢', color: 'text-emerald-400', bgGrad: 'from-emerald-500/30 to-teal-900/50', size: 0.95 },
-      { name: 'Cá Nóc Trúng Lớn', icon: '🐡', color: 'text-yellow-300', bgGrad: 'from-yellow-500/30 to-amber-900/50', size: 1 },
-    ];
-    setFishes(
-      fishPresets.map((fp, idx) => ({
-        id: idx + 1,
-        name: fp.name,
-        icon: fp.icon,
-        color: fp.color,
-        bgGrad: fp.bgGrad,
-        size: fp.size,
-        isCaught: false,
-        assignedStudent: shuffled[idx % shuffled.length],
-      }))
-    );
-    setFishingStage('idle');
-    setCaughtFish(null);
-  };
-
-  const initializeSwimmers = () => {
-    const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
-    const swimmerPresets = [
-      { name: 'Kình Ngư Tia Chớp', emoji: '🏊‍♂️', color: 'from-cyan-500 to-blue-600', laneBg: 'bg-cyan-500/20' },
-      { name: 'Cá Heo Siêu Tốc', emoji: '🐬', color: 'from-amber-400 to-orange-500', laneBg: 'bg-amber-500/20' },
-      { name: 'Nữ Thần Làn Đua', emoji: '🏊‍♀️', color: 'from-rose-500 to-pink-600', laneBg: 'bg-rose-500/20' },
-      { name: 'Thợ Lặn Vui Tính', emoji: '🤿', color: 'from-emerald-400 to-teal-600', laneBg: 'bg-emerald-500/20' },
-    ];
-    setSwimmers(
-      swimmerPresets.map((sp, idx) => ({
-        id: idx + 1,
-        lane: idx + 1,
-        name: sp.name,
-        emoji: sp.emoji,
-        color: sp.color,
-        laneBg: sp.laneBg,
-        progress: 0,
-        assignedStudent: shuffled[idx % shuffled.length],
-      }))
-    );
-    setSwimmingStage('idle');
-    setSwimmingCountdown(null);
-  };
-
-  // Canvas Drawing for Game 1: Chiếc Nón Kỳ Diệu (VTV3 Game Show Style - Luôn hiển thị rực rỡ)
   useEffect(() => {
-    if (activeGame !== 'wheel' || !canvasRef.current) return;
+    if (isOpen) {
+      initializeBoxes();
+      setSelectedStudent(null);
+      setSelectedGroup([]);
+      setIsSpinning(false);
+      setBattleStage('idle');
+      setBombStage('idle');
+      setOlympiaStage('idle');
+      setPenaltyStage('idle');
+      setClawStage('idle');
+      setDartStage('idle');
+      setWarpStage('idle');
+    }
+  }, [isOpen, classroom]);
+
+  // ==========================================
+  // GAME 1: WHEEL OF NAMES - 100% PRECISE POINTER
+  // ==========================================
+  const drawWheel = () => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -513,145 +284,90 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     const height = canvas.height;
     const centerX = width / 2;
     const centerY = height / 2;
-    const outerRimRadius = Math.min(centerX, centerY) - 8;
-    const wheelRadius = outerRimRadius - 16;
+    const wheelRadius = Math.min(centerX, centerY) - 25;
 
     ctx.clearRect(0, 0, width, height);
 
-    // 1. Draw Outer Golden Bezel with TV Studio Light Bulbs
-    ctx.save();
-    ctx.translate(centerX, centerY);
-
-    // Outer gold rim
-    const goldGrad = ctx.createRadialGradient(0, 0, wheelRadius, 0, 0, outerRimRadius + 6);
-    goldGrad.addColorStop(0, '#D97706');
-    goldGrad.addColorStop(0.5, '#FDE047');
-    goldGrad.addColorStop(1, '#92400E');
-
-    ctx.beginPath();
-    ctx.arc(0, 0, outerRimRadius, 0, 2 * Math.PI);
-    ctx.fillStyle = goldGrad;
-    ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = '#78350F';
-    ctx.stroke();
-
-    // 24 Glowing Studio Lights around the outer bezel
-    const numBulbs = 24;
-    for (let b = 0; b < numBulbs; b++) {
-      const bulbAngle = (b * 2 * Math.PI) / numBulbs;
-      const bx = Math.cos(bulbAngle) * (outerRimRadius - 8);
-      const by = Math.sin(bulbAngle) * (outerRimRadius - 8);
-
-      ctx.beginPath();
-      ctx.arc(bx, by, 4.5, 0, 2 * Math.PI);
-      ctx.fillStyle = b % 2 === 0 ? '#FEF08A' : '#FFFFFF';
-      ctx.shadowColor = '#FBBF24';
-      ctx.shadowBlur = 6;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = '#B45309';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // 2. Draw Wheel Slices with Rotation
-    ctx.save();
-    ctx.rotate(currentRotation);
-
-    const fallbackLabels = [
-      'May Mắn', '100 Điểm', '200 Điểm', 'Phần Thưởng',
-      'Ngôi Sao', '500 Điểm', 'Cơ Hội', 'Nhân Đôi',
-      'Về Đích', 'Bí Ẩn', 'Thử Thách', 'Vô Địch'
-    ];
-
-    const displayStudents = validStudents.length > 0 ? validStudents : [];
-    const count = Math.max(displayStudents.length > 0 ? Math.min(displayStudents.length, 24) : 12, 6);
+    const displayStudents = validStudents.length > 0 ? validStudents : SAMPLE_STUDENTS;
+    const count = Math.max(Math.min(displayStudents.length, 24), 6);
     const sliceAngle = (2 * Math.PI) / count;
 
-    // Chiếc Nón Kỳ Diệu rainbow palette
     const sliceColors = [
-      '#EF4444', '#F97316', '#F59E0B', '#10B981', '#06B6D4',
-      '#3B82F6', '#6366F1', '#8B5CF6', '#EC4899', '#14B8A6',
-      '#84CC16', '#E11D48',
+      '#ef4444', '#f97316', '#f59e0b', '#10b981', '#06b6d4',
+      '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#14b8a6',
+      '#e11d48', '#84cc16'
     ];
 
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(currentRotation);
+
+    // Draw Slices
     for (let i = 0; i < count; i++) {
       const startAngle = i * sliceAngle;
       const endAngle = startAngle + sliceAngle;
-
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.arc(0, 0, wheelRadius, startAngle, endAngle);
       ctx.closePath();
       ctx.fillStyle = sliceColors[i % sliceColors.length];
       ctx.fill();
+      ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = '#FFFFFF';
       ctx.stroke();
 
-      // Pin pegs near edge of slice
-      const pegX = Math.cos(startAngle) * (wheelRadius - 6);
-      const pegY = Math.sin(startAngle) * (wheelRadius - 6);
-      ctx.beginPath();
-      ctx.arc(pegX, pegY, 3, 0, 2 * Math.PI);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fill();
-      ctx.strokeStyle = '#78350F';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Text label
+      // Text label inside slice
       ctx.save();
       ctx.rotate(startAngle + sliceAngle / 2);
       ctx.textAlign = 'right';
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 12px "Plus Jakarta Sans", sans-serif';
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
       ctx.shadowBlur = 4;
-
-      const rawLabel = displayStudents[i]?.name || fallbackLabels[i % fallbackLabels.length];
-      const displayName = rawLabel.length > 14 ? rawLabel.substring(0, 13) + '…' : rawLabel;
-      ctx.fillText(displayName, wheelRadius - 16, 4);
+      const stName = displayStudents[i % displayStudents.length]?.name || `HS ${i + 1}`;
+      const truncated = stName.length > 14 ? stName.substring(0, 13) + '..' : stName;
+      ctx.fillText(truncated, wheelRadius - 20, 5);
       ctx.restore();
     }
 
-    // 3. Center Cap: Chiếc Nón Kỳ Diệu Golden Medallion
+    // Outer rim & Center cap
     ctx.beginPath();
-    ctx.arc(0, 0, 36, 0, 2 * Math.PI);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#D97706';
+    ctx.arc(0, 0, wheelRadius, 0, 2 * Math.PI);
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#fbbf24';
     ctx.stroke();
 
-    const centerGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, 32);
-    centerGrad.addColorStop(0, '#FEF08A');
-    centerGrad.addColorStop(0.7, '#F59E0B');
-    centerGrad.addColorStop(1, '#B45309');
-
     ctx.beginPath();
-    ctx.arc(0, 0, 32, 0, 2 * Math.PI);
-    ctx.fillStyle = centerGrad;
+    ctx.arc(0, 0, 24, 0, 2 * Math.PI);
+    ctx.fillStyle = '#ffffff';
     ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#78350F';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#f59e0b';
     ctx.stroke();
 
-    // Star icon in center
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 18px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-    ctx.shadowBlur = 3;
-    ctx.fillText('⭐', 0, 1);
+    ctx.restore();
 
-    ctx.restore(); // restore wheel rotation
-    ctx.restore(); // restore center translate
+    // Top Pointer Triangle - exactly at angle 1.5 * PI (Pointing Down)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(centerX - 14, centerY - wheelRadius - 12);
+    ctx.lineTo(centerX + 14, centerY - wheelRadius - 12);
+    ctx.lineTo(centerX, centerY - wheelRadius + 14);
+    ctx.closePath();
+    ctx.fillStyle = '#dc2626';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  useEffect(() => {
+    if (activeGame === 'wheel') {
+      drawWheel();
+    }
   }, [activeGame, currentRotation, validStudents]);
 
-  // Spin Wheel Handler
   const handleSpinWheel = () => {
     if (isSpinning || validStudents.length === 0) return;
     setIsSpinning(true);
@@ -659,51 +375,61 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     setSelectedGroup([]);
 
     if (mode === 'group') {
-      const shuffled: ClassStudent[] = shuffleArray<ClassStudent>(validStudents);
-      const group: ClassStudent[] = shuffled.slice(0, Math.min(groupSize, validStudents.length));
-      let counter = 0;
+      let step = 0;
       const interval = setInterval(() => {
-        playSound(400 + Math.random() * 400, 0.04, 'square');
-        setShufflingName(group[counter % group.length]?.name || '...');
-        counter++;
-        if (counter > 15) {
+        playSound(400 + Math.random() * 400, 0.04, 'sine');
+        setCurrentRotation((prev) => prev + 0.3);
+        step++;
+        if (step > 25) {
           clearInterval(interval);
           setIsSpinning(false);
+          const shuffled = [...validStudents].sort(() => Math.random() - 0.5);
+          const group = shuffled.slice(0, Math.min(groupSize, shuffled.length));
           setSelectedGroup(group);
           playVictorySound();
           confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
         }
-      }, 90);
+      }, 80);
       return;
     }
 
-    const winnerIndex = Math.floor(Math.random() * Math.min(validStudents.length, 24));
-    const targetStudent = validStudents[winnerIndex];
-    const count = Math.min(validStudents.length, 24);
+    const count = Math.max(Math.min(validStudents.length, 24), 6);
     const sliceAngle = (2 * Math.PI) / count;
+    const winnerIndex = Math.floor(Math.random() * Math.min(validStudents.length, count));
 
-    // Calculate target angle to point at top (3*PI/2)
-    const targetOffset = 1.5 * Math.PI - (winnerIndex * sliceAngle + sliceAngle / 2);
-    const fullSpins = (5 + Math.floor(Math.random() * 4)) * (2 * Math.PI);
-    const totalRotation = currentRotation + fullSpins + targetOffset;
+    // Pointer is at TOP center (angle 1.5 * PI).
+    // Local angle of slice i center is: i * sliceAngle + sliceAngle / 2.
+    // When wheel rotates by R, angle at pointer in wheel coords is (1.5*PI - R) mod 2*PI.
+    // We want (1.5*PI - R) = winnerIndex * sliceAngle + sliceAngle / 2 (mod 2*PI).
+    // Therefore desired R mod 2*PI is:
+    const targetSliceCenter = winnerIndex * sliceAngle + sliceAngle / 2;
+    let desiredTargetMod = (1.5 * Math.PI - targetSliceCenter) % (2 * Math.PI);
+    if (desiredTargetMod < 0) desiredTargetMod += 2 * Math.PI;
+
+    let currentMod = currentRotation % (2 * Math.PI);
+    if (currentMod < 0) currentMod += 2 * Math.PI;
+
+    let delta = desiredTargetMod - currentMod;
+    if (delta <= 0) delta += 2 * Math.PI;
+
+    const fullSpins = (6 + Math.floor(Math.random() * 3)) * (2 * Math.PI);
+    const totalRotation = currentRotation + fullSpins + delta;
 
     const startTime = performance.now();
     const duration = 4000;
     const startRot = currentRotation;
-
     let lastTickAngle = startRot;
 
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      // Ease out cubic
+      // Cubic ease-out
       const ease = 1 - Math.pow(1 - progress, 3);
       const current = startRot + (totalRotation - startRot) * ease;
       setCurrentRotation(current);
 
-      // Sound ticks
       if (Math.abs(current - lastTickAngle) >= sliceAngle) {
-        playSound(800, 0.03, 'sine');
+        playSound(850, 0.03, 'sine');
         lastTickAngle = current;
       }
 
@@ -711,11 +437,15 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         animationRef.current = requestAnimationFrame(animate);
       } else {
         setIsSpinning(false);
-        setSelectedStudent(targetStudent);
+        // Guaranteed exact match: calculate the slice directly under the pointer
+        const finalNormalizedAngle = ((1.5 * Math.PI - (totalRotation % (2 * Math.PI))) + 4 * Math.PI) % (2 * Math.PI);
+        const actualIndex = Math.floor(finalNormalizedAngle / sliceAngle) % count;
+        const winner = validStudents[actualIndex] || validStudents[winnerIndex] || validStudents[0];
+        setSelectedStudent(winner);
         playVictorySound();
         confetti({
-          particleCount: 100,
-          spread: 70,
+          particleCount: 120,
+          spread: 80,
           origin: { y: 0.6 },
         });
       }
@@ -724,7 +454,9 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     animationRef.current = requestAnimationFrame(animate);
   };
 
-  // Game 2: Mystery Box
+  // ==========================================
+  // GAME 2: MYSTERY BOXES
+  // ==========================================
   const handleOpenBox = (boxId: number) => {
     if (isShufflingBoxes) return;
     const box = boxes.find((b) => b.id === boxId);
@@ -736,28 +468,31 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     if (box.assignedStudent) {
       setSelectedStudent(box.assignedStudent);
       playVictorySound();
-      confetti({ particleCount: 100, spread: 75, origin: { y: 0.6 } });
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
     }
   };
 
   const handleShuffleBoxes = () => {
     setIsShufflingBoxes(true);
     setSelectedStudent(null);
+    setSelectedGroup([]);
     playSound(400, 0.1, 'sawtooth');
     let counter = 0;
     const interval = setInterval(() => {
-      playSound(300 + Math.random() * 300, 0.04, 'square');
+      playSound(300 + Math.random() * 400, 0.04, 'square');
       counter++;
       if (counter > 8) {
         clearInterval(interval);
         initializeBoxes();
         setIsShufflingBoxes(false);
-        playSound(600, 0.1, 'sine');
+        playSound(800, 0.1, 'sine');
       }
     }, 100);
   };
 
-  // Game 3: Space Rocket Launch (Clean 1-student display, no repeated names)
+  // ==========================================
+  // GAME 3: SPACE ROCKET LAUNCH
+  // ==========================================
   const handleLaunchRocket = () => {
     if (rocketStage === 'countdown' || rocketStage === 'launching' || validStudents.length === 0) return;
     setSelectedStudent(null);
@@ -770,9 +505,8 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         if (prev === null || prev <= 1) {
           clearInterval(interval);
           setRocketStage('launching');
-          playRocketEngineSound(2.5);
+          playSound(200, 1.8, 'sawtooth');
 
-          // Spin names in cosmic cockpit
           let count = 0;
           const slotInterval = setInterval(() => {
             const randomSt = validStudents[Math.floor(Math.random() * validStudents.length)];
@@ -798,379 +532,353 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     }, 700);
   };
 
-  // Game 4: Magic Card Flip
-  const handleFlipCard = (cardId: number) => {
-    if (isShufflingCards) return;
-    const card = cards.find((c) => c.id === cardId);
-    if (!card || card.isFlipped) return;
-
-    playSound(750, 0.12, 'sine');
-    setCards((prev) => prev.map((c) => (c.id === cardId ? { ...c, isFlipped: true } : c)));
-
-    if (card.assignedStudent) {
-      setSelectedStudent(card.assignedStudent);
-      playVictorySound();
-      confetti({ particleCount: 100, spread: 75, origin: { y: 0.6 } });
-    }
-  };
-
-  const handleShuffleCards = () => {
-    setIsShufflingCards(true);
+  // ==========================================
+  // GAME 4: ⚡ ĐẤU TRƯỜNG SINH TỒN (BATTLE ROYALE LASER)
+  // ==========================================
+  const handleStartBattleRoyale = () => {
+    if (battleStage === 'scanning' || battleStage === 'eliminating' || validStudents.length === 0) return;
     setSelectedStudent(null);
-    playSound(400, 0.1, 'sawtooth');
-    let counter = 0;
-    const interval = setInterval(() => {
-      playSound(350 + Math.random() * 350, 0.04, 'square');
-      counter++;
-      if (counter > 8) {
-        clearInterval(interval);
-        initializeCards();
-        setIsShufflingCards(false);
-        playSound(700, 0.1, 'sine');
+    setBattleStage('scanning');
+
+    // Pick 12 contestants
+    const shuffled = [...validStudents].sort(() => Math.random() - 0.5);
+    const contestants = shuffled.slice(0, Math.min(12, shuffled.length));
+    setBattleSurvivors(contestants.map((s) => s.id));
+
+    let scanCount = 0;
+    const scanInterval = setInterval(() => {
+      const randomC = contestants[Math.floor(Math.random() * contestants.length)];
+      setActiveLaserTarget(randomC.id);
+      playSound(700 + Math.random() * 300, 0.05, 'sawtooth');
+      scanCount++;
+      if (scanCount > 10) {
+        clearInterval(scanInterval);
+        setBattleStage('eliminating');
+
+        // Eliminate one by one until 1 survivor
+        let currentSurvivors = [...contestants.map((s) => s.id)];
+        const elimInterval = setInterval(() => {
+          if (currentSurvivors.length > 1) {
+            const victimIdx = Math.floor(Math.random() * currentSurvivors.length);
+            const victimId = currentSurvivors[victimIdx];
+            currentSurvivors = currentSurvivors.filter((id) => id !== victimId);
+            setBattleSurvivors([...currentSurvivors]);
+            playSound(180, 0.15, 'sawtooth'); // Shield break sound
+          } else {
+            clearInterval(elimInterval);
+            const winnerId = currentSurvivors[0];
+            const winner = contestants.find((s) => s.id === winnerId) || contestants[0];
+            setSelectedStudent(winner);
+            setBattleStage('winner');
+            playVictorySound();
+            confetti({ particleCount: 150, spread: 90, origin: { y: 0.5 } });
+          }
+        }, 320);
       }
-    }, 100);
+    }, 120);
   };
 
-  // Game 5: Golden Egg Cracking
-  const handleCrackEgg = (eggId: number) => {
-    if (isShufflingEggs) return;
-    const egg = eggs.find((e) => e.id === eggId);
-    if (!egg || egg.isCracked) return;
-
-    playSound(900, 0.15, 'triangle');
-    setEggs((prev) => prev.map((e) => (e.id === eggId ? { ...e, isCracked: true } : e)));
-
-    if (egg.assignedStudent) {
-      setSelectedStudent(egg.assignedStudent);
-      playVictorySound();
-      confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
-    }
-  };
-
-  // Game 6: Ocean Treasure Chest
-  const handleOpenChest = (chestId: number) => {
-    if (isShufflingChests) return;
-    const chest = chests.find((c) => c.id === chestId);
-    if (!chest || chest.isOpen) return;
-
-    playSound(650, 0.2, 'sine');
-    setChests((prev) => prev.map((c) => (c.id === chestId ? { ...c, isOpen: true } : c)));
-
-    if (chest.assignedStudent) {
-      setSelectedStudent(chest.assignedStudent);
-      playVictorySound();
-      confetti({ particleCount: 110, spread: 70, origin: { y: 0.6 } });
-    }
-  };
-
-  // Game 7: Sprint Track Race (Chạy đua)
-  const handleStartRace = () => {
-    if (raceStage === 'countdown' || raceStage === 'running' || validStudents.length === 0) return;
+  // ==========================================
+  // GAME 5: 💣 TRUYỀN BOM HẸN GIỜ (TICKING TIME BOMB)
+  // ==========================================
+  const handleStartBomb = () => {
+    if (bombStage === 'ticking' || validStudents.length === 0) return;
     setSelectedStudent(null);
-    setRaceStage('countdown');
-    setRaceCountdown(3);
-    playSound(600, 0.1, 'triangle');
+    setBombStage('ticking');
+    setBombTicks(12);
 
-    // Reset progress
-    setRunners((prev) => prev.map((r) => ({ ...r, progress: 0 })));
+    let ticksLeft = 12;
+    let speed = 250;
 
-    const countInterval = setInterval(() => {
-      setRaceCountdown((prev) => {
-        if (prev === null || prev <= 1) {
-          clearInterval(countInterval);
-          setRaceStage('running');
-          playSound(900, 0.3, 'sawtooth'); // Start whistle!
+    const tick = () => {
+      const randomHolder = validStudents[Math.floor(Math.random() * validStudents.length)];
+      setBombHolderId(randomHolder.id);
+      playSound(500 + (12 - ticksLeft) * 50, 0.06, 'triangle');
+      ticksLeft--;
+      setBombTicks(ticksLeft);
 
-          // Pick winner
-          const winnerIndex = Math.floor(Math.random() * 4);
-          let currentProgress = [0, 0, 0, 0];
+      if (ticksLeft > 0) {
+        speed = Math.max(70, speed * 0.88);
+        setTimeout(tick, speed);
+      } else {
+        // BOOOM!
+        playExplosionSound();
+        setBombStage('detonated');
+        setSelectedStudent(randomHolder);
+        confetti({ particleCount: 160, spread: 100, origin: { y: 0.55 } });
+      }
+    };
 
-          const raceStepInterval = setInterval(() => {
-            let reachedEnd = false;
-            currentProgress = currentProgress.map((p, idx) => {
-              const boost = idx === winnerIndex ? Math.random() * 12 + 6 : Math.random() * 9 + 4;
-              const next = Math.min(p + boost, 100);
-              if (next >= 100 && idx === winnerIndex) reachedEnd = true;
-              return next;
-            });
+    setTimeout(tick, speed);
+  };
 
-            playSound(300 + Math.random() * 200, 0.03, 'sine');
-            setRunners((prev) =>
-              prev.map((r, i) => ({
-                ...r,
-                progress: currentProgress[i] || 0,
-              }))
-            );
+  // ==========================================
+  // GAME 6: 🏆 ĐỈNH NÚI OLYMPIA (OLYMPIA MOUNTAIN RACE)
+  // ==========================================
+  const handleRollOlympiaDice = () => {
+    if (olympiaStage === 'rolling' || olympiaStage === 'climbing' || validStudents.length === 0) return;
+    setSelectedStudent(null);
+    setOlympiaStage('rolling');
 
-            if (reachedEnd) {
-              clearInterval(raceStepInterval);
-              setTimeout(() => {
-                setRunners((prev) => {
-                  const winnerRunner = prev[winnerIndex];
-                  if (winnerRunner) {
-                    setSelectedStudent(winnerRunner.assignedStudent);
-                  }
-                  return prev;
-                });
-                setRaceStage('finish');
-                playVictorySound();
-                confetti({ particleCount: 160, spread: 90, origin: { y: 0.55 } });
-              }, 400);
-            }
-          }, 120);
+    let rolls = 0;
+    const rollInterval = setInterval(() => {
+      const val = Math.floor(Math.random() * 6) + 1;
+      setDiceRollValue(val);
+      playSound(450 + Math.random() * 200, 0.04, 'square');
+      rolls++;
+      if (rolls > 8) {
+        clearInterval(rollInterval);
+        const finalVal = Math.floor(Math.random() * 6) + 1;
+        setDiceRollValue(finalVal);
+        setOlympiaStage('climbing');
+        playSound(750, 0.15, 'sine');
 
-          return 0;
-        }
-        playSound(550 + (3 - prev) * 120, 0.1, 'triangle');
-        return prev - 1;
-      });
+        setOlympiaPositions((prev) => {
+          const next = [...prev];
+          const newPos = Math.min(5, next[activeClimberIdx] + finalVal);
+          next[activeClimberIdx] = newPos;
+
+          if (newPos >= 5) {
+            setTimeout(() => {
+              const climberStudent = validStudents[activeClimberIdx % validStudents.length];
+              setSelectedStudent(climberStudent);
+              setOlympiaStage('winner');
+              playVictorySound();
+              confetti({ particleCount: 160, spread: 90, origin: { y: 0.5 } });
+            }, 600);
+          } else {
+            setTimeout(() => {
+              setActiveClimberIdx((prevIdx) => (prevIdx + 1) % 4);
+              setOlympiaStage('idle');
+            }, 800);
+          }
+          return next;
+        });
+      }
+    }, 80);
+  };
+
+  // ==========================================
+  // GAME 7: ⚽ SÚT PENALTY WORLD CUP
+  // ==========================================
+  const handleShootPenalty = (corner: 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right') => {
+    if (penaltyStage === 'shooting' || validStudents.length === 0) return;
+    setSelectedStudent(null);
+    setGoalCorner(corner);
+    setPenaltyStage('shooting');
+    playSound(400, 0.1, 'sawtooth'); // Kick whoosh!
+
+    // Goalkeeper dives opposite corner for guaranteed epic GOAL!
+    const oppositeCorners: Record<string, string> = {
+      top_left: 'bottom_right',
+      top_right: 'bottom_left',
+      bottom_left: 'top_right',
+      bottom_right: 'top_left',
+    };
+    setGoalKeeperDived(oppositeCorners[corner]);
+
+    setTimeout(() => {
+      // VÀOOO!
+      playSound(800, 0.4, 'triangle');
+      setPenaltyStage('goal');
+      const striker = validStudents[Math.floor(Math.random() * validStudents.length)];
+      setSelectedStudent(striker);
+      playVictorySound();
+      confetti({ particleCount: 180, spread: 100, origin: { y: 0.6 } });
     }, 700);
   };
 
-  // Game 8: Deep Sea Fishing (Câu cá)
-  const handleCastFishing = (fishId?: number) => {
-    if (fishingStage === 'casting' || fishingStage === 'hooked' || validStudents.length === 0) return;
+  // ==========================================
+  // GAME 8: 🕹️ MÁY GẮP THÚ BÔNG ARCADE (CLAW MACHINE)
+  // ==========================================
+  const handleDropClaw = () => {
+    if (clawStage !== 'idle' || validStudents.length === 0) return;
     setSelectedStudent(null);
-    setFishingStage('casting');
-    playSound(450, 0.2, 'sawtooth'); // Line cast sound
-
-    const targetFish = fishId
-      ? fishes.find((f) => f.id === fishId) || fishes[0]
-      : fishes[Math.floor(Math.random() * fishes.length)];
+    setClawStage('moving');
+    playSound(420, 0.2, 'sine');
 
     setTimeout(() => {
-      setFishingStage('hooked');
-      playSound(700, 0.15, 'sine'); // Nibble / bite
+      setClawStage('dropping');
+      playSound(300, 0.3, 'sawtooth');
 
       setTimeout(() => {
-        setCaughtFish(targetFish);
-        setFishes((prev) => prev.map((f) => (f.id === targetFish.id ? { ...f, isCaught: true } : f)));
-        setSelectedStudent(targetFish.assignedStudent);
-        setFishingStage('caught');
-        playVictorySound();
-        confetti({ particleCount: 140, spread: 80, origin: { y: 0.6 } });
-      }, 900);
-    }, 1200);
+        setClawStage('grabbing');
+        playSound(700, 0.15, 'triangle');
+
+        setTimeout(() => {
+          setClawStage('retrieving');
+          playSound(550, 0.3, 'sine');
+
+          setTimeout(() => {
+            setClawStage('winner');
+            const winner = validStudents[Math.floor(Math.random() * validStudents.length)];
+            setSelectedStudent(winner);
+            playVictorySound();
+            confetti({ particleCount: 140, spread: 80, origin: { y: 0.55 } });
+          }, 800);
+        }, 600);
+      }, 700);
+    }, 500);
   };
 
-  // Game 9: Archery Target Bullseye (Bắn cung)
-  const handleShootArchery = (customScore = 10) => {
-    if (archeryStage === 'aiming' || archeryStage === 'shooting' || validStudents.length === 0) return;
+  // ==========================================
+  // GAME 9: 🎯 PHI TIÊU CAO THỦ HỒNG TÂM (DART MASTER)
+  // ==========================================
+  const handleThrowDart = () => {
+    if (dartStage !== 'idle' || validStudents.length === 0) return;
     setSelectedStudent(null);
-    setArcheryStage('aiming');
-    playSound(500, 0.15, 'sine');
+    setDartStage('thrown');
+    playSound(880, 0.08, 'sawtooth'); // Whoosh!
 
     setTimeout(() => {
-      setArcheryStage('shooting');
-      playSound(850, 0.1, 'sawtooth'); // Whoosh of arrow!
-
-      setTimeout(() => {
-        // Bullseye hit!
-        const hitScore = customScore || 10;
-        setArrowScore(hitScore);
-        const winner = validStudents[Math.floor(Math.random() * validStudents.length)];
-        setSelectedStudent(winner);
-        setArcheryStage('hit');
-        playVictorySound();
-        confetti({ particleCount: 150, spread: 90, origin: { y: 0.55 } });
-      }, 600);
-    }, 800);
-  };
-
-  // Game 10: Swimming Race (Cuộc thi bơi lội vui nhộn)
-  const handleStartSwimming = () => {
-    if (swimmingStage === 'countdown' || swimmingStage === 'swimming' || validStudents.length === 0) return;
-    setSelectedStudent(null);
-    setSwimmingStage('countdown');
-    setSwimmingCountdown(3);
-    playSound(600, 0.1, 'triangle');
-
-    // Reset progress
-    setSwimmers((prev) => prev.map((s) => ({ ...s, progress: 0 })));
-
-    const countInterval = setInterval(() => {
-      setSwimmingCountdown((prev) => {
-        if (prev === null || prev <= 1) {
-          clearInterval(countInterval);
-          setSwimmingStage('swimming');
-          playSound(920, 0.4, 'sawtooth'); // Whistle!
-
-          const winnerIndex = Math.floor(Math.random() * 4);
-          let currentProgress = [0, 0, 0, 0];
-
-          const swimStepInterval = setInterval(() => {
-            let reachedEnd = false;
-            currentProgress = currentProgress.map((p, idx) => {
-              const boost = idx === winnerIndex ? Math.random() * 11 + 6 : Math.random() * 8 + 4;
-              const next = Math.min(p + boost, 100);
-              if (next >= 100 && idx === winnerIndex) reachedEnd = true;
-              return next;
-            });
-
-            // Splash sound
-            playSound(360 + Math.random() * 260, 0.04, 'sine');
-            setSwimmers((prev) =>
-              prev.map((s, i) => ({
-                ...s,
-                progress: currentProgress[i] || 0,
-              }))
-            );
-
-            if (reachedEnd) {
-              clearInterval(swimStepInterval);
-              setTimeout(() => {
-                setSwimmers((prev) => {
-                  const winnerSwimmer = prev[winnerIndex];
-                  if (winnerSwimmer) {
-                    setSelectedStudent(winnerSwimmer.assignedStudent);
-                  }
-                  return prev;
-                });
-                setSwimmingStage('finish');
-                playVictorySound();
-                confetti({ particleCount: 160, spread: 90, origin: { y: 0.55 } });
-              }, 400);
-            }
-          }, 130);
-
-          return 0;
-        }
-        playSound(550 + (3 - prev) * 120, 0.1, 'triangle');
-        return prev - 1;
-      });
-    }, 700);
-  };
-
-  // Legacy Game 10: Magician Magic Hat
-  const handleCastMagic = () => {
-    if (hatStage === 'casting' || validStudents.length === 0) return;
-    setSelectedStudent(null);
-    setHatStage('casting');
-    playSound(700, 0.2, 'sine');
-
-    let count = 0;
-    const castInterval = setInterval(() => {
-      playSound(600 + Math.random() * 400, 0.05, 'triangle');
-      count++;
-    }, 100);
-
-    setTimeout(() => {
-      clearInterval(castInterval);
+      setDartCoords({ x: 50, y: 50 }); // Bulls-Eye dead center!
+      setDartStage('bullseye');
+      playSound(600, 0.18, 'triangle'); // Thud into dartboard!
       const winner = validStudents[Math.floor(Math.random() * validStudents.length)];
       setSelectedStudent(winner);
-      setHatStage('revealed');
       playVictorySound();
-      confetti({ particleCount: 140, spread: 85, origin: { y: 0.55 } });
-    }, 1800);
+      confetti({ particleCount: 150, spread: 85, origin: { y: 0.55 } });
+    }, 600);
+  };
+
+  // ==========================================
+  // GAME 10: 🌌 CHIẾN HẠM KHÔNG GIAN HYPERSPACE
+  // ==========================================
+  const handleTriggerWarp = () => {
+    if (warpStage !== 'idle' || validStudents.length === 0) return;
+    setSelectedStudent(null);
+    setWarpStage('charging');
+    playSound(260, 0.4, 'sawtooth');
+
+    setTimeout(() => {
+      setWarpStage('warping');
+      playSound(500, 1.2, 'sawtooth');
+
+      setTimeout(() => {
+        setWarpStage('teleported');
+        const captain = validStudents[Math.floor(Math.random() * validStudents.length)];
+        setSelectedStudent(captain);
+        playVictorySound();
+        confetti({ particleCount: 180, spread: 95, origin: { y: 0.5 } });
+      }, 1300);
+    }, 600);
   };
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 select-none">
-      <div className="w-full max-w-5xl p-5 md:p-7 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-5 max-h-[94vh] overflow-y-auto smooth-touch-scroll">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between pb-3 border-b border-slate-200 gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-xs shrink-0">
-              <Gamepad2 className="w-7 h-7" />
+  // Render Result Card
+  const renderResultCard = () => {
+    if (!selectedStudent && selectedGroup.length === 0) return null;
+
+    return (
+      <div className="mt-6 p-6 rounded-3xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white shadow-xl animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-4 text-center md:text-left">
+            <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-3xl shadow-inner shrink-0">
+              👑
             </div>
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl md:text-2xl font-black text-slate-900">
-                  10 Trò Chơi Gọi Học Sinh Tương Tác
-                </h2>
-                {allClasses.length > 1 && onSelectClassroom ? (
-                  <select
-                    value={classroom?.id}
-                    onChange={(e) => {
-                      const selected = allClasses.find((c) => c.id === e.target.value);
-                      if (selected) onSelectClassroom(selected);
-                    }}
-                    className="px-3 py-1 rounded-xl bg-indigo-50 border-2 border-indigo-300 text-indigo-900 text-xs font-black cursor-pointer shadow-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                  >
-                    {allClasses.map((cls) => (
-                      <option key={cls.id} value={cls.id}>
-                        Lớp {cls.name} ({cls.students?.length || 0} HS)
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="px-3 py-0.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-black">
-                    Lớp {classroom?.name || '10A1'} ({validStudents.length} em)
-                  </span>
-                )}
+              <div className="text-xs font-black uppercase tracking-widest text-amber-200">
+                {mode === 'single' ? 'HỌC SINH ĐƯỢC CHỌN TRẢ LỜI' : 'NHÓM HỌC SINH ĐƯỢC CHỌN'}
               </div>
-              <p className="text-slate-500 text-xs font-medium mt-0.5">
-                Âm thanh sôi động, đồ họa sắc nét tối ưu cho màn hình cảm ứng SmartBoard 75 Pro
+              {mode === 'single' && selectedStudent ? (
+                <div className="text-2xl md:text-3xl font-black text-white drop-shadow-sm">
+                  {selectedStudent.name}
+                </div>
+              ) : (
+                <div className="text-lg md:text-xl font-bold text-white flex flex-wrap gap-2 mt-1">
+                  {selectedGroup.map((s, idx) => (
+                    <span key={s.id} className="px-3 py-1 rounded-xl bg-white/20 backdrop-blur-md text-sm font-black">
+                      {idx + 1}. {s.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {mode === 'single' && selectedStudent && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onAddBonusPoint(selectedStudent.id, 1)}
+                className="px-3.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+              >
+                <Star className="w-4 h-4 text-yellow-300" />
+                <span>+1 Điểm Thưởng</span>
+              </button>
+              <button
+                onClick={() => onSetOralScore(selectedStudent.id, 10)}
+                className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+              >
+                <Crown className="w-4 h-4 text-slate-950" />
+                <span>Chấm 10 Điểm</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 md:p-6 select-none animate-in fade-in duration-200">
+      <div className="w-full max-w-5xl max-h-[92vh] flex flex-col bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+        {/* Header Bar */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-md shadow-orange-500/20">
+              <Dices className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-black text-slate-900">VÒNG QUAY MAY MẮN & GỌI HỌC SINH</h2>
+              <p className="text-xs text-slate-500 font-medium">
+                10 trò chơi ngẫu nhiên sinh động cho lớp học & màn hình Tivi 75 inch
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-end md:self-center">
-            {allClasses.length > 0 && (
-              <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 hidden sm:flex">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Đã nạp {validStudents.length} học sinh</span>
-              </span>
-            )}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+              onClick={() => setSoundEnabled((prev) => !prev)}
+              className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-200/60 transition-all cursor-pointer"
               title={soundEnabled ? 'Tắt âm thanh' : 'Bật âm thanh'}
             >
-              {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5 text-rose-500" />}
+              {soundEnabled ? <Volume2 className="w-5 h-5 text-indigo-600" /> : <VolumeX className="w-5 h-5 text-slate-400" />}
             </button>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer"
+              className="p-2.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-all cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Notice if sample roster is used */}
-        {isUsingSampleRoster ? (
-          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Chưa có học sinh trong lớp này. Đang sử dụng 20 tên học sinh mẫu để Thầy/Cô trải nghiệm trò chơi ngay lập tức.</span>
-            </div>
-          </div>
-        ) : (
-          <div className="p-2 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Đang áp dụng danh sách học sinh thực tế của Lớp {classroom?.name} ({validStudents.length} học sinh)</span>
-            </div>
-          </div>
-        )}
-
-        {/* 10 FUN GAMES SELECTOR TABS */}
-        <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 bg-slate-100 rounded-2xl border border-slate-200 smooth-touch-scroll">
+        {/* 10 Games Selection Tabs Bar */}
+        <div className="flex items-center gap-1.5 overflow-x-auto p-2 bg-slate-100 border-b border-slate-200 smooth-touch-scroll shrink-0">
           {[
-            { id: 'wheel' as GameType, icon: '🎡', label: '1. Nón Kỳ Diệu' },
+            { id: 'wheel' as GameType, icon: '🎡', label: '1. Vòng Quay' },
             { id: 'mystery_box' as GameType, icon: '🎁', label: '2. Hộp Quà' },
             { id: 'space_rocket' as GameType, icon: '🚀', label: '3. Tên Lửa' },
-            { id: 'magic_cards' as GameType, icon: '🃏', label: '4. Thẻ Bài' },
-            { id: 'golden_egg' as GameType, icon: '🥚', label: '5. Đập Trứng' },
-            { id: 'treasure_chest' as GameType, icon: '🏴‍☠️', label: '6. Rương Báu' },
-            { id: 'sprint_race' as GameType, icon: '🏃‍♂️', label: '7. Chạy Đua' },
-            { id: 'ocean_fishing' as GameType, icon: '🎣', label: '8. Câu Cá' },
-            { id: 'archery_target' as GameType, icon: '🎯', label: '9. Bắn Cung' },
-            { id: 'swimming_race' as GameType, icon: '🏊‍♂️', label: '10. Bơi Lội' },
+            { id: 'laser_battle' as GameType, icon: '⚡', label: '4. Đấu Trường' },
+            { id: 'time_bomb' as GameType, icon: '💣', label: '5. Truyền Bom' },
+            { id: 'olympia_climb' as GameType, icon: '🏆', label: '6. Leo Núi Olympia' },
+            { id: 'penalty_kick' as GameType, icon: '⚽', label: '7. Sút Penalty' },
+            { id: 'claw_machine' as GameType, icon: '🕹️', label: '8. Gắp Thú' },
+            { id: 'super_darts' as GameType, icon: '🎯', label: '9. Phi Tiêu' },
+            { id: 'cosmic_warp' as GameType, icon: '🌌', label: '10. Chiến Hạm' },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
                 setActiveGame(tab.id);
                 setSelectedStudent(null);
+                setSelectedGroup([]);
               }}
               className={`px-3 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
                 activeGame === tab.id
-                  ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/80 scale-[1.03]'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white text-indigo-700 shadow-sm border border-slate-200 scale-[1.03]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
               }`}
             >
               <span>{tab.icon}</span>
@@ -1179,928 +887,424 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
           ))}
         </div>
 
-        {/* Global Options Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+        {/* Sub-controls bar */}
+        <div className="flex items-center justify-between px-6 py-2 bg-slate-50 border-b border-slate-200 shrink-0 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-600">Lớp: {classroom?.name || 'Mặc định'}</span>
+            <span className="text-slate-400">|</span>
+            <span className="font-medium text-slate-500">{validStudents.length} học sinh sẵn sàng</span>
+          </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={() => setMode('single')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                mode === 'single'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+              className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                mode === 'single' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200'
               }`}
             >
-              🎯 Gọi 1 Học Sinh
+              Gọi 1 Em
             </button>
             <button
               onClick={() => setMode('group')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                mode === 'group'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+              className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                mode === 'group' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200'
               }`}
             >
-              👥 Gọi Nhóm ({groupSize} em)
+              Gọi Nhóm ({groupSize})
             </button>
           </div>
+        </div>
 
-          {mode === 'group' && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-slate-600 uppercase">SỐ LƯỢNG NHÓM:</span>
-              {[2, 3, 4, 5].map((sz) => (
-                <button
-                  key={sz}
-                  onClick={() => setGroupSize(sz)}
-                  className={`w-7 h-7 rounded-lg text-xs font-black cursor-pointer ${
-                    groupSize === sz
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-white border border-slate-200 text-slate-700'
-                  }`}
-                >
-                  {sz}
-                </button>
-              ))}
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50/50">
+          {/* 1. WHEEL OF NAMES */}
+          {activeGame === 'wheel' && (
+            <div className="flex flex-col items-center justify-center space-y-4">
+              <div className="relative flex items-center justify-center">
+                <canvas
+                  ref={canvasRef}
+                  width={380}
+                  height={380}
+                  className="rounded-full shadow-2xl bg-white border-4 border-amber-300"
+                />
+              </div>
+              <button
+                onClick={handleSpinWheel}
+                disabled={isSpinning}
+                className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-white font-black text-base shadow-lg shadow-orange-500/25 active:scale-95 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                <RotateCw className={`w-5 h-5 ${isSpinning ? 'animate-spin' : ''}`} />
+                <span>{isSpinning ? 'ĐANG QUAY VÒNG...' : 'QUAY THƯỞNG NGAY'}</span>
+              </button>
             </div>
           )}
 
-          <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-bold text-slate-700">
-            <input
-              type="checkbox"
-              checked={excludeCalled}
-              onChange={(e) => setExcludeCalled(e.target.checked)}
-              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
-            />
-            <span>Ưu tiên học sinh chưa phát biểu ({validStudents.length} em)</span>
-          </label>
-        </div>
-
-        {/* 1. GAME 1: CHIẾC NÓN KỲ DIỆU (VTV3 GAME SHOW) */}
-        {activeGame === 'wheel' && (
-          <div className="flex flex-col items-center justify-center space-y-5">
-            <div className="relative p-3 rounded-full bg-gradient-to-br from-amber-400 via-yellow-200 to-amber-500 shadow-2xl ring-8 ring-amber-400/20">
-              {/* Pointer Indicator (Kim chỉ Chiếc Nón Kỳ Diệu) */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-3.5 z-30 pointer-events-none flex flex-col items-center">
-                <div className="w-6 h-6 rounded-full bg-red-600 border-2 border-white shadow-lg flex items-center justify-center text-[10px] text-white font-black">
-                  ⭐
-                </div>
-                <div className="w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[24px] border-t-red-600 drop-shadow-md -mt-1" />
-              </div>
-
-              <canvas
-                ref={canvasRef}
-                width={380}
-                height={380}
-                className="rounded-full shadow-inner bg-amber-50 cursor-pointer"
-                onClick={handleSpinWheel}
-              />
-            </div>
-
-            <button
-              onClick={handleSpinWheel}
-              disabled={isSpinning}
-              className={`px-8 py-3.5 rounded-2xl font-black text-base md:text-lg flex items-center gap-2.5 transition-all cursor-pointer shadow-xl active:scale-95 ${
-                isSpinning
-                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-600 hover:to-red-700 text-white shadow-amber-500/30'
-              }`}
-            >
-              <RotateCw className={`w-5 h-5 ${isSpinning ? 'animate-spin' : ''}`} />
-              <span>{isSpinning ? 'Đang quay nón kỳ diệu...' : 'QUAY CHIẾC NÓN KỲ DIỆU 🎡'}</span>
-            </button>
-
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 2. GAME 2: MYSTERY BOX (Displays only Full Name, no score numbers) */}
-        {activeGame === 'mystery_box' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold text-slate-600 uppercase">
-                Chạm vào một hộp quà để mở tên học sinh may mắn:
-              </div>
-              <button
-                onClick={handleShuffleBoxes}
-                disabled={isShufflingBoxes}
-                className="px-3.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              >
-                <Shuffle className={`w-3.5 h-3.5 text-amber-600 ${isShufflingBoxes ? 'animate-spin' : ''}`} />
-                <span>Xáo Trộn Hộp Quà</span>
-              </button>
-            </div>
-
-            {/* Boxes Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-              {boxes.map((box) => (
-                <div
-                  key={box.id}
-                  onClick={() => handleOpenBox(box.id)}
-                  className={`relative p-4 rounded-3xl border-2 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[135px] text-center select-none active:scale-95 shadow-md ${
-                    box.isOpen
-                      ? 'bg-white border-emerald-400 ring-2 ring-emerald-400/20'
-                      : `bg-gradient-to-br ${box.color} ${box.borderColor} hover:scale-105 text-white`
-                  } ${isShufflingBoxes ? 'animate-bounce' : ''}`}
+          {/* 2. MYSTERY BOXES */}
+          {activeGame === 'mystery_box' && (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <button
+                  onClick={handleShuffleBoxes}
+                  disabled={isShufflingBoxes}
+                  className="px-3.5 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 font-bold text-xs flex items-center gap-1.5 hover:bg-indigo-100 transition-all cursor-pointer"
                 >
-                  {box.isOpen ? (
-                    <div className="space-y-1 animate-fade-in">
-                      <div className="text-3xl">🎉</div>
-                      {/* ONLY FULL NAME */}
-                      <div className="font-black text-slate-900 text-base leading-tight">
-                        {box.assignedStudent?.name}
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span>Xáo lại 6 hộp quà</span>
+                </button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                {boxes.map((box) => (
+                  <button
+                    key={box.id}
+                    onClick={() => handleOpenBox(box.id)}
+                    className={`h-36 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 p-3 transition-all cursor-pointer ${
+                      box.isOpen
+                        ? 'bg-white border-amber-400 shadow-md'
+                        : `bg-gradient-to-br ${box.color} border-white/40 shadow-lg hover:scale-105 active:scale-95 text-white`
+                    }`}
+                  >
+                    {box.isOpen ? (
+                      <div className="text-center">
+                        <div className="text-2xl mb-1">🎁✨</div>
+                        <div className="font-black text-xs text-slate-900 leading-tight">
+                          {box.assignedStudent?.name}
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <div className="text-4xl drop-shadow-md">{box.icon}</div>
-                      <div className="font-black text-xs uppercase tracking-wider drop-shadow-sm">
-                        {box.title}
+                    ) : (
+                      <div className="text-center">
+                        <div className="text-4xl mb-1">{box.icon}</div>
+                        <div className="font-black text-xs uppercase tracking-wider">
+                          {box.title}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
+          )}
 
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 3. GAME 3: SPACE ROCKET (Displays 1 single unique student name in Cockpit) */}
-        {activeGame === 'space_rocket' && (
-          <div className="space-y-5">
-            <div className="p-7 rounded-3xl bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950 border border-indigo-900/50 shadow-2xl text-center space-y-5 relative overflow-hidden">
-              {/* Rocket State Banner */}
-              {rocketStage === 'countdown' && (
-                <div className="space-y-1 animate-bounce">
-                  <div className="text-6xl md:text-7xl font-black text-amber-400 font-mono">
-                    {countdown}
-                  </div>
-                  <div className="text-xs font-bold text-amber-200 uppercase tracking-widest">
-                    ĐANG ĐẾM NGƯỢC PHÓNG TÊN LỬA...
-                  </div>
-                </div>
-              )}
-
-              {rocketStage === 'launching' && (
-                <div className="space-y-2">
-                  <div className="text-5xl animate-pulse">🚀 🔥 ⚡</div>
-                  <div className="text-xs font-black text-indigo-300 uppercase tracking-wider">
-                    TÊN LỬA ĐANG TĂNG TỐC VƯỢT DẢI NGÂN HÀ...
-                  </div>
-                </div>
-              )}
-
-              {/* Single Sleek Cosmic Cockpit Display */}
-              <div className="max-w-md mx-auto p-5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-white font-mono font-black text-xl md:text-2xl text-center min-h-[75px] flex items-center justify-center shadow-inner">
+          {/* 3. SPACE ROCKET */}
+          {activeGame === 'space_rocket' && (
+            <div className="flex flex-col items-center justify-center p-6 space-y-6 text-center">
+              <div className="w-32 h-32 rounded-3xl bg-indigo-950 border-2 border-indigo-500/30 flex items-center justify-center shadow-xl relative overflow-hidden">
                 {rocketStage === 'launching' ? (
-                  <span className="text-amber-300 animate-pulse">{shufflingName || '🚀 ĐANG TĂNG TỐC...'}</span>
-                ) : selectedStudent ? (
-                  <span className="text-emerald-300 text-2xl font-black">{selectedStudent.name}</span>
+                  <Rocket className="w-16 h-16 text-amber-400 animate-bounce" />
                 ) : (
-                  <span className="text-slate-400 text-sm font-sans">Sẵn sàng kích hoạt tên lửa vũ trụ...</span>
+                  <Rocket className="w-16 h-16 text-indigo-400" />
                 )}
               </div>
 
-              {/* Launch Button */}
-              <div>
+              {rocketStage === 'countdown' && countdown !== null && (
+                <div className="text-6xl font-black text-orange-500 animate-ping">{countdown}</div>
+              )}
+
+              {rocketStage === 'launching' && (
+                <div className="text-xl font-black text-indigo-700 animate-pulse">{shufflingName}</div>
+              )}
+
+              {rocketStage === 'idle' && (
                 <button
                   onClick={handleLaunchRocket}
-                  disabled={rocketStage === 'countdown' || rocketStage === 'launching'}
-                  className="px-7 py-3.5 rounded-2xl bg-gradient-to-r from-rose-600 via-orange-500 to-amber-500 hover:from-rose-700 hover:to-amber-600 text-white font-black text-base md:text-lg shadow-xl shadow-rose-600/30 active:scale-95 transition-all inline-flex items-center gap-2.5 cursor-pointer"
+                  className="px-8 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-base shadow-lg shadow-indigo-600/25 active:scale-95 transition-all cursor-pointer flex items-center gap-2"
                 >
                   <Rocket className="w-5 h-5" />
-                  <span>{rocketStage === 'winner' ? 'Phóng Lượt Mới 🚀' : 'KÍCH HOẠT PHÓNG TÊN LỬA 🚀'}</span>
+                  <span>PHÓNG TÀU VŨ TRỤ GỌI HỌC SINH</span>
                 </button>
-              </div>
-            </div>
-
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 4. GAME 4: MAGIC CARDS */}
-        {activeGame === 'magic_cards' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold text-slate-600 uppercase">
-                Chọn 1 lá bài ma thuật để lật mở:
-              </div>
-              <button
-                onClick={handleShuffleCards}
-                disabled={isShufflingCards}
-                className="px-3.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-800 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              >
-                <Shuffle className={`w-3.5 h-3.5 text-purple-600 ${isShufflingCards ? 'animate-spin' : ''}`} />
-                <span>Xáo Bài Ma Thuật</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3.5">
-              {cards.map((c) => (
-                <div
-                  key={c.id}
-                  onClick={() => handleFlipCard(c.id)}
-                  className={`relative p-4 rounded-3xl border-2 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[150px] text-center select-none active:scale-95 shadow-md ${
-                    c.isFlipped
-                      ? 'bg-white border-purple-400 ring-2 ring-purple-400/20'
-                      : `bg-gradient-to-br ${c.color} border-white/40 hover:scale-105 text-white`
-                  } ${isShufflingCards ? 'animate-pulse' : ''}`}
-                >
-                  {c.isFlipped ? (
-                    <div className="space-y-1 animate-fade-in">
-                      <div className="text-3xl">✨</div>
-                      <div className="font-black text-slate-900 text-sm leading-tight">
-                        {c.assignedStudent?.name}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="text-4xl drop-shadow-md">{c.icon}</div>
-                      <div className="font-black text-[11px] uppercase tracking-wider">
-                        Thẻ {c.id}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 5. GAME 5: GOLDEN EGGS (ĐẬP TRỨNG VÀNG) */}
-        {activeGame === 'golden_egg' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold text-slate-600 uppercase">
-                Chạm vào quả trứng vàng để đập vỏ và nhận tên học sinh:
-              </div>
-              <button
-                onClick={() => {
-                  initializeEggs();
-                  setSelectedStudent(null);
-                  playSound(600, 0.1, 'sine');
-                }}
-                className="px-3.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-                <span>Đặt Lại Trứng Mới</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3.5">
-              {eggs.map((egg) => (
-                <div
-                  key={egg.id}
-                  onClick={() => handleCrackEgg(egg.id)}
-                  className={`relative p-4 rounded-3xl border-2 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[155px] text-center select-none active:scale-95 shadow-lg ${
-                    egg.isCracked
-                      ? 'bg-white border-amber-400 ring-2 ring-amber-400/20'
-                      : `bg-gradient-to-b ${egg.color} border-amber-200 hover:scale-105 text-amber-950`
-                  }`}
-                >
-                  {egg.isCracked ? (
-                    <div className="space-y-1 animate-fade-in">
-                      <div className="text-3xl">🐣 🌟</div>
-                      <div className="font-black text-slate-900 text-sm leading-tight">
-                        {egg.assignedStudent?.name}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <div className="text-5xl drop-shadow-md animate-pulse">🥚</div>
-                      <div className="font-black text-xs text-amber-900 uppercase">
-                        Trứng {egg.id}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 6. GAME 6: OCEAN TREASURE CHEST (RƯƠNG BÁU ĐẠI DƯƠNG) */}
-        {activeGame === 'treasure_chest' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold text-slate-600 uppercase">
-                Chạm vào rương báu để mở khóa châu báu & học sinh may mắn:
-              </div>
-              <button
-                onClick={() => {
-                  initializeChests();
-                  setSelectedStudent(null);
-                  playSound(600, 0.1, 'sine');
-                }}
-                className="px-3.5 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-800 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-teal-600" />
-                <span>Khóa Lại Các Rương</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3.5">
-              {chests.map((chest) => (
-                <div
-                  key={chest.id}
-                  onClick={() => handleOpenChest(chest.id)}
-                  className={`relative p-4 rounded-3xl border-2 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[155px] text-center select-none active:scale-95 shadow-lg ${
-                    chest.isOpen
-                      ? 'bg-white border-teal-400 ring-2 ring-teal-400/20'
-                      : 'bg-gradient-to-b from-amber-700 via-amber-800 to-amber-950 border-amber-600 hover:scale-105 text-amber-100'
-                  }`}
-                >
-                  {chest.isOpen ? (
-                    <div className="space-y-1 animate-fade-in">
-                      <div className="text-3xl">💎 ✨</div>
-                      <div className="font-black text-slate-900 text-sm leading-tight">
-                        {chest.assignedStudent?.name}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <div className="text-4xl drop-shadow-md">🏴‍☠️ 📦</div>
-                      <div className="font-black text-[11px] text-amber-200 uppercase">
-                        Rương {chest.id}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 7. GAME 7: SPRINT TRACK RACE (CUỘC ĐUA ĐIỀN KINH TỐC ĐỘ) */}
-        {activeGame === 'sprint_race' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold text-slate-600 uppercase flex items-center gap-1.5">
-                <Flag className="w-4 h-4 text-rose-500" />
-                <span>Cuộc đua 4 vận động viên thần tốc - Vận động viên về đích đầu tiên sẽ gọi tên học sinh:</span>
-              </div>
-              <button
-                onClick={() => {
-                  initializeRunners();
-                  setSelectedStudent(null);
-                  playSound(600, 0.1, 'sine');
-                }}
-                className="px-3.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-                <span>Xếp Lại Đội Hình</span>
-              </button>
-            </div>
-
-            {/* Stadium Track Container */}
-            <div className="p-5 rounded-3xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-slate-700 shadow-2xl space-y-3 relative overflow-hidden">
-              {/* Countdown Overlay */}
-              {raceStage === 'countdown' && raceCountdown !== null && (
-                <div className="absolute inset-0 bg-black/70 backdrop-blur-xs z-20 flex flex-col items-center justify-center animate-fade-in">
-                  <div className="text-7xl font-black text-amber-400 animate-ping">
-                    {raceCountdown > 0 ? raceCountdown : 'GO!'}
-                  </div>
-                  <span className="text-white font-bold text-sm mt-3 tracking-wider uppercase">Chuẩn bị xuất phát...</span>
-                </div>
               )}
-
-              {/* 4 Race Lanes */}
-              <div className="space-y-2.5 relative">
-                {runners.map((runner) => (
-                  <div
-                    key={runner.id}
-                    className={`relative p-2.5 rounded-2xl border border-white/10 ${runner.laneBg} flex items-center gap-3 overflow-hidden`}
-                  >
-                    {/* Lane Badge */}
-                    <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center font-black text-white text-xs shrink-0 shadow-xs">
-                      #{runner.lane}
-                    </div>
-
-                    {/* Track Rail */}
-                    <div className="flex-1 relative h-10 bg-slate-950/60 rounded-xl border border-white/10 overflow-hidden flex items-center px-2">
-                      {/* Finish Line Tape */}
-                      <div className="absolute right-3 top-0 bottom-0 w-3 bg-repeating-linear-gradient-black-white border-l-2 border-r-2 border-white/50 z-0 flex items-center justify-center">
-                        <span className="text-[8px] font-black text-white rotate-90 tracking-tighter">FINISH</span>
-                      </div>
-
-                      {/* Animated Runner on Track */}
-                      <div
-                        className="absolute flex items-center gap-2 transition-all duration-100 ease-linear z-10"
-                        style={{
-                          left: `calc(${runner.progress}% * 0.85)`,
-                        }}
-                      >
-                        <div
-                          className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${runner.color} flex items-center justify-center text-xl shadow-lg border border-white/30 ${
-                            raceStage === 'running' ? 'animate-bounce' : ''
-                          }`}
-                        >
-                          {runner.emoji}
-                        </div>
-                        <span className="text-[11px] font-black text-white bg-black/60 px-2 py-0.5 rounded-md backdrop-blur-xs whitespace-nowrap shadow-xs">
-                          {runner.name}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Controls */}
-              <div className="pt-2 flex items-center justify-center">
-                <button
-                  onClick={handleStartRace}
-                  disabled={raceStage === 'countdown' || raceStage === 'running'}
-                  className="px-7 py-3.5 rounded-2xl bg-gradient-to-r from-rose-500 via-amber-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 text-white font-black text-sm shadow-xl shadow-orange-500/25 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  <Flame className="w-5 h-5 text-yellow-200 animate-pulse" />
-                  <span>{raceStage === 'finish' ? 'ĐUA LẠI CHẶNG MỚI 🏁' : 'BẮT ĐẦU CUỘC ĐUA 🏁'}</span>
-                </button>
-              </div>
             </div>
+          )}
 
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 8. GAME 8: OCEAN FISHING (CÂU CÁ BIỂN SÂU - CÓ NGƯỜI QUĂNG CẦN CÂU) */}
-        {activeGame === 'ocean_fishing' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold text-slate-600 uppercase flex items-center gap-1.5">
-                <Fish className="w-4 h-4 text-cyan-600" />
-                <span>Người câu cá quăng cần xuống biển để câu 1 chú cá may mắn trong đàn cá:</span>
-              </div>
-              <button
-                onClick={() => {
-                  initializeFishes();
-                  setSelectedStudent(null);
-                  playSound(600, 0.1, 'sine');
-                }}
-                className="px-3.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 text-cyan-900 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-cyan-600" />
-                <span>Thả Đàn Cá Lại Biển</span>
-              </button>
-            </div>
-
-            {/* Ocean Fishing Stage */}
-            <div className="p-5 md:p-6 rounded-3xl bg-gradient-to-b from-sky-800 via-blue-900 to-indigo-950 border-2 border-cyan-400/40 shadow-2xl relative min-h-[360px] overflow-hidden space-y-4 select-none">
-              {/* Floating Bubbles */}
-              <div className="absolute top-12 left-10 text-xl opacity-30 animate-bounce">🫧</div>
-              <div className="absolute bottom-10 right-16 text-2xl opacity-30 animate-pulse">🫧</div>
-              <div className="absolute bottom-20 left-1/2 text-lg opacity-25 animate-bounce">🫧</div>
-
-              {/* Status Header */}
-              <div className="flex items-center justify-between text-cyan-200 text-xs font-bold border-b border-cyan-500/30 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">🎣</span>
-                  <span>Bến Tàu Câu Cá Hoàng Gia</span>
+          {/* 4. ⚡ ĐẤU TRƯỜNG SINH TỒN (BATTLE ROYALE LASER) */}
+          {(activeGame === 'laser_battle' || activeGame === 'magic_cards') && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold text-slate-600 uppercase">
+                  ⚡ Quét laser & hạ gục khiên năng lượng - Người sống sót cuối cùng chiến thắng:
                 </div>
-                <span className="bg-cyan-950/60 px-3 py-1 rounded-full border border-cyan-500/30 text-cyan-300 font-bold">
-                  {fishingStage === 'casting' && '🎣 Người câu đang vung cần quăng dây câu xuống biển...'}
-                  {fishingStage === 'hooked' && '🐟 CÁ ĐÃ CẮN CÂU! Cần câu đang uốn cong...'}
-                  {fishingStage === 'caught' && '🎉 Đã kéo được chú cá may mắn lên bờ!'}
-                  {fishingStage === 'idle' && 'Bấm "Quăng Cần Câu" hoặc chạm vào 1 chú cá bất kỳ'}
-                </span>
-              </div>
-
-              {/* Fisherman on the Dock (Cầu gỗ câu cá) */}
-              <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-sky-950/50 border border-cyan-500/20 backdrop-blur-xs">
-                <div className="flex items-center gap-3">
-                  {/* Fisherman Character */}
-                  <div className="relative">
-                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-700 via-amber-600 to-yellow-500 border-2 border-amber-300 flex items-center justify-center text-3xl shadow-lg">
-                      {fishingStage === 'caught' ? '🧑‍🌾' : fishingStage === 'hooked' ? '😮' : '🎣'}
-                    </div>
-                    {/* Fishing Rod */}
-                    <div className={`absolute -top-3 -right-2 text-2xl transition-transform duration-300 ${
-                      fishingStage === 'casting' ? 'rotate-45 scale-110' : fishingStage === 'hooked' ? '-rotate-12 animate-pulse' : ''
-                    }`}>
-                      🎋
-                    </div>
-                  </div>
-                  <div>
-                    <div className="font-black text-sm text-cyan-100 flex items-center gap-1.5">
-                      <span>Bác Ngư Dân Tài Ba</span>
-                      <span className="text-xs text-amber-300">⭐</span>
-                    </div>
-                    <p className="text-[11px] text-cyan-300/80 font-medium">
-                      {fishingStage === 'caught'
-                        ? 'Đã câu thành công chú cá may mắn!'
-                        : 'Sẵn sàng quăng cần xuống đàn cá đại dương'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Cast Fishing Rod Button */}
                 <button
-                  onClick={() => handleCastFishing()}
-                  disabled={fishingStage === 'casting' || fishingStage === 'hooked'}
-                  className="px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
+                  onClick={handleStartBattleRoyale}
+                  disabled={battleStage === 'scanning' || battleStage === 'eliminating'}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-black text-xs shadow-md active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
                 >
-                  <Fish className="w-4 h-4 text-slate-900" />
-                  <span>{fishingStage === 'caught' ? 'QUĂNG CẦN LẦN NỮA 🎣' : 'QUĂNG CẦN CÂU XUỐNG BIỂN 🎣'}</span>
+                  <Zap className="w-4 h-4 text-yellow-300" />
+                  <span>KÍCH HOẠT ĐẤU TRƯỜNG ⚡</span>
                 </button>
               </div>
 
-              {/* Caught Fish Display Banner */}
-              {fishingStage === 'caught' && caughtFish && selectedStudent && (
-                <div className="relative z-10 p-4 rounded-2xl bg-gradient-to-r from-amber-500/30 via-yellow-400/30 to-amber-500/30 border-2 border-amber-400 backdrop-blur-md animate-fade-in flex items-center justify-center gap-3 text-center shadow-xl">
-                  <div className="text-4xl animate-bounce">{caughtFish.icon}</div>
-                  <div>
-                    <div className="text-xs font-black text-amber-300 uppercase tracking-wider">
-                      🎉 BẮT ĐƯỢC CHÚ CÁ MAY MẮN: {caughtFish.name}
-                    </div>
-                    <div className="text-2xl md:text-3xl font-black text-white mt-0.5">
-                      {selectedStudent.name}
-                    </div>
-                  </div>
-                  <div className="text-4xl animate-bounce">{caughtFish.icon}</div>
-                </div>
-              )}
-
-              {/* The Ocean with School of Fish (Đàn cá bơi lội) */}
-              <div className="relative z-10 space-y-2">
-                <div className="text-[11px] font-bold text-cyan-300/80 flex items-center gap-1.5">
-                  <span>🌊 ĐÀN CÁ ĐANG BƠI LỘI TRONG VỊNH (Chạm vào con cá muốn câu):</span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                  {fishes.map((f) => (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {validStudents.slice(0, 12).map((st) => {
+                  const isAlive = battleSurvivors.includes(st.id);
+                  const isTargeted = activeLaserTarget === st.id;
+                  return (
                     <div
-                      key={f.id}
-                      onClick={() => handleCastFishing(f.id)}
-                      className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center gap-2.5 active:scale-95 ${
-                        f.isCaught
-                          ? 'bg-amber-400/25 border-amber-400 text-amber-100 shadow-lg ring-2 ring-amber-400/40'
-                          : `bg-gradient-to-r ${f.bgGrad} border-white/10 hover:border-cyan-300 hover:scale-102 hover:shadow-lg text-white`
+                      key={st.id}
+                      className={`p-3 rounded-2xl border-2 transition-all flex flex-col items-center justify-center text-center min-h-[105px] ${
+                        !isAlive && battleStage !== 'idle'
+                          ? 'bg-slate-100 border-slate-200 opacity-30 grayscale scale-95'
+                          : isTargeted
+                          ? 'bg-red-50 border-red-500 shadow-lg shadow-red-500/20 scale-105 ring-2 ring-red-400'
+                          : 'bg-white border-slate-200 shadow-xs'
                       }`}
                     >
-                      <div className="text-3xl animate-bounce" style={{ animationDuration: `${2 + (f.id % 3) * 0.4}s` }}>
-                        {f.icon}
+                      <div className="text-2xl mb-1">
+                        {!isAlive && battleStage !== 'idle' ? '💥' : '🛡️'}
                       </div>
-                      <div className="space-y-0.5 min-w-0">
-                        <div className="text-xs font-black tracking-wide truncate">{f.name}</div>
-                        <div className="text-[10px] text-cyan-300/80 font-bold">
-                          {f.isCaught ? '✅ Đã cắn câu' : 'Đang bơi tung tăng'}
-                        </div>
+                      <div className="font-bold text-xs text-slate-800 leading-tight truncate w-full">
+                        {st.name}
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                        {!isAlive && battleStage !== 'idle' ? 'ĐÃ BỊ HẠ' : '100% KHIÊN'}
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             </div>
+          )}
 
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 9. GAME 9: ARCHERY TARGET (BẮN CUNG - CÓ NGƯỜI GIƯƠNG CUNG BẮN TRÚNG HỌ VÀ TÊN) */}
-        {activeGame === 'archery_target' && (
-          <div className="space-y-5 text-center">
-            <div className="max-w-2xl mx-auto p-5 md:p-6 rounded-3xl bg-gradient-to-b from-slate-900 via-indigo-950 to-slate-950 border-2 border-amber-500/40 shadow-2xl space-y-4 select-none">
-              {/* Header */}
-              <div className="flex items-center justify-between border-b border-white/10 pb-2.5 text-xs font-bold text-amber-400 uppercase tracking-wider">
-                <div className="flex items-center gap-1.5">
-                  <Crosshair className="w-4 h-4 text-amber-400" />
-                  <span>Trường Bắn Cung Olympic Hoàng Gia</span>
+          {/* 5. 💣 TRUYỀN BOM HẸN GIỜ */}
+          {(activeGame === 'time_bomb' || activeGame === 'golden_egg') && (
+            <div className="flex flex-col items-center justify-center p-6 space-y-6 text-center">
+              <div className="relative">
+                <div className={`w-36 h-36 rounded-full bg-slate-900 border-4 flex items-center justify-center text-6xl shadow-2xl transition-all ${
+                  bombStage === 'ticking'
+                    ? 'border-orange-500 animate-bounce scale-110'
+                    : bombStage === 'detonated'
+                    ? 'border-red-600 scale-125'
+                    : 'border-slate-700'
+                }`}>
+                  {bombStage === 'detonated' ? '💥' : '💣'}
                 </div>
-                <span>
-                  {archeryStage === 'aiming' && '🎯 Xạ thủ đang giương cung căng dây...'}
-                  {archeryStage === 'shooting' && '🏹 Mũi tên xé gió phóng đi! VÚT!'}
-                  {archeryStage === 'hit' && '💥 ĐÃ BẮN TRÚNG HỒNG TÂM 10 ĐIỂM!'}
-                  {archeryStage === 'idle' && 'Bấm "Giương Cung Bắn Tên"'}
-                </span>
+                {bombStage === 'ticking' && (
+                  <div className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-red-600 text-white font-black text-sm flex items-center justify-center animate-ping">
+                    {bombTicks}
+                  </div>
+                )}
               </div>
 
-              {/* Archer vs Target Arena */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center py-2">
-                {/* Left: The Archer (Người giương cung) */}
-                <div className="p-4 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center justify-center space-y-2 relative overflow-hidden">
-                  <div className="relative">
-                    {/* Archer Avatar */}
-                    <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-amber-500 border-2 border-amber-300 flex items-center justify-center text-5xl shadow-xl">
-                      {archeryStage === 'hit' ? '🏆' : archeryStage === 'shooting' ? '⚡' : '🧑‍🏹'}
-                    </div>
-
-                    {/* Bow & Arrow Pose */}
-                    <div className={`absolute -right-3 top-1/2 -translate-y-1/2 text-3xl transition-transform duration-200 ${
-                      archeryStage === 'aiming' ? 'scale-125 rotate-12' : archeryStage === 'shooting' ? 'translate-x-6 opacity-80' : ''
-                    }`}>
-                      🏹
-                    </div>
-                  </div>
-
-                  <div className="text-center">
-                    <div className="font-black text-sm text-white flex items-center justify-center gap-1">
-                      <span>Xạ Thủ Vô Địch</span>
-                      <span className="text-amber-400 text-xs">🥇</span>
-                    </div>
-                    <p className="text-[11px] text-slate-300 font-medium mt-0.5">
-                      {archeryStage === 'aiming'
-                        ? 'Căng hết cỡ dây cung, ngắm thẳng hồng tâm...'
-                        : archeryStage === 'hit'
-                        ? 'Bách phát bách trúng tuyệt đỉnh!'
-                        : 'Sẵn sàng giương cung bắn trúng tên học sinh'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Right: The Olympic Target (Bia bắn cung) */}
-                <div className="flex flex-col items-center justify-center space-y-2">
-                  <div
-                    onClick={() => handleShootArchery(10)}
-                    className="relative w-52 h-52 rounded-full shadow-2xl flex items-center justify-center cursor-pointer transition-transform hover:scale-105 active:scale-95 border-4 border-amber-400/40"
-                    style={{
-                      background: 'radial-gradient(circle, #f59e0b 0%, #ef4444 35%, #3b82f6 60%, #1e293b 80%, #f8fafc 100%)',
-                    }}
-                  >
-                    {/* Target Rings */}
-                    <div className="w-40 h-40 rounded-full border-4 border-white/20 flex items-center justify-center">
-                      <div className="w-28 h-28 rounded-full border-4 border-white/30 flex items-center justify-center">
-                        <div className="w-16 h-16 rounded-full border-4 border-white/50 flex items-center justify-center bg-amber-400 text-slate-950 font-black text-lg shadow-inner">
-                          🎯 10
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Arrow Stuck in Bullseye */}
-                    {archeryStage === 'hit' && (
-                      <div className="absolute inset-0 flex items-center justify-center animate-bounce">
-                        <div className="text-3xl drop-shadow-lg">🏹</div>
-                      </div>
-                    )}
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-bold">Chạm vào bia hoặc bấm nút để bắn tên</span>
-                </div>
-              </div>
-
-              {/* Hit Student Banner Announcement */}
-              {archeryStage === 'hit' && selectedStudent && (
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/30 via-emerald-500/30 to-amber-500/30 border-2 border-emerald-400 backdrop-blur-md animate-fade-in space-y-1 shadow-xl">
-                  <div className="text-xs text-amber-300 font-black tracking-wider flex items-center justify-center gap-1.5">
-                    <span>🎯 MŨI TÊN BẮN TRÚNG HỌ VÀ TÊN HỌC SINH:</span>
-                  </div>
-                  <div className="text-3xl md:text-4xl font-black text-emerald-300">
-                    🎉 {selectedStudent.name}
-                  </div>
-                  <div className="text-xs font-mono font-bold text-slate-300">
-                    Mã số: {selectedStudent.code} • Điểm bắn trúng: 10/10 điểm
-                  </div>
+              {bombStage === 'ticking' && bombHolderId && (
+                <div className="text-xl font-black text-rose-600 animate-pulse">
+                  Bom đang ở tay: {validStudents.find((s) => s.id === bombHolderId)?.name || '...'}
                 </div>
               )}
 
-              {/* Shoot Button */}
-              <button
-                onClick={() => handleShootArchery(10)}
-                disabled={archeryStage === 'aiming' || archeryStage === 'shooting'}
-                className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-600 hover:to-red-700 text-white font-black text-sm shadow-xl shadow-amber-500/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                <Target className="w-5 h-5 text-yellow-200" />
-                <span>{archeryStage === 'hit' ? 'GIƯƠNG CUNG BẮN LẠI 🏹' : 'GIƯƠNG CUNG BẮN TÊN 🏹'}</span>
-              </button>
-            </div>
-
-            {renderResultCard()}
-          </div>
-        )}
-
-        {/* 10. GAME 10: SWIMMING RACE (CUỘC THI BƠI LỘI VUI NHỘN) */}
-        {activeGame === 'swimming_race' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold text-slate-600 uppercase flex items-center gap-1.5">
-                <span className="text-sm">🏊‍♂️</span>
-                <span>Cuộc thi bơi lội vui nhộn 4 làn đua - Kình ngư về đích đầu tiên sẽ chọn học sinh:</span>
-              </div>
-              <button
-                onClick={() => {
-                  initializeSwimmers();
-                  setSelectedStudent(null);
-                  playSound(600, 0.1, 'sine');
-                }}
-                className="px-3.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 text-cyan-900 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-cyan-600" />
-                <span>Xếp Lại Đội Bơi</span>
-              </button>
-            </div>
-
-            {/* Olympic Pool Container */}
-            <div className="p-5 md:p-6 rounded-3xl bg-gradient-to-b from-sky-900 via-blue-950 to-indigo-950 border-2 border-cyan-400/40 shadow-2xl space-y-3.5 relative overflow-hidden select-none">
-              {/* Countdown Overlay */}
-              {swimmingStage === 'countdown' && swimmingCountdown !== null && (
-                <div className="absolute inset-0 bg-black/75 backdrop-blur-xs z-20 flex flex-col items-center justify-center animate-fade-in">
-                  <div className="text-7xl font-black text-amber-400 animate-ping">
-                    {swimmingCountdown > 0 ? swimmingCountdown : 'GO! 🏊'}
-                  </div>
-                  <span className="text-cyan-200 font-bold text-sm mt-3 tracking-wider uppercase">
-                    Kình ngư sẵn sàng trên bục xuất phát...
-                  </span>
-                </div>
-              )}
-
-              {/* Pool Header */}
-              <div className="flex items-center justify-between text-cyan-200 text-xs font-bold border-b border-cyan-500/20 pb-2">
-                <div className="flex items-center gap-1.5">
-                  <span>🏊 Hồ Bơi Thi Đấu Quốc Tế</span>
-                </div>
-                <span>
-                  {swimmingStage === 'swimming' && '💦 Các kình ngư đang rẽ sóng so tài tốc độ...'}
-                  {swimmingStage === 'finish' && '🏆 Đã tìm ra kình ngư về đích quán quân!'}
-                  {swimmingStage === 'idle' && 'Bấm "Bắt Đầu Cuộc Thi Bơi Lội"'}
-                </span>
-              </div>
-
-              {/* 4 Swimming Lanes */}
-              <div className="space-y-2.5 relative">
-                {swimmers.map((swimmer) => (
-                  <div
-                    key={swimmer.id}
-                    className={`relative p-2.5 rounded-2xl border border-cyan-500/20 ${swimmer.laneBg} flex items-center gap-3 overflow-hidden bg-sky-900/30`}
-                  >
-                    {/* Starting Block Badge */}
-                    <div className="w-8 h-8 rounded-xl bg-cyan-600/60 border border-cyan-300/40 flex items-center justify-center font-black text-white text-xs shrink-0 shadow-xs">
-                      #{swimmer.lane}
-                    </div>
-
-                    {/* Water Swimming Lane */}
-                    <div className="flex-1 relative h-11 bg-gradient-to-r from-sky-800/80 via-blue-900/80 to-indigo-900/80 rounded-xl border border-cyan-400/30 overflow-hidden flex items-center px-2">
-                      {/* Touchpad Finish Line on right */}
-                      <div className="absolute right-2 top-1 bottom-1 w-4 rounded-sm bg-yellow-400 border border-amber-500 z-0 flex items-center justify-center shadow-md">
-                        <span className="text-[7px] font-black text-slate-900 rotate-90 tracking-tighter">FINISH</span>
-                      </div>
-
-                      {/* Animated Swimmer moving forward */}
-                      <div
-                        className="absolute flex items-center gap-2 transition-all duration-100 ease-linear z-10"
-                        style={{
-                          left: `calc(${swimmer.progress}% * 0.84)`,
-                        }}
-                      >
-                        <div
-                          className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${swimmer.color} flex items-center justify-center text-xl shadow-lg border border-white/40 ${
-                            swimmingStage === 'swimming' ? 'animate-bounce' : ''
-                          }`}
-                        >
-                          {swimmer.emoji}
-                        </div>
-                        <div className="flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded-md backdrop-blur-xs shadow-xs">
-                          <span className="text-[11px] font-black text-white whitespace-nowrap">
-                            {swimmer.name}
-                          </span>
-                          {swimmingStage === 'swimming' && (
-                            <span className="text-[10px] text-cyan-300">💦</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Start Swimming Button */}
-              <div className="pt-2 flex items-center justify-center">
+              {bombStage === 'idle' && (
                 <button
-                  onClick={handleStartSwimming}
-                  disabled={swimmingStage === 'countdown' || swimmingStage === 'swimming'}
-                  className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-600 hover:to-indigo-700 text-white font-black text-sm shadow-xl shadow-cyan-500/30 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  onClick={handleStartBomb}
+                  className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-black text-base shadow-lg shadow-rose-600/25 active:scale-95 transition-all cursor-pointer flex items-center gap-2"
                 >
-                  <span className="text-lg">🏊‍♂️</span>
-                  <span>{swimmingStage === 'finish' ? 'BƠI LẠI CHẶNG MỚI 🏊‍♂️' : 'BẮT ĐẦU CUỘC THI BƠI LỘI 🏊‍♂️'}</span>
+                  <Bomb className="w-5 h-5 text-yellow-300" />
+                  <span>CHÂM NGÒI NỔ TRUYỀN BOM</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 6. 🏆 ĐỈNH NÚI OLYMPIA */}
+          {(activeGame === 'olympia_climb' || activeGame === 'treasure_chest') && (
+            <div className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold text-slate-600 uppercase flex items-center gap-1.5">
+                  <Flag className="w-4 h-4 text-amber-500" />
+                  <span>Đoàn leo núi 4 người - Leo lên đỉnh Olympia giành Vòng Nguyệt Quế:</span>
+                </div>
+                <button
+                  onClick={handleRollOlympiaDice}
+                  disabled={olympiaStage === 'rolling' || olympiaStage === 'climbing'}
+                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs shadow-md active:scale-95 transition-all cursor-pointer flex items-center gap-2"
+                >
+                  <Dices className="w-4 h-4" />
+                  <span>ĐỔ XÚC XẮC ({diceRollValue} Điểm)</span>
                 </button>
               </div>
-            </div>
 
-            {renderResultCard()}
-          </div>
-        )}
+              <div className="space-y-3 bg-white p-4 rounded-3xl border border-slate-200">
+                {['🧗‍♂️ Đội Đỏ', '🧗‍♀️ Đội Xanh', '🧗‍♂️ Đội Vàng', '🧗‍♀️ Đội Tím'].map((team, idx) => {
+                  const student = validStudents[idx % validStudents.length];
+                  const pos = olympiaPositions[idx];
+                  const percent = Math.min(100, (pos / 5) * 100);
+                  return (
+                    <div key={team} className="space-y-1">
+                      <div className="flex justify-between text-xs font-bold">
+                        <span className="text-slate-800">{team}: {student?.name}</span>
+                        <span className="text-amber-600">{pos >= 5 ? '🏆 ĐÃ ĐẠT ĐỈNH OLYMPIA' : `Mốc ${pos}/5`}</span>
+                      </div>
+                      <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full transition-all duration-500"
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 7. ⚽ SÚT PENALTY WORLD CUP */}
+          {(activeGame === 'penalty_kick' || activeGame === 'sprint_race') && (
+            <div className="space-y-4 text-center">
+              <div className="text-xs font-bold text-slate-600 uppercase">
+                Chạm vào 1 trong 4 góc cầu môn để sút phạt đền tung lưới thủ môn:
+              </div>
+
+              <div className="relative mx-auto max-w-xl h-52 bg-gradient-to-b from-sky-400 via-emerald-600 to-emerald-800 rounded-3xl border-4 border-white shadow-xl overflow-hidden p-4 flex flex-col justify-between">
+                {/* Goal Post Frame */}
+                <div className="relative w-full h-full border-4 border-white rounded-2xl bg-white/10 backdrop-blur-xs flex items-center justify-center">
+                  {/* Goalkeeper */}
+                  <div className={`text-5xl transition-all duration-500 ${
+                    goalKeeperDived === 'bottom_left'
+                      ? 'translate-x-[-120px] translate-y-[40px] rotate-45'
+                      : goalKeeperDived === 'bottom_right'
+                      ? 'translate-x-[120px] translate-y-[40px] -rotate-45'
+                      : ''
+                  }`}>
+                    🧤🧑‍🦱
+                  </div>
+
+                  {/* 4 Shooting Corner Target Buttons */}
+                  <button
+                    onClick={() => handleShootPenalty('top_left')}
+                    className="absolute top-2 left-2 px-3 py-1.5 rounded-xl bg-amber-400/90 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md active:scale-95 cursor-pointer"
+                  >
+                    Góc Cao Trái 🎯
+                  </button>
+                  <button
+                    onClick={() => handleShootPenalty('top_right')}
+                    className="absolute top-2 right-2 px-3 py-1.5 rounded-xl bg-amber-400/90 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md active:scale-95 cursor-pointer"
+                  >
+                    🎯 Góc Cao Phải
+                  </button>
+                  <button
+                    onClick={() => handleShootPenalty('bottom_left')}
+                    className="absolute bottom-2 left-2 px-3 py-1.5 rounded-xl bg-amber-400/90 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md active:scale-95 cursor-pointer"
+                  >
+                    Góc Sệt Trái ⚽
+                  </button>
+                  <button
+                    onClick={() => handleShootPenalty('bottom_right')}
+                    className="absolute bottom-2 right-2 px-3 py-1.5 rounded-xl bg-amber-400/90 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md active:scale-95 cursor-pointer"
+                  >
+                    ⚽ Góc Sệt Phải
+                  </button>
+                </div>
+              </div>
+
+              {penaltyStage === 'goal' && (
+                <div className="text-2xl font-black text-emerald-600 animate-bounce">
+                  ⚽ VÀOOO! BÀN THẮNG TUYỆT ĐẸP!
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 8. 🕹️ MÁY GẮP THÚ BÔNG ARCADE */}
+          {(activeGame === 'claw_machine' || activeGame === 'ocean_fishing') && (
+            <div className="space-y-4 text-center">
+              <div className="text-xs font-bold text-slate-600 uppercase">
+                🕹️ Thả tay gắp may mắn để gắp quả cầu phần thưởng chứa tên học sinh:
+              </div>
+
+              <div className="relative mx-auto max-w-lg h-56 bg-slate-900 rounded-3xl border-4 border-indigo-400 shadow-2xl p-4 flex flex-col justify-between overflow-hidden">
+                {/* Mechanical Crane Rail & Claw */}
+                <div className="relative w-full h-8 border-b-2 border-indigo-500/50 flex items-center">
+                  <div
+                    className={`absolute text-3xl transition-all duration-700 ${
+                      clawStage === 'dropping' || clawStage === 'grabbing'
+                        ? 'top-24'
+                        : 'top-1'
+                    }`}
+                    style={{ left: `${clawPositionX}%` }}
+                  >
+                    🏗️
+                  </div>
+                </div>
+
+                {/* Prizes at bottom */}
+                <div className="flex justify-around text-3xl pt-10">
+                  <span>🧸</span>
+                  <span>🎁</span>
+                  <span>⭐</span>
+                  <span>🏆</span>
+                  <span>💎</span>
+                </div>
+              </div>
+
+              {clawStage === 'idle' && (
+                <button
+                  onClick={handleDropClaw}
+                  className="px-8 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm shadow-md active:scale-95 transition-all cursor-pointer"
+                >
+                  THẢ TAY GẮP MAY MẮN 🕹️
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 9. 🎯 PHI TIÊU CAO THỦ HỒNG TÂM */}
+          {(activeGame === 'super_darts' || activeGame === 'archery_target') && (
+            <div className="space-y-4 text-center">
+              <div className="text-xs font-bold text-slate-600 uppercase">
+                🎯 Phóng phi tiêu thẳng vào hồng tâm 100 điểm:
+              </div>
+
+              <div className="relative mx-auto w-48 h-48 rounded-full border-8 border-amber-400 bg-slate-900 shadow-2xl flex items-center justify-center">
+                <div className="w-36 h-36 rounded-full border-4 border-red-500 flex items-center justify-center">
+                  <div className="w-24 h-24 rounded-full border-4 border-emerald-500 flex items-center justify-center">
+                    <div className="w-12 h-12 rounded-full bg-red-600 flex items-center justify-center text-white font-black text-xs shadow-md">
+                      100
+                    </div>
+                  </div>
+                </div>
+
+                {dartStage === 'bullseye' && (
+                  <div className="absolute text-4xl animate-ping">🎯</div>
+                )}
+              </div>
+
+              {dartStage === 'idle' && (
+                <button
+                  onClick={handleThrowDart}
+                  className="px-8 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-black text-sm shadow-md active:scale-95 transition-all cursor-pointer"
+                >
+                  PHÓNG PHI TIÊU HỒNG TÂM 🎯
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 10. 🌌 CHIẾN HẠM KHÔNG GIAN HYPERSPACE */}
+          {(activeGame === 'cosmic_warp' || activeGame === 'swimming_race') && (
+            <div className="space-y-4 text-center">
+              <div className="text-xs font-bold text-slate-600 uppercase">
+                🌌 Nhảy vào không gian tốc độ ánh sáng để xác định thuyền trưởng:
+              </div>
+
+              <div className="relative mx-auto max-w-lg h-52 bg-black rounded-3xl border-2 border-cyan-500/40 shadow-2xl flex items-center justify-center overflow-hidden">
+                {warpStage === 'warping' ? (
+                  <div className="text-5xl animate-pulse">🛸 💫 ⚡</div>
+                ) : (
+                  <div className="text-4xl text-cyan-400">🌌 🛰️ 🚀</div>
+                )}
+              </div>
+
+              {warpStage === 'idle' && (
+                <button
+                  onClick={handleTriggerWarp}
+                  className="px-8 py-3 rounded-2xl bg-cyan-600 hover:bg-cyan-700 text-white font-black text-sm shadow-md active:scale-95 transition-all cursor-pointer"
+                >
+                  NHẢY KHÔNG GIAN WARP-SPEED 🌌
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Result announcement */}
+          {renderResultCard()}
+        </div>
       </div>
     </div>
   );
-
-  // Helper render winner card & quick score/points buttons
-  function renderResultCard() {
-    if (selectedStudent) {
-      return (
-        <div className="p-5 md:p-6 rounded-3xl bg-gradient-to-br from-indigo-50 to-amber-50/50 border-2 border-indigo-200 shadow-md space-y-3 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <span className="px-3 py-1 rounded-full bg-indigo-600 text-white text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
-              <Trophy className="w-3.5 h-3.5 text-amber-300" />
-              <span>HỌC SINH ĐƯỢC CHỌN</span>
-            </span>
-            <span className="text-xs font-mono font-bold text-slate-500">
-              {selectedStudent.code}
-            </span>
-          </div>
-
-          <div className="text-center py-1.5">
-            <h3 className="text-3xl md:text-4xl font-black text-slate-900">
-              {selectedStudent.name}
-            </h3>
-            <p className="text-xs font-semibold text-slate-500 mt-1">
-              Mời em đứng lên phát biểu hoặc lên bảng thực hiện bài tập
-            </p>
-          </div>
-
-          {/* Quick Grading Action Buttons */}
-          <div className="pt-2.5 border-t border-slate-200 flex flex-col items-center gap-2">
-            <div className="text-xs font-bold text-slate-600 flex items-center justify-center gap-1.5">
-              <span>Điểm thi đua hiện có:</span>
-              <span className={`px-2 py-0.5 rounded-full font-black text-xs ${
-                (selectedStudent.bonusPoints || 0) > 0
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : (selectedStudent.bonusPoints || 0) < 0
-                  ? 'bg-rose-100 text-rose-800'
-                  : 'bg-slate-100 text-slate-700'
-              }`}>
-                {(selectedStudent.bonusPoints || 0) > 0 ? `+${selectedStudent.bonusPoints}` : (selectedStudent.bonusPoints || 0)}đ
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <button
-                onClick={() => onAddBonusPoint(selectedStudent.id, 1)}
-                className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-              >
-                <Star className="w-3.5 h-3.5" />
-                <span>+1 Điểm Thưởng</span>
-              </button>
-
-              <button
-                onClick={() => onAddBonusPoint(selectedStudent.id, 2)}
-                className="px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-              >
-                <Flame className="w-3.5 h-3.5" />
-                <span>+2 Điểm Thưởng</span>
-              </button>
-
-              <button
-                onClick={() => onAddBonusPoint(selectedStudent.id, -1)}
-                className="px-3.5 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-              >
-                <span>-1 Điểm Trừ</span>
-              </button>
-
-              <button
-                onClick={() => onAddBonusPoint(selectedStudent.id, -2)}
-                className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-              >
-                <span>-2 Điểm Trừ</span>
-              </button>
-
-              <button
-                onClick={() => onSetOralScore(selectedStudent.id, 10)}
-                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-              >
-                <Award className="w-3.5 h-3.5" />
-                <span>Cho 10đ Miệng</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (selectedGroup.length > 0) {
-      return (
-        <div className="p-5 md:p-6 rounded-3xl bg-indigo-50 border-2 border-indigo-200 shadow-md space-y-3 animate-fade-in">
-          <div className="flex items-center gap-2">
-            <Users className="w-5 h-5 text-indigo-600" />
-            <h4 className="font-black text-slate-900 text-base">
-              DANH SÁCH NHÓM ({selectedGroup.length} HỌC SINH)
-            </h4>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {selectedGroup.map((st) => (
-              <div
-                key={st.id}
-                className="p-3 rounded-xl bg-white border border-slate-200 flex items-center justify-between shadow-xs"
-              >
-                <div>
-                  <span className="font-bold text-sm text-slate-900">{st.name}</span>
-                  <div className="text-[10px] text-slate-500 font-mono">{st.code}</div>
-                </div>
-                <button
-                  onClick={() => onAddBonusPoint(st.id, 1)}
-                  className="px-2 py-1 rounded-lg bg-amber-100 text-amber-800 text-[11px] font-bold cursor-pointer"
-                >
-                  +1đ
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    return null;
-  }
 };
