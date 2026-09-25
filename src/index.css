@@ -150,4 +150,18 @@
     linear-gradient(to bottom, rgba(203, 213, 225, 0.35) 1px, transparent 1px);
 }
 
+/* Font chữ tập viết tiểu học Việt Nam (Ưu tiên font cục bộ HP001 nếu máy trường học đã cài, fallback mượt mà sang Playpen Sans & Patrick Hand) */
+@font-face {
+  font-family: 'TapVietTieuHoc';
+  src: local('HP001 4 hàng normal'), local('HP001 4 hang normal'), local('HP001 4 hàng'), local('HP001'), local('HLHOCTRO'), local('TapViet'), local('Font Chu Tieu Hoc');
+}
+
+.font-tap-viet {
+  font-family: 'TapVietTieuHoc', 'Playpen Sans', 'Patrick Hand', 'Mali', cursive, sans-serif;
+}
+
+.font-luyen-chu-dep {
+  font-family: 'Charm', 'Dancing Script', 'Caveat', cursive, sans-serif;
+}
+
 

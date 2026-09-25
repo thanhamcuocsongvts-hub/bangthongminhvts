@@ -168,7 +168,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   }, [activeTool]);
 
   // Viết Chữ Đẹp (Smart Handwriting to Beautiful Calligraphy Font)
-  const [calligraphyFont, setCalligraphyFont] = useState<'calligraphy' | 'handwriting' | 'primary' | 'cursive'>('calligraphy');
+  const [calligraphyFont, setCalligraphyFont] = useState<'calligraphy' | 'handwriting' | 'primary' | 'cursive' | 'tapviet' | 'luyenchu'>('tapviet');
   const [showCalligraphyPopover, setShowCalligraphyPopover] = useState<boolean>(false);
   const [autoConvertCalligraphy, setAutoConvertCalligraphy] = useState<boolean>(true);
   const [isConvertingCalligraphy, setIsConvertingCalligraphy] = useState<boolean>(false);
@@ -180,6 +180,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const calligraphySessionStrokesRef = useRef<string[]>([]);
   const calligraphyTimerRef = useRef<any>(null);
   const lastPointerPointRef = useRef<{ x: number; y: number; pressure: number; time: number; width?: number } | null>(null);
+  const lastMidPointRef = useRef<{ x: number; y: number } | null>(null);
 
   // Modals & Shape Popovers
   const [showShapePicker, setShowShapePicker] = useState<boolean>(false);
@@ -278,6 +279,15 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     },
   ]);
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
+  const pagesRef = useRef<BlackboardPage[]>(pages);
+  const currentPageIndexRef = useRef<number>(currentPageIndex);
+
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
+  useEffect(() => {
+    currentPageIndexRef.current = currentPageIndex;
+  }, [currentPageIndex]);
 
   // Custom Equation Dialog state (Hàm số toán học & vật lý do giáo viên tự nhập)
   const [showEquationModal, setShowEquationModal] = useState<boolean>(false);
@@ -1066,9 +1076,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         ctx.arc(points[0].x, points[0].y, (tool === 'highlighter' ? size * 2.5 : size) / 2, 0, Math.PI * 2);
         ctx.fill();
       } else if (points.length === 2) {
+        const midX = (points[0].x + points[1].x) / 2;
+        const midY = (points[0].y + points[1].y) / 2;
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
-        ctx.lineTo(points[1].x, points[1].y);
+        ctx.quadraticCurveTo(points[0].x, points[0].y, midX, midY);
+        ctx.quadraticCurveTo(points[1].x, points[1].y, points[1].x, points[1].y);
         ctx.stroke();
       } else {
         ctx.beginPath();
@@ -1300,47 +1313,87 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   }, []);
 
   // Viết Chữ Đẹp: Convert handwritten chalk strokes to beautiful calligraphy font text box
-  const handleConvertHandwritingToCalligraphy = useCallback(async () => {
+  const handleConvertHandwritingToCalligraphy = useCallback(async (forcedStrokeIds?: string[]) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const strokeIds = [...calligraphySessionStrokesRef.current];
-    if (strokeIds.length === 0) return;
-
-    const currPage = pages[currentPageIndex];
+    // Use latest pages from pagesRef to eliminate any React stale closure issues!
+    const currPages = pagesRef.current;
+    const currIdx = currentPageIndexRef.current;
+    const currPage = currPages[currIdx];
     if (!currPage) return;
 
+    // 1. Gather stroke IDs to convert
+    let strokeIds = forcedStrokeIds && forcedStrokeIds.length > 0 
+      ? [...forcedStrokeIds] 
+      : [...calligraphySessionStrokesRef.current];
+
+    // If no session strokes, check if teacher currently selected a stroke
+    if (strokeIds.length === 0 && selectedStrokeId) {
+      strokeIds = [selectedStrokeId];
+    }
+
+    // If still no session strokes, find the most recent freehand strokes (pen or calligraphy)
+    if (strokeIds.length === 0 && currPage.strokes.length > 0) {
+      const freehandStrokes = currPage.strokes.filter(
+        (s) => s.tool === 'calligraphy' || s.tool === 'pen'
+      );
+      if (freehandStrokes.length > 0) {
+        // Take the last 1 to 5 recent strokes
+        const recent = freehandStrokes.slice(-5);
+        strokeIds = recent.map((s) => s.id);
+      }
+    }
+
+    if (strokeIds.length === 0) {
+      setCalligraphyStatusBanner('💡 Hãy dùng bút viết chữ lên bảng rồi nhấn "Chuyển thành chữ đẹp" nhé!');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3500);
+      return;
+    }
+
     const targetStrokes = currPage.strokes.filter((s) => strokeIds.includes(s.id));
-    if (targetStrokes.length === 0) return;
+    if (targetStrokes.length === 0) {
+      setCalligraphyStatusBanner('💡 Không tìm thấy nét vẽ nào để chuyển đổi.');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+      return;
+    }
 
     const allPoints: StrokePoint[] = [];
     targetStrokes.forEach((s) => {
       if (s.points) allPoints.push(...s.points);
     });
 
-    if (allPoints.length < 3) return;
+    if (allPoints.length < 3) {
+      setCalligraphyStatusBanner('💡 Nét vẽ quá ngắn, hãy viết từ ngữ hoàn chỉnh hơn nhé.');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+      return;
+    }
 
-    const crop = cropStrokesToImage(canvas, allPoints, boardScrollX, boardScrollY, 28);
-    if (!crop) return;
+    const crop = cropStrokesToImage(canvas, targetStrokes, boardScrollX, boardScrollY, 28);
+    if (!crop) {
+      setCalligraphyStatusBanner('⚠️ Không thể trích xuất nét vẽ.');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+      return;
+    }
 
     setIsConvertingCalligraphy(true);
     setCalligraphyStatusBanner('✨ Đang nhận diện chữ viết tay để chuyển thành chữ đẹp...');
 
     try {
-      const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, 'bài giảng lớp học, toán học, văn học, khoa học');
+      const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, 'bài giảng lớp học, toán học, văn học, khoa học, tiểu học');
       if (recognized && recognized.trim().length > 0) {
         const text = recognized.trim();
         const { bounds } = crop;
-        const calculatedSize = Math.max(26, Math.min(68, Math.round(bounds.height * 0.72)));
+        const calculatedSize = Math.max(28, Math.min(72, Math.round(bounds.height * 0.75)));
 
         const newTextBox: BlackboardTextBox = {
           id: `calligraphy_txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
           x: Math.round(bounds.minX),
           y: Math.round(bounds.minY),
-          width: Math.max(180, Math.round(bounds.width + 40)),
-          height: Math.max(60, Math.round(bounds.height + 24)),
+          width: Math.max(200, Math.round(bounds.width + 40)),
+          height: Math.max(64, Math.round(bounds.height + 24)),
           text: text,
-          color: activeColor,
+          color: targetStrokes[0]?.color || activeColor,
           size: calculatedSize,
           fontFamily: calligraphyFont,
           bold: false,
@@ -1358,132 +1411,74 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
         setPages((prev) => {
           const updated = [...prev];
-          const curr = updated[currentPageIndex];
+          const curr = updated[currIdx];
           if (!curr) return prev;
           const strokeIdSet = new Set(strokeIds);
           const remainingStrokes = curr.strokes.filter((s) => !strokeIdSet.has(s.id));
-          return [
-            ...updated.slice(0, currentPageIndex),
+          const newPages = [
+            ...updated.slice(0, currIdx),
             {
               ...curr,
               strokes: remainingStrokes,
               texts: [...(curr.texts || []), newTextBox],
             },
-            ...updated.slice(currentPageIndex + 1),
+            ...updated.slice(currIdx + 1),
           ];
+          pagesRef.current = newPages;
+          return newPages;
         });
 
         calligraphySessionStrokesRef.current = [];
+        setSelectedTextId(newTextBox.id);
+        setSelectedStrokeId(null);
         setCalligraphyStatusBanner(`✨ Đã chuyển hóa thành công: "${text}"`);
         setTimeout(() => setCalligraphyStatusBanner(null), 5000);
       } else {
-        setCalligraphyStatusBanner(null);
+        setCalligraphyStatusBanner('⚠️ Không nhận diện được chữ rõ ràng. Thầy cô vui lòng viết lại rõ nét hơn nhé.');
+        setTimeout(() => setCalligraphyStatusBanner(null), 4000);
       }
     } catch (err) {
       console.warn('Calligraphy conversion error:', err);
-      setCalligraphyStatusBanner(null);
+      setCalligraphyStatusBanner('⚠️ Lỗi kết nối dịch vụ nhận diện. Thầy cô vui lòng thử lại.');
+      setTimeout(() => setCalligraphyStatusBanner(null), 4000);
     } finally {
       setIsConvertingCalligraphy(false);
     }
-  }, [pages, currentPageIndex, boardScrollX, boardScrollY, activeColor, calligraphyFont]);
+  }, [boardScrollX, boardScrollY, activeColor, calligraphyFont, selectedStrokeId]);
 
   // Undo Calligraphy: revert converted text box back to original handwritten chalk strokes
   const handleUndoCalligraphy = useCallback(() => {
     if (!lastConvertedInfo) return;
     const { textBoxId, replacedStrokes } = lastConvertedInfo;
+    const currIdx = currentPageIndexRef.current;
     setPages((prev) => {
       const updated = [...prev];
-      const curr = updated[currentPageIndex];
+      const curr = updated[currIdx];
       if (!curr) return prev;
       const remainingTexts = (curr.texts || []).filter((t) => t.id !== textBoxId);
-      return [
-        ...updated.slice(0, currentPageIndex),
+      const newPages = [
+        ...updated.slice(0, currIdx),
         {
           ...curr,
           strokes: [...curr.strokes, ...replacedStrokes],
           texts: remainingTexts,
         },
-        ...updated.slice(currentPageIndex + 1),
+        ...updated.slice(currIdx + 1),
       ];
+      pagesRef.current = newPages;
+      return newPages;
     });
     setLastConvertedInfo(null);
     setCalligraphyStatusBanner('↩️ Đã hoàn tác về nét viết phấn ban đầu.');
     setTimeout(() => setCalligraphyStatusBanner(null), 4000);
-  }, [lastConvertedInfo, currentPageIndex]);
+  }, [lastConvertedInfo]);
 
   // Convert a specific selected stroke to calligraphy text box
   const convertSelectedStrokeToCalligraphy = useCallback(
     async (stroke: WhiteboardStroke) => {
-      const canvas = canvasRef.current;
-      if (!canvas || !stroke.points || stroke.points.length === 0) return;
-
-      const crop = cropStrokesToImage(canvas, stroke.points, boardScrollX, boardScrollY, 28);
-      if (!crop) return;
-
-      setIsConvertingCalligraphy(true);
-      setCalligraphyStatusBanner('✨ Đang nhận diện chữ viết tay để chuyển thành chữ đẹp...');
-
-      try {
-        const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, 'bài giảng lớp học, toán học, văn học, khoa học');
-        if (recognized && recognized.trim().length > 0) {
-          const text = recognized.trim();
-          const { bounds } = crop;
-          const calculatedSize = Math.max(26, Math.min(68, Math.round(bounds.height * 0.72)));
-
-          const newTextBox: BlackboardTextBox = {
-            id: `calligraphy_txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-            x: Math.round(bounds.minX),
-            y: Math.round(bounds.minY),
-            width: Math.max(180, Math.round(bounds.width + 40)),
-            height: Math.max(60, Math.round(bounds.height + 24)),
-            text: text,
-            color: stroke.color || activeColor,
-            size: calculatedSize,
-            fontFamily: calligraphyFont,
-            bold: false,
-            italic: false,
-            underline: false,
-            align: 'left',
-            bgColor: 'transparent',
-            borderStyle: 'none',
-          };
-
-          setLastConvertedInfo({
-            textBoxId: newTextBox.id,
-            replacedStrokes: [stroke],
-          });
-
-          setPages((prev) => {
-            const updated = [...prev];
-            const curr = updated[currentPageIndex];
-            if (!curr) return prev;
-            return [
-              ...updated.slice(0, currentPageIndex),
-              {
-                ...curr,
-                strokes: curr.strokes.filter((s) => s.id !== stroke.id),
-                texts: [...(curr.texts || []), newTextBox],
-              },
-              ...updated.slice(currentPageIndex + 1),
-            ];
-          });
-
-          setSelectedStrokeId(null);
-          setSelectedTextId(newTextBox.id);
-          setCalligraphyStatusBanner(`✨ Đã chuyển hóa thành công: "${text}"`);
-          setTimeout(() => setCalligraphyStatusBanner(null), 5000);
-        } else {
-          setCalligraphyStatusBanner('Không nhận diện được từ ngữ rõ ràng trong nét vẽ này.');
-          setTimeout(() => setCalligraphyStatusBanner(null), 3000);
-        }
-      } catch (err) {
-        console.warn('Convert stroke to calligraphy error:', err);
-        setCalligraphyStatusBanner(null);
-      } finally {
-        setIsConvertingCalligraphy(false);
-      }
+      await handleConvertHandwritingToCalligraphy([stroke.id]);
     },
-    [boardScrollX, boardScrollY, activeColor, calligraphyFont, currentPageIndex]
+    [handleConvertHandwritingToCalligraphy]
   );
 
   // Center selected stroke to the current visible viewport
@@ -1646,6 +1641,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const now = performance.now();
     const filteredPt = filterPointJitter({ x, y, pressure: e.pressure || 0.5, time: now });
     lastPointerPointRef.current = { ...filteredPt, width: strokeSize };
+    lastMidPointRef.current = { x: filteredPt.x, y: filteredPt.y };
     const startPt: StrokePoint = { x: filteredPt.x, y: filteredPt.y, pressure: filteredPt.pressure, time: now, width: strokeSize };
     activePointsRef.current = [startPt];
 
@@ -1866,34 +1862,32 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           activeTool === 'calligraphy'
         );
         const ptWithWidth = { ...filtered, width: dynWidth };
-        lastPointerPointRef.current = ptWithWidth;
         pts.push(ptWithWidth);
 
         if (activeTool === 'calligraphy') {
           ctx.lineWidth = dynWidth;
         }
 
-        if (pts.length >= 3) {
-          const p0 = pts[pts.length - 3];
-          const p1 = pts[pts.length - 2];
-          const p2 = pts[pts.length - 1];
-          const mid1X = (p0.x + p1.x) / 2;
-          const mid1Y = (p0.y + p1.y) / 2;
-          const mid2X = (p1.x + p2.x) / 2;
-          const mid2Y = (p1.y + p2.y) / 2;
+        // THUẬT TOÁN ĐIỂM GIỮA (MIDPOINT ALGORITHM) & QUADRATIC BEZIER NỘI SUY TỨC THÌ (Zero-Latency)
+        // Tuyệt đối không dùng lineTo() để triệt tiêu hoàn toàn góc gãy khúc khi lia bút nhanh
+        const pLast = lastPointerPointRef.current;
+        const pMidLast = lastMidPointRef.current;
+
+        if (pLast && pMidLast) {
+          const currentMidX = (pLast.x + ptWithWidth.x) / 2;
+          const currentMidY = (pLast.y + ptWithWidth.y) / 2;
 
           ctx.beginPath();
-          ctx.moveTo(mid1X, mid1Y);
-          ctx.quadraticCurveTo(p1.x, p1.y, mid2X, mid2Y);
+          ctx.moveTo(pMidLast.x, pMidLast.y);
+          ctx.quadraticCurveTo(pLast.x, pLast.y, currentMidX, currentMidY);
           ctx.stroke();
-        } else if (pts.length === 2) {
-          const p0 = pts[0];
-          const p1 = pts[1];
-          ctx.beginPath();
-          ctx.moveTo(p0.x, p0.y);
-          ctx.lineTo(p1.x, p1.y);
-          ctx.stroke();
+
+          lastMidPointRef.current = { x: currentMidX, y: currentMidY };
+        } else {
+          lastMidPointRef.current = { x: ptWithWidth.x, y: ptWithWidth.y };
         }
+
+        lastPointerPointRef.current = ptWithWidth;
       }
 
       ctx.restore();
@@ -2064,6 +2058,35 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
 
+    // Nối mượt mà đoạn cuối cùng đến chính xác vị trí nhấc bút
+    const pLast = lastPointerPointRef.current;
+    const pMidLast = lastMidPointRef.current;
+    if (canvas && pLast && pMidLast && (activeTool === 'pen' || activeTool === 'calligraphy' || activeTool === 'highlighter' || activeTool === 'eraser')) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.save();
+        ctx.translate(-boardScrollX, -boardScrollY);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (activeTool === 'eraser') {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = strokeSize;
+        } else {
+          ctx.strokeStyle = activeColor;
+          ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
+          ctx.globalAlpha = activeTool === 'highlighter' ? 0.45 : 0.98;
+        }
+        ctx.beginPath();
+        ctx.moveTo(pMidLast.x, pMidLast.y);
+        ctx.quadraticCurveTo(pLast.x, pLast.y, pLast.x, pLast.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    lastPointerPointRef.current = null;
+    lastMidPointRef.current = null;
+
     const completedPoints = [...activePointsRef.current];
     activePointsRef.current = [];
 
@@ -2131,6 +2154,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           strokes: [...curr.strokes, newStroke],
           redoStack: [],
         };
+        pagesRef.current = updated;
         return updated;
       });
 
@@ -2160,6 +2184,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         canvas.releasePointerCapture(e.pointerId);
       } catch (_) {}
     }
+    lastPointerPointRef.current = null;
+    lastMidPointRef.current = null;
     if (isDrawingRef.current) {
       isDrawingRef.current = false;
       activePointsRef.current = [];
@@ -2744,7 +2770,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
           onPointerCancel={handlePointerCancel}
-          style={getCanvasCursorStyle()}
+          style={{ ...getCanvasCursorStyle(), touchAction: 'none' }}
           className={`absolute inset-0 w-full h-full touch-canvas z-10 ${getCanvasCursorClass()}`}
         />
 
@@ -4438,9 +4464,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   <div className="text-[11px] font-semibold text-purple-300 mb-1.5">Chọn kiểu chữ viết tay:</div>
                   <div className="grid grid-cols-2 gap-1.5 mb-3">
                     {[
-                      { id: 'calligraphy', label: 'Thư Pháp Mềm Mại', sub: 'Dancing Script', sample: 'Nét chữ nghệ thuật' },
-                      { id: 'handwriting', label: 'Bút Mài Học Đường', sub: 'Caveat', sample: 'Thanh thoát giáo viên' },
-                      { id: 'primary', label: 'Nét Phấn Học Trò', sub: 'Mali', sample: 'Rõ ràng, tròn trịa' },
+                      { id: 'tapviet', label: 'Tập Viết Tiểu Học', sub: 'Chuẩn nét ô ly Lớp 1-5', sample: 'Nét chữ nết người' },
+                      { id: 'luyenchu', label: 'Vở Sạch Chữ Đẹp', sub: 'Nét thanh nét đậm Charm', sample: 'Luyện chữ rèn nết' },
+                      { id: 'primary', label: 'Nét Phấn Học Trò', sub: 'Patrick Hand / Mali', sample: 'Rõ ràng, tròn trịa' },
+                      { id: 'handwriting', label: 'Bút Mài Giáo Viên', sub: 'Caveat thanh thoát', sample: 'Nét bút cô giáo' },
+                      { id: 'calligraphy', label: 'Thư Pháp Mềm Mại', sub: 'Dancing Script', sample: 'Nghệ thuật thư pháp' },
                       { id: 'cursive', label: 'Nét Cọ Bay Bổng', sub: 'Marck Script', sample: 'Uốn lượn bay bổng' },
                     ].map((font) => (
                       <button
@@ -4452,18 +4480,26 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                             : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
                         }`}
                       >
-                        <div className="text-[11px] font-bold">{font.label}</div>
+                        <div className="text-[11px] font-bold flex items-center gap-1">
+                          {font.id === 'tapviet' && <span className="text-amber-400">📖</span>}
+                          {font.id === 'luyenchu' && <span className="text-pink-400">✨</span>}
+                          <span>{font.label}</span>
+                        </div>
                         <div className="text-[9px] text-slate-400 mb-1">{font.sub}</div>
                         <div
                           className="text-[13px] text-amber-200 truncate"
                           style={{
                             fontFamily:
-                              font.id === 'calligraphy'
+                              font.id === 'tapviet'
+                                ? '"TapVietTieuHoc", "Playpen Sans", "Patrick Hand", "Mali", cursive, sans-serif'
+                                : font.id === 'luyenchu'
+                                ? '"Charm", "Dancing Script", cursive'
+                                : font.id === 'calligraphy'
                                 ? '"Dancing Script", cursive'
                                 : font.id === 'handwriting'
                                 ? '"Caveat", cursive'
                                 : font.id === 'primary'
-                                ? '"Mali", cursive'
+                                ? '"Playpen Sans", "Mali", "Patrick Hand", cursive'
                                 : '"Marck Script", cursive',
                           }}
                         >

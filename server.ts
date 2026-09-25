@@ -125,16 +125,16 @@ async function generateWithGemini(ai: any, params: any) {
 // Ultra-low latency vision caller specifically for live classroom handwriting recognition
 async function generateFastVisionWithGemini(ai: any, params: any) {
   const modelsToTry = [
-    "gemini-3.1-flash-lite", // Extremely fast multimodal inference
+    "gemini-3.8-flash", // Official standard vision & text model
     "gemini-flash-latest",
-    "gemini-3.8-flash",
+    "gemini-3.1-flash-lite",
   ];
   let lastError: any = null;
 
   for (const model of modelsToTry) {
     try {
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout after 7s for ${model}`)), 7000)
+        setTimeout(() => reject(new Error(`Timeout after 14s for ${model}`)), 14000)
       );
       const callPromise = ai.models.generateContent({
         ...params,
@@ -571,15 +571,19 @@ app.post("/api/ai/recognize-handwriting", async (req, res) => {
               },
             },
             {
-              text: `Đọc chính xác chữ viết tay tiếng Việt hoặc số/công thức toán học trong ảnh trên bảng lớp học.
-Chỉ trả về DUY NHẤT nội dung chữ đọc được, viết đúng chính tả tiếng Việt có dấu, KHÔNG giải thích, KHÔNG thêm từ ngữ nào khác, KHÔNG ngoặc kép thừa. Nếu không đọc được chữ, trả về "".`,
+              text: `Bạn là trợ lý AI chuyên đọc chữ viết tay tiếng Việt và công thức trên bảng đen lớp học tiểu học và trung học.
+Hãy nhận diện CHÍNH XÁC từ ngữ, chữ cái, tên riêng hoặc số/phép tính viết tay trong ảnh này.
+Quy tắc:
+1. Trả về DUY NHẤT nội dung chữ đọc được, viết đúng chính tả tiếng Việt có dấu (ví dụ: "Chào các em", "Toán học", "Kiệt", "Tập viết", "15 + 4 = 19", v.v.).
+2. KHÔNG giải thích, KHÔNG thêm từ ngữ nào khác, KHÔNG bọc trong dấu ngoặc kép thừa.
+3. Nếu ảnh chỉ là nét vẽ nguệch ngoạc vô nghĩa hoặc không có chữ, trả về "".`,
             },
           ],
         },
       ],
       config: {
         temperature: 0.0,
-        maxOutputTokens: 64,
+        maxOutputTokens: 120,
       },
     });
 
