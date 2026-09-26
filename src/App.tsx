@@ -38,8 +38,12 @@ import { loadLessonsFromDB, saveLessonsToDB, forceSyncLessonsToCloud, forcePullL
 import { db, auth } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { useDeviceDetection } from './hooks/useDeviceDetection';
+import { PenTool, FolderOpen, Users, CheckSquare, Trophy, Smartphone } from 'lucide-react';
+import { TeacherMobileRemote } from './components/TeacherMobileRemote';
 
 export default function App() {
+  const { isMobile } = useDeviceDetection();
   // Check URL mode for student mobile access
   const [isStudentMode, setIsStudentMode] = useState<boolean>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -304,8 +308,13 @@ export default function App() {
     return emptyFallbackLesson;
   }, [activeOpenedLesson, lessons, activeLessonId]);
 
-  // Active Tab & Display Settings (Defaults to Classroom Blackboard upon login)
-  const [activeTab, setActiveTab] = useState<ActiveTab>('whiteboard');
+  // Active Tab & Display Settings (Defaults to Mobile Remote on phones, Classroom Blackboard on TV/Desktop)
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    if (typeof window !== 'undefined' && (window.innerWidth < 768 || (window.innerHeight < 520 && window.innerWidth < 1000))) {
+      return 'remote';
+    }
+    return 'whiteboard';
+  });
   const [textScale, setTextScale] = useState<TextScale>('large'); // Default 125% for 75" TV
   const [roomState, setRoomState] = useState<RoomState | null>(null);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
@@ -863,7 +872,13 @@ export default function App() {
       />
 
       {/* Main Interactive Screen Content */}
-      <main className={`flex-1 ${activeTab === 'whiteboard' ? 'p-0.5 sm:p-1 md:p-1.5' : 'p-3 md:p-4'} overflow-hidden relative bg-[#f8fafc]`}>
+      <main className={`flex-1 ${
+        activeTab === 'whiteboard'
+          ? 'p-0 sm:p-1 md:p-1.5 overflow-hidden'
+          : isMobile
+          ? 'p-2.5 pb-24 overflow-y-auto'
+          : 'p-3 md:p-4 overflow-hidden'
+      } relative bg-[#f8fafc]`}>
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -873,6 +888,39 @@ export default function App() {
             transition={{ duration: 0.18, ease: 'easeOut' }}
             className="w-full h-full"
           >
+            {/* Tab: Smart Teaching Mobile Remote */}
+            {activeTab === 'remote' && (
+              <TeacherMobileRemote
+                currentLesson={currentLesson}
+                allLessons={lessons}
+                activeTeacher={activeTeacher}
+                roomState={roomState}
+                onSelectLesson={handleSelectLesson}
+                onOpenQR={() => setShowQRModal(true)}
+                onOpenRandomPicker={() => {
+                  setPickerClassroom(activeTeacher?.classes?.[0] || null);
+                  setShowRandomPickerModal(true);
+                }}
+                onSwitchTab={setActiveTab}
+                onControlRoom={async (idx, isLive) => {
+                  await fetch(`/api/rooms/${roomState?.pin || '758899'}/control`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ activeQuestionIndex: idx, isLive }),
+                  });
+                  fetchRoom(roomState?.pin || '758899');
+                }}
+                onResetRoom={async () => {
+                  await fetch(`/api/rooms/${roomState?.pin || '758899'}/reset`, {
+                    method: 'POST',
+                  });
+                  fetchRoom(roomState?.pin || '758899');
+                }}
+                onAddStudentBonusPoint={handleAddBonusPointFromPicker}
+                onSetStudentOralScore={handleSetOralScoreFromPicker}
+                syncStatus={syncStatus}
+              />
+            )}
             {/* Tab 2: Document Reader View (Open Doc directly & AI Key Points) */}
             {activeTab === 'reader' && (
               <DocumentReaderView
@@ -1329,6 +1377,37 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+      {/* MOBILE PHONE BOTTOM NAVIGATION BAR (< 768px) */}
+      {isMobile && !isStudentMode && !isFullscreen && (
+        <nav
+          className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-1 py-1.5 flex items-center justify-around shadow-2xl select-none"
+          style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom))' }}
+        >
+          {[
+            { id: 'remote' as ActiveTab, label: 'Remote TV', icon: <Smartphone className="w-5 h-5" />, activeColor: 'text-indigo-600' },
+            { id: 'whiteboard' as ActiveTab, label: 'Bảng Viết', icon: <PenTool className="w-5 h-5" />, activeColor: 'text-emerald-600' },
+            { id: 'documents' as ActiveTab, label: 'Kho Bài', icon: <FolderOpen className="w-5 h-5" />, activeColor: 'text-amber-600' },
+            { id: 'gradebook' as ActiveTab, label: 'Lớp Học', icon: <Users className="w-5 h-5" />, activeColor: 'text-blue-600' },
+            { id: 'quiz' as ActiveTab, label: 'Trắc Nghiệm', icon: <CheckSquare className="w-5 h-5" />, activeColor: 'text-orange-500' },
+          ].map((item) => {
+            const isActive = activeTab === item.id || (item.id === 'documents' && activeTab === 'reader');
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer ${
+                  isActive ? `${item.activeColor} font-black scale-105` : 'text-slate-400 hover:text-slate-600 font-medium'
+                }`}
+              >
+                <div className={`p-1 rounded-xl ${isActive ? 'bg-slate-100 shadow-xs' : ''}`}>
+                  {item.icon}
+                </div>
+                <span className="text-[10px] tracking-tight mt-0.5">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       )}
     </div>
   );

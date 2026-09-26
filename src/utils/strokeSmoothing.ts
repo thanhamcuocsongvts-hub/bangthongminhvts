@@ -267,10 +267,10 @@ export function cropStrokesToImage(
     const rawW = strokeW + pad * 2;
     const rawH = strokeH + pad * 2;
 
-    // Normalizing scale so the image is readable but not overly heavy (360 - 640px)
-    const targetW = Math.max(260, Math.min(640, rawW));
+    // Normalizing scale so the image is readable but ultra lightweight (200 - 480px)
+    const targetW = Math.max(200, Math.min(480, rawW));
     const scale = targetW / rawW;
-    const targetH = Math.max(120, Math.min(480, Math.round(rawH * scale)));
+    const targetH = Math.max(80, Math.min(360, Math.round(rawH * scale)));
 
     offscreen.width = targetW;
     offscreen.height = targetH;
@@ -317,8 +317,8 @@ export function cropStrokesToImage(
     }
     offCtx.restore();
 
-    // High quality JPEG dataUrl
-    const dataUrl = offscreen.toDataURL('image/jpeg', 0.88);
+    // High speed optimized JPEG dataUrl (~15-25KB)
+    const dataUrl = offscreen.toDataURL('image/jpeg', 0.82);
 
     return {
       dataUrl,
@@ -343,7 +343,7 @@ export async function recognizeVietnameseHandwriting(
   contextHint = 'bài giảng lớp học, công thức toán học'
 ): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 16000); // 16s timeout for real cloud roundtrip
+  const timeoutId = setTimeout(() => controller.abort(), 7500); // 7.5s timeout for fast response
 
   try {
     const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');

@@ -27,12 +27,14 @@ import {
   CloudUpload,
   CloudDownload,
   RefreshCw,
+  Smartphone,
 } from 'lucide-react';
 import { ClassRoom, ClassStudent, TeacherProfile, ConductRecord, SemesterScoreDetail } from '../types';
 import { exportGradebookToExcel } from '../utils/exportUtils';
 import { isEvaluationOrSummaryRow } from '../utils/studentFilter';
 import { ImportStudentsModal } from './ImportStudentsModal';
 import { StudentConductModal } from './StudentConductModal';
+import { useDeviceDetection } from '../hooks/useDeviceDetection';
 
 interface ClassGradebookProps {
   teacher: TeacherProfile;
@@ -102,6 +104,8 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   syncStatus = 'synced',
 }) => {
   const classes = teacher?.classes || [];
+  const { isMobile } = useDeviceDetection();
+  const [mobileViewMode, setMobileViewMode] = useState<'cards' | 'table'>('cards');
   const [activeClassId, setActiveClassId] = useState<string>(classes[0]?.id || '');
   const [activeSemester, setActiveSemester] = useState<SemesterTab>('hk1');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -907,33 +911,216 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
         )}
       </div>
 
-      {/* Table controls toolbar: Full page toggle & horizontal scroll helper */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-slate-800 text-sm">
-            Danh Sách: {filteredStudents.length} Học Sinh
-          </span>
-          <span className="text-xs text-slate-500 hidden sm:inline">
-            • Đã hỗ trợ cuộn dọc toàn bộ trang & cuộn ngang xem tất cả các cột điểm
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
+      {/* Mobile View Mode Switcher */}
+      {isMobile && (
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 w-full">
           <button
-            onClick={() => setIsExpandedView((v) => !v)}
-            className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-              isExpandedView
-                ? 'bg-indigo-600 text-white shadow-xs ring-2 ring-indigo-400/30'
-                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+            onClick={() => setMobileViewMode('cards')}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              mobileViewMode === 'cards'
+                ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
-            title="Chuyển chế độ xem bao quát toàn bộ học sinh không giới hạn chiều cao"
           >
-            <Columns className="w-3.5 h-3.5" />
-            <span>{isExpandedView ? 'Chế Độ: Xem Bao Quát Toàn Bộ' : 'Chế Độ: Cố Định Khung Bảng'}</span>
+            <Smartphone className="w-4 h-4 text-indigo-600" />
+            <span>Thẻ Điểm Di Động</span>
+          </button>
+          <button
+            onClick={() => setMobileViewMode('table')}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              mobileViewMode === 'table'
+                ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Columns className="w-4 h-4 text-slate-500" />
+            <span>Bảng Đầy Đủ</span>
           </button>
         </div>
-      </div>
+      )}
 
-      {/* Main Gradebook Touch Table with Full 2D Scrolling & Sticky Headers */}
+      {/* Table controls toolbar: Full page toggle & horizontal scroll helper */}
+      {(!isMobile || mobileViewMode === 'table') && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-800 text-sm">
+              Danh Sách: {filteredStudents.length} Học Sinh
+            </span>
+            <span className="text-xs text-slate-500 hidden sm:inline">
+              • Đã hỗ trợ cuộn dọc toàn bộ trang & cuộn ngang xem tất cả các cột điểm
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsExpandedView((v) => !v)}
+              className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                isExpandedView
+                  ? 'bg-indigo-600 text-white shadow-xs ring-2 ring-indigo-400/30'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+              }`}
+              title="Chuyển chế độ xem bao quát toàn bộ học sinh không giới hạn chiều cao"
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span>{isExpandedView ? 'Chế Độ: Xem Bao Quát Toàn Bộ' : 'Chế Độ: Cố Định Khung Bảng'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MOBILE STUDENT CARDS VIEW (Clean, Ergonomic, Touch-Friendly for phones) */}
+      {isMobile && mobileViewMode === 'cards' ? (
+        <div className="flex flex-col gap-2.5 pb-12">
+          {filteredStudents.length === 0 ? (
+            <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center text-xs text-slate-500">
+              Không tìm thấy học sinh nào phù hợp.
+            </div>
+          ) : (
+            filteredStudents.map((student, idx) => {
+              const semData = activeSemester === 'hk2' ? student.hk2 : student.hk1;
+              const dtbVal = activeSemester === 'year'
+                ? calculateAnnualAvg(calculateSemesterDtb(student.hk1), calculateSemesterDtb(student.hk2), student.finalYearAvg)
+                : calculateSemesterDtb(semData);
+              const isAbsent = student.status === 'absent';
+
+              return (
+                <div
+                  key={student.id}
+                  className={`bg-white rounded-2xl p-3.5 border transition-all shadow-xs flex flex-col gap-2.5 ${
+                    isAbsent ? 'border-rose-300 bg-rose-50/30' : 'border-slate-200'
+                  }`}
+                >
+                  {/* Card Header: STT, Avatar, Name & Attendance Toggle */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-xs font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md shrink-0">
+                        #{student.stt || idx + 1}
+                      </span>
+                      <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-sm shrink-0">
+                        {student.avatar || (student.gender === 'Nữ' ? '👧' : '👦')}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-slate-900 truncate">
+                          {student.name}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          Mã: {student.code} • {student.gender || 'HS'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Attendance Status Toggle Button */}
+                    <button
+                      onClick={() =>
+                        handleStudentFieldChange(
+                          student.id,
+                          'status',
+                          isAbsent ? 'active' : 'absent'
+                        )
+                      }
+                      className={`px-2 py-1 rounded-xl text-[10px] font-bold shrink-0 transition-all cursor-pointer ${
+                        isAbsent
+                          ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}
+                      title="Bấm để đổi trạng thái Có mặt / Vắng"
+                    >
+                      {isAbsent ? '❌ Vắng' : '✓ Có mặt'}
+                    </button>
+                  </div>
+
+                  {/* Score Info Strip */}
+                  <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-100 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-slate-500 font-medium">
+                        ĐTB {activeSemester === 'hk2' ? 'HK2' : activeSemester === 'hk1' ? 'HK1' : 'CN'}:
+                      </span>
+                      <span
+                        className={`font-mono font-black text-sm px-2 py-0.5 rounded-lg ${
+                          dtbVal !== null && dtbVal >= 8.0
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : dtbVal !== null && dtbVal >= 6.5
+                            ? 'bg-indigo-100 text-indigo-800'
+                            : dtbVal !== null && dtbVal >= 5.0
+                            ? 'bg-amber-100 text-amber-800'
+                            : dtbVal !== null
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {dtbVal !== null ? dtbVal : '-'}
+                      </span>
+                      {dtbVal !== null && (
+                        <span className="text-[10px] font-bold text-slate-500">
+                          ({getClassificationLabel(dtbVal)})
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Current Regular Scores (TX1, TX2) */}
+                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                      <span className="text-[9px] text-slate-400">TX:</span>
+                      <span className="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-bold">
+                        {semData?.tx1 ?? '-'}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-bold">
+                        {semData?.tx2 ?? '-'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Fast Mobile Action Buttons */}
+                  <div className="flex items-center justify-between gap-1.5 pt-1">
+                    <button
+                      onClick={() => handleAdjustBonus(student.id, 1)}
+                      className="flex-1 py-1.5 px-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-800 border border-emerald-200 text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
+                      title="Cộng 1 điểm thưởng thi đua"
+                    >
+                      <Plus className="w-3 h-3 text-emerald-600" />
+                      <span>+1 Thưởng</span>
+                    </button>
+
+                    {/* Quick Oral Score (8, 9, 10) */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] font-bold text-slate-400">Miệng:</span>
+                      {[8, 9, 10].map((score) => (
+                        <button
+                          key={score}
+                          onClick={() => {
+                            if ('vibrate' in navigator) navigator.vibrate(30);
+                            handleUpdateSemesterScore(
+                              student.id,
+                              activeSemester === 'hk2' ? 'hk2' : 'hk1',
+                              'tx1',
+                              score
+                            );
+                          }}
+                          className="w-8 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-600 hover:text-white active:scale-95 text-indigo-700 font-mono font-black text-xs border border-indigo-200 transition-all cursor-pointer"
+                          title={`Chấm ${score} điểm miệng`}
+                        >
+                          {score}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Conduct Button */}
+                    <button
+                      onClick={() => {
+                        setConductStudentId(student.id);
+                        setShowConductModal(true);
+                      }}
+                      className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-600 cursor-pointer"
+                      title="Ghi nhận thi đua học sinh"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+      /* Main Gradebook Touch Table with Full 2D Scrolling & Sticky Headers */
       <div
         className={`${
           isExpandedView ? 'min-h-[500px]' : 'max-h-[calc(100vh-250px)]'
@@ -1509,6 +1696,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Touchpad Quick Numeric Score Input Modal */}
       {editingScore && (

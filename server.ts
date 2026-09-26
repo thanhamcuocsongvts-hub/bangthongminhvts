@@ -125,16 +125,16 @@ async function generateWithGemini(ai: any, params: any) {
 // Ultra-low latency vision caller specifically for live classroom handwriting recognition
 async function generateFastVisionWithGemini(ai: any, params: any) {
   const modelsToTry = [
-    "gemini-3.8-flash", // Official standard vision & text model
-    "gemini-flash-latest",
-    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite", // Lowest latency & highest availability for OCR
+    "gemini-flash-latest",   // Fast fallback
+    "gemini-3.8-flash",      // Official multimodal standard
   ];
   let lastError: any = null;
 
   for (const model of modelsToTry) {
     try {
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout after 14s for ${model}`)), 14000)
+        setTimeout(() => reject(new Error(`Timeout after 4.5s for ${model}`)), 4500)
       );
       const callPromise = ai.models.generateContent({
         ...params,
@@ -143,7 +143,7 @@ async function generateFastVisionWithGemini(ai: any, params: any) {
       return await Promise.race([callPromise, timeoutPromise]);
     } catch (err: any) {
       lastError = err;
-      console.warn(`[AI Notice] Fast vision model ${model} unavailable, trying next...`);
+      console.warn(`[AI Notice] Fast vision model ${model} unavailable (${err?.status || err?.message}), trying next...`);
     }
   }
   throw lastError;
@@ -576,7 +576,7 @@ Hãy nhận diện CHÍNH XÁC từ ngữ, chữ cái, tên riêng hoặc số/p
 Quy tắc:
 1. Trả về DUY NHẤT nội dung chữ đọc được, viết đúng chính tả tiếng Việt có dấu (ví dụ: "Chào các em", "Toán học", "Kiệt", "Tập viết", "15 + 4 = 19", v.v.).
 2. KHÔNG giải thích, KHÔNG thêm từ ngữ nào khác, KHÔNG bọc trong dấu ngoặc kép thừa.
-3. Nếu ảnh chỉ là nét vẽ nguệch ngoạc vô nghĩa hoặc không có chữ, trả về "".`,
+3. Nếu ảnh không có nét chữ viết tay, là ảnh trống, chỉ có màu nền hoặc nét vẽ nguệch ngoạc không phải chữ/số, BẮT BUỘC CHỈ TRẢ VỀ RỖNG (không trả về bất kỳ ký tự nào).`,
             },
           ],
         },
@@ -584,6 +584,9 @@ Quy tắc:
       config: {
         temperature: 0.0,
         maxOutputTokens: 120,
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
       },
     });
 

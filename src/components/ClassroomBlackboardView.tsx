@@ -67,6 +67,7 @@ import {
   Pencil,
   Feather,
   Wand2,
+  Loader2,
 } from 'lucide-react';
 import {
   filterPointJitter,
@@ -84,6 +85,7 @@ import katex from 'katex';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
 import { BlackboardWordTextBox, BlackboardTextBox } from './BlackboardWordTextBox';
+import { useDeviceDetection } from '../hooks/useDeviceDetection';
 
 interface BlackboardPage {
   id: string;
@@ -167,20 +169,41 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
   }, [activeTool]);
 
-  // Viết Chữ Đẹp (Smart Handwriting to Beautiful Calligraphy Font)
+  // Viết Chữ Đẹp (Smart Handwriting to Beautiful Calligraphy Font via Sweep Selection)
   const [calligraphyFont, setCalligraphyFont] = useState<'calligraphy' | 'handwriting' | 'primary' | 'cursive' | 'tapviet' | 'luyenchu'>('tapviet');
   const [showCalligraphyPopover, setShowCalligraphyPopover] = useState<boolean>(false);
-  const [autoConvertCalligraphy, setAutoConvertCalligraphy] = useState<boolean>(true);
   const [isConvertingCalligraphy, setIsConvertingCalligraphy] = useState<boolean>(false);
   const [calligraphyStatusBanner, setCalligraphyStatusBanner] = useState<string | null>(null);
   const [lastConvertedInfo, setLastConvertedInfo] = useState<{
     textBoxId: string;
     replacedStrokes: WhiteboardStroke[];
   } | null>(null);
+
+  // Marquee sweep state for Viết Chữ Đẹp (Quét văn bản)
+  const [calligraphySweep, setCalligraphySweep] = useState<{
+    startX: number;
+    startY: number;
+    curX: number;
+    curY: number;
+  } | null>(null);
+
+  // Confirmed swept selection waiting for user to click "Bấm chọn: Chuyển Chữ Đẹp"
+  const [sweptSelection, setSweptSelection] = useState<{
+    box: { minX: number; minY: number; maxX: number; maxY: number };
+    strokeIds: string[];
+    textIds: string[];
+  } | null>(null);
+
   const calligraphySessionStrokesRef = useRef<string[]>([]);
-  const calligraphyTimerRef = useRef<any>(null);
   const lastPointerPointRef = useRef<{ x: number; y: number; pressure: number; time: number; width?: number } | null>(null);
   const lastMidPointRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Device detection & mobile phone optimization
+  const { isMobile } = useDeviceDetection();
+  const [showMobileColorSheet, setShowMobileColorSheet] = useState<boolean>(false);
+  const [showMobileShapeSheet, setShowMobileShapeSheet] = useState<boolean>(false);
+  const [showMobileMoreSheet, setShowMobileMoreSheet] = useState<boolean>(false);
+  const [isMobileChalkDockMinimized, setIsMobileChalkDockMinimized] = useState<boolean>(false);
 
   // Modals & Shape Popovers
   const [showShapePicker, setShowShapePicker] = useState<boolean>(false);
@@ -1323,9 +1346,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const currPage = currPages[currIdx];
     if (!currPage) return;
 
-    // 1. Gather stroke IDs to convert
-    let strokeIds = forcedStrokeIds && forcedStrokeIds.length > 0 
-      ? [...forcedStrokeIds] 
+    // 1. Gather stroke IDs to convert (from swept selection, forced IDs, or selected stroke)
+    let strokeIds: string[] = forcedStrokeIds && forcedStrokeIds.length > 0
+      ? [...forcedStrokeIds]
+      : sweptSelection && sweptSelection.strokeIds.length > 0
+      ? [...sweptSelection.strokeIds]
       : [...calligraphySessionStrokesRef.current];
 
     // If no session strokes, check if teacher currently selected a stroke
@@ -1333,27 +1358,39 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       strokeIds = [selectedStrokeId];
     }
 
-    // If still no session strokes, find the most recent freehand strokes (pen or calligraphy)
-    if (strokeIds.length === 0 && currPage.strokes.length > 0) {
-      const freehandStrokes = currPage.strokes.filter(
-        (s) => s.tool === 'calligraphy' || s.tool === 'pen'
-      );
-      if (freehandStrokes.length > 0) {
-        // Take the last 1 to 5 recent strokes
-        const recent = freehandStrokes.slice(-5);
-        strokeIds = recent.map((s) => s.id);
-      }
+    // 1b. If swept selection contains existing text boxes but no strokes, convert text box font family directly (0ms latency!)
+    if (sweptSelection && sweptSelection.textIds.length > 0 && strokeIds.length === 0) {
+      setPages((prev) => {
+        const updated = [...prev];
+        const curr = updated[currIdx];
+        if (!curr) return prev;
+        const updatedTexts = (curr.texts || []).map((t) =>
+          sweptSelection.textIds.includes(t.id) ? { ...t, fontFamily: calligraphyFont } : t
+        );
+        const newPages = [
+          ...updated.slice(0, currIdx),
+          { ...curr, texts: updatedTexts },
+          ...updated.slice(currIdx + 1),
+        ];
+        pagesRef.current = newPages;
+        return newPages;
+      });
+      setSweptSelection(null);
+      setCalligraphyStatusBanner('✨ Đã áp dụng phông chữ đẹp cho văn bản vừa quét!');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3500);
+      return;
     }
 
+    // If still no strokes found, prompt teacher to sweep over handwriting
     if (strokeIds.length === 0) {
-      setCalligraphyStatusBanner('💡 Hãy dùng bút viết chữ lên bảng rồi nhấn "Chuyển thành chữ đẹp" nhé!');
+      setCalligraphyStatusBanner('💡 Thầy cô vui lòng kéo quét bao quanh vùng chữ trên bảng rồi bấm chọn nhé!');
       setTimeout(() => setCalligraphyStatusBanner(null), 3500);
       return;
     }
 
     const targetStrokes = currPage.strokes.filter((s) => strokeIds.includes(s.id));
     if (targetStrokes.length === 0) {
-      setCalligraphyStatusBanner('💡 Không tìm thấy nét vẽ nào để chuyển đổi.');
+      setCalligraphyStatusBanner('💡 Không tìm thấy nét vẽ nào trong vùng đã quét.');
       setTimeout(() => setCalligraphyStatusBanner(null), 3000);
       return;
     }
@@ -1364,12 +1401,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     });
 
     if (allPoints.length < 3) {
-      setCalligraphyStatusBanner('💡 Nét vẽ quá ngắn, hãy viết từ ngữ hoàn chỉnh hơn nhé.');
+      setCalligraphyStatusBanner('💡 Nét vẽ quá ngắn, hãy quét trọn vẹn từ ngữ cần chuyển đổi nhé.');
       setTimeout(() => setCalligraphyStatusBanner(null), 3000);
       return;
     }
 
-    const crop = cropStrokesToImage(canvas, targetStrokes, boardScrollX, boardScrollY, 28);
+    const crop = cropStrokesToImage(canvas, targetStrokes, boardScrollX, boardScrollY, 24);
     if (!crop) {
       setCalligraphyStatusBanner('⚠️ Không thể trích xuất nét vẽ.');
       setTimeout(() => setCalligraphyStatusBanner(null), 3000);
@@ -1377,14 +1414,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
 
     setIsConvertingCalligraphy(true);
-    setCalligraphyStatusBanner('✨ Đang nhận diện chữ viết tay để chuyển thành chữ đẹp...');
+    setCalligraphyStatusBanner('⚡ Đang chuyển thành chữ đẹp siêu tốc...');
 
     try {
       const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, 'bài giảng lớp học, toán học, văn học, khoa học, tiểu học');
       if (recognized && recognized.trim().length > 0) {
         const text = recognized.trim();
         const { bounds } = crop;
-        const calculatedSize = Math.max(28, Math.min(72, Math.round(bounds.height * 0.75)));
+        const calculatedSize = Math.max(28, Math.min(76, Math.round(bounds.height * 0.78)));
 
         const newTextBox: BlackboardTextBox = {
           id: `calligraphy_txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -1428,13 +1465,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           return newPages;
         });
 
+        setSweptSelection(null);
         calligraphySessionStrokesRef.current = [];
         setSelectedTextId(newTextBox.id);
         setSelectedStrokeId(null);
         setCalligraphyStatusBanner(`✨ Đã chuyển hóa thành công: "${text}"`);
         setTimeout(() => setCalligraphyStatusBanner(null), 5000);
       } else {
-        setCalligraphyStatusBanner('⚠️ Không nhận diện được chữ rõ ràng. Thầy cô vui lòng viết lại rõ nét hơn nhé.');
+        setCalligraphyStatusBanner('⚠️ Không nhận diện được chữ rõ ràng. Thầy cô vui lòng quét lại nét chữ hoàn chỉnh hơn nhé.');
         setTimeout(() => setCalligraphyStatusBanner(null), 4000);
       }
     } catch (err) {
@@ -1444,7 +1482,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     } finally {
       setIsConvertingCalligraphy(false);
     }
-  }, [boardScrollX, boardScrollY, activeColor, calligraphyFont, selectedStrokeId]);
+  }, [boardScrollX, boardScrollY, activeColor, calligraphyFont, selectedStrokeId, sweptSelection]);
 
   // Undo Calligraphy: revert converted text box back to original handwritten chalk strokes
   const handleUndoCalligraphy = useCallback(() => {
@@ -1563,6 +1601,19 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return;
     }
 
+    // Viết Chữ Đẹp: Drag to sweep / marquee select text area to convert to beautiful font
+    if (activeTool === 'calligraphy') {
+      setCalligraphySweep({ startX: x, startY: y, curX: x, curY: y });
+      setSweptSelection(null);
+      setSelectedStrokeId(null);
+      setSelectedTextId(null);
+      setIsStrokeToolbarExpanded(false);
+      try {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      } catch (_) {}
+      return;
+    }
+
     if (activeTool === 'select') {
       // Yêu cầu người dùng: "Khi viết thì chữ viết không tính là ảnh và bấm chuột vào chữ không ảnh hưởng. Chỉ vẽ đường thẳng, đường tròn, hình, đồ thị thì tính năng chọn của chuột mới thực hiện"
       // Loại trừ chữ viết / text khi nhấp chuột; chỉ thực hiện chọn trên hình học, đường thẳng, đường tròn, đồ thị.
@@ -1611,11 +1662,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         return;
       }
 
-      // If clicked on empty space, handwriting, or text, deselect shapes
+      // If clicked on empty space, allow dragging to sweep a marquee box over handwriting or text
+      setCalligraphySweep({ startX: x, startY: y, curX: x, curY: y });
+      setSweptSelection(null);
       setSelectedTextId(null);
       setSelectedStrokeId(null);
       setIsStrokeToolbarExpanded(false);
       setDragLivePos(null);
+      try {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      } catch (_) {}
       return;
     }
 
@@ -1645,15 +1701,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const startPt: StrokePoint = { x: filteredPt.x, y: filteredPt.y, pressure: filteredPt.pressure, time: now, width: strokeSize };
     activePointsRef.current = [startPt];
 
-    // Clear active debounce timer while teacher continues writing
-    if (calligraphyTimerRef.current) {
-      clearTimeout(calligraphyTimerRef.current);
-      calligraphyTimerRef.current = null;
-    }
-
-    // For freehand pen/calligraphy/eraser/highlighter, draw initial dot immediately
+    // For freehand pen/eraser/highlighter, draw initial dot immediately
     const ctx = canvas.getContext('2d');
-    if (ctx && (activeTool === 'pen' || activeTool === 'calligraphy' || activeTool === 'highlighter' || activeTool === 'eraser')) {
+    if (ctx && (activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'eraser')) {
       ctx.save();
       ctx.translate(-boardScrollX, -boardScrollY);
       ctx.lineCap = 'round';
@@ -1699,6 +1749,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     // Live marquee dragging for creating new Word Text Box
     if (newTextBoxDrag) {
       setNewTextBoxDrag((prev) => (prev ? { ...prev, curX: x, curY: y } : null));
+      return;
+    }
+
+    // Live marquee sweep for Viết Chữ Đẹp (Quét văn bản)
+    if (calligraphySweep) {
+      setCalligraphySweep((prev) => (prev ? { ...prev, curX: x, curY: y } : null));
       return;
     }
 
@@ -1966,6 +2022,63 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   };
 
   const handlePointerUp = (e?: React.PointerEvent<HTMLCanvasElement>) => {
+    // 0. Finalize Calligraphy Marquee Sweep (Quét văn bản chuyển chữ đẹp)
+    if (calligraphySweep) {
+      const minX = Math.min(calligraphySweep.startX, calligraphySweep.curX);
+      const maxX = Math.max(calligraphySweep.startX, calligraphySweep.curX);
+      const minY = Math.min(calligraphySweep.startY, calligraphySweep.curY);
+      const maxY = Math.max(calligraphySweep.startY, calligraphySweep.curY);
+      const dragW = maxX - minX;
+      const dragH = maxY - minY;
+
+      setCalligraphySweep(null);
+
+      // If drag area is too small (< 12px), user likely clicked/tapped without sweeping
+      if (dragW < 12 && dragH < 12) {
+        setSweptSelection(null);
+        return;
+      }
+
+      const curr = pages[currentPageIndex];
+      if (!curr) return;
+
+      // Find all handwriting strokes that intersect or lie inside the swept box
+      const matchedStrokeIds = curr.strokes.filter((s) => {
+        if (s.points && s.points.length > 0) {
+          return s.points.some((p) => p.x >= minX - 8 && p.x <= maxX + 8 && p.y >= minY - 8 && p.y <= maxY + 8);
+        }
+        const bounds = getStrokeBounds(s);
+        if (!bounds) return false;
+        return (
+          bounds.minX <= maxX + 8 &&
+          bounds.maxX >= minX - 8 &&
+          bounds.minY <= maxY + 8 &&
+          bounds.maxY >= minY - 8
+        );
+      }).map((s) => s.id);
+
+      // Find any existing text boxes within the swept box
+      const matchedTextIds = (curr.texts || []).filter((t) => {
+        const tRight = t.x + t.width;
+        const tBottom = t.y + t.height;
+        return t.x <= maxX + 8 && tRight >= minX - 8 && t.y <= maxY + 8 && tBottom >= minY - 8;
+      }).map((t) => t.id);
+
+      if (matchedStrokeIds.length > 0 || matchedTextIds.length > 0) {
+        setSweptSelection({
+          box: { minX, minY, maxX, maxY },
+          strokeIds: matchedStrokeIds,
+          textIds: matchedTextIds,
+        });
+        setCalligraphyStatusBanner(`✨ Đã quét chọn ${matchedStrokeIds.length > 0 ? `${matchedStrokeIds.length} nét chữ` : `${matchedTextIds.length} văn bản`}. Hãy bấm nút "Chuyển Chữ Đẹp" để hoàn tất!`);
+      } else {
+        setSweptSelection(null);
+        setCalligraphyStatusBanner('💡 Không tìm thấy nét chữ nào trong vùng vừa quét. Vui lòng quét qua vùng có chữ viết.');
+        setTimeout(() => setCalligraphyStatusBanner(null), 3500);
+      }
+      return;
+    }
+
     // 1. Finalize Word Text Box marquee drag
     if (newTextBoxDrag) {
       const minX = Math.min(newTextBoxDrag.startX, newTextBoxDrag.curX);
@@ -2157,17 +2270,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         pagesRef.current = updated;
         return updated;
       });
-
-      // Viết Chữ Đẹp: Track stroke and initiate debounced smart handwriting recognition
-      if (activeTool === 'calligraphy') {
-        calligraphySessionStrokesRef.current.push(newStroke.id);
-        if (autoConvertCalligraphy) {
-          if (calligraphyTimerRef.current) clearTimeout(calligraphyTimerRef.current);
-          calligraphyTimerRef.current = setTimeout(() => {
-            handleConvertHandwritingToCalligraphy();
-          }, 1400);
-        }
-      }
 
       // Automatically select function graphs so the user can easily zoom/scale and move them immediately
       if (isFunctionGraphTool(activeTool)) {
@@ -2488,6 +2590,70 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
       {/* Blackboard Top Bar */}
       {!isTopBarCollapsed && !isImmersiveMode && (
+        isMobile ? (
+          <div className="absolute top-2 left-2 right-2 z-30 flex items-center justify-between pointer-events-none gap-1 animate-fade-in select-none">
+            {/* Page navigation compact for phone */}
+            <div className="flex items-center gap-1 pointer-events-auto bg-slate-950/90 backdrop-blur-md px-2 py-1 rounded-xl border border-white/20 text-white shadow-lg text-xs">
+              <button
+                onClick={() => setCurrentPageIndex((prev) => Math.max(0, prev - 1))}
+                disabled={currentPageIndex === 0}
+                className="p-1 rounded-lg hover:bg-white/20 disabled:opacity-30 transition-colors cursor-pointer"
+                title="Trang trước"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="font-mono font-bold text-[11px] px-1">
+                {currentPageIndex + 1}/{pages.length}
+              </span>
+              <button
+                onClick={() => setCurrentPageIndex((prev) => Math.min(pages.length - 1, prev + 1))}
+                disabled={currentPageIndex === pages.length - 1}
+                className="p-1 rounded-lg hover:bg-white/20 disabled:opacity-30 transition-colors cursor-pointer"
+                title="Trang sau"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleAddNewPage}
+                className="p-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white ml-0.5 cursor-pointer"
+                title="Thêm trang bảng mới"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Quick action buttons on mobile */}
+            <div className="flex items-center gap-1 pointer-events-auto">
+              {/* Document Modal */}
+              <button
+                onClick={() => setShowDocumentModal(true)}
+                className="px-2.5 py-1 rounded-xl bg-indigo-600 text-white text-[11px] font-bold flex items-center gap-1 shadow cursor-pointer"
+                title="Mở tài liệu"
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                <span>Tài liệu</span>
+              </button>
+
+              {/* Mobile Fullscreen toggle */}
+              <button
+                onClick={() => setIsFullBoard((prev) => !prev)}
+                className="p-1.5 rounded-xl bg-slate-900/90 text-white border border-white/20 hover:bg-slate-800 cursor-pointer"
+                title={isFullBoard ? 'Thu nhỏ bảng' : 'Bảng toàn màn hình điện thoại'}
+              >
+                {isFullBoard ? <Minimize2 className="w-3.5 h-3.5 text-amber-300" /> : <Maximize2 className="w-3.5 h-3.5 text-emerald-300" />}
+              </button>
+
+              {/* Collapse Top Bar to free up canvas */}
+              <button
+                onClick={() => setIsTopBarCollapsed(true)}
+                className="p-1.5 rounded-xl bg-slate-900/90 text-slate-300 border border-white/20 hover:text-white cursor-pointer"
+                title="Thu gọn để viết rộng hơn"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between pointer-events-none gap-2 animate-fade-in">
           {/* Left: Blackboard Title & Multi-Page Selector */}
           <div className="flex items-center gap-2 pointer-events-auto bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-white/20 text-white shadow-lg">
@@ -2701,6 +2867,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             </button>
           </div>
         </div>
+        )
       )}
 
       {/* Floating Restore Pill when Top Bar is collapsed - Right Aligned to maximize blackboard space */}
@@ -2805,7 +2972,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             <span className="text-slate-200">
               {calligraphyStatusBanner || (
                 <>
-                  Chế độ <strong className="text-purple-300">Viết Chữ Đẹp</strong>: Viết chữ lên bảng, ứng dụng sẽ tự động chuyển thành phông chữ viết tay nghệ thuật!
+                  Chế độ <strong className="text-purple-300">Quét Chữ Đẹp</strong>: Kéo quét bao quanh vùng chữ trên bảng, sau đó bấm chọn để chuyển đổi siêu tốc!
                 </>
               )}
             </span>
@@ -2822,10 +2989,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             <button
               onClick={() => handleConvertHandwritingToCalligraphy()}
               disabled={isConvertingCalligraphy}
-              className="ml-1 px-3 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 rounded-full text-[10.5px] font-bold text-white transition-all shadow flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              className="ml-1 px-3 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 rounded-full text-[10.5px] font-bold text-white transition-all shadow flex items-center gap-1 cursor-pointer disabled:opacity-50 ring-1 ring-purple-400/50"
             >
               <Wand2 className="w-3 h-3 text-amber-300" />
-              <span>Chuyển ngay</span>
+              <span>{sweptSelection ? 'Bấm chọn chuyển ngay' : 'Chuyển chữ đẹp'}</span>
             </button>
           </div>
         )}
@@ -3179,6 +3346,104 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               Hộp văn bản Word ({Math.round(Math.abs(newTextBoxDrag.curX - newTextBoxDrag.startX))} × {Math.round(Math.abs(newTextBoxDrag.curY - newTextBoxDrag.startY))})
             </span>
           </div>
+        )}
+
+        {/* Live Calligraphy Sweep Preview (Quét vùng văn bản chuyển chữ đẹp) */}
+        {calligraphySweep && (
+          <div
+            className="absolute pointer-events-none border-2 border-dashed border-purple-400 bg-purple-500/20 rounded-2xl z-50 flex items-center justify-center shadow-[0_0_35px_rgba(168,85,247,0.4)] backdrop-blur-[0.5px]"
+            style={{
+              left: `${Math.min(calligraphySweep.startX, calligraphySweep.curX) - boardScrollX}px`,
+              top: `${Math.min(calligraphySweep.startY, calligraphySweep.curY) - boardScrollY}px`,
+              width: `${Math.abs(calligraphySweep.curX - calligraphySweep.startX)}px`,
+              height: `${Math.abs(calligraphySweep.curY - calligraphySweep.startY)}px`,
+            }}
+          >
+            <div className="bg-slate-950/90 text-purple-200 text-[11px] font-bold px-3 py-1.5 rounded-full border border-purple-400/50 shadow-xl flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" />
+              <span>Đang quét vùng chữ cần chuyển ({Math.round(Math.abs(calligraphySweep.curX - calligraphySweep.startX))} × {Math.round(Math.abs(calligraphySweep.curY - calligraphySweep.startY))}px)</span>
+            </div>
+          </div>
+        )}
+
+        {/* Swept Selection Highlight & Floating Action Pill ("Bấm chọn: Chuyển Chữ Đẹp") */}
+        {sweptSelection && (
+          <>
+            {/* Pulsing Outline Box around the Swept Text Area */}
+            <div
+              className="absolute pointer-events-none border-2 border-dashed border-purple-400 rounded-2xl bg-purple-500/15 shadow-[0_0_35px_rgba(168,85,247,0.4)] z-40 transition-all animate-pulse"
+              style={{
+                left: `${sweptSelection.box.minX - boardScrollX}px`,
+                top: `${sweptSelection.box.minY - boardScrollY}px`,
+                width: `${sweptSelection.box.maxX - sweptSelection.box.minX}px`,
+                height: `${sweptSelection.box.maxY - sweptSelection.box.minY}px`,
+              }}
+            >
+              <div className="absolute -top-3.5 left-4 px-2.5 py-0.5 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-full text-[10.5px] font-black text-white shadow-lg flex items-center gap-1.5 border border-purple-300/40">
+                <Sparkles className="w-3 h-3 text-amber-300" />
+                <span>Vùng chữ đã quét ({sweptSelection.strokeIds.length > 0 ? `${sweptSelection.strokeIds.length} nét` : `${sweptSelection.textIds.length} khối chữ`})</span>
+              </div>
+            </div>
+
+            {/* Floating Confirm Action Pill: Bấm Chọn Chuyển Chữ Đẹp */}
+            <div
+              className="absolute z-50 flex flex-wrap items-center gap-2 bg-slate-950/95 backdrop-blur-2xl border-2 border-purple-400/80 rounded-2xl p-2 md:p-2.5 shadow-2xl text-white animate-in zoom-in-95 duration-150 pointer-events-auto"
+              style={{
+                left: `${Math.max(12, Math.min(window.innerWidth - 420, sweptSelection.box.minX - boardScrollX))}px`,
+                top: `${Math.max(
+                  12,
+                  sweptSelection.box.minY - boardScrollY > 64
+                    ? sweptSelection.box.minY - boardScrollY - 60
+                    : sweptSelection.box.maxY - boardScrollY + 12
+                )}px`,
+              }}
+            >
+              {/* Quick Font Selector */}
+              <div className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 rounded-xl border border-white/15 shrink-0">
+                <Feather className="w-3.5 h-3.5 text-purple-300" />
+                <select
+                  value={calligraphyFont}
+                  onChange={(e) => setCalligraphyFont(e.target.value as any)}
+                  className="bg-transparent text-white text-[11px] font-bold focus:outline-none cursor-pointer"
+                >
+                  <option value="tapviet" className="bg-slate-900 text-white">📖 Tập Viết Tiểu Học</option>
+                  <option value="luyenchu" className="bg-slate-900 text-white">✨ Vở Sạch Chữ Đẹp</option>
+                  <option value="primary" className="bg-slate-900 text-white">📝 Nét Phấn Học Trò</option>
+                  <option value="handwriting" className="bg-slate-900 text-white">✒️ Bút Mài Giáo Viên</option>
+                  <option value="calligraphy" className="bg-slate-900 text-white">🌸 Thư Pháp Mềm Mại</option>
+                  <option value="cursive" className="bg-slate-900 text-white">✍️ Nét Cọ Bay Bổng</option>
+                </select>
+              </div>
+
+              {/* Confirm / Action Button: User clicks this to activate conversion */}
+              <button
+                onClick={() => handleConvertHandwritingToCalligraphy()}
+                disabled={isConvertingCalligraphy}
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:brightness-110 active:scale-95 text-white font-black text-xs rounded-xl shadow-xl flex items-center gap-2 cursor-pointer disabled:opacity-50 transition-all ring-2 ring-purple-300/50 shrink-0"
+              >
+                {isConvertingCalligraphy ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                    <span>Đang chuyển siêu tốc...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-4 h-4 text-amber-300 animate-bounce" />
+                    <span>Bấm chọn: Chuyển Chữ Đẹp</span>
+                  </>
+                )}
+              </button>
+
+              {/* Cancel / Dismiss button */}
+              <button
+                onClick={() => setSweptSelection(null)}
+                className="p-1.5 hover:bg-white/15 rounded-xl text-slate-400 hover:text-white cursor-pointer transition-colors shrink-0"
+                title="Hủy quét"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </>
         )}
 
         {/* All Blackboard Word Text Boxes (Crisp HTML + KaTeX rendering + Word Formatting Toolbar + 8-Point Resizing) */}
@@ -4371,8 +4636,466 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         </div>
       )}
 
-      {/* AUTHENTIC BOTTOM CHALK & TOOL DOCK (75 INCH TOUCH OPTIMIZED - ALWAYS VISIBLE) */}
-      <div className="absolute bottom-2.5 sm:bottom-3 md:bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] flex justify-center">
+      {/* MOBILE PHONE CHALK DOCK (< 768px) */}
+      {isMobile ? (
+        isMobileChalkDockMinimized ? (
+          <button
+            onClick={() => setIsMobileChalkDockMinimized(false)}
+            className={`absolute ${isFullBoard ? 'bottom-4' : 'bottom-[74px]'} right-4 z-40 p-3 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xl border-2 border-white flex items-center justify-center cursor-pointer hover:scale-110 active:scale-95 transition-all`}
+            title="Mở thanh bút phấn"
+          >
+            <Pen className="w-5 h-5 text-white" />
+          </button>
+        ) : (
+        <div className={`absolute ${isFullBoard ? 'bottom-3' : 'bottom-[74px]'} left-1/2 -translate-x-1/2 z-40 pointer-events-auto w-[96vw] max-w-[420px] flex flex-col items-center gap-1.5 animate-in slide-in-from-bottom-2 select-none transition-all duration-200`}>
+          {/* Sub-sheet 0: Mobile Calligraphy / Chữ Đẹp AI Sheet */}
+          {showCalligraphyPopover && (
+            <div
+              className="w-full bg-slate-900/98 backdrop-blur-xl border border-purple-500/50 rounded-2xl p-3 shadow-2xl text-white flex flex-col gap-2.5 animate-in fade-in max-h-[75vh] overflow-y-auto custom-scrollbar"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-400/30">
+                    <Feather className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold flex items-center gap-1.5 text-white">
+                      Viết Chữ Đẹp
+                      <span className="text-[9px] px-1.5 py-0.5 bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 font-black rounded-md">AI OCR</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400">Chọn font chữ tập viết tiểu học chuẩn</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCalligraphyPopover(false)}
+                  className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Font Selection */}
+              <div className="text-[11px] font-semibold text-purple-300">Chọn kiểu chữ viết:</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { id: 'tapviet', label: 'Tập Viết Tiểu Học', sub: 'Chuẩn nét ô ly Lớp 1-5', sample: 'Nét chữ nết người' },
+                  { id: 'luyenchu', label: 'Vở Sạch Chữ Đẹp', sub: 'Nét thanh nét đậm Charm', sample: 'Luyện chữ rèn nết' },
+                  { id: 'primary', label: 'Nét Phấn Học Trò', sub: 'Patrick Hand / Mali', sample: 'Rõ ràng, tròn trịa' },
+                  { id: 'handwriting', label: 'Bút Mài Giáo Viên', sub: 'Caveat thanh thoát', sample: 'Nét bút cô giáo' },
+                  { id: 'calligraphy', label: 'Thư Pháp Mềm Mại', sub: 'Dancing Script', sample: 'Nghệ thuật thư pháp' },
+                  { id: 'cursive', label: 'Nét Cọ Bay Bổng', sub: 'Marck Script', sample: 'Uốn lượn bay bổng' },
+                ].map((font) => (
+                  <button
+                    key={font.id}
+                    onClick={() => setCalligraphyFont(font.id as any)}
+                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                      calligraphyFont === font.id
+                        ? 'bg-purple-600/30 border-purple-400 text-white shadow ring-1 ring-purple-400'
+                        : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="text-[11px] font-bold flex items-center gap-1">
+                      {font.id === 'tapviet' && <span className="text-amber-400">📖</span>}
+                      {font.id === 'luyenchu' && <span className="text-pink-400">✨</span>}
+                      <span>{font.label}</span>
+                    </div>
+                    <div className="text-[9px] text-slate-400 mb-0.5">{font.sub}</div>
+                    <div
+                      className="text-[12px] text-amber-200 truncate"
+                      style={{
+                        fontFamily:
+                          font.id === 'tapviet'
+                            ? '"TapVietTieuHoc", "Playpen Sans", "Patrick Hand", "Mali", cursive, sans-serif'
+                            : font.id === 'luyenchu'
+                            ? '"Charm", "Dancing Script", cursive'
+                            : font.id === 'calligraphy'
+                            ? '"Dancing Script", cursive'
+                            : font.id === 'handwriting'
+                            ? '"Caveat", cursive'
+                            : font.id === 'primary'
+                            ? '"Playpen Sans", "Mali", "Patrick Hand", cursive'
+                            : '"Marck Script", cursive',
+                      }}
+                    >
+                      {font.sample}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Sweep & Select Guidance */}
+              <div className="bg-purple-500/10 border border-purple-500/30 p-2.5 rounded-xl text-left">
+                <div className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5 mb-1">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Cách chuyển chữ đẹp siêu tốc</span>
+                </div>
+                <div className="text-[10px] text-slate-300 leading-relaxed">
+                  1. Kéo quét bao quanh vùng chữ cần chuyển trên bảng.<br/>
+                  2. Bấm nút <strong>"Chuyển Chữ Đẹp"</strong> để hoàn tất tức thì!
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <button
+                onClick={() => {
+                  setShowCalligraphyPopover(false);
+                  handleConvertHandwritingToCalligraphy();
+                }}
+                disabled={isConvertingCalligraphy}
+                className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg hover:brightness-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Wand2 className="w-3.5 h-3.5 text-amber-300" />
+                <span>{isConvertingCalligraphy ? 'Đang chuyển siêu tốc...' : sweptSelection ? 'Bấm chọn chuyển ngay' : 'Chuyển chữ đẹp'}</span>
+              </button>
+
+              {lastConvertedInfo && (
+                <button
+                  onClick={() => {
+                    handleUndoCalligraphy();
+                    setShowCalligraphyPopover(false);
+                  }}
+                  className="w-full py-1.5 px-3 rounded-xl bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Hoàn tác nét phấn ban đầu</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Sub-sheet 1: Mobile Color & Size Drawer */}
+          {showMobileColorSheet && (
+            <div className="w-full bg-slate-900/98 backdrop-blur-xl border border-white/20 rounded-2xl p-2.5 shadow-2xl text-white flex flex-col gap-2 animate-in fade-in">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-300 px-1">
+                <span>Màu phấn viết:</span>
+                <button onClick={() => setShowMobileColorSheet(false)} className="p-1 text-slate-400 hover:text-white cursor-pointer">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex items-center justify-around gap-1">
+                {[
+                  { color: '#ffffff', label: 'Trắng' },
+                  { color: '#fef08a', label: 'Vàng' },
+                  { color: '#fdba74', label: 'Cam' },
+                  { color: '#f472b6', label: 'Hồng' },
+                  { color: '#38bdf8', label: 'Lam' },
+                  { color: '#4ade80', label: 'Lục' },
+                ].map((c) => (
+                  <button
+                    key={c.color}
+                    onClick={() => {
+                      setActiveColor(c.color);
+                      setShowMobileColorSheet(false);
+                    }}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                      activeColor === c.color ? 'ring-2 ring-white scale-110 shadow-lg' : 'opacity-85 hover:opacity-100'
+                    }`}
+                    style={{ backgroundColor: c.color }}
+                    title={c.label}
+                  >
+                    {activeColor === c.color && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-slate-950/60" />
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center justify-between pt-1.5 border-t border-white/10 px-1 text-xs">
+                <span className="text-slate-400">Nét phấn:</span>
+                <div className="flex items-center gap-1.5">
+                  {[
+                    { size: 2, label: 'Nhỏ' },
+                    { size: 4, label: 'Vừa' },
+                    { size: 8, label: 'Đậm' },
+                  ].map((s) => (
+                    <button
+                      key={s.size}
+                      onClick={() => {
+                        setStrokeSize(s.size);
+                        setShowMobileColorSheet(false);
+                      }}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                        strokeSize === s.size ? 'bg-indigo-600 text-white' : 'bg-white/10 text-slate-300'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sub-sheet 2: Mobile Shapes Drawer */}
+          {showMobileShapeSheet && (
+            <div className="w-full bg-slate-900/98 backdrop-blur-xl border border-white/20 rounded-2xl p-2.5 shadow-2xl text-white flex flex-col gap-2 animate-in fade-in">
+              <div className="flex items-center justify-between text-xs font-bold text-purple-300 px-1">
+                <span>Vẽ hình học cơ bản:</span>
+                <button onClick={() => setShowMobileShapeSheet(false)} className="p-1 text-slate-400 hover:text-white cursor-pointer">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {[
+                  { tool: 'line', label: 'Thẳng', icon: <Minus className="w-4 h-4" /> },
+                  { tool: 'arrow', label: 'Mũi tên', icon: <MoveRight className="w-4 h-4" /> },
+                  { tool: 'rectangle', label: 'C.Nhật', icon: <Square className="w-4 h-4" /> },
+                  { tool: 'circle', label: 'Tròn', icon: <Circle className="w-4 h-4" /> },
+                  { tool: 'triangle', label: 'T.Giác', icon: <Triangle className="w-4 h-4" /> },
+                ].map((sh) => (
+                  <button
+                    key={sh.tool}
+                    onClick={() => {
+                      setActiveTool(sh.tool as any);
+                      setShowMobileShapeSheet(false);
+                    }}
+                    className={`p-2 rounded-xl flex flex-col items-center gap-1 text-[10px] font-bold cursor-pointer ${
+                      activeTool === sh.tool ? 'bg-purple-600 text-white ring-1 ring-purple-300' : 'bg-white/10 text-slate-200'
+                    }`}
+                  >
+                    {sh.icon}
+                    <span>{sh.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Sub-sheet 3: Mobile More Options Drawer */}
+          {showMobileMoreSheet && (
+            <div className="w-full bg-slate-900/98 backdrop-blur-xl border border-white/20 rounded-2xl p-3 shadow-2xl text-white flex flex-col gap-2.5 animate-in fade-in">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                <span>Tùy chọn bảng viết:</span>
+                <button onClick={() => setShowMobileMoreSheet(false)} className="p-1 text-slate-400 hover:text-white cursor-pointer">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Trang bảng */}
+              <div className="flex items-center justify-between bg-white/5 p-2 rounded-xl border border-white/10">
+                <span className="text-xs text-slate-300">Trang bảng:</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCurrentPageIndex((p) => Math.max(0, p - 1))}
+                    disabled={currentPageIndex === 0}
+                    className="p-1.5 rounded-lg bg-white/10 disabled:opacity-30 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="font-mono text-xs font-bold px-2">{currentPageIndex + 1}/{pages.length}</span>
+                  <button
+                    onClick={() => setCurrentPageIndex((p) => Math.min(pages.length - 1, p + 1))}
+                    disabled={currentPageIndex === pages.length - 1}
+                    className="p-1.5 rounded-lg bg-white/10 disabled:opacity-30 cursor-pointer"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleAddNewPage();
+                      setShowMobileMoreSheet(false);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 text-xs font-bold ml-1 shadow cursor-pointer"
+                  >
+                    + Thêm
+                  </button>
+                </div>
+              </div>
+
+              {/* Nền bảng */}
+              <div className="space-y-1">
+                <span className="text-[11px] text-slate-400">Chọn nền bảng:</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    onClick={() => {
+                      setBgTheme('oli');
+                      setShowMobileMoreSheet(false);
+                    }}
+                    className={`p-2 rounded-xl text-center text-[10px] font-bold border transition-all cursor-pointer ${
+                      bgTheme === 'oli' ? 'bg-emerald-800 border-emerald-400 text-white shadow' : 'bg-white/5 border-white/10 text-slate-300'
+                    }`}
+                  >
+                    📗 Bảng Ô Ly SGK
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBgTheme('slate');
+                      setShowMobileMoreSheet(false);
+                    }}
+                    className={`p-2 rounded-xl text-center text-[10px] font-bold border transition-all cursor-pointer ${
+                      bgTheme === 'slate' ? 'bg-slate-800 border-slate-400 text-white shadow' : 'bg-white/5 border-white/10 text-slate-300'
+                    }`}
+                  >
+                    ⬛ Bảng Đen Mun
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBgTheme('white');
+                      setShowMobileMoreSheet(false);
+                    }}
+                    className={`p-2 rounded-xl text-center text-[10px] font-bold border transition-all cursor-pointer ${
+                      bgTheme === 'white' ? 'bg-slate-100 border-indigo-500 text-slate-900 shadow' : 'bg-white/5 border-white/10 text-slate-300'
+                    }`}
+                  >
+                    ⬜ Bảng Trắng
+                  </button>
+                </div>
+              </div>
+
+              {/* Lau Sạch Toàn Bộ Bảng */}
+              <button
+                onClick={() => {
+                  setShowMobileMoreSheet(false);
+                  handleClearBoard();
+                }}
+                disabled={strokes.length === 0 && texts.length === 0}
+                className="w-full py-2 rounded-xl bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Lau sạch toàn bộ trang bảng</span>
+              </button>
+            </div>
+          )}
+
+          {/* Main Floating Tool Pill on Phone */}
+          <div className="w-full bg-slate-950/95 backdrop-blur-2xl border border-white/20 shadow-2xl rounded-2xl px-2 py-1.5 flex items-center justify-between text-white">
+            {/* 1. Phấn */}
+            <button
+              onClick={() => {
+                handleToolChange('pen');
+                setShowMobileColorSheet(false);
+                setShowMobileShapeSheet(false);
+                setShowMobileMoreSheet(false);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
+                activeTool === 'pen'
+                  ? 'bg-emerald-600 text-white shadow ring-2 ring-emerald-400'
+                  : 'text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              <div className="relative w-4 h-4 flex items-center justify-center">
+                <Hand className="w-3.5 h-3.5 text-emerald-200" />
+                <PenLine className="w-2 h-2 absolute -top-0.5 -right-0.5 text-amber-300" />
+              </div>
+              <span className="text-[11px]">Phấn</span>
+            </button>
+
+            {/* 2. Chữ Đẹp AI */}
+            <button
+              onClick={() => {
+                handleToolChange('calligraphy');
+                setShowCalligraphyPopover(true);
+                setShowMobileColorSheet(false);
+                setShowMobileShapeSheet(false);
+                setShowMobileMoreSheet(false);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
+                activeTool === 'calligraphy'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow ring-2 ring-purple-400'
+                  : 'text-purple-300 hover:bg-white/10'
+              }`}
+            >
+              <div className="relative w-4 h-4 flex items-center justify-center">
+                <Feather className="w-3.5 h-3.5 text-purple-200" />
+                <Sparkles className="w-2 h-2 absolute -top-1 -right-1 text-amber-300 animate-pulse" />
+              </div>
+              <span className="text-[11px]">Chữ Đẹp</span>
+              <span className="text-[8px] px-1 bg-amber-400 text-slate-950 font-black rounded-full">AI</span>
+            </button>
+
+            {/* 3. Khăn Lau */}
+            <button
+              onClick={() => {
+                handleToolChange('eraser');
+                setShowMobileColorSheet(false);
+                setShowMobileShapeSheet(false);
+                setShowMobileMoreSheet(false);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
+                activeTool === 'eraser'
+                  ? 'bg-rose-600 text-white shadow ring-2 ring-rose-400'
+                  : 'text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              <Eraser className="w-4 h-4" />
+              <span className="text-[11px]">Lau</span>
+            </button>
+
+            {/* 4. Màu Phấn & Độ Dày */}
+            <button
+              onClick={() => {
+                setShowMobileColorSheet((v) => !v);
+                setShowMobileShapeSheet(false);
+                setShowMobileMoreSheet(false);
+              }}
+              className="p-1.5 rounded-xl hover:bg-white/10 flex items-center gap-1 text-xs font-bold cursor-pointer"
+              title="Chọn màu phấn và độ dày nét"
+            >
+              <span
+                className="w-5 h-5 rounded-full border border-white/60 shadow-sm"
+                style={{ backgroundColor: activeColor }}
+              />
+            </button>
+
+            {/* 5. Hình Học */}
+            <button
+              onClick={() => {
+                setShowMobileShapeSheet((v) => !v);
+                setShowMobileColorSheet(false);
+                setShowMobileMoreSheet(false);
+              }}
+              className={`p-2 rounded-xl text-xs font-bold cursor-pointer ${
+                ['line', 'arrow', 'rectangle', 'circle', 'triangle'].includes(activeTool) || showMobileShapeSheet
+                  ? 'bg-purple-600 text-white shadow'
+                  : 'text-purple-300 hover:bg-white/10'
+              }`}
+              title="Vẽ hình học cơ bản"
+            >
+              <Shapes className="w-4 h-4" />
+            </button>
+
+            {/* 6. Hoàn Tác (Undo) */}
+            <button
+              onClick={handleUndo}
+              disabled={strokes.length === 0}
+              className="p-2 rounded-xl text-amber-300 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+              title="Hoàn tác nét phấn"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+
+            {/* 7. Thêm (...) */}
+            <button
+              onClick={() => {
+                setShowMobileMoreSheet((v) => !v);
+                setShowMobileColorSheet(false);
+                setShowMobileShapeSheet(false);
+              }}
+              className="p-2 rounded-xl text-slate-300 hover:bg-white/10 cursor-pointer"
+              title="Tùy chọn thêm: Đổi trang, Nền bảng, Xóa sạch"
+            >
+              <Sliders className="w-4 h-4" />
+            </button>
+
+            {/* 8. Thu gọn thanh vẽ */}
+            <button
+              onClick={() => {
+                setIsMobileChalkDockMinimized(true);
+                setShowMobileColorSheet(false);
+                setShowMobileShapeSheet(false);
+                setShowMobileMoreSheet(false);
+              }}
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer"
+              title="Thu gọn thanh bút phấn"
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        )
+      ) : (
+        /* AUTHENTIC BOTTOM CHALK & TOOL DOCK (75 INCH TOUCH OPTIMIZED - ALWAYS VISIBLE) */
+        <div className="absolute bottom-2.5 sm:bottom-3 md:bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] flex justify-center">
         <div className="bg-slate-950/95 backdrop-blur-2xl px-3.5 py-2 rounded-2xl md:rounded-3xl border-2 border-white/25 shadow-2xl flex items-center gap-1 sm:gap-2 text-white shrink-0">
           {/* Main Drawing Tools */}
           <div className="flex items-center gap-1 shrink-0">
@@ -4509,19 +5232,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     ))}
                   </div>
 
-                  {/* Auto-convert toggle */}
-                  <div className="flex items-center justify-between bg-white/5 p-2 rounded-xl border border-white/10 mb-3">
-                    <span className="text-[11px] text-slate-300">Tự động chuyển khi viết xong:</span>
-                    <button
-                      onClick={() => setAutoConvertCalligraphy((v) => !v)}
-                      className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold transition-all cursor-pointer ${
-                        autoConvertCalligraphy
-                          ? 'bg-emerald-600 text-white shadow'
-                          : 'bg-slate-700 text-slate-300'
-                      }`}
-                    >
-                      {autoConvertCalligraphy ? 'Bật (sau 1.4s)' : 'Thủ công'}
-                    </button>
+                  {/* Sweep & Select Guidance */}
+                  <div className="bg-purple-500/10 border border-purple-500/30 p-2.5 rounded-xl text-left mb-3">
+                    <div className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5 mb-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Cơ chế Quét & Bấm Chọn mới</span>
+                    </div>
+                    <div className="text-[10px] text-slate-300 leading-relaxed">
+                      1. Kéo quét bao quanh vùng chữ cần chuyển trên bảng.<br/>
+                      2. Bấm nút <strong>"Bấm chọn: Chuyển Chữ Đẹp"</strong> nổi lên để chuyển đổi siêu tốc!
+                    </div>
                   </div>
 
                   {/* Manual Convert Now button */}
@@ -4534,7 +5254,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg hover:brightness-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
                   >
                     <Wand2 className="w-3.5 h-3.5 text-amber-300" />
-                    <span>{isConvertingCalligraphy ? 'Đang chuyển hóa...' : 'Chuyển thành chữ đẹp ngay'}</span>
+                    <span>{isConvertingCalligraphy ? 'Đang chuyển siêu tốc...' : sweptSelection ? 'Bấm chọn chuyển ngay' : 'Chuyển chữ đẹp'}</span>
                   </button>
                 </div>
               )}
@@ -5756,6 +6476,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           </div>
         </div>
       </div>
+      )}
 
       {/* MODAL: CONFIRM CLEAR BOARD */}
       {showClearBoardModal && (
