@@ -25,6 +25,9 @@ import {
   Gamepad2,
   Bomb,
   Compass,
+  Plus,
+  Minus,
+  AlertCircle,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ClassRoom, ClassStudent } from '../types';
@@ -108,6 +111,30 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // Results State
   const [selectedStudent, setSelectedStudent] = useState<ClassStudent | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<ClassStudent[]>([]);
+  const [scoreNotification, setScoreNotification] = useState<{
+    type: 'plus' | 'minus' | 'ten' | 'zero';
+    message: string;
+  } | null>(null);
+
+  // Sync selectedStudent when classroom updates
+  useEffect(() => {
+    if (selectedStudent && classroom?.students) {
+      const updated = classroom.students.find((s) => s.id === selectedStudent.id);
+      if (updated) {
+        setSelectedStudent(updated);
+      }
+    }
+  }, [classroom]);
+
+  // Auto clear score notification
+  useEffect(() => {
+    if (scoreNotification) {
+      const timer = setTimeout(() => {
+        setScoreNotification(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [scoreNotification]);
 
   // Wheel State
   const [isSpinning, setIsSpinning] = useState<boolean>(false);
@@ -764,6 +791,97 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     }, 600);
   };
 
+  // Handler for awarding/deducting bonus points
+  const handleAwardBonus = (pts: number) => {
+    if (!selectedStudent) return;
+    onAddBonusPoint(selectedStudent.id, pts);
+    setSelectedStudent((prev) =>
+      prev
+        ? {
+            ...prev,
+            bonusPoints: (prev.bonusPoints || 0) + pts,
+            isCalled: true,
+          }
+        : null
+    );
+    if (pts > 0) {
+      playSound(880, 0.15, 'triangle');
+      setScoreNotification({
+        type: 'plus',
+        message: `🎉 Đã khen thưởng +${pts} điểm cho em ${selectedStudent.name}!`,
+      });
+    } else {
+      playSound(240, 0.25, 'sawtooth');
+      setScoreNotification({
+        type: 'minus',
+        message: `⚠️ Đã trừ ${pts} điểm của em ${selectedStudent.name}!`,
+      });
+    }
+  };
+
+  // Handler for setting oral score (e.g. 0đ or 10đ)
+  const handleAwardOral = (score: number) => {
+    if (!selectedStudent) return;
+    onSetOralScore(selectedStudent.id, score);
+    setSelectedStudent((prev) =>
+      prev
+        ? {
+            ...prev,
+            oralScore: score,
+            isCalled: true,
+          }
+        : null
+    );
+    if (score === 10) {
+      playVictorySound();
+      try {
+        confetti({ particleCount: 160, spread: 90, origin: { y: 0.6 } });
+      } catch (e) {}
+      setScoreNotification({
+        type: 'ten',
+        message: `👑 Xuất sắc! Đã chấm 10 điểm cho em ${selectedStudent.name}!`,
+      });
+    } else if (score === 0) {
+      playSound(180, 0.35, 'sawtooth');
+      setScoreNotification({
+        type: 'zero',
+        message: `❌ Đã chấm 0 điểm cho em ${selectedStudent.name}!`,
+      });
+    } else {
+      playSound(600, 0.15, 'triangle');
+      setScoreNotification({
+        type: 'plus',
+        message: `Đã chấm ${score} điểm cho em ${selectedStudent.name}!`,
+      });
+    }
+  };
+
+  // Handler for group mode bonus
+  const handleGroupBonus = (pts: number) => {
+    if (selectedGroup.length === 0) return;
+    selectedGroup.forEach((st) => onAddBonusPoint(st.id, pts));
+    setSelectedGroup((prev) =>
+      prev.map((st) => ({
+        ...st,
+        bonusPoints: (st.bonusPoints || 0) + pts,
+        isCalled: true,
+      }))
+    );
+    if (pts > 0) {
+      playSound(880, 0.15, 'triangle');
+      setScoreNotification({
+        type: 'plus',
+        message: `🎉 Đã khen thưởng +${pts} điểm cho cả nhóm (${selectedGroup.length} học sinh)!`,
+      });
+    } else {
+      playSound(240, 0.25, 'sawtooth');
+      setScoreNotification({
+        type: 'minus',
+        message: `⚠️ Đã trừ ${pts} điểm của cả nhóm (${selectedGroup.length} học sinh)!`,
+      });
+    }
+  };
+
   if (!isOpen) return null;
 
   // Render Result Card
@@ -771,24 +889,50 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     if (!selectedStudent && selectedGroup.length === 0) return null;
 
     return (
-      <div className="mt-6 p-6 rounded-3xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white shadow-xl animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-4 text-center md:text-left">
-            <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-3xl shadow-inner shrink-0">
-              👑
+      <div className="mt-6 p-5 md:p-6 rounded-3xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white shadow-2xl animate-in fade-in zoom-in-95 duration-200 border border-white/20">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-5">
+          {/* Student Info Card */}
+          <div className="flex items-center gap-4 text-left">
+            <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-3xl md:text-4xl shadow-inner shrink-0 border border-white/30">
+              {mode === 'single' ? '👑' : '👥'}
             </div>
             <div>
-              <div className="text-xs font-black uppercase tracking-widest text-amber-200">
-                {mode === 'single' ? 'HỌC SINH ĐƯỢC CHỌN TRẢ LỜI' : 'NHÓM HỌC SINH ĐƯỢC CHỌN'}
+              <div className="text-xs font-black uppercase tracking-widest text-amber-200 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{mode === 'single' ? 'HỌC SINH ĐƯỢC CHỌN TRẢ LỜI' : 'NHÓM HỌC SINH ĐƯỢC CHỌN'}</span>
               </div>
               {mode === 'single' && selectedStudent ? (
-                <div className="text-2xl md:text-3xl font-black text-white drop-shadow-sm">
-                  {selectedStudent.name}
-                </div>
+                <>
+                  <div className="text-2xl md:text-3xl font-black text-white drop-shadow-sm flex items-center gap-2.5 flex-wrap">
+                    <span>{selectedStudent.name}</span>
+                    {selectedStudent.code && (
+                      <span className="text-xs px-2 py-0.5 rounded-lg bg-black/25 font-mono text-amber-100 font-bold border border-white/10">
+                        {selectedStudent.code}
+                      </span>
+                    )}
+                  </div>
+                  {/* Current points status */}
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-white/20 backdrop-blur-md text-amber-100 flex items-center gap-1">
+                      <span>Thi đua:</span>
+                      <strong className="text-white font-black">
+                        {(selectedStudent.bonusPoints || 0) > 0 ? `+${selectedStudent.bonusPoints}` : (selectedStudent.bonusPoints || 0)} đ
+                      </strong>
+                    </span>
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-white/20 backdrop-blur-md text-amber-100 flex items-center gap-1">
+                      <span>Điểm miệng:</span>
+                      <strong className="text-white font-black">
+                        {selectedStudent.oralScore !== undefined && selectedStudent.oralScore !== null
+                          ? `${selectedStudent.oralScore} đ`
+                          : 'Chưa chấm'}
+                      </strong>
+                    </span>
+                  </div>
+                </>
               ) : (
-                <div className="text-lg md:text-xl font-bold text-white flex flex-wrap gap-2 mt-1">
+                <div className="text-base md:text-lg font-bold text-white flex flex-wrap gap-2 mt-1">
                   {selectedGroup.map((s, idx) => (
-                    <span key={s.id} className="px-3 py-1 rounded-xl bg-white/20 backdrop-blur-md text-sm font-black">
+                    <span key={s.id} className="px-3 py-1 rounded-xl bg-white/20 backdrop-blur-md text-xs md:text-sm font-black border border-white/20">
                       {idx + 1}. {s.name}
                     </span>
                   ))}
@@ -797,25 +941,137 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
             </div>
           </div>
 
+          {/* Scoring Controls: Trừ Điểm & Khen Thưởng */}
           {mode === 'single' && selectedStudent && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onAddBonusPoint(selectedStudent.id, 1)}
-                className="px-3.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
-              >
-                <Star className="w-4 h-4 text-yellow-300" />
-                <span>+1 Điểm Thưởng</span>
-              </button>
-              <button
-                onClick={() => onSetOralScore(selectedStudent.id, 10)}
-                className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
-              >
-                <Crown className="w-4 h-4 text-slate-950" />
-                <span>Chấm 10 Điểm</span>
-              </button>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-black/25 p-3 rounded-2xl border border-white/20 backdrop-blur-md">
+              {/* PHẦN TRỪ ĐIỂM (-1, -2, 0 đ) */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-black uppercase tracking-wider text-rose-200 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-300" />
+                  <span>Trừ điểm:</span>
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleAwardBonus(-1)}
+                    className="px-3 py-2 rounded-xl bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1 border border-rose-400/40"
+                    title="Trừ 1 điểm thi đua (-1 đ)"
+                  >
+                    <span>-1 đ</span>
+                  </button>
+                  <button
+                    onClick={() => handleAwardBonus(-2)}
+                    className="px-3 py-2 rounded-xl bg-rose-700/90 hover:bg-rose-600 active:scale-95 text-white font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1 border border-rose-400/40"
+                    title="Trừ 2 điểm thi đua (-2 đ)"
+                  >
+                    <span>-2 đ</span>
+                  </button>
+                  <button
+                    onClick={() => handleAwardOral(0)}
+                    className="px-3 py-2 rounded-xl bg-slate-900/95 hover:bg-black active:scale-95 text-rose-300 font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1 border border-rose-500/60"
+                    title="Chấm 0 điểm kiểm tra miệng / không trả lời được (0 đ)"
+                  >
+                    <span>0 đ</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Vertical Divider */}
+              <div className="hidden sm:block w-px h-11 bg-white/20 self-center" />
+
+              {/* PHẦN KHEN THƯỞNG (+1, +2, 10 đ) */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-200 flex items-center gap-1">
+                  <Star className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
+                  <span>Khen thưởng:</span>
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleAwardBonus(1)}
+                    className="px-3 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 active:scale-95 text-white font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1 border border-emerald-400/40"
+                    title="Khen thưởng +1 điểm thi đua (+1 đ)"
+                  >
+                    <span>+1 đ</span>
+                  </button>
+                  <button
+                    onClick={() => handleAwardBonus(2)}
+                    className="px-3 py-2 rounded-xl bg-emerald-700/90 hover:bg-emerald-600 active:scale-95 text-white font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1 border border-emerald-400/40"
+                    title="Khen thưởng +2 điểm thi đua (+2 đ)"
+                  >
+                    <span>+2 đ</span>
+                  </button>
+                  <button
+                    onClick={() => handleAwardOral(10)}
+                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-300 hover:from-amber-300 hover:to-yellow-200 text-slate-950 font-black text-xs shadow-lg active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-amber-200"
+                    title="Chấm 10 điểm kiểm tra miệng / bài cũ xuất sắc (10 đ)"
+                  >
+                    <Crown className="w-3.5 h-3.5 text-slate-950" />
+                    <span>10 đ</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Group Mode Scoring Controls */}
+          {mode === 'group' && selectedGroup.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-black/25 p-3 rounded-2xl border border-white/20 backdrop-blur-md">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-rose-200">Trừ cả nhóm:</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleGroupBonus(-1)}
+                    className="px-3 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer active:scale-95 transition-all"
+                  >
+                    -1 đ
+                  </button>
+                  <button
+                    onClick={() => handleGroupBonus(-2)}
+                    className="px-3 py-1.5 rounded-xl bg-rose-700/90 hover:bg-rose-600 text-white font-bold text-xs cursor-pointer active:scale-95 transition-all"
+                  >
+                    -2 đ
+                  </button>
+                </div>
+              </div>
+              <div className="hidden sm:block w-px h-8 bg-white/20" />
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-200">Thưởng cả nhóm:</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleGroupBonus(1)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer active:scale-95 transition-all"
+                  >
+                    +1 đ
+                  </button>
+                  <button
+                    onClick={() => handleGroupBonus(2)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-700/90 hover:bg-emerald-600 text-white font-bold text-xs cursor-pointer active:scale-95 transition-all"
+                  >
+                    +2 đ
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
+
+        {/* Score notification banner */}
+        {scoreNotification && (
+          <div className="mt-3.5 px-4 py-2.5 rounded-2xl bg-white/95 text-slate-900 font-bold text-xs shadow-xl flex items-center justify-between border border-white animate-in slide-in-from-top-2">
+            <span className="flex items-center gap-2">
+              {scoreNotification.type === 'ten' && '👑'}
+              {scoreNotification.type === 'plus' && '🎉'}
+              {scoreNotification.type === 'minus' && '⚠️'}
+              {scoreNotification.type === 'zero' && '❌'}
+              <span className="text-slate-800">{scoreNotification.message}</span>
+            </span>
+            <button
+              onClick={() => setScoreNotification(null)}
+              className="text-slate-400 hover:text-slate-700 cursor-pointer ml-3 p-1"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     );
   };

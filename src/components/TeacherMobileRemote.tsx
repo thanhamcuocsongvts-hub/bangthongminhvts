@@ -20,7 +20,11 @@ import {
   Volume2,
   CheckSquare,
   ArrowRight,
-  Plus
+  Plus,
+  Minus,
+  AlertCircle,
+  Star,
+  Crown,
 } from 'lucide-react';
 import { LessonDoc, RoomState, TeacherProfile, ClassRoom, ClassStudent } from '../types';
 
@@ -104,14 +108,24 @@ export const TeacherMobileRemote: React.FC<TeacherMobileRemoteProps> = ({
   const handleQuickAddPoint = (student: ClassStudent, pts: number) => {
     if ('vibrate' in navigator) navigator.vibrate(40);
     onAddStudentBonusPoint?.(student.id, pts);
-    setShowPickedToast(`+${pts} điểm thưởng cho ${student.name}!`);
+    setShowPickedToast(
+      pts > 0
+        ? `🎉 Đã khen thưởng +${pts} điểm cho ${student.name}!`
+        : `⚠️ Đã trừ ${pts} điểm của ${student.name}!`
+    );
     setTimeout(() => setShowPickedToast(null), 3000);
   };
 
   const handleQuickSetOral = (student: ClassStudent, score: number) => {
     if ('vibrate' in navigator) navigator.vibrate(50);
     onSetStudentOralScore?.(student.id, score);
-    setShowPickedToast(`Đã chấm ${score} điểm miệng cho ${student.name}!`);
+    setShowPickedToast(
+      score === 10
+        ? `👑 Xuất sắc! Đã chấm 10 điểm cho ${student.name}!`
+        : score === 0
+        ? `❌ Đã chấm 0 điểm cho ${student.name}!`
+        : `Đã chấm ${score} điểm cho ${student.name}!`
+    );
     setTimeout(() => setShowPickedToast(null), 3000);
   };
 
@@ -343,26 +357,69 @@ export const TeacherMobileRemote: React.FC<TeacherMobileRemoteProps> = ({
               </span>
             </div>
 
-            {/* Instant Grading Buttons */}
-            <div className="pt-2 border-t border-amber-200/80 flex flex-col gap-1.5">
-              <span className="text-[10px] font-bold text-amber-900 uppercase">Chấm Điểm Trực Tiếp:</span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => handleQuickAddPoint(quickPickedStudent, 1)}
-                  className="flex-1 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>+1 Thưởng</span>
-                </button>
-                {[8, 9, 10].map((score) => (
+            {/* Instant Grading Buttons: Trừ Điểm (-1, -2, 0 đ) & Khen Thưởng (+1, +2, 10 đ) */}
+            <div className="pt-2 border-t border-amber-200/80 flex flex-col gap-2">
+              {/* KHEN THƯỞNG */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-black text-emerald-800 uppercase flex items-center gap-1">
+                  <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                  <span>Khen thưởng:</span>
+                </span>
+                <div className="flex items-center gap-1.5">
                   <button
-                    key={score}
-                    onClick={() => handleQuickSetOral(quickPickedStudent, score)}
-                    className="w-11 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-black text-xs shadow-xs cursor-pointer"
+                    onClick={() => handleQuickAddPoint(quickPickedStudent, 1)}
+                    className="flex-1 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                    title="Khen thưởng +1 điểm"
                   >
-                    {score}đ
+                    <span>+1 đ</span>
                   </button>
-                ))}
+                  <button
+                    onClick={() => handleQuickAddPoint(quickPickedStudent, 2)}
+                    className="flex-1 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                    title="Khen thưởng +2 điểm"
+                  >
+                    <span>+2 đ</span>
+                  </button>
+                  <button
+                    onClick={() => handleQuickSetOral(quickPickedStudent, 10)}
+                    className="flex-1 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 active:scale-95 text-slate-950 font-black text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer border border-amber-300"
+                    title="Chấm 10 điểm miệng"
+                  >
+                    <Crown className="w-3 h-3 text-slate-950" />
+                    <span>10 đ</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* TRỪ ĐIỂM */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-black text-rose-800 uppercase flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 text-rose-600" />
+                  <span>Trừ điểm:</span>
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleQuickAddPoint(quickPickedStudent, -1)}
+                    className="flex-1 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                    title="Trừ 1 điểm (-1 đ)"
+                  >
+                    <span>-1 đ</span>
+                  </button>
+                  <button
+                    onClick={() => handleQuickAddPoint(quickPickedStudent, -2)}
+                    className="flex-1 py-1.5 rounded-xl bg-rose-700 hover:bg-rose-800 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                    title="Trừ 2 điểm (-2 đ)"
+                  >
+                    <span>-2 đ</span>
+                  </button>
+                  <button
+                    onClick={() => handleQuickSetOral(quickPickedStudent, 0)}
+                    className="flex-1 py-1.5 rounded-xl bg-slate-900 hover:bg-black active:scale-95 text-rose-300 font-black text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer border border-rose-500/30"
+                    title="Chấm 0 điểm (0 đ)"
+                  >
+                    <span>0 đ</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
