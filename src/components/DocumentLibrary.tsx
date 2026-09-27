@@ -26,6 +26,7 @@ import * as XLSX from 'xlsx';
 import { LessonDoc, SubjectType, TeacherProfile } from '../types';
 import { exportOriginalLessonFile, exportLessonJSON } from '../utils/exportUtils';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
+import { useLectureRepository } from '../hooks/useLectureRepository';
 
 interface DocumentLibraryProps {
   lessons: LessonDoc[];
@@ -63,6 +64,16 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [showCleanModal, setShowCleanModal] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Hook Firebase Storage & Cloud Firestore Realtime Sync
+  const {
+    lectures: cloudLectures,
+    uploadLectureFile,
+    uploadingProgress,
+    deleteLectureFile,
+    isLoading: isRepoLoading,
+    error: repoError,
+  } = useLectureRepository();
+
   // New Lesson State for Modal
   const [newTitle, setNewTitle] = useState<string>('');
   const [newSubject, setNewSubject] = useState<SubjectType>('Sinh học');
@@ -72,25 +83,65 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
   const subjects = ['Tất cả', 'Sinh học', 'Vật lý', 'Toán học', 'Hóa học', 'Lịch sử', 'Ngữ văn', 'Tiếng Anh'];
 
-  // Sanitize and deduplicate lessons
+  // Sanitize and deduplicate lessons, seamlessly merging real-time cloud lectures from Firebase
   const sanitizedLessons = useMemo(() => {
     const valid = (lessons || []).filter(
       (l) => l && l.id && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
     );
-    const seen = new Set<string>();
+    const seenTitles = new Set<string>();
+    const seenIds = new Set<string>();
     const deduped: LessonDoc[] = [];
+
     for (const item of valid) {
       const key = item.title.trim().toLowerCase();
       if (key === 'tài liệu bài giảng đính kèm.' && (!item.slides || item.slides.length === 0) && !item.fileUrl) {
         continue;
       }
-      if (!seen.has(key)) {
-        seen.add(key);
+      if (!seenTitles.has(key)) {
+        seenTitles.add(key);
+        seenIds.add(item.id);
         deduped.push(item);
       }
     }
+
+    // Seamlessly include any lecture uploaded from other devices via Firebase onSnapshot
+    if (cloudLectures && cloudLectures.length > 0) {
+      for (const cl of cloudLectures) {
+        const title = cl.fileName || 'Tài liệu bài giảng';
+        const key = title.trim().toLowerCase();
+        if (!seenTitles.has(key) && !seenIds.has(cl.id)) {
+          seenTitles.add(key);
+          seenIds.add(cl.id);
+          const ext = cl.fileType || cl.fileName.split('.').pop() || 'doc';
+          deduped.push({
+            id: cl.id,
+            title,
+            fileName: cl.fileName,
+            fileType: ext as any,
+            fileUrl: cl.downloadURL,
+            fileSize: typeof cl.fileSize === 'string' ? cl.fileSize : undefined,
+            subject: (title.toLowerCase().includes('toán') ? 'Toán học' : title.toLowerCase().includes('sinh') ? 'Sinh học' : title.toLowerCase().includes('vật lý') ? 'Vật lý' : 'Toán học') as any,
+            grade: 'Lớp 12',
+            author: 'Đồng bộ Firebase Cloud',
+            lastModified: cl.uploadedAt?.toDate ? cl.uploadedAt.toDate().toISOString() : new Date().toISOString(),
+            syncedToCloud: true,
+            rawText: title,
+            quizzes: [],
+            slides: [
+              {
+                id: `s_${cl.id}`,
+                title,
+                subtitle: 'Bài giảng đồng bộ thời gian thực từ Firebase Cloud Storage',
+                content: `Tài liệu: ${cl.fileName}\nKích thước: ${cl.fileSize || 'Chuẩn'}\nĐồng bộ đa thiết bị tự động qua Firebase onSnapshot.`,
+              }
+            ],
+          });
+        }
+      }
+    }
+
     return deduped;
-  }, [lessons]);
+  }, [lessons, cloudLectures]);
 
   const filteredLessons = sanitizedLessons.filter((l) => {
     const matchSearch =
@@ -112,18 +163,31 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     }
 
     setIsProcessingFile(true);
-    setUploadStatus(`Đang đọc tệp ${file.name}...`);
+    setUploadStatus(`Đang tải lên Firebase Cloud Storage: ${file.name}...`);
     setErrorMessage(null);
 
     try {
+      // 1. Upload physical file to Firebase Cloud Storage & record metadata in Firestore `lectures`
+      let uploadedItem: any = null;
+      try {
+        uploadedItem = await uploadLectureFile(file);
+      } catch (uploadStorageErr: any) {
+        console.warn('[Firebase Storage] Direct upload notice:', uploadStorageErr);
+      }
+
+      // 2. Parse file for classroom blackboard presentation & slides
       const newDoc = await parseUploadedFileToLesson(file, activeTeacher?.name, activeTeacher?.id);
+      if (uploadedItem?.downloadURL) {
+        newDoc.fileUrl = uploadedItem.downloadURL;
+      }
       onAddLesson(newDoc);
+
       // Automatically sync to cloud immediately so user has zero risk of lost files
       if (onSyncToCloud) {
         onSyncToCloud().catch((e) => console.warn('Auto sync cloud error:', e));
       }
       if (newDoc.fileUrl?.startsWith('http')) {
-        setUploadStatus(`Đã tải lên và đồng bộ thành công tài liệu "${newDoc.title}" lên Đám Mây!`);
+        setUploadStatus(`Đã tải lên và đồng bộ thành công tài liệu "${newDoc.title}" lên Đám Mây Firebase!`);
       } else {
         setUploadStatus(`Đã nạp "${newDoc.title}" và lưu vào kho bài giảng.`);
       }
@@ -251,6 +315,24 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       </div>
 
       {/* Upload Feedback Status Alerts */}
+      {uploadingProgress > 0 && (
+        <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 shadow-xs space-y-2 animate-fade-in">
+          <div className="flex items-center justify-between text-xs font-bold text-indigo-900">
+            <span className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+              Đang tải file lên Firebase Cloud Storage & Firestore...
+            </span>
+            <span className="font-mono text-indigo-600">{uploadingProgress}%</span>
+          </div>
+          <div className="w-full bg-indigo-200/60 rounded-full h-2.5 overflow-hidden">
+            <div
+              className="bg-gradient-to-r from-sky-500 to-indigo-600 h-2.5 rounded-full transition-all duration-300"
+              style={{ width: `${uploadingProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {uploadStatus && (
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold flex items-center gap-2.5 animate-fade-in shadow-xs">
           <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />

@@ -46,6 +46,19 @@
         { "name": "updatedAt", "type": "timestamp" }
       ],
       "rules": "Users can read and write only if userId matches their auth uid."
+    },
+    {
+      "name": "lectures",
+      "document_id": "auto",
+      "fields": [
+        { "name": "fileName", "type": "string" },
+        { "name": "downloadURL", "type": "string" },
+        { "name": "uploadedAt", "type": "timestamp" },
+        { "name": "fileType", "type": "string" },
+        { "name": "fileSize", "type": "string" },
+        { "name": "storagePath", "type": "string" }
+      ],
+      "rules": "Users can read and write lecture files and metadata."
     }
   ]
 }

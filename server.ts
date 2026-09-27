@@ -23,12 +23,23 @@ app.get("/health", (req, res) => {
 
 // Persistent Cloud Storage Directories
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+const BACKUP_UPLOADS_DIR = path.join(process.cwd(), "data", "uploads");
+
 try {
   if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
 } catch (e) { console.warn('Could not create UPLOADS_DIR', e); }
+
+try {
+  if (!fs.existsSync(BACKUP_UPLOADS_DIR)) {
+    fs.mkdirSync(BACKUP_UPLOADS_DIR, { recursive: true });
+  }
+} catch (e) { console.warn('Could not create BACKUP_UPLOADS_DIR', e); }
+
+// Serve uploaded files from both primary and persistent backup directory
 app.use("/uploads", express.static(UPLOADS_DIR));
+app.use("/uploads", express.static(BACKUP_UPLOADS_DIR));
 
 const DATA_DIR = path.join(process.cwd(), "data");
 try {
@@ -423,8 +434,10 @@ app.post("/api/documents/upload", (req, res) => {
     const baseName = path.basename(fileName, ext).replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF-]/g, '_');
     const uniqueFileName = `${Date.now()}_${baseName}${ext}`;
     const filePath = path.join(UPLOADS_DIR, uniqueFileName);
+    const backupFilePath = path.join(BACKUP_UPLOADS_DIR, uniqueFileName);
 
     fs.writeFileSync(filePath, buffer);
+    try { fs.writeFileSync(backupFilePath, buffer); } catch (_) {}
 
     const docRecord = {
       id: `doc_${Date.now()}`,
@@ -455,6 +468,40 @@ app.post("/api/documents/upload", (req, res) => {
   }
 });
 
+// Helper to auto-save base64 dataURL from lesson to permanent file on disk
+function saveBase64LessonFile(lesson: any): any {
+  if (!lesson || !lesson.fileUrl || typeof lesson.fileUrl !== 'string' || !lesson.fileUrl.startsWith('data:')) {
+    return lesson;
+  }
+  try {
+    const cleanBase64 = lesson.fileUrl.replace(/^data:[^;]+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    let ext = '.bin';
+    if (lesson.fileType === 'pdf') ext = '.pdf';
+    else if (lesson.fileType === 'docx') ext = '.docx';
+    else if (lesson.fileType === 'pptx') ext = '.pptx';
+    else if (lesson.fileType === 'xlsx') ext = '.xlsx';
+    else if (lesson.fileType === 'image') ext = '.png';
+
+    const baseName = (lesson.fileName || lesson.title || 'lesson_file')
+      .replace(/\.[^/.]+$/, '')
+      .replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF-]/g, '_');
+    const uniqueFileName = `${Date.now()}_${baseName}${ext}`;
+    
+    fs.writeFileSync(path.join(UPLOADS_DIR, uniqueFileName), buffer);
+    try { fs.writeFileSync(path.join(BACKUP_UPLOADS_DIR, uniqueFileName), buffer); } catch (_) {}
+
+    return {
+      ...lesson,
+      fileUrl: `/uploads/${uniqueFileName}`,
+      fileName: lesson.fileName || `${baseName}${ext}`,
+    };
+  } catch (e) {
+    console.warn('Could not auto-save lesson base64 to file:', e);
+    return lesson;
+  }
+}
+
 // 2. Get list of cloud documents
 app.get("/api/documents", (req, res) => {
   res.json({ success: true, documents: cloudDocumentsStore });
@@ -466,12 +513,12 @@ app.delete("/api/documents/:id", (req, res) => {
   const doc = cloudDocumentsStore.find((d) => d.id === id || d.uniqueFileName === id);
   if (doc) {
     const fullPath = path.join(UPLOADS_DIR, doc.uniqueFileName);
+    const backupPath = path.join(BACKUP_UPLOADS_DIR, doc.uniqueFileName);
     if (fs.existsSync(fullPath)) {
-      try {
-        fs.unlinkSync(fullPath);
-      } catch (e) {
-        console.warn('Could not delete file:', fullPath, e);
-      }
+      try { fs.unlinkSync(fullPath); } catch (e) {}
+    }
+    if (fs.existsSync(backupPath)) {
+      try { fs.unlinkSync(backupPath); } catch (e) {}
     }
     cloudDocumentsStore = cloudDocumentsStore.filter((d) => d.id !== id && d.uniqueFileName !== id);
     writeJsonFileSync(DOCUMENTS_FILE, cloudDocumentsStore);
@@ -479,20 +526,26 @@ app.delete("/api/documents/:id", (req, res) => {
   res.json({ success: true, documents: cloudDocumentsStore });
 });
 
-// 4. Get all cloud lessons (only valid lessons, filter out teacher objects or corrupt items)
+// 4. Get all cloud lessons (only valid lessons with real content, no ghosts or corrupt items)
 app.get("/api/lessons", (req, res) => {
+  cloudLessonsStore = readJsonFileSync(LESSONS_FILE, cloudLessonsStore);
   const sanitized = cloudLessonsStore.filter(
-    (l) => l && l.id && typeof l.title === "string" && l.title.trim().length > 0 && !l.username && !l.classes
+    (l) => l && l.id && typeof l.title === "string" && l.title.trim().length > 0 && !l.username && !l.classes && (
+      (l.fileUrl && l.fileUrl.trim().length > 0) ||
+      (l.slides && l.slides.length > 0) ||
+      (l.rawText && l.rawText.trim().length > 50)
+    )
   );
   res.json({ success: true, lessons: sanitized });
 });
 
 // 5. Save or update a single lesson on Cloud
 app.post("/api/lessons", (req, res) => {
-  const lesson = req.body;
-  if (!lesson || !lesson.id || typeof lesson.title !== "string" || !lesson.title.trim() || lesson.username) {
+  const rawLesson = req.body;
+  if (!rawLesson || !rawLesson.id || typeof rawLesson.title !== "string" || !rawLesson.title.trim() || rawLesson.username) {
     return res.status(400).json({ error: "Dữ liệu bài giảng không hợp lệ" });
   }
+  const lesson = saveBase64LessonFile(rawLesson);
   const idx = cloudLessonsStore.findIndex((l) => l.id === lesson.id);
   const updatedLesson = {
     ...lesson,
@@ -508,13 +561,19 @@ app.post("/api/lessons", (req, res) => {
   res.json({ success: true, lesson: updatedLesson, lessons: cloudLessonsStore });
 });
 
-// 6. Bulk Sync Lessons to Cloud (with replaceAll support for cleanup)
+// 6. Bulk Sync Lessons to Cloud (with replaceAll support for cleanup and auto file saving)
 app.post("/api/lessons/sync", (req, res) => {
   const { lessons, replaceAll } = req.body;
   if (Array.isArray(lessons)) {
-    const validIncoming = lessons.filter(
-      (incoming) => incoming && incoming.id && typeof incoming.title === "string" && incoming.title.trim().length > 0 && !incoming.username && !incoming.classes
-    );
+    const validIncoming = lessons
+      .filter(
+        (incoming) => incoming && incoming.id && typeof incoming.title === "string" && incoming.title.trim().length > 0 && !incoming.username && !incoming.classes && (
+          (incoming.fileUrl && incoming.fileUrl.trim().length > 0) ||
+          (incoming.slides && incoming.slides.length > 0) ||
+          (incoming.rawText && incoming.rawText.trim().length > 50)
+        )
+      )
+      .map((item) => saveBase64LessonFile(item));
 
     if (replaceAll) {
       cloudLessonsStore = validIncoming.map((doc) => ({
@@ -571,12 +630,23 @@ app.post("/api/ai/recognize-handwriting", async (req, res) => {
               },
             },
             {
-              text: `Bạn là trợ lý AI chuyên đọc chữ viết tay tiếng Việt và công thức trên bảng đen lớp học tiểu học và trung học.
-Hãy nhận diện CHÍNH XÁC từ ngữ, chữ cái, tên riêng hoặc số/phép tính viết tay trong ảnh này.
-Quy tắc:
-1. Trả về DUY NHẤT nội dung chữ đọc được, viết đúng chính tả tiếng Việt có dấu (ví dụ: "Chào các em", "Toán học", "Kiệt", "Tập viết", "15 + 4 = 19", v.v.).
-2. KHÔNG giải thích, KHÔNG thêm từ ngữ nào khác, KHÔNG bọc trong dấu ngoặc kép thừa.
-3. Nếu ảnh không có nét chữ viết tay, là ảnh trống, chỉ có màu nền hoặc nét vẽ nguệch ngoạc không phải chữ/số, BẮT BUỘC CHỈ TRẢ VỀ RỖNG (không trả về bất kỳ ký tự nào).`,
+              text: `Bạn là chuyên gia AI nhận diện chữ viết tay và CÔNG THỨC TOÁN HỌC trên bảng dạy học (từ tiểu học đến THPT và đại học).
+Hãy nhận diện CHÍNH XÁC 100% từ ngữ, chữ cái, tên riêng hoặc CÔNG THỨC TOÁN HỌC/phép tính viết tay trong ảnh này.
+
+QUY TẮC NHẬN DIỆN CÔNG THỨC TOÁN HỌC:
+1. Đối với CÔNG THỨC TOÁN HỌC, BIỂU THỨC, PHƯƠNG TRÌNH, PHÉP TÍNH:
+   - Nhận diện CHÍNH XÁC từng ký hiệu toán học:
+     + Phân số: \\frac{a}{b} hoặc (a/b)
+     + Căn thức: \\sqrt{x}, \\sqrt[3]{x}, \\sqrt{x^2 + 1}
+     + Số mũ / lũy thừa: x^2, x^3, e^{2x}, 10^3
+     + Chỉ số dưới: x_1, x_2, u_n, S_n, y_0
+     + Dấu phép tính: +, -, \\times, :, =, \\ne, \\le, \\ge, <, >, \\approx, \\pm
+     + Ký hiệu giải tích & hình học: \\int, \\lim_{x \\to 0}, \\vec{u}, \\Delta, \\alpha, \\beta, \\pi, \\angle A, \\triangle ABC
+     + Phép tính số học: 12 + 25 = 37, 45 : 5 = 9, 3 x 4 = 12...
+   - Nếu là biểu thức toán học, hãy bao quanh bằng cặp dấu $ (ví dụ: $x^2 - 4x + 3 = 0$, $\\sqrt{x} + 2 = 4$, $\\frac{x + 1}{2x - 3} = 1$) để hệ thống tự động hiển thị KaTeX chuẩn xác và đẹp mắt.
+2. Đối với CHỮ VIẾT TAY TIẾNG VIỆT: Trả về chuẩn chính tả tiếng Việt có dấu đầy đủ (ví dụ: "Nguyễn Văn An", "Đạo hàm và ứng dụng", "Chào các em").
+3. Trả về DUY NHẤT nội dung nhận diện được. KHÔNG giải thích, KHÔNG thêm từ ngữ dẫn dắt, KHÔNG bọc trong dấu ngoặc kép thừa.
+4. Nếu ảnh hoàn toàn trống hoặc không có nét chữ/số nào, CHỈ TRẢ VỀ RỖNG.`,
             },
           ],
         },

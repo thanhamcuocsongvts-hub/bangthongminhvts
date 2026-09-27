@@ -1421,14 +1421,23 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       if (recognized && recognized.trim().length > 0) {
         const text = recognized.trim();
         const { bounds } = crop;
-        const calculatedSize = Math.max(28, Math.min(76, Math.round(bounds.height * 0.78)));
+        const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+        const lineCount = Math.max(1, lines.length);
+        const heightPerLine = bounds.height / lineCount;
+
+        // Size matching: Font size that matches physical chalk handwriting height before conversion
+        let calculatedSize = Math.round(heightPerLine * 0.84);
+        calculatedSize = Math.max(20, Math.min(120, calculatedSize));
+
+        const boxWidth = Math.max(Math.round(bounds.width + 36), calculatedSize * 2);
+        const boxHeight = Math.max(Math.round(bounds.height + 20), Math.round(calculatedSize * lineCount * 1.32));
 
         const newTextBox: BlackboardTextBox = {
           id: `calligraphy_txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
           x: Math.round(bounds.minX),
           y: Math.round(bounds.minY),
-          width: Math.max(200, Math.round(bounds.width + 40)),
-          height: Math.max(64, Math.round(bounds.height + 24)),
+          width: boxWidth,
+          height: boxHeight,
           text: text,
           color: targetStrokes[0]?.color || activeColor,
           size: calculatedSize,
@@ -2022,7 +2031,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   };
 
   const handlePointerUp = (e?: React.PointerEvent<HTMLCanvasElement>) => {
-    // 0. Finalize Calligraphy Marquee Sweep (Quét văn bản chuyển chữ đẹp)
+    // 0. Finalize Calligraphy Marquee Sweep (Quét văn bản chuyển chữ đẹp) - Optimized for hand/finger touch & stylus
     if (calligraphySweep) {
       const minX = Math.min(calligraphySweep.startX, calligraphySweep.curX);
       const maxX = Math.max(calligraphySweep.startX, calligraphySweep.curX);
@@ -2033,48 +2042,158 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
       setCalligraphySweep(null);
 
-      // If drag area is too small (< 12px), user likely clicked/tapped without sweeping
-      if (dragW < 12 && dragH < 12) {
-        setSweptSelection(null);
-        return;
-      }
-
-      const curr = pages[currentPageIndex];
+      const curr = pagesRef.current[currentPageIndexRef.current] || pages[currentPageIndex];
       if (!curr) return;
 
-      // Find all handwriting strokes that intersect or lie inside the swept box
-      const matchedStrokeIds = curr.strokes.filter((s) => {
-        if (s.points && s.points.length > 0) {
-          return s.points.some((p) => p.x >= minX - 8 && p.x <= maxX + 8 && p.y >= minY - 8 && p.y <= maxY + 8);
-        }
-        const bounds = getStrokeBounds(s);
-        if (!bounds) return false;
-        return (
-          bounds.minX <= maxX + 8 &&
-          bounds.maxX >= minX - 8 &&
-          bounds.minY <= maxY + 8 &&
-          bounds.maxY >= minY - 8
-        );
-      }).map((s) => s.id);
+      let matchedStrokeIds: string[] = [];
+      let matchedTextIds: string[] = [];
+      let selMinX = minX;
+      let selMaxX = maxX;
+      let selMinY = minY;
+      let selMaxY = maxY;
 
-      // Find any existing text boxes within the swept box
-      const matchedTextIds = (curr.texts || []).filter((t) => {
-        const tRight = t.x + t.width;
-        const tBottom = t.y + t.height;
-        return t.x <= maxX + 8 && tRight >= minX - 8 && t.y <= maxY + 8 && tBottom >= minY - 8;
-      }).map((t) => t.id);
+      // Case A: Hand/Finger Tap or slight press (< 22px) -> Smart Proximity & Formula Cluster Selection
+      if (dragW < 22 && dragH < 22) {
+        const tapX = calligraphySweep.startX;
+        const tapY = calligraphySweep.startY;
+        let nearestStroke: WhiteboardStroke | null = null;
+        let nearestDist = 52; // Generous touch target for human finger (52px radius)
+
+        for (const s of curr.strokes) {
+          if (s.points && s.points.length > 0) {
+            for (const p of s.points) {
+              const d = Math.hypot(p.x - tapX, p.y - tapY);
+              if (d < nearestDist) {
+                nearestDist = d;
+                nearestStroke = s;
+              }
+            }
+          } else {
+            const b = getStrokeBounds(s);
+            if (b) {
+              const d = Math.hypot(b.centerX - tapX, b.centerY - tapY);
+              if (d < nearestDist) {
+                nearestDist = d;
+                nearestStroke = s;
+              }
+            }
+          }
+        }
+
+        // Also check if teacher tapped on an existing text box
+        const hitText = (curr.texts || []).find(
+          (t) => tapX >= t.x - 20 && tapX <= t.x + t.width + 20 && tapY >= t.y - 20 && tapY <= t.y + t.height + 20
+        );
+        if (hitText) {
+          matchedTextIds.push(hitText.id);
+          selMinX = hitText.x;
+          selMaxX = hitText.x + hitText.width;
+          selMinY = hitText.y;
+          selMaxY = hitText.y + hitText.height;
+        }
+
+        if (nearestStroke) {
+          // Cluster all strokes forming the same word/formula
+          const cluster = [nearestStroke];
+          const clusterIds = new Set([nearestStroke.id]);
+          let added = true;
+          while (added) {
+            added = false;
+            for (const s of curr.strokes) {
+              if (clusterIds.has(s.id)) continue;
+              const sBounds = getStrokeBounds(s);
+              if (!sBounds) continue;
+              const isNear = cluster.some((c) => {
+                const cb = getStrokeBounds(c);
+                if (!cb) return false;
+                const dx = Math.max(0, Math.max(sBounds.minX - cb.maxX, cb.minX - sBounds.maxX));
+                const dy = Math.max(0, Math.max(sBounds.minY - cb.maxY, cb.minY - sBounds.maxY));
+                return dx < 48 && dy < 36;
+              });
+              if (isNear) {
+                cluster.push(s);
+                clusterIds.add(s.id);
+                added = true;
+              }
+            }
+          }
+          matchedStrokeIds = Array.from(clusterIds);
+          let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+          cluster.forEach((s) => {
+            const b = getStrokeBounds(s);
+            if (b) {
+              bMinX = Math.min(bMinX, b.minX);
+              bMaxX = Math.max(bMaxX, b.maxX);
+              bMinY = Math.min(bMinY, b.minY);
+              bMaxY = Math.max(bMaxY, b.maxY);
+            }
+          });
+          selMinX = Math.max(0, bMinX - 16);
+          selMaxX = bMaxX + 16;
+          selMinY = Math.max(0, bMinY - 16);
+          selMaxY = bMaxY + 16;
+        }
+      } else {
+        // Case B: Hand/Finger or Stylus Drag Sweep -> Generous finger tolerance
+        const margin = 28;
+        const sweepLeft = minX - margin;
+        const sweepRight = maxX + margin;
+        const sweepTop = minY - margin;
+        const sweepBottom = maxY + margin;
+
+        const matchedStrokes = curr.strokes.filter((s) => {
+          if (s.points && s.points.length > 0) {
+            return s.points.some(
+              (p) => p.x >= sweepLeft && p.x <= sweepRight && p.y >= sweepTop && p.y <= sweepBottom
+            );
+          }
+          const bounds = getStrokeBounds(s);
+          if (!bounds) return false;
+          return (
+            bounds.minX <= sweepRight &&
+            bounds.maxX >= sweepLeft &&
+            bounds.minY <= sweepBottom &&
+            bounds.maxY >= sweepTop
+          );
+        });
+
+        matchedStrokeIds = matchedStrokes.map((s) => s.id);
+
+        matchedTextIds = (curr.texts || []).filter((t) => {
+          const tRight = t.x + t.width;
+          const tBottom = t.y + t.height;
+          return t.x <= sweepRight && tRight >= sweepLeft && t.y <= sweepBottom && tBottom >= sweepTop;
+        }).map((t) => t.id);
+
+        if (matchedStrokes.length > 0) {
+          let bMinX = minX, bMaxX = maxX, bMinY = minY, bMaxY = maxY;
+          matchedStrokes.forEach((s) => {
+            const b = getStrokeBounds(s);
+            if (b) {
+              bMinX = Math.min(bMinX, b.minX);
+              bMaxX = Math.max(bMaxX, b.maxX);
+              bMinY = Math.min(bMinY, b.minY);
+              bMaxY = Math.max(bMaxY, b.maxY);
+            }
+          });
+          selMinX = Math.max(0, bMinX - 14);
+          selMaxX = bMaxX + 14;
+          selMinY = Math.max(0, bMinY - 14);
+          selMaxY = bMaxY + 14;
+        }
+      }
 
       if (matchedStrokeIds.length > 0 || matchedTextIds.length > 0) {
         setSweptSelection({
-          box: { minX, minY, maxX, maxY },
+          box: { minX: selMinX, minY: selMinY, maxX: selMaxX, maxY: selMaxY },
           strokeIds: matchedStrokeIds,
           textIds: matchedTextIds,
         });
-        setCalligraphyStatusBanner(`✨ Đã quét chọn ${matchedStrokeIds.length > 0 ? `${matchedStrokeIds.length} nét chữ` : `${matchedTextIds.length} văn bản`}. Hãy bấm nút "Chuyển Chữ Đẹp" để hoàn tất!`);
+        setCalligraphyStatusBanner(`✨ Đã chọn ${matchedStrokeIds.length > 0 ? `${matchedStrokeIds.length} nét chữ/công thức` : `${matchedTextIds.length} văn bản`}. Bấm nút nổi để chuyển đổi siêu tốc!`);
       } else {
         setSweptSelection(null);
-        setCalligraphyStatusBanner('💡 Không tìm thấy nét chữ nào trong vùng vừa quét. Vui lòng quét qua vùng có chữ viết.');
-        setTimeout(() => setCalligraphyStatusBanner(null), 3500);
+        setCalligraphyStatusBanner('💡 Chạm hoặc quét bao quanh vùng chữ/công thức cần chuyển đổi nhé!');
+        setTimeout(() => setCalligraphyStatusBanner(null), 3000);
       }
       return;
     }
@@ -4958,7 +5077,26 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           )}
 
           {/* Main Floating Tool Pill on Phone */}
-          <div className="w-full bg-slate-950/95 backdrop-blur-2xl border border-white/20 shadow-2xl rounded-2xl px-2 py-1.5 flex items-center justify-between text-white">
+          <div className="w-full bg-slate-950/95 backdrop-blur-2xl border border-white/20 shadow-2xl rounded-2xl px-2 py-1.5 flex items-center justify-start gap-1.5 text-white overflow-x-auto scrollbar-none touch-pan-x">
+            {/* 0. Chọn (Select) - Tiện lợi cho giáo viên trên di động */}
+            <button
+              onClick={() => {
+                handleToolChange('select');
+                setShowMobileColorSheet(false);
+                setShowMobileShapeSheet(false);
+                setShowMobileMoreSheet(false);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                activeTool === 'select'
+                  ? 'bg-blue-600 text-white shadow ring-2 ring-blue-400'
+                  : 'text-slate-300 hover:bg-white/10'
+              }`}
+              title="Chọn và di chuyển đối tượng"
+            >
+              <MousePointer2 className="w-4 h-4 text-blue-300" />
+              <span className="text-[11px]">Chọn</span>
+            </button>
+
             {/* 1. Phấn */}
             <button
               onClick={() => {
@@ -4967,7 +5105,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 setShowMobileShapeSheet(false);
                 setShowMobileMoreSheet(false);
               }}
-              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 activeTool === 'pen'
                   ? 'bg-emerald-600 text-white shadow ring-2 ring-emerald-400'
                   : 'text-slate-300 hover:bg-white/10'
@@ -4980,20 +5118,23 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <span className="text-[11px]">Phấn</span>
             </button>
 
-            {/* 2. Chữ Đẹp AI */}
+            {/* 2. Chữ Đẹp AI (Quét để chọn văn bản - Không bật hộp thoại) */}
             <button
               onClick={() => {
                 handleToolChange('calligraphy');
-                setShowCalligraphyPopover(true);
+                setShowCalligraphyPopover(false);
                 setShowMobileColorSheet(false);
                 setShowMobileShapeSheet(false);
                 setShowMobileMoreSheet(false);
+                setCalligraphyStatusBanner('✨ Chế độ Quét Chữ Đẹp: Kéo quét bao quanh vùng chữ trên bảng để chọn. Kiểu chữ chọn trên thanh công cụ phía trên!');
+                setTimeout(() => setCalligraphyStatusBanner(''), 4500);
               }}
-              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 activeTool === 'calligraphy'
                   ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow ring-2 ring-purple-400'
                   : 'text-purple-300 hover:bg-white/10'
               }`}
+              title="Quét để chọn vùng chữ cần chuyển sang chữ đẹp"
             >
               <div className="relative w-4 h-4 flex items-center justify-center">
                 <Feather className="w-3.5 h-3.5 text-purple-200" />
@@ -5011,7 +5152,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 setShowMobileShapeSheet(false);
                 setShowMobileMoreSheet(false);
               }}
-              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 activeTool === 'eraser'
                   ? 'bg-rose-600 text-white shadow ring-2 ring-rose-400'
                   : 'text-slate-300 hover:bg-white/10'
@@ -5130,23 +5271,25 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <span className="text-[11px] font-bold">Phấn</span>
             </button>
 
-            {/* 2b. Viết Chữ Đẹp (Smart Handwriting to Beautiful Font) */}
+            {/* 2b. Viết Chữ Đẹp (Smart Handwriting to Beautiful Font - Quét để chọn) */}
             <div className="relative shrink-0 flex items-center">
               <button
                 onClick={() => {
                   handleToolChange('calligraphy');
-                  setShowCalligraphyPopover((prev) => !prev);
+                  setShowCalligraphyPopover(false);
                   setShowShapePicker(false);
                   setShowFunctionPicker(false);
                   setShowColorPopover(false);
                   setShowSizePopover(false);
+                  setCalligraphyStatusBanner('✨ Chế độ Quét Chữ Đẹp: Kéo quét bao quanh vùng chữ trên bảng để chọn. Kiểu chữ chọn trên thanh công cụ phía trên!');
+                  setTimeout(() => setCalligraphyStatusBanner(''), 4500);
                 }}
                 className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 cursor-pointer ${
                   activeTool === 'calligraphy'
                     ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-2 ring-purple-400'
                     : 'hover:bg-white/10 text-slate-300'
                 }`}
-                title="Viết chữ đẹp: Tự động chuyển nét viết bảng thành phông chữ viết tay nghệ thuật"
+                title="Quét để chọn vùng chữ trên bảng cần chuyển sang chữ đẹp (chọn kiểu chữ trên thanh công cụ phía trên)"
               >
                 <div className="relative w-4 h-4 flex items-center justify-center">
                   <Feather className="w-3.5 h-3.5 text-purple-200" />
