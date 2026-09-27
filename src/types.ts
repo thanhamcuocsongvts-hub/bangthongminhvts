@@ -104,6 +104,7 @@ export interface LessonDoc {
     type: string;
     url?: string;
   }>;
+  storagePath?: string;
 }
 
 export type WhiteboardTool =

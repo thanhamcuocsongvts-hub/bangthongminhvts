@@ -129,6 +129,109 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
 }
 
 /**
+ * Permanently delete a lesson from IndexedDB, localStorage, backend server, and Firestore global_store immediately.
+ * No debounce to prevent Firestore onSnapshot from restoring deleted documents.
+ */
+export async function deleteLessonFromStorage(
+  id: string,
+  remainingLessons: any[],
+  lessonTitle?: string,
+  fileName?: string
+): Promise<void> {
+  // 1. Cancel any pending debounce sync to avoid resurrecting the deleted item
+  if ((window as any).firestoreSyncTimeout) {
+    clearTimeout((window as any).firestoreSyncTimeout);
+    (window as any).firestoreSyncTimeout = null;
+  }
+
+  const validRemaining = (remainingLessons || []).filter(
+    (l: any) =>
+      l &&
+      l.id &&
+      l.id !== id &&
+      (!lessonTitle || l.title?.trim().toLowerCase() !== lessonTitle.trim().toLowerCase()) &&
+      (!fileName || l.fileName?.trim().toLowerCase() !== fileName.trim().toLowerCase()) &&
+      typeof l.title === 'string' &&
+      l.title.trim().length > 0 &&
+      !('username' in l) &&
+      !('classes' in l)
+  );
+
+  // 2. Remove from LocalStorage
+  try {
+    localStorage.setItem('smartboard_lessons', JSON.stringify(validRemaining));
+  } catch (_) {}
+
+  // 3. Remove from IndexedDB
+  try {
+    const db = await openDB();
+    const tx = db.transaction([STORE_LESSONS, STORE_FILES], 'readwrite');
+    const lessonStore = tx.objectStore(STORE_LESSONS);
+    const filesStore = tx.objectStore(STORE_FILES);
+
+    lessonStore.delete(id);
+    filesStore.delete(id);
+
+    // If lessonTitle or fileName provided, scan and delete any lingering entries
+    const allRecordsReq = lessonStore.getAll();
+    allRecordsReq.onsuccess = () => {
+      const records = allRecordsReq.result || [];
+      for (const rec of records) {
+        if (!rec) continue;
+        const matchTitle = lessonTitle && rec.title?.trim().toLowerCase() === lessonTitle.trim().toLowerCase();
+        const matchFile = fileName && rec.fileName?.trim().toLowerCase() === fileName.trim().toLowerCase();
+        if (matchTitle || matchFile) {
+          lessonStore.delete(rec.id);
+          filesStore.delete(rec.id);
+        }
+      }
+    };
+
+    await new Promise<void>((resolve) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch (idbErr) {
+    console.warn('IndexedDB delete notice:', idbErr);
+  }
+
+  // 4. Notify backend server
+  try {
+    fetch(`/api/lessons/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    fetch(`/api/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    fetch('/api/lessons/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lessons: validRemaining, replaceAll: true }),
+    }).catch(() => {});
+  } catch (_) {}
+
+  // 5. Instantly push cleaned lessons list to Firestore global_store/smartboard_lessons (NO DELAY!)
+  try {
+    const authModule = await import('../lib/firebase');
+    const firestoreModule = await import('firebase/firestore');
+    const db = authModule.db;
+    const { doc, setDoc } = firestoreModule;
+
+    const sanitizedLessons = validRemaining.map((l: any) => {
+      let cleanFileUrl = l.fileUrl;
+      if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 500000) {
+        cleanFileUrl = '';
+      }
+      return {
+        ...l,
+        fileUrl: cleanFileUrl,
+      };
+    });
+    const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
+    await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
+    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
+  } catch (firestoreErr) {
+    console.warn('Firestore instant sync on delete notice:', firestoreErr);
+  }
+}
+
+/**
  * Force immediate cloud synchronization for lessons (NO DEBOUNCE)
  * Guarantees that lessons uploaded on home computer are instantly pushed to cloud & available at school
  */

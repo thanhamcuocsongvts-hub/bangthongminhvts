@@ -34,7 +34,7 @@ interface DocumentLibraryProps {
   activeLessonId: string;
   onSelectLesson: (id: string) => void;
   onAddLesson: (newDoc: LessonDoc) => void;
-  onDeleteLesson: (id: string) => void;
+  onDeleteLesson: (id: string, title?: string) => Promise<void> | void;
   onCleanLibrary?: () => void;
   onSyncToCloud: () => Promise<void>;
   onPullFromCloud?: () => Promise<void>;
@@ -61,7 +61,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [lessonToDelete, setLessonToDelete] = useState<LessonDoc | null>(null);
+  const [isDeletingLesson, setIsDeletingLesson] = useState<boolean>(false);
   const [showCleanModal, setShowCleanModal] = useState<boolean>(false);
+  const [localDeletedIds, setLocalDeletedIds] = useState<Set<string>>(() => new Set());
+  const [localDeletedTitles, setLocalDeletedTitles] = useState<Set<string>>(() => new Set());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Hook Firebase Storage & Cloud Firestore Realtime Sync
@@ -86,7 +89,16 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // Sanitize and deduplicate lessons, seamlessly merging real-time cloud lectures from Firebase
   const sanitizedLessons = useMemo(() => {
     const valid = (lessons || []).filter(
-      (l) => l && l.id && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
+      (l) =>
+        l &&
+        l.id &&
+        typeof l.title === 'string' &&
+        l.title.trim().length > 0 &&
+        !('username' in l) &&
+        !('classes' in l) &&
+        !localDeletedIds.has(l.id) &&
+        !localDeletedTitles.has(l.title.trim().toLowerCase()) &&
+        (!l.fileName || !localDeletedTitles.has(l.fileName.trim().toLowerCase()))
     );
     const seenTitles = new Set<string>();
     const seenIds = new Set<string>();
@@ -107,12 +119,15 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     // Seamlessly include any lecture uploaded from other devices via Firebase onSnapshot
     if (cloudLectures && cloudLectures.length > 0) {
       for (const cl of cloudLectures) {
+        if (localDeletedIds.has(cl.id)) continue;
         const title = cl.fileName || 'Tài liệu bài giảng';
         const key = title.trim().toLowerCase();
+        if (localDeletedTitles.has(key)) continue;
+
         if (!seenTitles.has(key) && !seenIds.has(cl.id)) {
           seenTitles.add(key);
           seenIds.add(cl.id);
-          const ext = cl.fileType || cl.fileName.split('.').pop() || 'doc';
+          const ext = cl.fileType || cl.fileName?.split('.').pop() || 'doc';
           deduped.push({
             id: cl.id,
             title,
@@ -120,6 +135,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             fileType: ext as any,
             fileUrl: cl.downloadURL,
             fileSize: typeof cl.fileSize === 'string' ? cl.fileSize : undefined,
+            storagePath: cl.storagePath,
             subject: (title.toLowerCase().includes('toán') ? 'Toán học' : title.toLowerCase().includes('sinh') ? 'Sinh học' : title.toLowerCase().includes('vật lý') ? 'Vật lý' : 'Toán học') as any,
             grade: 'Lớp 12',
             author: 'Đồng bộ Firebase Cloud',
@@ -141,7 +157,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     }
 
     return deduped;
-  }, [lessons, cloudLectures]);
+  }, [lessons, cloudLectures, localDeletedIds, localDeletedTitles]);
 
   const filteredLessons = sanitizedLessons.filter((l) => {
     const matchSearch =
@@ -177,6 +193,12 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
       // 2. Parse file for classroom blackboard presentation & slides
       const newDoc = await parseUploadedFileToLesson(file, activeTeacher?.name, activeTeacher?.id);
+      if (uploadedItem?.id) {
+        newDoc.id = uploadedItem.id;
+      }
+      if (uploadedItem?.storagePath) {
+        newDoc.storagePath = uploadedItem.storagePath;
+      }
       if (uploadedItem?.downloadURL) {
         newDoc.fileUrl = uploadedItem.downloadURL;
       }
@@ -670,25 +692,57 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
+                disabled={isDeletingLesson}
                 onClick={() => setLessonToDelete(null)}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-bold transition-all cursor-pointer"
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-bold transition-all cursor-pointer disabled:opacity-50"
               >
                 Hủy Bỏ
               </button>
               <button
                 type="button"
-                onClick={() => {
+                disabled={isDeletingLesson}
+                onClick={async () => {
+                  if (!lessonToDelete) return;
                   const targetId = lessonToDelete.id;
                   const targetTitle = lessonToDelete.title;
-                  setLessonToDelete(null);
-                  onDeleteLesson(targetId);
-                  setUploadStatus(`Đã xóa thành công bài giảng "${targetTitle}" khỏi Kho!`);
-                  setTimeout(() => setUploadStatus(null), 3500);
+                  const targetFileName = lessonToDelete.fileName || lessonToDelete.title;
+                  const targetStoragePath = lessonToDelete.storagePath;
+
+                  setIsDeletingLesson(true);
+                  try {
+                    // 1. Phản hồi giao diện tức thì (Optimistic 0ms)
+                    setLocalDeletedIds((prev) => new Set(prev).add(targetId));
+                    if (targetTitle) {
+                      setLocalDeletedTitles((prev) => new Set(prev).add(targetTitle.trim().toLowerCase()));
+                    }
+                    if (targetFileName) {
+                      setLocalDeletedTitles((prev) => new Set(prev).add(targetFileName.trim().toLowerCase()));
+                    }
+
+                    // 2. Xóa khỏi Firebase Firestore collection `lectures` & Firebase Cloud Storage
+                    await deleteLectureFile(targetId, targetStoragePath, targetFileName);
+
+                    // 3. Xóa khỏi lessons state, IndexedDB, server API, & Firestore global_store
+                    await onDeleteLesson(targetId, targetTitle);
+
+                    setUploadStatus(`Đã xóa vĩnh viễn bài giảng "${targetTitle}" khỏi Kho!`);
+                    setTimeout(() => setUploadStatus(null), 3500);
+                  } catch (delErr: any) {
+                    console.error('Delete lecture error:', delErr);
+                    setErrorMessage(`Lỗi khi xóa bài giảng: ${delErr.message || String(delErr)}`);
+                  } finally {
+                    setIsDeletingLesson(false);
+                    setLessonToDelete(null);
+                  }
                 }}
-                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-md shadow-rose-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-md shadow-rose-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
               >
-                <Trash2 className="w-4 h-4" />
-                <span>Xác Nhận Xóa</span>
+                {isDeletingLesson ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>{isDeletingLesson ? 'Đang Xóa...' : 'Xác Nhận Xóa'}</span>
               </button>
             </div>
           </div>
@@ -740,12 +794,31 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   setShowCleanModal(false);
-                  if (onCleanLibrary) {
-                    onCleanLibrary();
+                  setIsProcessingFile(true);
+                  setUploadStatus('Đang dọn dẹp kho bài giảng trên thiết bị và Đám Mây Firebase...');
+                  try {
+                    if (onCleanLibrary) {
+                      onCleanLibrary();
+                    }
+                    if (cloudLectures && cloudLectures.length > 0) {
+                      const seenNames = new Set<string>();
+                      for (const cl of cloudLectures) {
+                        const nameKey = (cl.fileName || '').trim().toLowerCase();
+                        if (!nameKey || nameKey === 'tài liệu bài giảng đính kèm.' || seenNames.has(nameKey)) {
+                          await deleteLectureFile(cl.id, cl.storagePath, cl.fileName);
+                        } else {
+                          seenNames.add(nameKey);
+                        }
+                      }
+                    }
                     setUploadStatus('Đã dọn dẹp kho bài giảng: loại bỏ các bài rỗng và tệp trùng lặp thành công!');
                     setTimeout(() => setUploadStatus(null), 4000);
+                  } catch (cleanErr: any) {
+                    setErrorMessage('Lỗi khi dọn dẹp kho: ' + (cleanErr.message || String(cleanErr)));
+                  } finally {
+                    setIsProcessingFile(false);
                   }
                 }}
                 className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold shadow-md shadow-amber-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"

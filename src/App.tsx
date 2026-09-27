@@ -34,7 +34,7 @@ import { AdminManagementModal } from './components/AdminManagementModal';
 import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { QRCodeSVG } from 'qrcode.react';
-import { loadLessonsFromDB, saveLessonsToDB, forceSyncLessonsToCloud, forcePullLessonsFromCloud } from './utils/storageUtils';
+import { loadLessonsFromDB, saveLessonsToDB, forceSyncLessonsToCloud, forcePullLessonsFromCloud, deleteLessonFromStorage } from './utils/storageUtils';
 import { db, auth } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
@@ -192,14 +192,36 @@ export default function App() {
        if (docSnap.exists() && docSnap.data().lessons) {
           const cloudLessons = docSnap.data().lessons;
           if (Array.isArray(cloudLessons)) {
+            // Read fresh set of deleted lessons to prevent resurrecting deleted documents
+            let delIds = new Set<string>();
+            let delTitles = new Set<string>();
+            try {
+              const savedDel = localStorage.getItem('smartboard_deleted_lessons');
+              if (savedDel) {
+                const p = JSON.parse(savedDel);
+                delIds = new Set(p.ids || []);
+                delTitles = new Set(p.titles || []);
+              }
+            } catch {}
+
+            const nonDeletedCloud = cloudLessons.filter((c: any) => {
+              if (!c || !c.id) return false;
+              if (delIds.has(c.id)) return false;
+              const titleKey = c.title?.trim().toLowerCase();
+              if (titleKey && delTitles.has(titleKey)) return false;
+              const fileKey = c.fileName?.trim().toLowerCase();
+              if (fileKey && delTitles.has(fileKey)) return false;
+              return true;
+            });
+
             setLessons((prev) => {
               const localMap = new Map<string, any>();
               prev.forEach((l) => localMap.set(l.id, l));
 
-              const cloudIds = new Set(cloudLessons.map((c: any) => c.id));
+              const cloudIds = new Set(nonDeletedCloud.map((c: any) => c.id));
 
               // 1. Merge cloud lessons, preserving local rich data (dataUrls, rawText, slides)
-              const mergedCloud = cloudLessons.map((cloudL: any) => {
+              const mergedCloud = nonDeletedCloud.map((cloudL: any) => {
                 if (localMap.has(cloudL.id)) {
                   const localL = localMap.get(cloudL.id);
                   return {
@@ -212,9 +234,14 @@ export default function App() {
                 return cloudL;
               });
 
-              // 2. CRITICAL BUGFIX: Never drop local user-uploaded/opened lessons!
-              // Any lesson in prev that hasn't synced to Firestore yet MUST be kept.
-              const localOnly = prev.filter((l) => !cloudIds.has(l.id));
+              // 2. CRITICAL BUGFIX: Never drop local user-uploaded/opened lessons, unless explicitly deleted
+              const localOnly = prev.filter(
+                (l) =>
+                  !cloudIds.has(l.id) &&
+                  !delIds.has(l.id) &&
+                  (!l.title || !delTitles.has(l.title.trim().toLowerCase())) &&
+                  (!l.fileName || !delTitles.has(l.fileName.trim().toLowerCase()))
+              );
               const allLessons = [...localOnly, ...mergedCloud];
 
               try {
@@ -450,6 +477,68 @@ export default function App() {
       return deduped;
     });
   }, []);
+
+  // Centralized Lesson Delete Handler: Permanently cleans from memory, storage, backend & cloud
+  const handleDeleteLesson = useCallback(async (id: string, lessonTitle?: string) => {
+    // 1. Resolve lesson being deleted
+    const target = lessons.find((l) => l.id === id);
+    const titleKey = (lessonTitle || target?.title || '').trim().toLowerCase();
+    const fileKey = (target?.fileName || '').trim().toLowerCase();
+
+    // 2. Persistently record in smartboard_deleted_lessons so onSnapshot will never bring it back
+    try {
+      let delIds: string[] = [];
+      let delTitles: string[] = [];
+      const saved = localStorage.getItem('smartboard_deleted_lessons');
+      if (saved) {
+        const p = JSON.parse(saved);
+        delIds = p.ids || [];
+        delTitles = p.titles || [];
+      }
+      if (!delIds.includes(id)) delIds.push(id);
+      if (titleKey && !delTitles.includes(titleKey)) delTitles.push(titleKey);
+      if (fileKey && !delTitles.includes(fileKey)) delTitles.push(fileKey);
+      localStorage.setItem('smartboard_deleted_lessons', JSON.stringify({ ids: delIds, titles: delTitles }));
+    } catch {}
+
+    // 3. Clear active opened lesson if matching
+    if (activeOpenedLesson && (activeOpenedLesson.id === id || (titleKey && activeOpenedLesson.title?.trim().toLowerCase() === titleKey))) {
+      setActiveOpenedLesson(null);
+      try {
+        localStorage.removeItem('smartboard_active_lesson_obj');
+      } catch {}
+    }
+
+    // 4. Update local lessons state
+    let remainingLessons: LessonDoc[] = [];
+    setLessons((prev) => {
+      const next = prev.filter(
+        (l) =>
+          l.id !== id &&
+          (!titleKey || l.title?.trim().toLowerCase() !== titleKey) &&
+          (!fileKey || l.fileName?.trim().toLowerCase() !== fileKey)
+      );
+      remainingLessons = next;
+      if (activeLessonId === id) {
+        const nextId = next.length > 0 ? next[0].id : '';
+        setActiveLessonId(nextId);
+        try {
+          localStorage.setItem('smartboard_active_lesson', nextId);
+        } catch {}
+      }
+      try {
+        localStorage.setItem('smartboard_lessons', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    // 5. Permanently remove from IndexedDB, server API, and Firestore global_store immediately
+    try {
+      await deleteLessonFromStorage(id, remainingLessons, lessonTitle || target?.title, target?.fileName);
+    } catch (storageErr) {
+      console.warn('Permanent lesson storage cleanup notice:', storageErr);
+    }
+  }, [lessons, activeOpenedLesson, activeLessonId]);
 
   // Centralized Lesson Selector (Selects active lesson without auto-saving foreign files into library)
   const handleSelectLesson = useCallback((lesson: LessonDoc) => {
@@ -941,15 +1030,7 @@ export default function App() {
                   }
                 }}
                 onDeleteLesson={(id) => {
-                  setLessons((prev) => {
-                    const next = prev.filter((l) => l.id !== id);
-                    if (next.length > 0) {
-                      setActiveLessonId(next[0].id);
-                    }
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
-                  });
+                  handleDeleteLesson(id);
                   setActiveTab('whiteboard');
                 }}
                 onLaunchSlides={() => setActiveTab('whiteboard')}
@@ -986,15 +1067,7 @@ export default function App() {
                   }
                 }}
                 onDeleteLesson={(id) => {
-                  setLessons((prev) => {
-                    const next = prev.filter((l) => l.id !== id);
-                    if (next.length > 0) {
-                      setActiveLessonId(next[0].id);
-                    }
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    return next;
-                  });
+                  handleDeleteLesson(id);
                 }}
                 onSwitchToPresentation={() => setActiveTab('whiteboard')}
                 onSwitchToReader={() => setActiveTab('reader')}
@@ -1127,24 +1200,7 @@ export default function App() {
                 onSyncToCloud={handleSyncToCloud}
                 onPullFromCloud={handlePullLessonsFromCloud}
                 isSyncing={isSyncingCloud}
-                onDeleteLesson={(id) => {
-                  if (activeOpenedLesson && activeOpenedLesson.id === id) {
-                    setActiveOpenedLesson(null);
-                    localStorage.removeItem('smartboard_active_lesson_obj');
-                  }
-                  setLessons((prev) => {
-                    const next = prev.filter((l) => l.id !== id);
-                    if (activeLessonId === id) {
-                      const nextId = next.length > 0 ? next[0].id : '';
-                      setActiveLessonId(nextId);
-                      localStorage.setItem('smartboard_active_lesson', nextId);
-                    }
-                    try { localStorage.setItem('smartboard_lessons', JSON.stringify(next)); } catch {}
-                    saveLessonsToDB(next).catch(() => {});
-                    fetch(`/api/lessons/${id}`, { method: 'DELETE' }).catch(() => {});
-                    return next;
-                  });
-                }}
+                onDeleteLesson={handleDeleteLesson}
               />
             )}
           </motion.div>

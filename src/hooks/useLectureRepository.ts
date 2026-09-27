@@ -8,6 +8,7 @@ import {
   orderBy,
   doc,
   deleteDoc,
+  getDocs,
   Timestamp,
 } from 'firebase/firestore';
 import {
@@ -36,7 +37,7 @@ export interface UseLectureRepositoryResult {
   error: string | null;
   uploadingProgress: number; // 0 đến 100%
   uploadLectureFile: (file: File) => Promise<LectureItem>;
-  deleteLectureFile: (id: string, storagePath?: string) => Promise<void>;
+  deleteLectureFile: (id: string, storagePath?: string, fileName?: string) => Promise<void>;
 }
 
 /**
@@ -190,13 +191,66 @@ export function useLectureRepository(): UseLectureRepositoryResult {
   }, []);
 
   // 3. Hàm Xoá file khỏi Firestore & Firebase Storage
-  const deleteLectureFile = useCallback(async (id: string, storagePath?: string): Promise<void> => {
+  const deleteLectureFile = useCallback(async (id: string, storagePath?: string, fileName?: string): Promise<void> => {
     try {
       setError(null);
-      // Xoá document Firestore
-      await deleteDoc(doc(db, 'lectures', id));
 
-      // Xoá file vật lý trên Storage nếu có đường dẫn
+      // 1. Phản hồi giao diện lập tức (Optimistic update 0ms)
+      setLectures((prev) =>
+        prev.filter((item) => {
+          if (item.id === id) return false;
+          if (fileName && (item.fileName === fileName || item.fileName?.toLowerCase() === fileName.toLowerCase())) return false;
+          if (storagePath && item.storagePath === storagePath) return false;
+          return true;
+        })
+      );
+
+      // 2. Xóa trực tiếp document Firestore theo ID nếu là ID của Firestore (không phải id local)
+      if (id && !id.startsWith('lesson_')) {
+        try {
+          await deleteDoc(doc(db, 'lectures', id));
+        } catch (directErr) {
+          console.warn('[useLectureRepository] Direct deleteDoc note:', directErr);
+        }
+      }
+
+      // 3. Quét sạch mọi bản ghi trùng fileName hoặc id trong collection 'lectures'
+      try {
+        const lecturesCol = collection(db, 'lectures');
+        const snapshot = await getDocs(lecturesCol);
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+          const matchId = docSnap.id === id;
+          const matchFileName = Boolean(
+            fileName && (
+              data.fileName === fileName ||
+              data.fileName?.toLowerCase() === fileName.toLowerCase() ||
+              data.fileName?.trim().toLowerCase() === fileName.trim().toLowerCase()
+            )
+          );
+          const matchIdAsName = Boolean(
+            id && (
+              data.fileName === id ||
+              data.fileName?.toLowerCase() === id.toLowerCase()
+            )
+          );
+          const matchStorage = Boolean(storagePath && data.storagePath === storagePath);
+
+          if (matchId || matchFileName || matchIdAsName || matchStorage) {
+            await deleteDoc(doc(db, 'lectures', docSnap.id));
+            const pathToDelete = data.storagePath || storagePath;
+            if (pathToDelete) {
+              try {
+                await deleteObject(ref(storage, pathToDelete));
+              } catch (_) {}
+            }
+          }
+        }
+      } catch (scanErr) {
+        console.warn('[useLectureRepository] Scan deleteDoc note:', scanErr);
+      }
+
+      // 4. Xoá file vật lý trên Storage nếu có đường dẫn cụ thể
       if (storagePath) {
         try {
           const fileRef = ref(storage, storagePath);
@@ -205,6 +259,22 @@ export function useLectureRepository(): UseLectureRepositoryResult {
           console.warn('[useLectureRepository] Storage delete note:', storageErr);
         }
       }
+
+      // 5. Quét dọn collection cũ 'TaiLieuGiaoVien' nếu còn tồn tại tài liệu tương ứng
+      try {
+        const taiLieuCol = collection(db, 'TaiLieuGiaoVien');
+        const snapTL = await getDocs(taiLieuCol);
+        for (const docSnap of snapTL.docs) {
+          const d = docSnap.data();
+          if (
+            docSnap.id === id ||
+            (fileName && (d.name === fileName || d.name?.toLowerCase() === fileName.toLowerCase())) ||
+            (id && (d.name === id || d.name?.toLowerCase() === id.toLowerCase()))
+          ) {
+            await deleteDoc(doc(db, 'TaiLieuGiaoVien', docSnap.id));
+          }
+        }
+      } catch (_) {}
     } catch (err: any) {
       console.error('[useLectureRepository] Delete lecture error:', err);
       setError('Lỗi khi xoá bài giảng: ' + (err.message || String(err)));
