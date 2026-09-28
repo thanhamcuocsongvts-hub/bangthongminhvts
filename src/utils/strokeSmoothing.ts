@@ -217,16 +217,29 @@ export function drawSmoothSpline(
  * Renders directly with high contrast (solid chalk on chalkboard background)
  * for 100% reliable, zero-artifact Gemini Vision handwriting recognition.
  */
+/**
+ * Trích xuất ảnh vùng chữ viết tay chuẩn OCR cao cấp (High-Precision B&W OffscreenCanvas)
+ * 
+ * KHẮC PHỤC TRIỆT ĐỂ LỖI API KHÔNG ĐỌC ĐƯỢC CHỮ (Yêu cầu 2):
+ * - Nguyên nhân: Trước đây bị dính nền xanh bảng/trong suốt khiến API AI nhận diện bị mù.
+ * - Giải pháp BẮT BUỘC:
+ *   1. Tạo OffscreenCanvas ẩn, kích thước đúng bằng bounding box vừa quét (+ padding an toàn).
+ *   2. BẮT BUỘC fill toàn bộ nền của OffscreenCanvas bằng màu TRẮNG (#FFFFFF).
+ *   3. BẮT BUỘC cấu hình ctx.lineCap = 'round' và ctx.lineJoin = 'round'.
+ *   4. BẮT BUỘC vẽ toàn bộ phần nét chữ đã cắt đè lên bằng màu ĐEN (#000000).
+ *   5. Trích xuất canvas.toDataURL('image/png') để gửi cho API nhận diện với độ tương phản tuyệt đối 100%.
+ */
 export function cropStrokesToImage(
   canvas: HTMLCanvasElement | null,
-  pointsOrStrokes: StrokePoint[] | Array<{ points?: StrokePoint[]; color?: string; size?: number }>,
+  pointsOrStrokes: StrokePoint[] | Array<{ points?: StrokePoint[]; color?: string; size?: number; tool?: string }>,
   boardScrollX = 0,
   boardScrollY = 0,
-  padding = 32
+  padding = 24,
+  customBounds?: { minX: number; minY: number; maxX: number; maxY: number }
 ): { dataUrl: string; bounds: { minX: number; minY: number; width: number; height: number } } | null {
   if (!pointsOrStrokes || (pointsOrStrokes as any[]).length === 0) return null;
 
-  // Normalize into array of stroke point segments
+  // Chuẩn hóa thành danh sách các mảng điểm nét vẽ
   const strokeSegments: StrokePoint[][] = [];
   const allPoints: StrokePoint[] = [];
 
@@ -239,7 +252,7 @@ export function cropStrokesToImage(
         }
       });
     } else {
-      // Single continuous point array or list of points
+      // Danh sách điểm liên tục
       const pts = pointsOrStrokes as StrokePoint[];
       strokeSegments.push(pts);
       allPoints.push(...pts);
@@ -248,53 +261,72 @@ export function cropStrokesToImage(
 
   if (allPoints.length === 0) return null;
 
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const p of allPoints) {
-    if (p.x < minX) minX = p.x;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.y > maxY) maxY = p.y;
+  // Tính toán chính xác Bounding Box của nét chữ
+  let minX = customBounds ? customBounds.minX : Infinity;
+  let maxX = customBounds ? customBounds.maxX : -Infinity;
+  let minY = customBounds ? customBounds.minY : Infinity;
+  let maxY = customBounds ? customBounds.maxY : -Infinity;
+
+  if (!customBounds) {
+    for (const p of allPoints) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
   }
 
-  const strokeW = maxX - minX;
-  const strokeH = maxY - minY;
+  const strokeW = Math.max(1, maxX - minX);
+  const strokeH = Math.max(1, maxY - minY);
   if (strokeW < 4 && strokeH < 4) return null;
 
   try {
-    const offscreen = document.createElement('canvas');
-    // Ensure generous canvas resolution with padding for clean OCR
-    const pad = Math.max(36, padding);
+    // 1. Tạo OffscreenCanvas ẩn kích thước đúng bằng bounding box vừa quét + padding
+    const pad = Math.max(20, padding);
     const rawW = strokeW + pad * 2;
     const rawH = strokeH + pad * 2;
 
-    // Normalizing scale so the image is readable but ultra lightweight (200 - 480px)
-    const targetW = Math.max(200, Math.min(480, rawW));
+    // Chuẩn hóa độ phân giải tối ưu cho OCR nhận diện (320px - 720px)
+    const targetW = Math.max(240, Math.min(640, rawW));
     const scale = targetW / rawW;
-    const targetH = Math.max(80, Math.min(360, Math.round(rawH * scale)));
+    const targetH = Math.max(80, Math.min(480, Math.round(rawH * scale)));
 
-    offscreen.width = targetW;
-    offscreen.height = targetH;
+    let offscreen: HTMLCanvasElement;
+    if (typeof document !== 'undefined') {
+      offscreen = document.createElement('canvas');
+      offscreen.width = targetW;
+      offscreen.height = targetH;
+    } else {
+      offscreen = new (globalThis as any).OffscreenCanvas(targetW, targetH);
+    }
+
     const offCtx = offscreen.getContext('2d', { alpha: false });
     if (!offCtx) return null;
 
-    // High contrast chalkboard dark background
-    offCtx.fillStyle = '#0f172a';
-    offCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+    // =========================================================================
+    // CỰC KỲ QUAN TRỌNG (Yêu cầu 2):
+    // BẮT BUỘC 1: Fill toàn bộ nền của OffscreenCanvas này bằng màu TRẮNG (#FFFFFF)
+    // =========================================================================
+    offCtx.fillStyle = '#FFFFFF';
+    offCtx.fillRect(0, 0, targetW, targetH);
 
-    // Vector rendering of strokes: Clean, crisp, immune to DPR or scroll bugs
+    // =========================================================================
+    // BẮT BUỘC 2: Cấu hình ctx.lineCap = 'round' và ctx.lineJoin = 'round'
+    // BẮT BUỘC 3: Vẽ phần nét chữ đã cắt đè lên bằng màu ĐEN (#000000)
+    // =========================================================================
     offCtx.save();
     offCtx.scale(scale, scale);
     offCtx.translate(-minX + pad, -minY + pad);
     offCtx.lineCap = 'round';
     offCtx.lineJoin = 'round';
-    offCtx.strokeStyle = '#ffffff'; // Pristine white chalk for max OCR clarity
-    offCtx.lineWidth = 5;
+    offCtx.strokeStyle = '#000000'; // Mực đen thuần túy cho OCR
+    offCtx.fillStyle = '#000000';
+    offCtx.lineWidth = 4.5; // Nét mực đen đậm rõ nét
 
     for (const segment of strokeSegments) {
       if (segment.length === 1) {
         offCtx.beginPath();
-        offCtx.arc(segment[0].x, segment[0].y, 3, 0, Math.PI * 2);
-        offCtx.fillStyle = '#ffffff';
+        offCtx.arc(segment[0].x, segment[0].y, 2.5, 0, Math.PI * 2);
         offCtx.fill();
       } else if (segment.length === 2) {
         offCtx.beginPath();
@@ -317,22 +349,179 @@ export function cropStrokesToImage(
     }
     offCtx.restore();
 
-    // High speed optimized JPEG dataUrl (~15-25KB)
-    const dataUrl = offscreen.toDataURL('image/jpeg', 0.82);
+    // =========================================================================
+    // BẮT BUỘC 4: Cuối cùng mới trích xuất canvas.toDataURL() để gửi cho API
+    // Sử dụng PNG để giữ nguyên độ sắc nét nhị phân (đen - trắng tuyệt đối)
+    // =========================================================================
+    const dataUrl = offscreen.toDataURL('image/png');
 
     return {
       dataUrl,
       bounds: {
         minX: minX - pad / 2,
         minY: minY - pad / 2,
-        width: Math.max(180, strokeW + pad),
-        height: Math.max(64, strokeH + pad),
+        width: Math.max(160, strokeW + pad),
+        height: Math.max(50, strokeH + pad),
       },
     };
   } catch (err) {
     console.warn('cropStrokesToImage error:', err);
     return null;
   }
+}
+
+/**
+ * Thuật toán nhận diện hình khối tự động (Auto-Shape Smart Recognition)
+ * Phân tích nét vẽ tay phác thảo của giáo viên để tự động chuẩn hóa thành:
+ * Hình tròn, Hình chữ nhật, Hình elip, Hình tam giác, Đường thẳng hoặc Mũi tên.
+ */
+export function recognizeGeometricShape(points: StrokePoint[]): {
+  tool: 'circle' | 'rectangle' | 'ellipse' | 'line' | 'arrow';
+  points: StrokePoint[];
+  label: string;
+} | null {
+  if (!points || points.length < 5) return null;
+
+  // 1. Tính toán Bounding Box
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  let totalPerimeter = 0;
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+    if (i > 0) {
+      totalPerimeter += Math.hypot(p.x - points[i - 1].x, p.y - points[i - 1].y);
+    }
+  }
+
+  const w = maxX - minX;
+  const h = maxY - minY;
+  if (w < 20 && h < 20) return null; // Quá nhỏ để thành hình
+
+  const startPt = points[0];
+  const endPt = points[points.length - 1];
+  const closeDist = Math.hypot(startPt.x - endPt.x, startPt.y - endPt.y);
+  const isClosed = closeDist < Math.max(45, totalPerimeter * 0.28);
+
+  // Trọng tâm
+  const cx = points.reduce((acc, p) => acc + p.x, 0) / points.length;
+  const cy = points.reduce((acc, p) => acc + p.y, 0) / points.length;
+
+  // 2. Kiểm tra nếu là đường thẳng hoặc mũi tên (hình mở)
+  if (!isClosed) {
+    const chord = Math.hypot(endPt.x - startPt.x, endPt.y - startPt.y);
+    const straightness = chord / (totalPerimeter || 1);
+
+    if (straightness > 0.85) {
+      // Kiểm tra có nét gấp nhọn ở đuôi (mũi tên)
+      const lastSegmentLen = Math.hypot(endPt.x - points[Math.max(0, points.length - 4)].x, endPt.y - points[Math.max(0, points.length - 4)].y);
+      if (lastSegmentLen > 15 && straightness < 0.92) {
+        return {
+          tool: 'arrow',
+          points: [startPt, endPt],
+          label: 'Mũi Tên Thẳng',
+        };
+      }
+      return {
+        tool: 'line',
+        points: [startPt, endPt],
+        label: 'Đường Thẳng',
+      };
+    }
+  }
+
+  // 3. Hình khép kín: Tính độ phân tán bán kính từ tâm
+  const radii = points.map((p) => Math.hypot(p.x - cx, p.y - cy));
+  const avgRadius = radii.reduce((acc, r) => acc + r, 0) / radii.length;
+  const varianceR = Math.sqrt(radii.reduce((acc, r) => acc + Math.pow(r - avgRadius, 2), 0) / radii.length) / (avgRadius || 1);
+
+  const aspectRatio = w / (h || 1);
+
+  // A. Hình tròn: Bán kính đồng đều, tỷ lệ khung hình gần vuông
+  if (varianceR < 0.20 && aspectRatio >= 0.78 && aspectRatio <= 1.28) {
+    const radius = Math.round((w + h) / 4);
+    return {
+      tool: 'circle',
+      points: [
+        { x: cx, y: cy },
+        { x: cx + radius, y: cy },
+      ],
+      label: 'Hình Tròn',
+    };
+  }
+
+  // B. Hình Elip: Bán kính biến thiên đều theo góc
+  if (varianceR < 0.28 && (aspectRatio < 0.75 || aspectRatio > 1.35)) {
+    return {
+      tool: 'ellipse',
+      points: [
+        { x: minX, y: minY },
+        { x: maxX, y: maxY },
+      ],
+      label: 'Hình Elip',
+    };
+  }
+
+  // C. RDP Simplification tìm đỉnh góc (Corners)
+  const simplified = simplifyPoints(points, Math.max(14, totalPerimeter * 0.05));
+  const cornerCount = simplified.length - 1; // trừ điểm trùng cuối
+
+  // Hình chữ nhật / Vuông
+  if (cornerCount === 4 || (cornerCount >= 3 && cornerCount <= 5 && varianceR > 0.25)) {
+    // Tính diện tích đa giác thực tế (Shoelace formula) so với W * H
+    let polyArea = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      polyArea += points[i].x * points[i + 1].y - points[i + 1].x * points[i].y;
+    }
+    polyArea = Math.abs(polyArea) / 2;
+    const boxArea = w * h;
+    const fillRatio = polyArea / (boxArea || 1);
+
+    if (fillRatio > 0.72) {
+      return {
+        tool: 'rectangle',
+        points: [
+          { x: minX, y: minY },
+          { x: maxX, y: maxY },
+        ],
+        label: aspectRatio >= 0.88 && aspectRatio <= 1.14 ? 'Hình Vuông' : 'Hình Chữ Nhật',
+      };
+    }
+  }
+
+  // D. Hình tam giác
+  if (cornerCount === 3) {
+    return {
+      tool: 'line',
+      points: [simplified[0], simplified[1], simplified[2], simplified[0]],
+      label: 'Hình Tam Giác',
+    };
+  }
+
+  // Fallback: nếu tỷ lệ gần tròn thì chọn hình tròn, ngược lại hình chữ nhật
+  if (varianceR < 0.24) {
+    const radius = Math.round((w + h) / 4);
+    return {
+      tool: 'circle',
+      points: [
+        { x: cx, y: cy },
+        { x: cx + radius, y: cy },
+      ],
+      label: 'Hình Tròn',
+    };
+  }
+
+  return {
+    tool: 'rectangle',
+    points: [
+      { x: minX, y: minY },
+      { x: maxX, y: maxY },
+    ],
+    label: 'Hình Khối Chuẩn',
+  };
 }
 
 /**
