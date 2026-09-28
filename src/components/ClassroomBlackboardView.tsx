@@ -75,7 +75,6 @@ import {
   simplifyPoints,
   cropStrokesToImage,
   recognizeVietnameseHandwriting,
-  recognizeGeometricShape,
 } from '../utils/strokeSmoothing';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile, BlackboardBackground } from '../types';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
@@ -199,38 +198,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const lastPointerPointRef = useRef<{ x: number; y: number; pressure: number; time: number; width?: number } | null>(null);
   const lastMidPointRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Vẽ Sáng Tạo (Creative Brushes: Rainbow Highlighter, Auto-Shape, Neon, Sparkle)
-  const [showCreativePopover, setShowCreativePopover] = useState<boolean>(false);
-
-  const isFreehandStrokeTool = useCallback((tool: WhiteboardTool) =>
-    tool === 'pen' ||
-    tool === 'calligraphy' ||
-    tool === 'creative_rainbow' ||
-    tool === 'creative_autoshapes' ||
-    tool === 'creative_neon' ||
-    tool === 'creative_sparkle' ||
-    tool === 'highlighter' ||
-    tool === 'eraser', []);
-
-  const isCreativeTool = useCallback((tool: WhiteboardTool) =>
-    tool === 'creative_rainbow' ||
-    tool === 'creative_autoshapes' ||
-    tool === 'creative_neon' ||
-    tool === 'creative_sparkle', []);
-
-  // Helper vẽ ngôi sao lấp lánh cho bút sáng tạo
-  const drawSparkleStar = (ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color = '#fef08a') => {
-    ctx.save();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - r);
-    ctx.quadraticCurveTo(cx, cy, cx + r, cy);
-    ctx.quadraticCurveTo(cx, cy, cx, cy + r);
-    ctx.quadraticCurveTo(cx, cy, cx - r, cy);
-    ctx.quadraticCurveTo(cx, cy, cx, cy - r);
-    ctx.fill();
-    ctx.restore();
-  };
+  const isFreehandStrokeTool = useCallback(
+    (tool: WhiteboardTool) =>
+      tool === 'pen' ||
+      tool === 'calligraphy' ||
+      tool === 'highlighter' ||
+      tool === 'eraser',
+    []
+  );
 
   // Device detection & mobile phone optimization
   const { isMobile } = useDeviceDetection();
@@ -804,82 +779,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     const isFluo = color === '#ccff00' || color === '#ff007f' || color === '#00ffff';
 
-    if (tool === 'creative_rainbow') {
-      ctx.globalAlpha = 0.65;
-      ctx.lineWidth = size * 2.8;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      if (points && points.length >= 2) {
-        for (let i = 1; i < points.length; i++) {
-          const p0 = points[i - 1];
-          const p1 = points[i];
-          const hue = (i * 8) % 360;
-          ctx.strokeStyle = `hsl(${hue}, 100%, 55%)`;
-          ctx.beginPath();
-          ctx.moveTo(p0.x, p0.y);
-          ctx.lineTo(p1.x, p1.y);
-          ctx.stroke();
-        }
-      } else if (points && points.length === 1) {
-        ctx.fillStyle = '#ff007f';
-        ctx.beginPath();
-        ctx.arc(points[0].x, points[0].y, (size * 2.8) / 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-      return;
-    } else if (tool === 'creative_neon') {
-      ctx.shadowColor = color || '#00ffff';
-      ctx.shadowBlur = 12;
-      ctx.strokeStyle = color || '#00ffff';
-      ctx.lineWidth = size * 2.2;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      if (points && points.length >= 2) {
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-          ctx.lineTo(points[i].x, points[i].y);
-        }
-        ctx.stroke();
-        // Lõi trắng sáng bên trong
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = Math.max(1.5, size * 0.7);
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-          ctx.lineTo(points[i].x, points[i].y);
-        }
-        ctx.stroke();
-      } else if (points && points.length === 1) {
-        ctx.beginPath();
-        ctx.arc(points[0].x, points[0].y, size * 1.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-      return;
-    } else if (tool === 'creative_sparkle') {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = size;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      if (points && points.length >= 2) {
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-          ctx.lineTo(points[i].x, points[i].y);
-        }
-        ctx.stroke();
-        for (let i = 0; i < points.length; i += 6) {
-          drawSparkleStar(ctx, points[i].x, points[i].y, Math.max(3, size * 1.5), '#fef08a');
-        }
-      } else if (points && points.length === 1) {
-        drawSparkleStar(ctx, points[0].x, points[0].y, Math.max(4, size * 2), '#fef08a');
-      }
-      ctx.restore();
-      return;
-    } else if (tool === 'highlighter') {
+    if (tool === 'highlighter') {
       ctx.globalAlpha = isFluo ? 0.65 : 0.35;
       if (isFluo) {
         ctx.shadowColor = color;
@@ -889,7 +789,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       ctx.globalCompositeOperation = 'destination-out';
       ctx.globalAlpha = 1.0;
     } else {
-      ctx.globalAlpha = 0.95;
+      ctx.globalAlpha = 0.98;
       ctx.shadowColor = color;
       ctx.shadowBlur = 0;
     }
@@ -1202,31 +1102,37 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       ctx.stroke();
       ctx.setLineDash([]);
     } else {
-      // Freehand chalk stroke with ultra-smooth Catmull-Rom / Midpoint Bezier interpolation
+      // Freehand chalk & calligraphy stroke with ultra-smooth Catmull-Rom / Midpoint Bezier interpolation
+      // BẢO ĐẢM HIỂN THỊ TRỌN VẸN MỌI NÉT CHẠM NHẸ, CHẤM PHẤN, DẤU CÂU & LƯỚT NHANH
+      const dotRadius = Math.max(1.8, (tool === 'highlighter' ? size * 2.5 : size) / 2);
+
       if (points.length === 1) {
         ctx.beginPath();
-        ctx.arc(points[0].x, points[0].y, (tool === 'highlighter' ? size * 2.5 : size) / 2, 0, Math.PI * 2);
+        ctx.arc(points[0].x, points[0].y, dotRadius, 0, Math.PI * 2);
         ctx.fill();
       } else if (points.length === 2) {
-        const midX = (points[0].x + points[1].x) / 2;
-        const midY = (points[0].y + points[1].y) / 2;
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
-        ctx.quadraticCurveTo(points[0].x, points[0].y, midX, midY);
-        ctx.quadraticCurveTo(points[1].x, points[1].y, points[1].x, points[1].y);
+        ctx.lineTo(points[1].x, points[1].y);
         ctx.stroke();
+
+        // Vẽ 2 điểm tròn hai đầu để những nét chạm nhẹ / vẩy bút cực ngắn không bao giờ bị mất
+        ctx.beginPath();
+        ctx.arc(points[0].x, points[0].y, dotRadius, 0, Math.PI * 2);
+        ctx.arc(points[1].x, points[1].y, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
       } else {
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length - 1; i++) {
-          const xc = (points[i].x + points[i + 1].x) / 2;
-          const yc = (points[i].y + points[i + 1].y) / 2;
-          ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+        for (let i = 0; i < points.length - 1; i++) {
+          const p0 = points[i];
+          const p1 = points[i + 1];
+          const midX = (p0.x + p1.x) / 2;
+          const midY = (p0.y + p1.y) / 2;
+          ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
         }
-        // Connect smoothly to the last point
         const last = points[points.length - 1];
-        const prev = points[points.length - 2];
-        ctx.quadraticCurveTo(prev.x, prev.y, last.x, last.y);
+        ctx.lineTo(last.x, last.y);
         ctx.stroke();
       }
     }
@@ -1345,14 +1251,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) {
-        twoFingerStartRef.current = null;
-        twoFingerCooldownUntilRef.current = Date.now() + 250;
-        setTimeout(() => {
+      if (isTwoFingerPanningRef.current) {
+        if (e.touches.length < 2) {
+          twoFingerStartRef.current = null;
+          twoFingerCooldownUntilRef.current = Date.now() + 60;
           if (e.touches.length === 0) {
             isTwoFingerPanningRef.current = false;
           }
-        }, 250);
+        }
       }
     };
 
@@ -1825,9 +1731,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     } catch (_) {}
 
     const now = performance.now();
-    lastPointerPointRef.current = { x, y, pressure: e.pressure || 0.5, time: now, width: strokeSize };
+    const effectivePressure = e.pressure && e.pressure > 0 ? Math.max(0.25, e.pressure) : 0.5;
+    const initialWidth = activeTool === 'pen'
+      ? calculateDynamicStrokeWidth(strokeSize, { x, y, pressure: effectivePressure, time: now }, undefined, false)
+      : strokeSize;
+
+    lastPointerPointRef.current = { x, y, pressure: effectivePressure, time: now, width: initialWidth };
     lastMidPointRef.current = { x, y };
-    const startPt: StrokePoint = { x, y, pressure: e.pressure || 0.5, time: now, width: strokeSize };
+    const startPt: StrokePoint = { x, y, pressure: effectivePressure, time: now, width: initialWidth };
     activePointsRef.current = [startPt];
 
     // Khởi tạo nét vẽ với ctx.lineCap = 'round' và ctx.lineJoin = 'round'
@@ -1840,13 +1751,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       if (activeTool === 'eraser') {
         ctx.globalCompositeOperation = 'destination-out';
         ctx.fillStyle = '#000';
-      } else if (activeTool === 'creative_rainbow') {
-        ctx.fillStyle = '#ff007f';
-        ctx.globalAlpha = 0.65;
-      } else if (activeTool === 'creative_neon') {
-        ctx.shadowColor = activeColor || '#00ffff';
-        ctx.shadowBlur = 12;
-        ctx.fillStyle = activeColor;
       } else if (activeTool === 'highlighter') {
         ctx.fillStyle = activeColor;
         ctx.globalAlpha = 0.45;
@@ -1855,8 +1759,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         ctx.globalAlpha = 0.98;
       }
       ctx.beginPath();
-      const dotRadius = (activeTool === 'highlighter' || activeTool === 'creative_rainbow' ? strokeSize * 2.8 : strokeSize) / 2;
-      ctx.arc(x, y, Math.max(1, dotRadius), 0, Math.PI * 2);
+      const dotRadius = Math.max(1.8, (activeTool === 'highlighter' ? strokeSize * 2.5 : initialWidth) / 2);
+      ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -2002,13 +1906,17 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           coalescedList.push({
             x: ce.clientX - rect.left + boardScrollX,
             y: ce.clientY - rect.top + boardScrollY,
-            pressure: ce.pressure || 0.5,
+            pressure: ce.pressure && ce.pressure > 0 ? Math.max(0.25, ce.pressure) : 0.5,
           });
         }
       }
     }
     if (coalescedList.length === 0) {
-      coalescedList.push({ x, y, pressure: e.pressure || 0.5 });
+      coalescedList.push({
+        x,
+        y,
+        pressure: e.pressure && e.pressure > 0 ? Math.max(0.25, e.pressure) : 0.5,
+      });
     }
 
     const pts = activePointsRef.current;
@@ -2033,19 +1941,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         ctx.strokeStyle = '#000000';
         ctx.fillStyle = '#000000';
         ctx.lineWidth = strokeSize;
-      } else if (activeTool === 'creative_rainbow') {
-        ctx.globalAlpha = 0.65;
-        ctx.lineWidth = strokeSize * 2.8;
-      } else if (activeTool === 'creative_neon') {
-        ctx.shadowColor = activeColor || '#00ffff';
-        ctx.shadowBlur = 12;
-        ctx.strokeStyle = activeColor || '#00ffff';
-        ctx.lineWidth = strokeSize * 2.2;
-        ctx.globalAlpha = 0.98;
-      } else if (activeTool === 'creative_sparkle') {
-        ctx.strokeStyle = activeColor;
-        ctx.lineWidth = strokeSize;
-        ctx.globalAlpha = 0.98;
       } else if (activeTool === 'highlighter') {
         ctx.strokeStyle = activeColor;
         ctx.fillStyle = activeColor;
@@ -2069,27 +1964,24 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         const lastX = lastPointerPointRef.current ? lastPointerPointRef.current.x : currentX;
         const lastY = lastPointerPointRef.current ? lastPointerPointRef.current.y : currentY;
 
+        const effectivePressure = Math.max(0.25, rawPt.pressure || 0.5);
         const dynWidth = activeTool === 'calligraphy'
-          ? calculateDynamicStrokeWidth(strokeSize, { x: currentX, y: currentY, pressure: rawPt.pressure, time: performance.now() }, lastPointerPointRef.current || undefined, true)
-          : strokeSize;
+          ? calculateDynamicStrokeWidth(strokeSize, { x: currentX, y: currentY, pressure: effectivePressure, time: performance.now() }, lastPointerPointRef.current || undefined, true)
+          : (activeTool === 'pen'
+            ? calculateDynamicStrokeWidth(strokeSize, { x: currentX, y: currentY, pressure: effectivePressure, time: performance.now() }, lastPointerPointRef.current || undefined, false)
+            : strokeSize);
 
-        const ptWithWidth: StrokePoint = {
+        const ptWithWidth = {
           x: currentX,
           y: currentY,
-          pressure: rawPt.pressure,
+          pressure: effectivePressure,
           time: performance.now(),
           width: dynWidth,
         };
         pts.push(ptWithWidth);
 
-        if (activeTool === 'calligraphy') {
+        if (activeTool === 'calligraphy' || activeTool === 'pen') {
           ctx.lineWidth = dynWidth;
-        }
-
-        // Bút Dạ Quang Đa Sắc: Chuyển đổi màu quang phổ rực rỡ theo từng phân đoạn
-        if (activeTool === 'creative_rainbow') {
-          const hue = (pts.length * 8) % 360;
-          ctx.strokeStyle = `hsl(${hue}, 100%, 55%)`;
         }
 
         // =========================================================================
@@ -2101,11 +1993,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         ctx.moveTo(lastX, lastY);
         ctx.lineTo(currentX, currentY);
         ctx.stroke();
-
-        // Bút Sao Lấp Lánh: Vẽ sao ngẫu nhiên dọc nét
-        if (activeTool === 'creative_sparkle' && pts.length % 5 === 0) {
-          drawSparkleStar(ctx, currentX, currentY, Math.max(3, strokeSize * 1.5), '#fef08a');
-        }
 
         // Cập nhật lại tọa độ điểm trước đó
         lastPointerPointRef.current = ptWithWidth;
@@ -2460,17 +2347,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           ctx.globalCompositeOperation = 'destination-out';
           ctx.strokeStyle = '#000000';
           ctx.lineWidth = strokeSize;
-        } else if (activeTool === 'creative_rainbow') {
-          const hue = (activePointsRef.current.length * 8) % 360;
-          ctx.strokeStyle = `hsl(${hue}, 100%, 55%)`;
-          ctx.lineWidth = strokeSize * 2.8;
-          ctx.globalAlpha = 0.65;
-        } else if (activeTool === 'creative_neon') {
-          ctx.shadowColor = activeColor || '#00ffff';
-          ctx.shadowBlur = 12;
-          ctx.strokeStyle = activeColor || '#00ffff';
-          ctx.lineWidth = strokeSize * 2.2;
-          ctx.globalAlpha = 0.98;
         } else {
           ctx.strokeStyle = activeColor;
           ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
@@ -2485,42 +2361,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const completedPoints = [...activePointsRef.current];
     activePointsRef.current = [];
 
-    // Nhận diện hình khối tự động (Auto-Shape Recognition) cho Cọ vẽ hình khối tự động
-    if (activeTool === 'creative_autoshapes' && completedPoints.length >= 5) {
-      const recognized = recognizeGeometricShape(completedPoints);
-      if (recognized) {
-        const newStroke: WhiteboardStroke = {
-          id: `shape_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-          tool: recognized.tool,
-          points: recognized.points,
-          color: activeColor,
-          size: Math.max(2, strokeSize),
-        };
-
-        setPages((prev) => {
-          const updated = [...prev];
-          const curr = updated[currentPageIndexRef.current];
-          if (!curr) return prev;
-          const newPages = [
-            ...updated.slice(0, currentPageIndexRef.current),
-            { ...curr, strokes: [...curr.strokes, newStroke] },
-            ...updated.slice(currentPageIndexRef.current + 1),
-          ];
-          pagesRef.current = newPages;
-          return newPages;
-        });
-
-        setCalligraphyStatusBanner(`✨ Cọ thông minh: Đã tự động chuẩn hóa ${recognized.label}!`);
-        setTimeout(() => setCalligraphyStatusBanner(null), 3500);
-        return;
-      }
-    }
-
     if (completedPoints.length > 0) {
       let finalPoints = completedPoints;
       // High-precision RDP curve smoothing to remove infrared jitter & redundant samples
+      // Chỉ làm mượt RDP khi nét đủ dài (>= 5 điểm) để không làm suy biến nét chạm nhẹ, dấu chấm, dấu câu
       if (isFreehandStrokeTool(activeTool)) {
-        finalPoints = simplifyPoints(completedPoints, 0.65);
+        finalPoints = completedPoints.length >= 5 ? simplifyPoints(completedPoints, 0.65) : completedPoints;
       }
       if (isFunctionGraphTool(activeTool) && completedPoints.length <= 2) {
         const p0 = completedPoints[0];
@@ -2542,6 +2388,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         if (p.y < minY) minY = p.y;
         if (p.y > maxY) maxY = p.y;
       });
+
+      // Bảo đảm bounding box có kích thước tối thiểu cho nét chấm / chạm nhẹ
+      if (minX === maxX) {
+        minX -= 3;
+        maxX += 3;
+      }
+      if (minY === maxY) {
+        minY -= 3;
+        maxY += 3;
+      }
 
       const initialVertices = computeDefaultVertices(activeTool, finalPoints);
       const tempStroke: WhiteboardStroke = {
@@ -2593,6 +2449,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   };
 
   const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Nếu có điểm vẽ dở (kể cả chỉ 1 điểm chạm nhẹ), chuyển sang handlePointerUp để bảo toàn nét vẽ
+    if (isDrawingRef.current && activePointsRef.current.length > 0) {
+      handlePointerUp(e);
+      return;
+    }
     const canvas = canvasRef.current;
     if (canvas) {
       try {
@@ -2601,12 +2462,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
     lastPointerPointRef.current = null;
     lastMidPointRef.current = null;
-    if (isDrawingRef.current) {
-      isDrawingRef.current = false;
-      activePointsRef.current = [];
-      const ctx = canvas?.getContext('2d');
-      if (ctx) redrawCanvas(ctx);
-    }
+    isDrawingRef.current = false;
+    activePointsRef.current = [];
   };
 
   // Undo & Redo handlers
@@ -5337,29 +5194,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <span className="text-[8px] px-1 bg-amber-400 text-slate-950 font-black rounded-full">AI</span>
             </button>
 
-            {/* 2c. Vẽ Sáng Tạo trên Di động */}
-            <button
-              onClick={() => {
-                setShowCreativePopover((v) => !v);
-                setShowCalligraphyPopover(false);
-                setShowMobileColorSheet(false);
-                setShowMobileShapeSheet(false);
-                setShowMobileMoreSheet(false);
-              }}
-              className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 cursor-pointer ${
-                isCreativeTool(activeTool)
-                  ? 'bg-gradient-to-r from-amber-500 via-pink-500 to-purple-600 text-white shadow ring-2 ring-pink-400'
-                  : 'text-pink-300 hover:bg-white/10'
-              }`}
-              title="Vẽ Sáng Tạo: Bút dạ quang đa sắc, Cọ hình khối tự động"
-            >
-              <div className="relative w-4 h-4 flex items-center justify-center">
-                <Palette className="w-3.5 h-3.5 text-pink-200" />
-                <Sparkles className="w-2 h-2 absolute -top-1 -right-1 text-amber-300 animate-pulse" />
-              </div>
-              <span className="text-[11px]">Sáng Tạo</span>
-            </button>
-
             {/* 3. Khăn Lau */}
             <button
               onClick={() => {
@@ -5615,176 +5449,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     <Wand2 className="w-3.5 h-3.5 text-amber-300" />
                     <span>{isConvertingCalligraphy ? 'Đang chuyển siêu tốc...' : sweptSelection ? 'Bấm chọn chuyển ngay' : 'Chuyển chữ đẹp'}</span>
                   </button>
-                </div>
-              )}
-            </div>
-
-            {/* 2c. Vẽ Sáng Tạo (Creative Brushes: Bút dạ quang đa sắc, Cọ hình khối tự động, Bút Neon, Bút Sao) */}
-            <div className="relative shrink-0 flex items-center">
-              <button
-                onClick={() => {
-                  setShowCreativePopover((v) => !v);
-                  setShowCalligraphyPopover(false);
-                  setShowShapePicker(false);
-                  setShowFunctionPicker(false);
-                  setShowColorPopover(false);
-                  setShowSizePopover(false);
-                }}
-                className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 cursor-pointer ${
-                  isCreativeTool(activeTool)
-                    ? 'bg-gradient-to-r from-amber-500 via-pink-500 to-purple-600 text-white shadow-md ring-2 ring-pink-400'
-                    : 'hover:bg-white/10 text-slate-300'
-                }`}
-                title="Vẽ Sáng Tạo: Bút dạ quang đa sắc, Cọ hình khối tự động, Bút Neon, Bút Sao"
-              >
-                <div className="relative w-4 h-4 flex items-center justify-center">
-                  <Palette className="w-4 h-4 text-pink-300" />
-                  <Sparkles className="w-2.5 h-2.5 absolute -top-1 -right-1 text-amber-300 animate-pulse" />
-                </div>
-                <span className="text-[11px] font-bold">Vẽ Sáng Tạo</span>
-                {isCreativeTool(activeTool) && (
-                  <span className="text-[8px] px-1 py-0.5 bg-amber-400 text-slate-950 font-black rounded-full leading-none">
-                    {activeTool === 'creative_rainbow' ? 'Đa Sắc' : activeTool === 'creative_autoshapes' ? 'Hình Khối' : activeTool === 'creative_neon' ? 'Neon' : 'Sao'}
-                  </span>
-                )}
-              </button>
-
-              {/* Creative Drawing Popover */}
-              {showCreativePopover && (
-                <div
-                  className="absolute bottom-full mb-3 left-0 w-84 bg-slate-950/98 backdrop-blur-2xl border-2 border-pink-500/50 rounded-2xl shadow-2xl p-3 z-50 text-white animate-in fade-in slide-in-from-bottom-2"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex items-center justify-between pb-2 border-b border-white/10 mb-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-xl bg-pink-500/20 text-pink-300 border border-pink-400/30">
-                        <Palette className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold flex items-center gap-1.5 text-white">
-                          Vẽ Sáng Tạo Giảng Dạy
-                          <span className="text-[8px] px-1.5 py-0.5 bg-gradient-to-r from-amber-400 to-pink-500 text-slate-950 font-black rounded-md">MỚI</span>
-                        </div>
-                        <div className="text-[10px] text-slate-400">Bộ cọ vẽ trực quan sinh động cho thầy cô</div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setShowCreativePopover(false)}
-                      className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    {/* Option 1: Bút dạ quang đa sắc */}
-                    <button
-                      onClick={() => {
-                        handleToolChange('creative_rainbow');
-                        setStrokeSize(8);
-                        setShowCreativePopover(false);
-                        setCalligraphyStatusBanner('🌈 Đã chọn Bút Dạ Quang Đa Sắc: Viết/vẽ để tạo dải màu quang phổ rực rỡ!');
-                        setTimeout(() => setCalligraphyStatusBanner(null), 3500);
-                      }}
-                      className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex items-center gap-2.5 ${
-                        activeTool === 'creative_rainbow'
-                          ? 'bg-gradient-to-r from-pink-600/40 to-purple-600/40 border-pink-400 text-white shadow ring-1 ring-pink-400'
-                          : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                      }`}
-                    >
-                      <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-rose-500 via-amber-400 via-emerald-400 via-blue-500 to-purple-600 flex items-center justify-center shrink-0 shadow">
-                        <Highlighter className="w-4 h-4 text-white drop-shadow" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-white flex items-center justify-between">
-                          <span>Bút Dạ Quang Đa Sắc</span>
-                          <span className="text-[9px] px-1.5 py-0.5 bg-pink-500/30 text-pink-300 rounded font-semibold">Cầu Vồng</span>
-                        </div>
-                        <div className="text-[10px] text-slate-300 truncate">Dải màu quang phổ chuyển động liên tục, làm nổi bật ý chính</div>
-                      </div>
-                    </button>
-
-                    {/* Option 2: Cọ vẽ hình khối tự động */}
-                    <button
-                      onClick={() => {
-                        handleToolChange('creative_autoshapes');
-                        setStrokeSize(3);
-                        setShowCreativePopover(false);
-                        setCalligraphyStatusBanner('📐 Đã chọn Cọ Hình Khối Tự Động: Vẽ phác họa tự do, hệ thống tự biến thành hình tròn, chữ nhật, tam giác SGK chuẩn!');
-                        setTimeout(() => setCalligraphyStatusBanner(null), 4000);
-                      }}
-                      className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex items-center gap-2.5 ${
-                        activeTool === 'creative_autoshapes'
-                          ? 'bg-gradient-to-r from-blue-600/40 to-cyan-600/40 border-cyan-400 text-white shadow ring-1 ring-cyan-400'
-                          : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                      }`}
-                    >
-                      <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 flex items-center justify-center shrink-0 shadow">
-                        <Shapes className="w-4 h-4 text-white" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-white flex items-center justify-between">
-                          <span>Cọ Vẽ Hình Khối Tự Động</span>
-                          <span className="text-[9px] px-1.5 py-0.5 bg-cyan-500/30 text-cyan-300 rounded font-semibold">Tự nắn chuẩn</span>
-                        </div>
-                        <div className="text-[10px] text-slate-300 truncate">Vẽ phác tròn, chữ nhật, tam giác tự động chuẩn hóa vector SGK</div>
-                      </div>
-                    </button>
-
-                    {/* Option 3: Bút Neon phát sáng */}
-                    <button
-                      onClick={() => {
-                        handleToolChange('creative_neon');
-                        setStrokeSize(4);
-                        setShowCreativePopover(false);
-                        setCalligraphyStatusBanner('⚡ Đã chọn Bút Neon Phát Sáng: Đường vẽ phát sáng rực rỡ với quầng sáng neon!');
-                        setTimeout(() => setCalligraphyStatusBanner(null), 3500);
-                      }}
-                      className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex items-center gap-2.5 ${
-                        activeTool === 'creative_neon'
-                          ? 'bg-gradient-to-r from-emerald-600/40 to-teal-600/40 border-emerald-400 text-white shadow ring-1 ring-emerald-400'
-                          : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                      }`}
-                    >
-                      <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-300 flex items-center justify-center shrink-0 shadow">
-                        <Sparkles className="w-4 h-4 text-slate-950" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-white flex items-center justify-between">
-                          <span>Bút Neon Phát Sáng</span>
-                          <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/30 text-emerald-300 rounded font-semibold">Glow</span>
-                        </div>
-                        <div className="text-[10px] text-slate-300 truncate">Nét vẽ tỏa ánh sáng neon hiện đại thu hút sự tập trung</div>
-                      </div>
-                    </button>
-
-                    {/* Option 4: Bút Sao Lấp Lánh */}
-                    <button
-                      onClick={() => {
-                        handleToolChange('creative_sparkle');
-                        setStrokeSize(3);
-                        setShowCreativePopover(false);
-                        setCalligraphyStatusBanner('✨ Đã chọn Bút Sao Lấp Lánh: Tỏa ra những ngôi sao nhỏ sinh động khi viết!');
-                        setTimeout(() => setCalligraphyStatusBanner(null), 3500);
-                      }}
-                      className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex items-center gap-2.5 ${
-                        activeTool === 'creative_sparkle'
-                          ? 'bg-gradient-to-r from-amber-600/40 to-yellow-600/40 border-amber-400 text-white shadow ring-1 ring-amber-400'
-                          : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                      }`}
-                    >
-                      <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center shrink-0 shadow">
-                        <Sparkle className="w-4 h-4 text-amber-950" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-white flex items-center justify-between">
-                          <span>Bút Sao Lấp Lánh</span>
-                          <span className="text-[9px] px-1.5 py-0.5 bg-amber-500/30 text-amber-300 rounded font-semibold">Khen thưởng</span>
-                        </div>
-                        <div className="text-[10px] text-slate-300 truncate">Đính kèm các ngôi sao lấp lánh dọc nét vẽ</div>
-                      </div>
-                    </button>
-                  </div>
                 </div>
               )}
             </div>

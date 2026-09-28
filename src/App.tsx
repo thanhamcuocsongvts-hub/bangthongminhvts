@@ -39,8 +39,7 @@ import { db, auth } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { useDeviceDetection } from './hooks/useDeviceDetection';
-import { PenTool, FolderOpen, Users, CheckSquare, Trophy, Smartphone } from 'lucide-react';
-import { TeacherMobileRemote } from './components/TeacherMobileRemote';
+import { PenTool, FolderOpen, Users, CheckSquare, Trophy } from 'lucide-react';
 
 export default function App() {
   const { isMobile } = useDeviceDetection();
@@ -335,13 +334,8 @@ export default function App() {
     return emptyFallbackLesson;
   }, [activeOpenedLesson, lessons, activeLessonId]);
 
-  // Active Tab & Display Settings (Defaults to Mobile Remote on phones, Classroom Blackboard on TV/Desktop)
-  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
-    if (typeof window !== 'undefined' && (window.innerWidth < 768 || (window.innerHeight < 520 && window.innerWidth < 1000))) {
-      return 'remote';
-    }
-    return 'whiteboard';
-  });
+  // Active Tab & Display Settings (Defaults to Classroom Blackboard on TV, PC and Mobile)
+  const [activeTab, setActiveTab] = useState<ActiveTab>('whiteboard');
   const [textScale, setTextScale] = useState<TextScale>('large'); // Default 125% for 75" TV
   const [roomState, setRoomState] = useState<RoomState | null>(null);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
@@ -977,39 +971,6 @@ export default function App() {
             transition={{ duration: 0.18, ease: 'easeOut' }}
             className="w-full h-full"
           >
-            {/* Tab: Smart Teaching Mobile Remote */}
-            {activeTab === 'remote' && (
-              <TeacherMobileRemote
-                currentLesson={currentLesson}
-                allLessons={lessons}
-                activeTeacher={activeTeacher}
-                roomState={roomState}
-                onSelectLesson={handleSelectLesson}
-                onOpenQR={() => setShowQRModal(true)}
-                onOpenRandomPicker={() => {
-                  setPickerClassroom(activeTeacher?.classes?.[0] || null);
-                  setShowRandomPickerModal(true);
-                }}
-                onSwitchTab={setActiveTab}
-                onControlRoom={async (idx, isLive) => {
-                  await fetch(`/api/rooms/${roomState?.pin || '758899'}/control`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ activeQuestionIndex: idx, isLive }),
-                  });
-                  fetchRoom(roomState?.pin || '758899');
-                }}
-                onResetRoom={async () => {
-                  await fetch(`/api/rooms/${roomState?.pin || '758899'}/reset`, {
-                    method: 'POST',
-                  });
-                  fetchRoom(roomState?.pin || '758899');
-                }}
-                onAddStudentBonusPoint={handleAddBonusPointFromPicker}
-                onSetStudentOralScore={handleSetOralScoreFromPicker}
-                syncStatus={syncStatus}
-              />
-            )}
             {/* Tab 2: Document Reader View (Open Doc directly & AI Key Points) */}
             {activeTab === 'reader' && (
               <DocumentReaderView
@@ -1441,7 +1402,6 @@ export default function App() {
           style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom))' }}
         >
           {[
-            { id: 'remote' as ActiveTab, label: 'Remote TV', icon: <Smartphone className="w-5 h-5" />, activeColor: 'text-indigo-600' },
             { id: 'whiteboard' as ActiveTab, label: 'Bảng Viết', icon: <PenTool className="w-5 h-5" />, activeColor: 'text-emerald-600' },
             { id: 'documents' as ActiveTab, label: 'Kho Bài', icon: <FolderOpen className="w-5 h-5" />, activeColor: 'text-amber-600' },
             { id: 'gradebook' as ActiveTab, label: 'Lớp Học', icon: <Users className="w-5 h-5" />, activeColor: 'text-blue-600' },

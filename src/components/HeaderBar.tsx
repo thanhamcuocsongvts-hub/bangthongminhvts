@@ -16,8 +16,7 @@ export type ActiveTab =
   | 'reader'
   | 'quiz'
   | 'games'
-  | 'embed'
-  | 'remote';
+  | 'embed';
 
 interface HeaderBarProps {
   activeTab: ActiveTab;
@@ -90,12 +89,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     { id: 'embed', label: 'Nhúng Web/YouTube', shortLabel: 'Nhúng Web', icon: <Globe className="w-4 h-4 text-purple-600" />, desc: 'Video bài giảng YouTube & mô phỏng thí nghiệm' },
   ];
 
-  const mobileTabs: Array<{ id: ActiveTab; label: string; shortLabel: string; icon: React.ReactNode; desc: string }> = [
-    { id: 'remote', label: 'Remote TV 75" (Điều Khiển)', shortLabel: 'Remote TV', icon: <Smartphone className="w-4 h-4 text-indigo-600" />, desc: 'Điều khiển slide, quay số học sinh, Live Quiz từ xa' },
-    ...tabs
-  ];
-
-  const currentTab = (isMobile ? mobileTabs : tabs).find((t) => t.id === activeTab) || tabs[0];
+  const currentTab = tabs.find((t) => t.id === activeTab) || tabs[0];
 
   // ================= MOBILE PHONE HEADER BAR (< 768px) =================
   if (isMobile) {
@@ -228,7 +222,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1 mb-1">
                   CHỌN TÍNH NĂNG GIẢNG DẠY
                 </div>
-                {mobileTabs.map((tab) => {
+                {tabs.map((tab) => {
                   const isActive = activeTab === tab.id;
                   return (
                     <button

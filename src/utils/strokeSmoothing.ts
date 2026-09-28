@@ -45,7 +45,9 @@ export function filterPointJitter(
 
 /**
  * Calculate natural velocity & pressure modulated stroke width
- * Emulates authentic chalk and fountain pen physics
+ * Emulates authentic chalk and fountain pen physics:
+ * - "Thanh thoát, mượt mà": Nét thanh khi lia nhanh/chạm nhẹ, nét đậm khi đi chậm/chạm ấn
+ * - BẢO ĐẢM KHÔNG BAO GIỜ MẤT NÉT KHI CHẠM NHẸ: Sàn kích thước tối thiểu bảo đảm luôn hiển thị rõ nét
  */
 export function calculateDynamicStrokeWidth(
   baseSize: number,
@@ -53,7 +55,7 @@ export function calculateDynamicStrokeWidth(
   previous?: { x: number; y: number; pressure?: number; time?: number; width?: number },
   isCalligraphy = false
 ): number {
-  if (!previous) return baseSize;
+  if (!previous) return Math.max(1.8, baseSize);
 
   const dt = Math.max(1, (current.time || performance.now()) - (previous.time || performance.now()));
   const dist = Math.hypot(current.x - previous.x, current.y - previous.y);
@@ -64,39 +66,46 @@ export function calculateDynamicStrokeWidth(
   if (isCalligraphy) {
     // Calligraphy angle modulation (45 degree thick/thin nib physics)
     const angle = Math.atan2(current.y - previous.y, current.x - previous.x);
-    // 45 degrees angle nib gives maximum contrast between upstrokes and downstrokes
+    // 45 degrees angle nib gives maximum contrast between upstrokes (nét thanh) and downstrokes (nét đậm)
     const angleFactor = Math.abs(Math.sin(angle - Math.PI / 4));
-    const widthFactor = 0.55 + angleFactor * 0.75; // 0.55x to 1.3x
+    const widthFactor = 0.70 + angleFactor * 0.55; // 0.70x to 1.25x
 
-    // Speed modulation: faster = slightly sharper
-    const speedFactor = Math.max(0.7, Math.min(1.25, 1.15 - speed * 0.15));
+    // Speed modulation: faster = slightly sharper but never below visible threshold
+    const speedFactor = Math.max(0.82, Math.min(1.20, 1.12 - speed * 0.10));
     targetWidth = baseSize * widthFactor * speedFactor;
   } else {
     // Natural chalk / ballpoint dynamics:
-    // Faster strokes get slightly tapered (0.8x), slow steady strokes get full body (1.1x)
-    const speedFactor = Math.max(0.78, Math.min(1.15, 1.1 - speed * 0.12));
+    // Faster strokes get slightly tapered (0.85x), slow steady strokes get full body (1.15x)
+    const speedFactor = Math.max(0.85, Math.min(1.15, 1.10 - speed * 0.08));
     targetWidth = baseSize * speedFactor;
   }
 
-  // Modulate with stylus pressure if hardware provides real pressure
+  // Modulate with stylus/touch pressure:
+  // KHẮC PHỤC TRIỆT ĐỂ: Khi chạm nhẹ (pressure ~ 0.01 - 0.2), giữ tỉ lệ nét thanh thoát 0.82x - 1.30x
+  // Không bao giờ để nét bị teo nhỏ hoặc biến mất
   if (current.pressure !== undefined && current.pressure > 0 && current.pressure !== 0.5) {
-    const pressureMultiplier = 0.5 + current.pressure; // 0.5x to 1.5x
+    const clampedPressure = Math.max(0, Math.min(1, current.pressure));
+    const pressureMultiplier = 0.82 + clampedPressure * 0.48; // 0.82x -> 1.30x
     targetWidth *= pressureMultiplier;
   }
 
   // Smooth width transition from previous point to avoid sudden jumps
   const prevWidth = previous.width || baseSize;
-  const smoothedWidth = prevWidth * 0.65 + targetWidth * 0.35;
+  const smoothedWidth = prevWidth * 0.60 + targetWidth * 0.40;
 
-  return Math.max(baseSize * 0.45, Math.min(baseSize * 1.85, smoothedWidth));
+  // Bảo đảm sàn hiển thị: Tối thiểu 1.8px hoặc 75% baseSize
+  const minFloor = Math.max(1.8, baseSize * 0.72);
+  const maxCeil = Math.max(minFloor + 1, baseSize * 1.65);
+  return Math.max(minFloor, Math.min(maxCeil, smoothedWidth));
 }
 
 /**
  * Ramer-Douglas-Peucker (RDP) algorithm for stroke simplification
- * Reduces raw touch point density by 60-75% without perceptible loss of curve fidelity
+ * Giữ nguyên các nét ngắn (dấu chấm, dấu phẩy, dấu tiếng Việt) để không bị nuốt mất nét
  */
-export function simplifyPoints(points: StrokePoint[], epsilon = 0.75): StrokePoint[] {
-  if (points.length <= 2) return points;
+export function simplifyPoints(points: StrokePoint[], epsilon = 0.65): StrokePoint[] {
+  // Nét chấm, dấu thanh, nét ngắn (<= 4 điểm): KHÔNG làm suy giảm để giữ trọn vẹn nét chạm nhẹ
+  if (points.length <= 4) return points;
 
   let maxDistance = 0;
   let index = 0;
