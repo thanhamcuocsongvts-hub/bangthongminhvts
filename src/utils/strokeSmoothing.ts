@@ -245,7 +245,11 @@ export function cropStrokesToImage(
   boardScrollY = 0,
   padding = 24,
   customBounds?: { minX: number; minY: number; maxX: number; maxY: number }
-): { dataUrl: string; bounds: { minX: number; minY: number; width: number; height: number } } | null {
+): {
+  dataUrl: string;
+  bounds: { minX: number; minY: number; width: number; height: number };
+  actualBounds: { minX: number; minY: number; maxX: number; maxY: number; width: number; height: number };
+} | null {
   if (!pointsOrStrokes || (pointsOrStrokes as any[]).length === 0) return null;
 
   // Chuẩn hóa thành danh sách các mảng điểm nét vẽ
@@ -371,6 +375,14 @@ export function cropStrokesToImage(
         minY: minY - pad / 2,
         width: Math.max(160, strokeW + pad),
         height: Math.max(50, strokeH + pad),
+      },
+      actualBounds: {
+        minX,
+        minY,
+        maxX,
+        maxY,
+        width: strokeW,
+        height: strokeH,
       },
     };
   } catch (err) {

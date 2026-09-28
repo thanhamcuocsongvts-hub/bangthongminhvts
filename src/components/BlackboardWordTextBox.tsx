@@ -529,7 +529,7 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
 
       {/* 2. TEXT BOX CONTAINER WITH RESIZE HANDLERS */}
       <div
-        className={`relative w-full h-full rounded-xl p-2.5 transition-all ${getBgStyle()} ${
+        className={`relative w-full h-full rounded-xl ${bgColor === 'transparent' ? 'p-1' : 'p-2.5'} transition-all ${getBgStyle()} ${
           isSelected ? 'ring-2 ring-cyan-400/80 shadow-2xl' : ''
         }`}
         style={{
@@ -537,11 +537,11 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
           borderWidth: isSelected ? '2px' : borderStyle === 'none' ? '0px' : '1.5px',
         }}
       >
-        {/* Top Header Grip for dragging */}
+        {/* Top Header Grip for dragging - only occupies space when selected */}
         <div
           onPointerDown={handleHeaderPointerDown}
-          className={`w-full py-0.5 px-1 flex items-center justify-between cursor-move rounded-md mb-1 transition-opacity ${
-            isSelected ? 'opacity-100 bg-white/10' : 'opacity-0 hover:opacity-100'
+          className={`w-full py-0.5 px-1 items-center justify-between cursor-move rounded-md mb-1 transition-opacity ${
+            isSelected ? 'flex opacity-100 bg-white/10' : 'hidden'
           }`}
           title="Kéo để di chuyển vị trí Hộp văn bản trên bảng"
         >
@@ -564,10 +564,11 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
               }
             }}
             placeholder="Gõ văn bản, tiêu đề, công thức toán $x^2 + y^2 = r^2$..."
-            className="w-full h-full min-h-[44px] bg-transparent resize-none outline-none leading-relaxed custom-scrollbar-none"
+            className="w-full h-full min-h-[30px] bg-transparent resize-none outline-none leading-tight custom-scrollbar-none"
             style={{
               color: textBox.color,
               fontSize: `${textBox.size}px`,
+              lineHeight: 1.18,
               fontFamily: getFontFamilyCss(),
               fontWeight: textBox.bold ? 700 : 400,
               fontStyle: textBox.italic ? 'italic' : 'normal',
@@ -577,10 +578,11 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
           />
         ) : (
           <div
-            className="w-full h-full min-h-[44px] break-words cursor-pointer leading-relaxed"
+            className="w-full h-full min-h-[30px] break-words cursor-pointer leading-tight"
             style={{
               color: textBox.color,
               fontSize: `${textBox.size}px`,
+              lineHeight: 1.18,
               fontFamily: getFontFamilyCss(),
               fontWeight: textBox.bold ? 700 : 400,
               fontStyle: textBox.italic ? 'italic' : 'normal',

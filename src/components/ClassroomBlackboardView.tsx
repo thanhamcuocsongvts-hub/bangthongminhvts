@@ -1447,22 +1447,43 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, 'bài giảng lớp học, toán học, văn học, khoa học, tiểu học');
       if (recognized && recognized.trim().length > 0) {
         const text = recognized.trim();
-        const { bounds } = crop;
+        // Tính toán chính xác kích thước và tọa độ thật của nét vẽ lúc giáo viên viết phấn
+        let sMinX = Infinity, sMaxX = -Infinity;
+        let sMinY = Infinity, sMaxY = -Infinity;
+        targetStrokes.forEach((s) => {
+          if (s.points) {
+            s.points.forEach((p) => {
+              if (p.x < sMinX) sMinX = p.x;
+              if (p.x > sMaxX) sMaxX = p.x;
+              if (p.y < sMinY) sMinY = p.y;
+              if (p.y > sMaxY) sMaxY = p.y;
+            });
+          }
+        });
+
+        const actualStrokeHeight = sMaxY > sMinY ? (sMaxY - sMinY) : (crop.actualBounds?.height || crop.bounds.height);
+        const actualStrokeWidth = sMaxX > sMinX ? (sMaxX - sMinX) : (crop.actualBounds?.width || crop.bounds.width);
+        const origX = sMinX < Infinity ? sMinX : crop.bounds.minX;
+        const origY = sMinY < Infinity ? sMinY : crop.bounds.minY;
+
         const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
         const lineCount = Math.max(1, lines.length);
-        const heightPerLine = bounds.height / lineCount;
+        const heightPerLine = actualStrokeHeight / lineCount;
 
-        // Size matching: Font size that matches physical chalk handwriting height before conversion
-        let calculatedSize = Math.round(heightPerLine * 0.84);
-        calculatedSize = Math.max(20, Math.min(120, calculatedSize));
+        // Size matching: Chuẩn hóa size font bằng 100% kích thước chữ lúc vẽ thật trên bảng (1:1 chuẩn xác)
+        // Font chữ tiểu học/luyện chữ (Charm, TapViet) có các ký tự có dấu mũ, nét vươn (h, k, b, d) chiếm ~95% khung chữ.
+        // Hệ số 1.06 giúp chiều cao chữ in phông đẹp trùng khớp hoàn hảo với chiều cao chữ viết tay thực tế.
+        const hasTallChars = /[A-ZÀ-ỸbdfhklptđghjpqyÁÀẢÃẠẮẰẲẴẶẤẦẨẪẬÉÈẺẼẸẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌỐỒỔỖỘỚỜỞỠỢÚÙỦŨỤỨỪỬỮỰÝỲỶỸỴ0-9]/.test(text);
+        let calculatedSize = Math.round(hasTallChars ? heightPerLine * 1.06 : heightPerLine * 1.45);
+        calculatedSize = Math.max(18, Math.min(240, calculatedSize));
 
-        const boxWidth = Math.max(Math.round(bounds.width + 36), calculatedSize * 2);
-        const boxHeight = Math.max(Math.round(bounds.height + 20), Math.round(calculatedSize * lineCount * 1.32));
+        const boxWidth = Math.max(Math.round(actualStrokeWidth + 40), calculatedSize * 3);
+        const boxHeight = Math.max(Math.round(actualStrokeHeight + 16), Math.round(calculatedSize * lineCount * 1.25));
 
         const newTextBox: BlackboardTextBox = {
           id: `calligraphy_txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-          x: Math.round(bounds.minX),
-          y: Math.round(bounds.minY),
+          x: Math.round(origX),
+          y: Math.round(origY),
           width: boxWidth,
           height: boxHeight,
           text: text,

@@ -61,6 +61,61 @@ interface WhiteboardText {
   size: number;
 }
 
+// =========================================================================
+// SENSOR THRESHOLD & POINTER PRESSURE CALIBRATION
+// =========================================================================
+export const MIN_POINTER_PRESSURE_THRESHOLD = 0.01; // Ngưỡng cảm biến tối thiểu để bắt trọn ngay cả cú chạm nhẹ nhất (0.01)
+export const MIN_RENDER_PRESSURE = 0.18; // Sàn hiển thị tối thiểu để nét chạm nhẹ không bị teo nhỏ hoặc mờ mất
+export const DEFAULT_POINTER_PRESSURE = 0.50; // Mặc định cho chuột hoặc thiết bị không có cảm biến lực
+
+/**
+ * Chuẩn hóa lực nhấn từ PointerEvent:
+ * - Bắt trọn lực nhấn thực tế từ bút cảm ứng (Apple Pencil, Surface Pen, Wacom, Smartboard Stylus) hoặc ngón tay
+ * - Hàm phi tuyến gamma (power 0.72) giúp mọi cú chạm cực nhẹ (0.01 - 0.15) đều vượt ngưỡng sensor và kích hoạt hiển thị ngay lập tức
+ */
+export function normalizePointerPressure(rawPressure?: number, pointerType?: string): number {
+  if (rawPressure !== undefined && rawPressure !== null && rawPressure >= MIN_POINTER_PRESSURE_THRESHOLD) {
+    const curved = Math.pow(Math.min(1.0, rawPressure), 0.72);
+    return Math.max(MIN_RENDER_PRESSURE, Math.min(1.0, curved));
+  }
+  return DEFAULT_POINTER_PRESSURE;
+}
+
+/**
+ * Tính toán độ đậm/nhạt (opacity/alpha) và độ dày nét (width) linh hoạt theo lực nhấn (Pointer Pressure)
+ * - Chạm nhẹ (Pressure ~ 0.18 - 0.35): Nét vẽ thanh mảnh (0.68x - 0.85x), độ chắn sáng thanh thoát (alpha ~ 0.70 - 0.80)
+ * - Chạm vừa (Pressure ~ 0.35 - 0.65): Nét vẽ tự nhiên, độ đậm vừa phải (alpha ~ 0.80 - 0.90)
+ * - Chạm mạnh (Pressure ~ 0.65 - 1.00): Nét vẽ đậm đà (1.10x - 1.48x), chắc chắn, độ chắn sáng tối đa (alpha = 1.0)
+ */
+export function calculatePressureDynamics(
+  baseSize: number,
+  pressure: number,
+  tool: string,
+  velocity: number = 0
+): { width: number; alpha: number } {
+  const norm = Math.max(0, Math.min(1, (pressure - MIN_RENDER_PRESSURE) / (1.0 - MIN_RENDER_PRESSURE)));
+
+  // Tốc độ lia bút: lia nhanh thì nét hơi vuốt thanh hơn
+  const velocityFactor = Math.max(0.80, Math.min(1.15, 1.06 - velocity * 0.04));
+
+  // 1. Độ dày nét (Stroke Width): từ 0.68x đến 1.48x baseSize, luôn có sàn tối thiểu 1.8px
+  const widthMultiplier = (0.68 + norm * 0.80) * velocityFactor;
+  const width = Math.max(1.8, baseSize * widthMultiplier);
+
+  // 2. Độ đậm nhạt (Alpha / Opacity) điều chỉnh trực tiếp theo lực nhấn:
+  let alpha = 1.0;
+  if (tool === 'highlighter') {
+    alpha = 0.35 + norm * 0.30; // 0.35 -> 0.65
+  } else if (tool === 'eraser') {
+    alpha = 1.0;
+  } else {
+    // Pen & Calligraphy: chuyển đổi mượt mà từ 0.70 (chạm nhẹ thanh mảnh) lên 1.0 (nhấn mạnh đậm đặc)
+    alpha = Math.max(0.68, Math.min(1.0, 0.70 + norm * 0.30));
+  }
+
+  return { width, alpha };
+}
+
 export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
   id = 'interactive-whiteboard-area',
   isOverlay = false,
@@ -744,22 +799,45 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    // FREEHAND CALLIGRAPHIC BEZIER SMOOTHING (PEN, HIGHLIGHTER, ERASER)
+    // FREEHAND CALLIGRAPHIC BEZIER SMOOTHING (PEN, CALLIGRAPHY, HIGHLIGHTER, ERASER)
     else {
       if (points.length === 1) {
+        const p = points[0];
+        const { width: dynW, alpha: dynA } = calculatePressureDynamics(size, p.pressure || DEFAULT_POINTER_PRESSURE, tool);
+        ctx.save();
+        ctx.globalAlpha = tool === 'highlighter' ? 0.45 : dynA;
         ctx.beginPath();
-        const r = (tool === 'highlighter' ? size * 2.8 : tool === 'eraser' ? size * 3 : size) / 2;
-        ctx.arc(points[0].x, points[0].y, Math.max(1, r), 0, Math.PI * 2);
+        const r = Math.max(1.8, (tool === 'highlighter' ? size * 2.8 : tool === 'eraser' ? size * 3 : dynW) / 2);
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
       } else if (points.length === 2) {
+        const p0 = points[0];
+        const p1 = points[1];
+        const avgPressure = ((p0.pressure || DEFAULT_POINTER_PRESSURE) + (p1.pressure || DEFAULT_POINTER_PRESSURE)) / 2;
+        const { width: dynW, alpha: dynA } = calculatePressureDynamics(size, avgPressure, tool);
+
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = tool === 'highlighter' ? 0.45 : dynA;
+        ctx.lineWidth = tool === 'highlighter' ? size * 2.8 : tool === 'eraser' ? size * 3 : dynW;
         ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        ctx.lineTo(points[1].x, points[1].y);
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
         ctx.stroke();
+
+        // Vẽ 2 điểm tròn hai đầu để những nét chạm nhẹ / vẩy bút cực ngắn luôn hiển thị rõ nét
+        const dotRadius = Math.max(1.8, (tool === 'highlighter' ? size * 2.8 : tool === 'eraser' ? size * 3 : dynW) / 2);
+        ctx.beginPath();
+        ctx.arc(p0.x, p0.y, dotRadius, 0, Math.PI * 2);
+        ctx.arc(p1.x, p1.y, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       } else {
         // Professional Calligraphy Bezier Spline
-        // For 'pen': render segments with smooth calligraphic tapering at start/end and velocity responsiveness
-        if (tool === 'pen') {
+        // For 'pen' & 'calligraphy': render segments with smooth calligraphic tapering at start/end and pressure responsiveness
+        if (tool === 'pen' || tool === 'calligraphy') {
           const n = points.length;
           for (let i = 1; i < n - 1; i++) {
             const pPrev = points[i - 1];
@@ -771,38 +849,56 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
             const mid2X = (pCurr.x + pNext.x) / 2;
             const mid2Y = (pCurr.y + pNext.y) / 2;
 
-            // Calligraphic weight taper
+            // Calligraphic weight taper at stroke ends
             let taper = 1.0;
-            if (i === 1) taper = 0.55;
-            else if (i === 2) taper = 0.8;
-            else if (i === n - 3) taper = 0.8;
-            else if (i === n - 2) taper = 0.45;
+            if (i === 1) taper = 0.70;
+            else if (i === 2) taper = 0.88;
+            else if (i === n - 3) taper = 0.88;
+            else if (i === n - 2) taper = 0.60;
 
-            // Velocity / pressure modulation
-            const pressure = pCurr.pressure || 0.7;
-            const segWidth = Math.max(1, size * taper * (0.5 + pressure * 0.7));
+            const { width: dynW, alpha: dynA } = calculatePressureDynamics(size * taper, pCurr.pressure || DEFAULT_POINTER_PRESSURE, tool);
 
-            ctx.lineWidth = segWidth;
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalAlpha = dynA;
+            ctx.lineWidth = dynW;
+
             ctx.beginPath();
             ctx.moveTo(mid1X, mid1Y);
             ctx.quadraticCurveTo(pCurr.x, pCurr.y, mid2X, mid2Y);
             ctx.stroke();
+            ctx.restore();
           }
 
           // Smooth connect to endpoints
           const firstMid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-          ctx.lineWidth = Math.max(1, size * 0.4);
+          const p0Pressure = points[0].pressure || DEFAULT_POINTER_PRESSURE;
+          const { width: wStart, alpha: aStart } = calculatePressureDynamics(size * 0.60, p0Pressure, tool);
+          ctx.save();
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.globalAlpha = aStart;
+          ctx.lineWidth = wStart;
           ctx.beginPath();
           ctx.moveTo(points[0].x, points[0].y);
           ctx.lineTo(firstMid.x, firstMid.y);
           ctx.stroke();
+          ctx.restore();
 
           const lastMid = { x: (points[n - 2].x + points[n - 1].x) / 2, y: (points[n - 2].y + points[n - 1].y) / 2 };
-          ctx.lineWidth = Math.max(1, size * 0.35);
+          const pEndPressure = points[n - 1].pressure || DEFAULT_POINTER_PRESSURE;
+          const { width: wEnd, alpha: aEnd } = calculatePressureDynamics(size * 0.55, pEndPressure, tool);
+          ctx.save();
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.globalAlpha = aEnd;
+          ctx.lineWidth = wEnd;
           ctx.beginPath();
           ctx.moveTo(lastMid.x, lastMid.y);
           ctx.lineTo(points[n - 1].x, points[n - 1].y);
           ctx.stroke();
+          ctx.restore();
         } else {
           // Highlighter or Eraser with continuous smooth Bezier curve
           ctx.beginPath();
@@ -927,12 +1023,12 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
   const getCanvasCoords = (e: React.PointerEvent<HTMLCanvasElement>): StrokePoint => {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
+    if (!canvas) return { x: 0, y: 0, pressure: DEFAULT_POINTER_PRESSURE };
     const rect = canvas.getBoundingClientRect();
     return {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top,
-      pressure: e.pressure && e.pressure > 0 ? e.pressure : 0.6,
+      pressure: normalizePointerPressure(e.pressure, e.pointerType),
     };
   };
 
@@ -976,6 +1072,12 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
     }
 
     e.preventDefault();
+    const canvas = canvasRef.current;
+    if (canvas) {
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch (_) {}
+    }
     const point = getCanvasCoords(e);
 
     if (activeTool === 'laser') {
@@ -1006,28 +1108,44 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
     // Draw immediate responsive initial dot for freehand
     if (['pen', 'calligraphy', 'highlighter', 'eraser'].includes(activeTool)) {
-      const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.save();
-      ctx.fillStyle = activeColor;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
       const isFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
-      if (activeTool === 'highlighter') {
-        ctx.globalAlpha = isFluo ? 0.65 : 0.45;
+      const { width: dynW, alpha: dynA } = calculatePressureDynamics(
+        strokeSize,
+        point.pressure || DEFAULT_POINTER_PRESSURE,
+        activeTool,
+        0
+      );
+
+      ctx.fillStyle = activeColor;
+      ctx.strokeStyle = activeColor;
+
+      if (activeTool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = '#000000';
+      } else if (activeTool === 'highlighter') {
+        ctx.globalAlpha = isFluo ? Math.min(0.65, dynA) : dynA;
         if (isFluo) {
           ctx.shadowColor = activeColor;
           ctx.shadowBlur = 0;
         }
-      } else if (activeTool === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out';
-      } else if (isFluo) {
-        ctx.shadowColor = activeColor;
-        ctx.shadowBlur = 0;
+      } else {
+        ctx.globalAlpha = dynA;
+        if (isFluo) {
+          ctx.shadowColor = activeColor;
+          ctx.shadowBlur = 0;
+        }
       }
+
       ctx.beginPath();
-      const r = (activeTool === 'highlighter' ? strokeSize * 2.8 : activeTool === 'eraser' ? strokeSize * 3 : strokeSize) / 2;
-      ctx.arc(point.x, point.y, Math.max(1, r), 0, Math.PI * 2);
+      const r = Math.max(1.8, (activeTool === 'highlighter' ? strokeSize * 2.8 : activeTool === 'eraser' ? strokeSize * 3 : dynW) / 2);
+      ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -1062,55 +1180,104 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
 
     if (!isDrawing) return;
 
-    // Anti-jitter noise reduction filter
-    const lastSmoothed = lastSmoothedRef.current || currentPointsRef.current[currentPointsRef.current.length - 1];
-    const dist = Math.hypot(rawPoint.x - lastSmoothed.x, rawPoint.y - lastSmoothed.y);
-
-    // Filter micro-jitter (< 1.4px)
-    if (dist < 1.4 && ['pen', 'calligraphy', 'highlighter', 'eraser'].includes(activeTool)) {
-      return;
+    // Collect coalesced high-frequency touch samples (120Hz/240Hz stylus support)
+    const coalescedPoints: StrokePoint[] = [];
+    const nativeEvt = e.nativeEvent as any;
+    if (nativeEvt && typeof nativeEvt.getCoalescedEvents === 'function') {
+      const cEvents = nativeEvt.getCoalescedEvents();
+      if (Array.isArray(cEvents) && cEvents.length > 0) {
+        const canvas = canvasRef.current;
+        const rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+        for (const ce of cEvents) {
+          coalescedPoints.push({
+            x: ce.clientX - rect.left,
+            y: ce.clientY - rect.top,
+            pressure: normalizePointerPressure(ce.pressure, ce.pointerType || e.pointerType),
+          });
+        }
+      }
+    }
+    if (coalescedPoints.length === 0) {
+      coalescedPoints.push(rawPoint);
     }
 
-    // Adaptive Exponential Moving Average (Low-Pass Filter)
-    const alpha = 0.74;
-    const smoothX = lastSmoothed.x * (1 - alpha) + rawPoint.x * alpha;
-    const smoothY = lastSmoothed.y * (1 - alpha) + rawPoint.y * alpha;
+    for (const cPt of coalescedPoints) {
+      const lastSmoothed = lastSmoothedRef.current || currentPointsRef.current[currentPointsRef.current.length - 1];
+      const dist = Math.hypot(cPt.x - lastSmoothed.x, cPt.y - lastSmoothed.y);
 
-    const now = Date.now();
-    const dt = Math.max(1, now - lastTimeRef.current);
-    const velocity = dist / dt;
-    lastTimeRef.current = now;
-    lastVelocityRef.current = velocity;
+      // Low threshold (0.2px): Loại bỏ nhiễu rung phần cứng nhưng không làm rơi rớt nét chạm nhẹ nhất
+      if (dist < 0.2 && ['pen', 'calligraphy', 'highlighter', 'eraser'].includes(activeTool)) {
+        continue;
+      }
 
-    // Calculate dynamic pressure
-    const dynamicPressure = rawPoint.pressure && rawPoint.pressure > 0.1
-      ? rawPoint.pressure
-      : Math.max(0.35, Math.min(1.1, 1.0 - velocity * 0.08));
+      // Adaptive Exponential Moving Average (Low-Pass Filter)
+      const alpha = 0.74;
+      const smoothX = lastSmoothed.x * (1 - alpha) + cPt.x * alpha;
+      const smoothY = lastSmoothed.y * (1 - alpha) + cPt.y * alpha;
 
-    const smoothedPoint: StrokePoint = {
-      x: smoothX,
-      y: smoothY,
-      pressure: dynamicPressure,
-    };
-    lastSmoothedRef.current = smoothedPoint;
+      const now = Date.now();
+      const dt = Math.max(1, now - lastTimeRef.current);
+      const velocity = dist / dt;
+      lastTimeRef.current = now;
+      lastVelocityRef.current = velocity;
 
-    currentPointsRef.current.push(smoothedPoint);
+      const smoothedPoint: StrokePoint = {
+        x: smoothX,
+        y: smoothY,
+        pressure: cPt.pressure,
+      };
+      lastSmoothedRef.current = smoothedPoint;
+      currentPointsRef.current.push(smoothedPoint);
+    }
+
     const newPoints = currentPointsRef.current;
-
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
-    // Use requestAnimationFrame for batching rendering
-    if (!window.currentRafRef) window.currentRafRef = {};
-    if (window.currentRafRef.id) cancelAnimationFrame(window.currentRafRef.id);
-    
-    window.currentRafRef.id = requestAnimationFrame(() => {
 
-    // Freehand tools: Lightning-fast incremental Bezier rendering
+    // Render trực tiếp đồng bộ (Zero Latency) - Đảm bảo mọi điểm chạm nhẹ đều được vẽ ngay lập tức không bị delay/rơi rớt
     if (['pen', 'calligraphy', 'highlighter', 'eraser'].includes(activeTool)) {
-      if (newPoints.length >= 3) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      const isFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
+
+      if (newPoints.length === 2) {
+        // Render điểm thứ 2 tức thì
+        const p0 = newPoints[0];
+        const p1 = newPoints[1];
+        const { width: segW, alpha: segA } = calculatePressureDynamics(
+          strokeSize,
+          p1.pressure || DEFAULT_POINTER_PRESSURE,
+          activeTool,
+          lastVelocityRef.current
+        );
+
+        if (activeTool === 'eraser') {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.lineWidth = strokeSize * 3;
+          ctx.strokeStyle = '#000000';
+        } else if (activeTool === 'highlighter') {
+          ctx.globalAlpha = isFluo ? Math.min(0.65, segA) : segA;
+          ctx.lineWidth = strokeSize * 2.8;
+          ctx.strokeStyle = activeColor;
+        } else {
+          ctx.globalAlpha = segA;
+          ctx.lineWidth = segW;
+          ctx.strokeStyle = activeColor;
+          if (isFluo) {
+            ctx.shadowColor = activeColor;
+            ctx.shadowBlur = 0;
+          }
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.stroke();
+      } else if (newPoints.length >= 3) {
         const p0 = newPoints[newPoints.length - 3];
         const p1 = newPoints[newPoints.length - 2];
         const p2 = newPoints[newPoints.length - 1];
@@ -1120,53 +1287,59 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         const mid2X = (p1.x + p2.x) / 2;
         const mid2Y = (p1.y + p2.y) / 2;
 
-        ctx.save();
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
+        const { width: segW, alpha: segA } = calculatePressureDynamics(
+          strokeSize,
+          p1.pressure || DEFAULT_POINTER_PRESSURE,
+          activeTool,
+          lastVelocityRef.current
+        );
 
-        const isFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
-
-        if (activeTool === 'highlighter') {
-          ctx.globalAlpha = isFluo ? 0.65 : 0.45;
-          ctx.lineWidth = strokeSize * 2.8;
-          ctx.strokeStyle = activeColor;
-          if (isFluo) {
-            ctx.shadowColor = activeColor;
-            ctx.shadowBlur = 0;
-          }
-        } else if (activeTool === 'eraser') {
+        if (activeTool === 'eraser') {
           ctx.globalCompositeOperation = 'destination-out';
           ctx.lineWidth = strokeSize * 3;
           ctx.strokeStyle = '#000000';
+        } else if (activeTool === 'highlighter') {
+          ctx.globalAlpha = isFluo ? Math.min(0.65, segA) : segA;
+          ctx.lineWidth = strokeSize * 2.8;
+          ctx.strokeStyle = activeColor;
         } else {
-          ctx.globalAlpha = 1.0;
+          ctx.globalAlpha = segA;
+          ctx.lineWidth = segW;
           ctx.strokeStyle = activeColor;
           if (isFluo) {
             ctx.shadowColor = activeColor;
             ctx.shadowBlur = 0;
           }
-          // Dynamic calligraphy width
-          const segWidth = Math.max(1, strokeSize * (0.6 + (p1.pressure || 0.6) * 0.6));
-          ctx.lineWidth = segWidth;
         }
 
         ctx.beginPath();
         ctx.moveTo(mid1X, mid1Y);
         ctx.quadraticCurveTo(p1.x, p1.y, mid2X, mid2Y);
         ctx.stroke();
-        ctx.restore();
       }
+
+      ctx.restore();
     } else {
       // Shapes & Function Graphs: Interactive live dragging preview
       redrawCanvas(strokes);
       renderSingleStroke(ctx, activeTool, newPoints, activeColor, strokeSize);
     }
-    });
   };
 
-  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerCancel = (e?: React.PointerEvent<HTMLCanvasElement>) => {
+    // Không bao giờ hủy bỏ nét vẽ dở dang - luôn cam kết nét vẽ để không mất nét chạm nhẹ
+    handlePointerUp(e);
+  };
+
+  const handlePointerUp = (e?: React.PointerEvent<HTMLCanvasElement>) => {
     if (e && e.pointerId != null) {
       activePointersRef.current.delete(e.pointerId);
+      const canvas = canvasRef.current;
+      if (canvas) {
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+      }
     } else {
       activePointersRef.current.clear();
     }
@@ -1274,6 +1447,7 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         onPointerMove={activeTool === 'select' ? undefined : handlePointerMove}
         onPointerUp={activeTool === 'select' ? undefined : handlePointerUp}
         onPointerLeave={activeTool === 'select' ? undefined : handlePointerUp}
+        onPointerCancel={activeTool === 'select' ? undefined : handlePointerCancel}
         onContextMenu={(e) => e.preventDefault()}
         style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
         className={`absolute inset-0 w-full h-full ${
