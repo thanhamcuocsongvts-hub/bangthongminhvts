@@ -274,35 +274,38 @@ export function cropStrokesToImage(
 
   if (allPoints.length === 0) return null;
 
-  // Tính toán chính xác Bounding Box của nét chữ
-  let minX = customBounds ? customBounds.minX : Infinity;
-  let maxX = customBounds ? customBounds.maxX : -Infinity;
-  let minY = customBounds ? customBounds.minY : Infinity;
-  let maxY = customBounds ? customBounds.maxY : -Infinity;
+  // Luôn luôn tính toán Bounding Box THẬT sự của các nét vẽ từ allPoints để crop bám sát chữ, phóng to tối đa
+  let sMinX = Infinity;
+  let sMaxX = -Infinity;
+  let sMinY = Infinity;
+  let sMaxY = -Infinity;
 
-  if (!customBounds) {
-    for (const p of allPoints) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    }
+  for (const p of allPoints) {
+    if (p.x < sMinX) sMinX = p.x;
+    if (p.x > sMaxX) sMaxX = p.x;
+    if (p.y < sMinY) sMinY = p.y;
+    if (p.y > sMaxY) sMaxY = p.y;
   }
+
+  const minX = sMinX;
+  const maxX = sMaxX;
+  const minY = sMinY;
+  const maxY = sMaxY;
 
   const strokeW = Math.max(1, maxX - minX);
   const strokeH = Math.max(1, maxY - minY);
   if (strokeW < 4 && strokeH < 4) return null;
 
   try {
-    // 1. Tạo OffscreenCanvas ẩn kích thước đúng bằng bounding box vừa quét + padding
-    const pad = Math.max(20, padding);
+    // 1. Tạo OffscreenCanvas ẩn kích thước bám sát nét chữ + padding an toàn
+    const pad = Math.max(24, padding);
     const rawW = strokeW + pad * 2;
     const rawH = strokeH + pad * 2;
 
-    // Chuẩn hóa độ phân giải tối ưu cho OCR nhận diện (320px - 720px)
-    const targetW = Math.max(240, Math.min(640, rawW));
+    // Chuẩn hóa độ phân giải tối ưu cho OCR nhận diện chữ viết tay (360px - 800px)
+    const targetW = Math.max(360, Math.min(800, rawW * 1.5));
     const scale = targetW / rawW;
-    const targetH = Math.max(80, Math.min(480, Math.round(rawH * scale)));
+    const targetH = Math.max(140, Math.min(600, Math.round(rawH * scale)));
 
     let offscreen: HTMLCanvasElement;
     if (typeof document !== 'undefined') {
@@ -316,25 +319,19 @@ export function cropStrokesToImage(
     const offCtx = offscreen.getContext('2d', { alpha: false });
     if (!offCtx) return null;
 
-    // =========================================================================
-    // CỰC KỲ QUAN TRỌNG (Yêu cầu 2):
-    // BẮT BUỘC 1: Fill toàn bộ nền của OffscreenCanvas này bằng màu TRẮNG (#FFFFFF)
-    // =========================================================================
+    // BẮT BUỘC 1: Nền TRẮNG (#FFFFFF) tuyệt đối 100%
     offCtx.fillStyle = '#FFFFFF';
     offCtx.fillRect(0, 0, targetW, targetH);
 
-    // =========================================================================
-    // BẮT BUỘC 2: Cấu hình ctx.lineCap = 'round' và ctx.lineJoin = 'round'
-    // BẮT BUỘC 3: Vẽ phần nét chữ đã cắt đè lên bằng màu ĐEN (#000000)
-    // =========================================================================
+    // BẮT BUỘC 2: Vẽ nét mực ĐEN (#000000) đậm rõ, đầu tròn, kể cả chữ viết xấu/vội vẫn rất sắc nét
     offCtx.save();
     offCtx.scale(scale, scale);
     offCtx.translate(-minX + pad, -minY + pad);
     offCtx.lineCap = 'round';
     offCtx.lineJoin = 'round';
-    offCtx.strokeStyle = '#000000'; // Mực đen thuần túy cho OCR
+    offCtx.strokeStyle = '#000000';
     offCtx.fillStyle = '#000000';
-    offCtx.lineWidth = 4.5; // Nét mực đen đậm rõ nét
+    offCtx.lineWidth = 5.0; // Nét mực đậm đà giúp AI nhận diện chữ xấu cực kỳ dễ dàng
 
     for (const segment of strokeSegments) {
       if (segment.length === 1) {
@@ -553,7 +550,7 @@ export async function recognizeVietnameseHandwriting(
   contextHint = 'bài giảng lớp học, công thức toán học'
 ): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 7500); // 7.5s timeout for fast response
+  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for reliable AI recognition
 
   try {
     const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');

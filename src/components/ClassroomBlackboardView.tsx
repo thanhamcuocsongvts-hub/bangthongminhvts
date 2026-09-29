@@ -170,7 +170,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   }, [activeTool]);
 
   // Viết Chữ Đẹp (Smart Handwriting to Beautiful Calligraphy Font via Sweep Selection)
-  const [calligraphyFont, setCalligraphyFont] = useState<'calligraphy' | 'handwriting' | 'primary' | 'cursive' | 'tapviet' | 'luyenchu'>('tapviet');
+  const [calligraphyFont, setCalligraphyFont] = useState<'calligraphy' | 'handwriting' | 'primary' | 'cursive' | 'tapviet' | 'luyenchu' | 'tieuhoc_chuan' | 'tieuhoc_oly'>('tieuhoc_chuan');
   const [showCalligraphyPopover, setShowCalligraphyPopover] = useState<boolean>(false);
   const [isConvertingCalligraphy, setIsConvertingCalligraphy] = useState<boolean>(false);
   const [calligraphyStatusBanner, setCalligraphyStatusBanner] = useState<string | null>(null);
@@ -1466,19 +1466,38 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         const origX = sMinX < Infinity ? sMinX : crop.bounds.minX;
         const origY = sMinY < Infinity ? sMinY : crop.bounds.minY;
 
-        const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+        // Phân tích tỷ lệ nét chữ viết tay thật của giáo viên để định hình dòng
+        let processedText = text;
+        const rawLines = processedText.split('\n').map((l) => l.trim()).filter(Boolean);
+        const strokeAspectRatio = actualStrokeWidth / Math.max(1, actualStrokeHeight);
+
+        // Nếu nét vẽ trải ngang rộng (tỷ lệ ngang/dọc >= 2.0), giáo viên viết trên 1 hàng ngang -> không ngắt dòng
+        if (strokeAspectRatio >= 2.0 && rawLines.length > 1) {
+          processedText = rawLines.join(' ');
+        }
+
+        const lines = processedText.split('\n').map((l) => l.trim()).filter(Boolean);
         const lineCount = Math.max(1, lines.length);
-        const heightPerLine = actualStrokeHeight / lineCount;
+        const maxCharsInLine = Math.max(...lines.map((l) => l.length), 1);
 
-        // Size matching: Chuẩn hóa size font bằng 100% kích thước chữ lúc vẽ thật trên bảng (1:1 chuẩn xác)
-        // Font chữ tiểu học/luyện chữ (Charm, TapViet) có các ký tự có dấu mũ, nét vươn (h, k, b, d) chiếm ~95% khung chữ.
-        // Hệ số 1.06 giúp chiều cao chữ in phông đẹp trùng khớp hoàn hảo với chiều cao chữ viết tay thực tế.
-        const hasTallChars = /[A-ZÀ-ỸbdfhklptđghjpqyÁÀẢÃẠẮẰẲẴẶẤẦẨẪẬÉÈẺẼẸẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌỐỒỔỖỘỚỜỞỠỢÚÙỦŨỤỨỪỬỮỰÝỲỶỸỴ0-9]/.test(text);
-        let calculatedSize = Math.round(hasTallChars ? heightPerLine * 1.06 : heightPerLine * 1.45);
-        calculatedSize = Math.max(18, Math.min(240, calculatedSize));
+        // Chuẩn hóa kích thước font chữ tương đồng chuẩn xác với nét phấn vẽ thật (khắc phục lỗi chữ khổng lồ 126px):
+        // 1. Theo chiều cao nét vẽ thực tế:
+        const sizeFromHeight = (actualStrokeHeight / lineCount) * 0.68;
+        // 2. Theo chiều ngang nét vẽ thực tế:
+        const sizeFromWidth = actualStrokeWidth / (maxCharsInLine * 0.55);
 
-        const boxWidth = Math.max(Math.round(actualStrokeWidth + 40), calculatedSize * 3);
-        const boxHeight = Math.max(Math.round(actualStrokeHeight + 16), Math.round(calculatedSize * lineCount * 1.25));
+        // Cân bằng hài hòa giữa chiều ngang và chiều dọc để vừa khít nét vẽ ban đầu:
+        let balancedSize = maxCharsInLine > 3
+          ? Math.min(sizeFromHeight, sizeFromWidth * 1.1)
+          : sizeFromHeight;
+
+        // Giới hạn trong khoảng hợp lý (20px - 64px, đảm bảo size chữ đẹp luôn tương đồng với nét vẽ thật)
+        let calculatedSize = Math.round(Math.max(20, Math.min(64, balancedSize)));
+
+        // Độ rộng hộp đủ rộng để chứa trọn vẹn văn bản, ngăn chặn triệt để tình trạng tự động rớt dòng
+        const neededTextWidth = Math.round(maxCharsInLine * calculatedSize * 0.68) + 40;
+        const boxWidth = Math.max(Math.round(actualStrokeWidth + 40), neededTextWidth);
+        const boxHeight = Math.max(Math.round(actualStrokeHeight + 14), Math.round(calculatedSize * lineCount * 1.3) + 16);
 
         const newTextBox: BlackboardTextBox = {
           id: `calligraphy_txt_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -1486,7 +1505,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           y: Math.round(origY),
           width: boxWidth,
           height: boxHeight,
-          text: text,
+          text: processedText,
           color: targetStrokes[0]?.color || activeColor,
           size: calculatedSize,
           fontFamily: calligraphyFont,
@@ -3596,8 +3615,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   onChange={(e) => setCalligraphyFont(e.target.value as any)}
                   className="bg-transparent text-white text-[11px] font-bold focus:outline-none cursor-pointer"
                 >
-                  <option value="tapviet" className="bg-slate-900 text-white">📖 Tập Viết Tiểu Học</option>
-                  <option value="luyenchu" className="bg-slate-900 text-white">✨ Vở Sạch Chữ Đẹp</option>
+                  <option value="tieuhoc_chuan" className="bg-slate-900 text-white">🌟 Chữ Mẫu Tiểu Học BGD (Playwrite VN)</option>
+                  <option value="tieuhoc_oly" className="bg-slate-900 text-white">📐 Tập Viết Kẻ Ô Ly (Guides)</option>
+                  <option value="luyenchu" className="bg-slate-900 text-white">✨ Vở Sạch Chữ Đẹp (Charm - Ảnh 3)</option>
+                  <option value="tapviet" className="bg-slate-900 text-white">📖 Tập Viết Nét Tròn (HP001)</option>
                   <option value="primary" className="bg-slate-900 text-white">📝 Nét Phấn Học Trò</option>
                   <option value="handwriting" className="bg-slate-900 text-white">✒️ Bút Mài Giáo Viên</option>
                   <option value="calligraphy" className="bg-slate-900 text-white">🌸 Thư Pháp Mềm Mại</option>
@@ -4869,8 +4890,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <div className="text-[11px] font-semibold text-purple-300">Chọn kiểu chữ viết:</div>
               <div className="grid grid-cols-2 gap-1.5">
                 {[
-                  { id: 'tapviet', label: 'Tập Viết Tiểu Học', sub: 'Chuẩn nét ô ly Lớp 1-5', sample: 'Nét chữ nết người' },
+                  { id: 'tieuhoc_chuan', label: 'Chữ Mẫu Tiểu Học', sub: 'Chuẩn Bộ GD (Playwrite VN)', sample: 'Luyện nét chữ rèn nết người' },
+                  { id: 'tieuhoc_oly', label: 'Tập Viết Có Ô Ly', sub: 'Kẻ ô ly học sinh tiểu học', sample: 'Nét chữ cô dạy em thơ' },
                   { id: 'luyenchu', label: 'Vở Sạch Chữ Đẹp', sub: 'Nét thanh nét đậm Charm', sample: 'Luyện chữ rèn nết' },
+                  { id: 'tapviet', label: 'Tập Viết Nét Tròn', sub: 'Nét tròn Playpen / HP001', sample: 'Nét chữ nết người' },
                   { id: 'primary', label: 'Nét Phấn Học Trò', sub: 'Patrick Hand / Mali', sample: 'Rõ ràng, tròn trịa' },
                   { id: 'handwriting', label: 'Bút Mài Giáo Viên', sub: 'Caveat thanh thoát', sample: 'Nét bút cô giáo' },
                   { id: 'calligraphy', label: 'Thư Pháp Mềm Mại', sub: 'Dancing Script', sample: 'Nghệ thuật thư pháp' },
@@ -4886,8 +4909,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     }`}
                   >
                     <div className="text-[11px] font-bold flex items-center gap-1">
-                      {font.id === 'tapviet' && <span className="text-amber-400">📖</span>}
+                      {font.id === 'tieuhoc_chuan' && <span className="text-amber-300">🌟</span>}
+                      {font.id === 'tieuhoc_oly' && <span className="text-cyan-300">📐</span>}
                       {font.id === 'luyenchu' && <span className="text-pink-400">✨</span>}
+                      {font.id === 'tapviet' && <span className="text-amber-400">📖</span>}
                       <span>{font.label}</span>
                     </div>
                     <div className="text-[9px] text-slate-400 mb-0.5">{font.sub}</div>
@@ -4895,8 +4920,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                       className="text-[12px] text-amber-200 truncate"
                       style={{
                         fontFamily:
-                          font.id === 'tapviet'
-                            ? '"TapVietTieuHoc", "Playpen Sans", "Patrick Hand", "Mali", cursive, sans-serif'
+                          font.id === 'tieuhoc_chuan'
+                            ? '"Playwrite VN", "HP001 4 hàng normal", cursive, sans-serif'
+                            : font.id === 'tieuhoc_oly'
+                            ? '"Playwrite VN Guides", "Playwrite VN", cursive, sans-serif'
+                            : font.id === 'tapviet'
+                            ? '"Playwrite VN", "Playpen Sans", cursive, sans-serif'
                             : font.id === 'luyenchu'
                             ? '"Charm", "Dancing Script", cursive'
                             : font.id === 'calligraphy'
@@ -5401,8 +5430,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   <div className="text-[11px] font-semibold text-purple-300 mb-1.5">Chọn kiểu chữ viết tay:</div>
                   <div className="grid grid-cols-2 gap-1.5 mb-3">
                     {[
-                      { id: 'tapviet', label: 'Tập Viết Tiểu Học', sub: 'Chuẩn nét ô ly Lớp 1-5', sample: 'Nét chữ nết người' },
-                      { id: 'luyenchu', label: 'Vở Sạch Chữ Đẹp', sub: 'Nét thanh nét đậm Charm', sample: 'Luyện chữ rèn nết' },
+                      { id: 'tieuhoc_chuan', label: 'Chữ Mẫu Tiểu Học', sub: 'Chuẩn Bộ GD (Playwrite VN)', sample: 'Luyện nét chữ rèn nết người' },
+                      { id: 'tieuhoc_oly', label: 'Tập Viết Có Ô Ly', sub: 'Dòng kẻ ô ly cấp 1 (Guides)', sample: 'Nét chữ cô dạy em thơ' },
+                      { id: 'luyenchu', label: 'Vở Sạch Chữ Đẹp', sub: 'Nét thanh nét đậm Charm - Ảnh 3', sample: 'Luyện chữ rèn nết' },
+                      { id: 'tapviet', label: 'Tập Viết Nét Tròn', sub: 'Playpen Sans / HP001', sample: 'Nét chữ nết người' },
                       { id: 'primary', label: 'Nét Phấn Học Trò', sub: 'Patrick Hand / Mali', sample: 'Rõ ràng, tròn trịa' },
                       { id: 'handwriting', label: 'Bút Mài Giáo Viên', sub: 'Caveat thanh thoát', sample: 'Nét bút cô giáo' },
                       { id: 'calligraphy', label: 'Thư Pháp Mềm Mại', sub: 'Dancing Script', sample: 'Nghệ thuật thư pháp' },
@@ -5418,8 +5449,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                         }`}
                       >
                         <div className="text-[11px] font-bold flex items-center gap-1">
-                          {font.id === 'tapviet' && <span className="text-amber-400">📖</span>}
+                          {font.id === 'tieuhoc_chuan' && <span className="text-amber-300">🌟</span>}
+                          {font.id === 'tieuhoc_oly' && <span className="text-cyan-300">📐</span>}
                           {font.id === 'luyenchu' && <span className="text-pink-400">✨</span>}
+                          {font.id === 'tapviet' && <span className="text-amber-400">📖</span>}
                           <span>{font.label}</span>
                         </div>
                         <div className="text-[9px] text-slate-400 mb-1">{font.sub}</div>
@@ -5427,8 +5460,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                           className="text-[13px] text-amber-200 truncate"
                           style={{
                             fontFamily:
-                              font.id === 'tapviet'
-                                ? '"TapVietTieuHoc", "Playpen Sans", "Patrick Hand", "Mali", cursive, sans-serif'
+                              font.id === 'tieuhoc_chuan'
+                                ? '"Playwrite VN", "HP001 4 hàng normal", cursive, sans-serif'
+                                : font.id === 'tieuhoc_oly'
+                                ? '"Playwrite VN Guides", "Playwrite VN", cursive, sans-serif'
+                                : font.id === 'tapviet'
+                                ? '"Playwrite VN", "Playpen Sans", cursive, sans-serif'
                                 : font.id === 'luyenchu'
                                 ? '"Charm", "Dancing Script", cursive'
                                 : font.id === 'calligraphy'

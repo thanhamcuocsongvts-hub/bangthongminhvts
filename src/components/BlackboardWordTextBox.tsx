@@ -27,7 +27,7 @@ export interface BlackboardTextBox {
   text: string;
   color: string;
   size: number;
-  fontFamily?: 'sans' | 'serif' | 'mono' | 'handwriting' | 'calligraphy' | 'cursive' | 'primary' | 'tapviet' | 'luyenchu';
+  fontFamily?: 'sans' | 'serif' | 'mono' | 'handwriting' | 'calligraphy' | 'cursive' | 'primary' | 'tapviet' | 'luyenchu' | 'tieuhoc_chuan' | 'tieuhoc_oly';
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -84,10 +84,14 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
   // Quick font families mapping
   const getFontFamilyCss = () => {
     switch (fontFamily) {
+      case 'tieuhoc_chuan':
+        return '"Playwrite VN", "HP001 4 hàng normal", "HP001 4 hàng", "HP001", "UNI Tapviet", "Playpen Sans", cursive, sans-serif';
+      case 'tieuhoc_oly':
+        return '"Playwrite VN Guides", "Playwrite VN", "HP001 4 hàng 1 ô ly", "HP001 4 hàng", cursive, sans-serif';
       case 'tapviet':
-        return '"TapVietTieuHoc", "Playpen Sans", "Patrick Hand", "Mali", cursive, sans-serif';
+        return '"Playwrite VN", "TapVietTieuHoc", "Playpen Sans", "Patrick Hand", "Mali", cursive, sans-serif';
       case 'luyenchu':
-        return '"Charm", "Dancing Script", "Caveat", cursive, sans-serif';
+        return '"Charm", "Dancing Script", "Playwrite VN", cursive, sans-serif';
       case 'calligraphy':
         return '"Dancing Script", "Caveat", cursive, sans-serif';
       case 'cursive':
@@ -272,8 +276,10 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
             className="bg-slate-800 text-white text-xs font-semibold px-2 py-1 rounded-lg border border-slate-700 outline-none focus:ring-1 focus:ring-cyan-400"
             title="Kiểu phông chữ (Chuẩn Word, Sách Giáo Khoa & Chữ Viết Tay Tuyệt Đẹp)"
           >
-            <option value="tapviet">📖 Tập Viết Tiểu Học (Chuẩn Lớp 1-5 / Playpen Sans / HP001)</option>
-            <option value="luyenchu">✨ Vở Sạch Chữ Đẹp (Nét thanh nét đậm / Charm)</option>
+            <option value="tieuhoc_chuan">🌟 Chữ Mẫu Tiểu Học BGD (Playwrite VN / HP001 Lớp 1-5)</option>
+            <option value="tieuhoc_oly">📐 Tập Viết Có Dòng Kẻ Ô Ly (Playwrite VN Guides)</option>
+            <option value="luyenchu">✨ Vở Sạch Chữ Đẹp (Nét thanh nét đậm Charm - Mẫu Ảnh 3)</option>
+            <option value="tapviet">📖 Tập Viết Nét Tròn (Playpen Sans / HP001)</option>
             <option value="calligraphy">✍️ Thư Pháp Mềm Mại (Dancing Script)</option>
             <option value="handwriting">📝 Bút Mài Giáo Viên (Caveat)</option>
             <option value="primary">🎒 Nét Phấn Học Trò (Playpen / Mali)</option>

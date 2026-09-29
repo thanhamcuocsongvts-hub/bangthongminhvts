@@ -136,16 +136,17 @@ async function generateWithGemini(ai: any, params: any) {
 // Ultra-low latency vision caller specifically for live classroom handwriting recognition
 async function generateFastVisionWithGemini(ai: any, params: any) {
   const modelsToTry = [
-    "gemini-3.1-flash-lite", // Lowest latency & highest availability for OCR
+    "gemini-2.5-flash",      // Top tier multimodal vision & handwriting OCR
+    "gemini-3.8-flash",      // Multimodal standard
     "gemini-flash-latest",   // Fast fallback
-    "gemini-3.8-flash",      // Official multimodal standard
+    "gemini-2.5-flash-lite", // Fast lite fallback
   ];
   let lastError: any = null;
 
   for (const model of modelsToTry) {
     try {
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout after 4.5s for ${model}`)), 4500)
+        setTimeout(() => reject(new Error(`Timeout after 6s for ${model}`)), 6000)
       );
       const callPromise = ai.models.generateContent({
         ...params,
@@ -630,30 +631,27 @@ app.post("/api/ai/recognize-handwriting", async (req, res) => {
               },
             },
             {
-              text: `Bạn là chuyên gia AI nhận diện chữ viết tay và CÔNG THỨC TOÁN HỌC trên bảng dạy học (từ tiểu học đến THPT và đại học).
-Hãy nhận diện CHÍNH XÁC 100% từ ngữ, chữ cái, tên riêng hoặc CÔNG THỨC TOÁN HỌC/phép tính viết tay trong ảnh này.
+              text: `Bạn là chuyên gia AI hàng đầu về OCR nhận diện CHỮ VIẾT TAY TIẾNG VIỆT và CÔNG THỨC TOÁN HỌC trên bảng dạy học (kể cả chữ viết ẩu, chữ viết xấu, chữ viết thảo, chữ nghiêng, chữ nhanh của giáo viên và học sinh).
 
-QUY TẮC NHẬN DIỆN CÔNG THỨC TOÁN HỌC:
-1. Đối với CÔNG THỨC TOÁN HỌC, BIỂU THỨC, PHƯƠNG TRÌNH, PHÉP TÍNH:
-   - Nhận diện CHÍNH XÁC từng ký hiệu toán học:
-     + Phân số: \\frac{a}{b} hoặc (a/b)
-     + Căn thức: \\sqrt{x}, \\sqrt[3]{x}, \\sqrt{x^2 + 1}
-     + Số mũ / lũy thừa: x^2, x^3, e^{2x}, 10^3
-     + Chỉ số dưới: x_1, x_2, u_n, S_n, y_0
-     + Dấu phép tính: +, -, \\times, :, =, \\ne, \\le, \\ge, <, >, \\approx, \\pm
-     + Ký hiệu giải tích & hình học: \\int, \\lim_{x \\to 0}, \\vec{u}, \\Delta, \\alpha, \\beta, \\pi, \\angle A, \\triangle ABC
-     + Phép tính số học: 12 + 25 = 37, 45 : 5 = 9, 3 x 4 = 12...
-   - Nếu là biểu thức toán học, hãy bao quanh bằng cặp dấu $ (ví dụ: $x^2 - 4x + 3 = 0$, $\\sqrt{x} + 2 = 4$, $\\frac{x + 1}{2x - 3} = 1$) để hệ thống tự động hiển thị KaTeX chuẩn xác và đẹp mắt.
-2. Đối với CHỮ VIẾT TAY TIẾNG VIỆT: Trả về chuẩn chính tả tiếng Việt có dấu đầy đủ (ví dụ: "Nguyễn Văn An", "Đạo hàm và ứng dụng", "Chào các em").
-3. Trả về DUY NHẤT nội dung nhận diện được. KHÔNG giải thích, KHÔNG thêm từ ngữ dẫn dắt, KHÔNG bọc trong dấu ngoặc kép thừa.
-4. Nếu ảnh hoàn toàn trống hoặc không có nét chữ/số nào, CHỈ TRẢ VỀ RỖNG.`,
+NHIỆM VỤ:
+Nhận diện nội dung chữ hoặc công thức trong ảnh, suy luận ngữ cảnh tiếng Việt chuẩn xác để đọc được cả những chữ viết vội, nét nối liền, chữ viết xấu.
+
+QUY TẮC NHẬN DIỆN:
+1. KHẢ NĂNG ĐỌC CHỮ XẤU & SUY LUẬN NGỮ CẢNH:
+   - Dù chữ viết tay có thể nguệch ngoạc, nét đứt, viết ẩu, viết thảo hoặc nét không đều, hãy vận dụng từ vựng tiếng Việt, tên riêng, thuật ngữ học tập để suy luận và đọc CHÍNH XÁC từ ngữ mà con người định viết.
+   - Luôn trả về từ ngữ tiếng Việt có dấu đầy đủ, chuẩn chính tả (ví dụ: "Đăng nguyên", "Hôm nay học bài", "Nguyễn Văn An", "Hình học không gian").
+   - Nếu người viết viết trên một hàng ngang, giữ nguyên trên một dòng (dùng khoảng trắng). Nếu viết rõ ràng trên nhiều dòng, dùng ký tự xuống dòng \\n.
+2. ĐỐI VỚI CÔNG THỨC TOÁN HỌC / BIỂU THỨC / PHÉP TÍNH:
+   - Nhận diện đúng số, phân số \\frac{a}{b}, căn thức \\sqrt{x}, số mũ x^2, chỉ số dưới x_1, dấu phép tính (+, -, \\times, :, =)... và bao quanh bằng cặp dấu $ (ví dụ: $x^2 - 4x + 3 = 0$, $15 + 28 = 43$).
+3. ĐỊNH DẠNG XUẤT RA:
+   - CHỈ TRẢ VỀ DUY NHẤT VĂN BẢN ĐÃ NHẬN DIỆN. KHÔNG giải thích, KHÔNG thêm lời chào, KHÔNG bọc trong dấu ngoặc kép thừa.`,
             },
           ],
         },
       ],
       config: {
-        temperature: 0.0,
-        maxOutputTokens: 120,
+        temperature: 0.1,
+        maxOutputTokens: 200,
         thinkingConfig: {
           thinkingBudget: 0,
         },
