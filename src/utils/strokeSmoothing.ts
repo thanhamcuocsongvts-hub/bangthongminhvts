@@ -335,10 +335,17 @@ export function cropStrokesToImage(
 
     for (const segment of strokeSegments) {
       if (segment.length === 1) {
+        // Nét chấm đơn lẻ (dấu chấm chữ i/j, dấu nặng, dấu chấm câu)
         offCtx.beginPath();
-        offCtx.arc(segment[0].x, segment[0].y, 2.5, 0, Math.PI * 2);
+        offCtx.arc(segment[0].x, segment[0].y, 4.5, 0, Math.PI * 2);
         offCtx.fill();
       } else if (segment.length === 2) {
+        // Nét gạch cực ngắn (dấu sắc, dấu huyền, dấu mũ)
+        offCtx.beginPath();
+        offCtx.arc(segment[0].x, segment[0].y, 3.2, 0, Math.PI * 2);
+        offCtx.arc(segment[1].x, segment[1].y, 3.2, 0, Math.PI * 2);
+        offCtx.fill();
+
         offCtx.beginPath();
         offCtx.moveTo(segment[0].x, segment[0].y);
         offCtx.lineTo(segment[1].x, segment[1].y);
@@ -550,7 +557,7 @@ export async function recognizeVietnameseHandwriting(
   contextHint = 'bài giảng lớp học, công thức toán học'
 ): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for reliable AI recognition
+  const timeoutId = setTimeout(() => controller.abort(), 18000); // 18s timeout for reliable AI recognition
 
   try {
     const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');

@@ -136,26 +136,35 @@ async function generateWithGemini(ai: any, params: any) {
 // Ultra-low latency vision caller specifically for live classroom handwriting recognition
 async function generateFastVisionWithGemini(ai: any, params: any) {
   const modelsToTry = [
-    "gemini-2.5-flash",      // Top tier multimodal vision & handwriting OCR
-    "gemini-3.8-flash",      // Multimodal standard
+    "gemini-3.8-flash",      // Multimodal primary model
     "gemini-flash-latest",   // Fast fallback
-    "gemini-2.5-flash-lite", // Fast lite fallback
+    "gemini-3.1-flash-lite", // Fast lite fallback
+    "gemini-3.1-pro-preview", // High-intelligence fallback
   ];
   let lastError: any = null;
 
-  for (const model of modelsToTry) {
-    try {
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout after 6s for ${model}`)), 6000)
-      );
-      const callPromise = ai.models.generateContent({
-        ...params,
-        model,
-      });
-      return await Promise.race([callPromise, timeoutPromise]);
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`[AI Notice] Fast vision model ${model} unavailable (${err?.status || err?.message}), trying next...`);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (const model of modelsToTry) {
+      try {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout after 8s for ${model}`)), 8000)
+        );
+        const callPromise = ai.models.generateContent({
+          ...params,
+          model,
+        });
+        return await Promise.race([callPromise, timeoutPromise]);
+      } catch (err: any) {
+        lastError = err;
+        const msg = err?.message || String(err);
+        console.warn(`[AI Notice] Fast vision model ${model} (attempt ${attempt + 1}) unavailable: ${msg.slice(0, 90)}, trying next candidate...`);
+        if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("429")) {
+          await new Promise((r) => setTimeout(r, 350));
+        }
+      }
+    }
+    if (attempt === 0) {
+      await new Promise((r) => setTimeout(r, 500));
     }
   }
   throw lastError;
@@ -631,19 +640,23 @@ app.post("/api/ai/recognize-handwriting", async (req, res) => {
               },
             },
             {
-              text: `Bạn là chuyên gia AI hàng đầu về OCR nhận diện CHỮ VIẾT TAY TIẾNG VIỆT và CÔNG THỨC TOÁN HỌC trên bảng dạy học (kể cả chữ viết ẩu, chữ viết xấu, chữ viết thảo, chữ nghiêng, chữ nhanh của giáo viên và học sinh).
+              text: `[VAI TRÒ]:
+Bạn là một GIÁO VIÊN VIỆT NAM GIÀU KINH NGHIỆM ĐỌC VÀ CHẤM CHỮ VIẾT TAY TRÊN BẢNG LỚP HỌC.
+Người bình thường có thể đọc và đoán được từ ngữ dù chữ viết xấu, viết ẩu, viết vội, nét nghệch ngoạc, nét đứt, thiếu dấu hoặc dính nét. Là một giáo viên tâm huyết, bạn luôn suy luận ngữ cảnh tiếng Việt và đọc ĐÚNG 100% từ ngữ mà người viết định thể hiện!
 
-NHIỆM VỤ:
-Nhận diện nội dung chữ hoặc công thức trong ảnh, suy luận ngữ cảnh tiếng Việt chuẩn xác để đọc được cả những chữ viết vội, nét nối liền, chữ viết xấu.
+[NGỮ CẢNH BÀI GIẢNG / LỚP HỌC]: ${context || "lớp học, giáo viên giảng bài tiếng Việt, toán học"}
 
-QUY TẮC NHẬN DIỆN:
-1. KHẢ NĂNG ĐỌC CHỮ XẤU & SUY LUẬN NGỮ CẢNH:
-   - Dù chữ viết tay có thể nguệch ngoạc, nét đứt, viết ẩu, viết thảo hoặc nét không đều, hãy vận dụng từ vựng tiếng Việt, tên riêng, thuật ngữ học tập để suy luận và đọc CHÍNH XÁC từ ngữ mà con người định viết.
-   - Luôn trả về từ ngữ tiếng Việt có dấu đầy đủ, chuẩn chính tả (ví dụ: "Đăng nguyên", "Hôm nay học bài", "Nguyễn Văn An", "Hình học không gian").
-   - Nếu người viết viết trên một hàng ngang, giữ nguyên trên một dòng (dùng khoảng trắng). Nếu viết rõ ràng trên nhiều dòng, dùng ký tự xuống dòng \\n.
+[HƯỚNG DẪN ĐỌC & ĐOÁN CHỮ VIẾT TAY XẤU]:
+1. ĐỌC VÀ SUY LUẬN TỪ NGỮ TIẾNG VIỆT & TÊN RIÊNG:
+   - Hãy liên tưởng ngay tới các tên riêng phổ biến của người Việt (ví dụ: Kiệt, Tuấn Kiệt, Minh, An, Linh, Nam, Hùng, Long, Dũng, Hoa, Lan, Thảo, Trang, Phúc, Đức, Quân, Hoàng, Khoa...).
+   - Nếu thấy các nét ký tự trông giống 'K', 'i', 'e', 't' (kể cả nét nguệch ngoạc, nét đứt, dấu chấm chữ i hay dấu nặng mờ) -> Đọc ngay là "Kiệt" (hoặc "Tuấn Kiệt" nếu có 2 từ).
+   - Hãy liên tưởng tới các từ vựng học tập thường ngày (ví dụ: "Bài học", "Hôm nay", "Hình học", "Toán", "Văn", "Đại số", "Thứ hai", "Định lý", "Công thức", "Tập viết"...).
+   - Tự động hoàn thiện dấu tiếng Việt chuẩn xác (dấu sắc, huyền, hỏi, ngã, nặng, mũ â ê ô, móc ư ơ, đ).
+   - Nếu nét chữ trải dài trên một hàng ngang, giữ trên 1 dòng. Nếu rõ ràng nhiều dòng, dùng ký tự xuống dòng \\n.
 2. ĐỐI VỚI CÔNG THỨC TOÁN HỌC / BIỂU THỨC / PHÉP TÍNH:
-   - Nhận diện đúng số, phân số \\frac{a}{b}, căn thức \\sqrt{x}, số mũ x^2, chỉ số dưới x_1, dấu phép tính (+, -, \\times, :, =)... và bao quanh bằng cặp dấu $ (ví dụ: $x^2 - 4x + 3 = 0$, $15 + 28 = 43$).
-3. ĐỊNH DẠNG XUẤT RA:
+   - Nhận diện đúng số 0-9, phân số \\frac{a}{b}, căn thức \\sqrt{x}, số mũ x^2, chỉ số dưới x_1, dấu phép tính (+, -, \\times, :, =)... và bao quanh bằng cặp dấu $ (ví dụ: $x^2 - 4x + 3 = 0$, $15 + 28 = 43$).
+3. QUY TẮC BẮT BUỘC:
+   - Tuyệt đối KHÔNG từ chối. Luôn đưa ra phỏng đoán tốt nhất có nghĩa trong tiếng Việt.
    - CHỈ TRẢ VỀ DUY NHẤT VĂN BẢN ĐÃ NHẬN DIỆN. KHÔNG giải thích, KHÔNG thêm lời chào, KHÔNG bọc trong dấu ngoặc kép thừa.`,
             },
           ],
@@ -652,9 +665,6 @@ QUY TẮC NHẬN DIỆN:
       config: {
         temperature: 0.1,
         maxOutputTokens: 200,
-        thinkingConfig: {
-          thinkingBudget: 0,
-        },
       },
     });
 
