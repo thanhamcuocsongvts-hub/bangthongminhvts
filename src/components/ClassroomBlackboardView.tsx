@@ -68,6 +68,7 @@ import {
   Feather,
   Wand2,
   Loader2,
+  Zap,
 } from 'lucide-react';
 import {
   filterPointJitter,
@@ -109,6 +110,7 @@ interface ClassroomBlackboardViewProps {
   onDeleteLesson?: (id: string) => void;
   onSwitchToPresentation?: () => void;
   onSwitchToReader?: () => void;
+  onSwitchToFastWhiteboard?: () => void;
   onOpenRandomPicker?: () => void;
   isInitialFullScreen?: boolean;
 }
@@ -127,6 +129,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   onDeleteLesson,
   onSwitchToPresentation,
   onSwitchToReader,
+  onSwitchToFastWhiteboard,
   onOpenRandomPicker,
   isInitialFullScreen = false,
 }) => {
@@ -2025,14 +2028,35 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         }
 
         // =========================================================================
-        // BẮT BUỘC (Yêu cầu 3): Khi vẽ, dùng ctx.beginPath(), ctx.moveTo(lastX, lastY)
-        // và ctx.lineTo(currentX, currentY), sau đó gọi ctx.stroke() ngay lập tức để
-        // nối kín nét ngang/xéo dù tốc độ lướt rất nhanh.
+        // THUẬT TOÁN NỘI SUY MIDPOINT QUADRATIC BÉZIER (Zero-Latency & Smooth Stroke):
+        // Khử gãy khúc, vẽ đường cong mượt mà liên tục từ phần cứng 120Hz
         // =========================================================================
-        ctx.beginPath();
-        ctx.moveTo(lastX, lastY);
-        ctx.lineTo(currentX, currentY);
-        ctx.stroke();
+        if (pts.length === 2) {
+          const midX = (pts[0].x + currentX) / 2;
+          const midY = (pts[0].y + currentY) / 2;
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          ctx.lineTo(midX, midY);
+          ctx.stroke();
+          lastMidPointRef.current = { x: midX, y: midY };
+        } else if (pts.length >= 3) {
+          const pPrev = pts[pts.length - 2];
+          const currentMidX = (pPrev.x + currentX) / 2;
+          const currentMidY = (pPrev.y + currentY) / 2;
+          const prevMid = lastMidPointRef.current || { x: pPrev.x, y: pPrev.y };
+
+          ctx.beginPath();
+          ctx.moveTo(prevMid.x, prevMid.y);
+          ctx.quadraticCurveTo(pPrev.x, pPrev.y, currentMidX, currentMidY);
+          ctx.stroke();
+
+          lastMidPointRef.current = { x: currentMidX, y: currentMidY };
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(currentX, currentY);
+          ctx.lineTo(currentX, currentY);
+          ctx.stroke();
+        }
 
         // Cập nhật lại tọa độ điểm trước đó
         lastPointerPointRef.current = ptWithWidth;
@@ -2391,6 +2415,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           ctx.strokeStyle = activeColor;
           ctx.lineWidth = activeTool === 'highlighter' ? strokeSize * 2.5 : strokeSize;
           ctx.globalAlpha = activeTool === 'highlighter' ? 0.45 : 0.98;
+        }
+        if (lastMidPointRef.current && activePointsRef.current.length > 2) {
+          ctx.beginPath();
+          ctx.moveTo(lastMidPointRef.current.x, lastMidPointRef.current.y);
+          ctx.lineTo(pLast.x, pLast.y);
+          ctx.stroke();
         }
         ctx.restore();
       }
@@ -2965,6 +2995,18 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               >
                 <Eye className="w-3.5 h-3.5" />
                 <span className="hidden md:inline">Góc Bảng</span>
+              </button>
+            )}
+
+            {/* Quick Switch to Fast Whiteboard 120Hz */}
+            {onSwitchToFastWhiteboard && (
+              <button
+                onClick={onSwitchToFastWhiteboard}
+                className="px-2.5 py-1.5 rounded-2xl text-xs font-black flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 border border-amber-300 shadow-md transition-all active:scale-95 cursor-pointer"
+                title="Chuyển sang Bảng Siêu Tốc 120Hz 4K Zero-Latency"
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span className="hidden sm:inline">Bảng Siêu Tốc 120Hz</span>
               </button>
             )}
 

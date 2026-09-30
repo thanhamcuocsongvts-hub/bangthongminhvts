@@ -18,6 +18,7 @@ import { PresentationView } from './components/PresentationView';
 import { PPTPresentationMode } from './components/PPTPresentationMode';
 import { DocumentReaderView } from './components/DocumentReaderView';
 import { TouchWhiteboard } from './components/TouchWhiteboard';
+import { FastWhiteboard } from './components/FastWhiteboard';
 import { LiveQuizHub } from './components/LiveQuizHub';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ClassGradebook } from './components/ClassGradebook';
@@ -956,7 +957,7 @@ export default function App() {
 
       {/* Main Interactive Screen Content */}
       <main className={`flex-1 ${
-        activeTab === 'whiteboard'
+        activeTab === 'whiteboard' || activeTab === 'fast-whiteboard'
           ? 'p-0 sm:p-1 md:p-1.5 overflow-hidden'
           : isMobile
           ? 'p-2.5 pb-24 overflow-y-auto'
@@ -1032,11 +1033,23 @@ export default function App() {
                 }}
                 onSwitchToPresentation={() => setActiveTab('whiteboard')}
                 onSwitchToReader={() => setActiveTab('reader')}
+                onSwitchToFastWhiteboard={() => setActiveTab('fast-whiteboard')}
                 onOpenRandomPicker={() => {
                   setPickerClassroom(activeTeacher?.classes?.[0] || null);
                   setShowRandomPickerModal(true);
                 }}
               />
+            )}
+
+            {/* Tab: Fast Whiteboard (4K 120Hz Zero Latency Interactive Surface) */}
+            {activeTab === 'fast-whiteboard' && (
+              <div className="w-full h-full relative">
+                <FastWhiteboard
+                  theme="chalkboard"
+                  className="rounded-2xl shadow-xl border border-slate-700/50"
+                  onBack={() => setActiveTab('whiteboard')}
+                />
+              </div>
             )}
 
             {/* Tab 4: Live Quiz Hub & Classroom Submission (with embedded Analytics) */}

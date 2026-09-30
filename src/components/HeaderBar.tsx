@@ -4,13 +4,14 @@ import {
   BookOpen, Trophy, PenTool, CheckSquare, Globe, 
   FolderOpen, ShieldCheck, KeyRound, RefreshCw, LogOut, 
   LogIn, Dices, Type, ChevronDown, Smartphone, Menu, X,
-  GraduationCap, Sparkles
+  GraduationCap, Sparkles, Zap
 } from 'lucide-react';
 import { TextScale, TeacherProfile } from '../types';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
 
 export type ActiveTab =
   | 'whiteboard'
+  | 'fast-whiteboard'
   | 'gradebook'
   | 'documents'
   | 'reader'
@@ -78,9 +79,10 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // 7 Main Navigation Tabs - clean, prominent, fully visible outside
+  // 8 Main Navigation Tabs - clean, prominent, fully visible outside
   const tabs: Array<{ id: ActiveTab; label: string; shortLabel: string; icon: React.ReactNode; desc: string }> = [
-    { id: 'whiteboard', label: 'Bảng Xanh & Bút Viết', shortLabel: 'Bảng Viết', icon: <PenTool className="w-4 h-4 text-emerald-600" />, desc: 'Bảng đen 75", phấn viết, chữ đẹp AI, hình học' },
+    { id: 'whiteboard', label: 'Bảng Xanh Sư Phạm', shortLabel: 'Bảng Viết', icon: <PenTool className="w-4 h-4 text-emerald-600" />, desc: 'Bảng đen 75", phấn viết, chữ đẹp AI, hình học' },
+    { id: 'fast-whiteboard', label: 'Bảng Siêu Tốc 120Hz', shortLabel: 'Bảng 120Hz', icon: <Zap className="w-4 h-4 text-amber-500" />, desc: 'Bảng tương tác chuyên dụng 75" 4K không độ trễ, mượt như bảng tivi' },
     { id: 'gradebook', label: 'Quản Lý Lớp Học', shortLabel: 'Lớp Học', icon: <Users className="w-4 h-4 text-blue-600" />, desc: 'Danh sách học sinh, điểm số, chuyên cần' },
     { id: 'documents', label: 'Kho Bài Giảng', shortLabel: 'Kho Bài Giảng', icon: <FolderOpen className="w-4 h-4 text-amber-600" />, desc: 'Lưu trữ tài liệu Word, PDF, PPTX, hình ảnh' },
     { id: 'reader', label: 'Mở Tài Liệu', shortLabel: 'Mở Tài Liệu', icon: <BookOpen className="w-4 h-4 text-sky-600" />, desc: 'Đọc tài liệu gốc & trích xuất kiến thức AI' },
