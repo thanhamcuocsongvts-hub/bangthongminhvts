@@ -73,9 +73,14 @@ function writeJsonFileSync(filePath: string, data: any): void {
 
 // Initialize Gemini Client
 const getGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    process.env.API_KEY ||
+    process.env.VITE_API_KEY ||
+    process.env.GOOGLE_API_KEY;
   if (!apiKey) {
-    console.warn("GEMINI_API_KEY is not set. Gemini features may fail.");
+    console.warn("GEMINI_API_KEY (or VITE_GEMINI_API_KEY / API_KEY) is not set. Gemini features may fail.");
   }
   return new GoogleGenAI({
     apiKey: apiKey || "",

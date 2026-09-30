@@ -27,6 +27,7 @@ import { QuizQuestion, LessonDoc } from '../types';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { parseQuizFromFile } from '../utils/quizFileParser';
+import { directGenerateQuiz } from '../utils/geminiClient';
 
 interface AIQuizCreatorModalProps {
   currentLesson?: LessonDoc | null;
@@ -85,22 +86,48 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
     setSuccessMessage(null);
 
     try {
-      const response = await fetch('/api/ai/generate-quiz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let rawQuestions: QuizQuestion[] = [];
+
+      try {
+        const response = await fetch('/api/ai/generate-quiz', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic: topic.trim(),
+            content: currentLesson?.rawText || '',
+            count: questionCount,
+            subject,
+            grade,
+            difficulty,
+          }),
+        });
+
+        if (response.ok) {
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const data = await response.json();
+            if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
+              rawQuestions = data.questions;
+            }
+          }
+        }
+      } catch (apiErr) {
+        console.info('[AI Fallback] Server API unavailable, generating quiz directly in browser...', apiErr);
+      }
+
+      // If server API was unavailable or returned empty, call direct client-side Gemini
+      if (rawQuestions.length === 0) {
+        rawQuestions = await directGenerateQuiz({
           topic: topic.trim(),
-          content: currentLesson?.rawText || '',
-          count: questionCount,
           subject,
           grade,
+          count: questionCount,
           difficulty,
-        }),
-      });
+        });
+      }
 
-      const data = await response.json();
-      if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
-        const withLimits = data.questions.map((q: QuizQuestion, idx: number) => ({
+      if (rawQuestions && rawQuestions.length > 0) {
+        const withLimits = rawQuestions.map((q: QuizQuestion, idx: number) => ({
           ...q,
           id: `ai_q_${Date.now()}_${idx + 1}`,
           timeLimit: q.timeLimit || timeLimit,
@@ -109,11 +136,11 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
         setGeneratedQuestions((prev) => replaceExisting ? withLimits : [...prev, ...withLimits]);
         setSuccessMessage(`Đã tạo thành công ${withLimits.length} câu hỏi chuẩn từ AI!`);
       } else {
-        setErrorMessage('Không thể tạo câu hỏi từ AI. Vui lòng thử lại với chủ đề chi tiết hơn.');
+        setErrorMessage('Không thể tạo câu hỏi từ AI. Vui lòng kiểm tra API Key trong mục Cấu hình AI hoặc nhập chủ đề chi tiết hơn.');
       }
     } catch (e: any) {
       console.error('Error generating AI quiz', e);
-      setErrorMessage('Lỗi kết nối máy chủ AI: ' + (e?.message || 'Vui lòng kiểm tra kết nối mạng'));
+      setErrorMessage('Lỗi kết nối máy chủ AI: ' + (e?.message || 'Vui lòng kiểm tra lại API Key'));
     } finally {
       setIsGenerating(false);
     }

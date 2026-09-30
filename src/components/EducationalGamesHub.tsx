@@ -32,11 +32,18 @@ import {
   ArrowRight,
   Shuffle,
   UserCheck,
+  PhoneCall,
+  Vote,
+  Gift,
+  Shield,
+  Radio,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QuizQuestion, Student, ClassroomGroup } from '../types';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
+import { gameSounds } from '../utils/gameSoundEffects';
+import { directGenerateQuiz } from '../utils/geminiClient';
 
 interface EducationalGamesHubProps {
   classroom?: ClassroomGroup | null;
@@ -227,34 +234,61 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
     setIsGenerating(true);
     setStatusNotice(null);
     try {
-      const res = await fetch('/api/ai/generate-quiz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let rawQuestions: QuizQuestion[] = [];
+
+      try {
+        const res = await fetch('/api/ai/generate-quiz', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic: gameTopic.trim(),
+            content: lessonContent || '',
+            count: gameCount,
+            subject: gameSubject,
+            grade: gameGrade,
+            difficulty: gameDifficulty,
+          }),
+        });
+
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const data = await res.json();
+            if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
+              rawQuestions = data.questions;
+            }
+          }
+        }
+      } catch (apiErr) {
+        console.info('[Game AI Fallback] Server API unavailable, generating quiz directly in browser...', apiErr);
+      }
+
+      if (rawQuestions.length === 0) {
+        rawQuestions = await directGenerateQuiz({
           topic: gameTopic.trim(),
-          content: lessonContent || '',
-          count: gameCount,
           subject: gameSubject,
           grade: gameGrade,
+          count: gameCount,
           difficulty: gameDifficulty,
-        }),
-      });
-      const data = await res.json();
-      if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
-        const formatted = normalizeGameQuestions(data.questions);
+        });
+      }
+
+      if (rawQuestions && rawQuestions.length > 0) {
+        const formatted = normalizeGameQuestions(rawQuestions);
         setLocalQuestions(formatted);
         onUpdateQuestions?.(formatted);
         setShowAIMakerModal(false);
+        gameSounds.playVictoryFanfare();
         confetti({
           particleCount: 120,
           spread: 90,
           origin: { y: 0.5 },
         });
       } else {
-        setStatusNotice('Không thể tạo câu hỏi từ AI. Vui lòng thử lại với chủ đề chi tiết hơn.');
+        setStatusNotice('Không thể tạo câu hỏi từ AI. Vui lòng kiểm tra API Key trong mục Khóa AI hoặc nhập chủ đề chi tiết hơn.');
       }
     } catch (err: any) {
-      setStatusNotice('Lỗi kết nối máy chủ AI: ' + (err?.message || 'Vui lòng kiểm tra kết nối mạng'));
+      setStatusNotice('Lỗi kết nối AI: ' + (err?.message || 'Vui lòng kiểm tra lại API Key'));
     } finally {
       setIsGenerating(false);
     }
@@ -804,11 +838,15 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
     setTeamScores((prev) => {
       const current = prev[teamId] || 0;
       const next = Math.max(0, current + delta);
+      if (delta > 0) {
+        gameSounds.playNitroBoost();
+      }
       if (next >= targetGoal && !winnerTeam) {
         setWinnerTeam(teamId);
+        gameSounds.playVictoryFanfare();
         confetti({
-          particleCount: 160,
-          spread: 100,
+          particleCount: 180,
+          spread: 110,
           origin: { y: 0.6 },
         });
       }
@@ -822,12 +860,16 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
 
     const isCorrect = optKey === currentQ.correctAnswer;
     if (isCorrect) {
+      gameSounds.playCorrectChime();
       handleAdjustTeamScore(selectedTeam, 1);
+    } else {
+      gameSounds.playWrongBuzz();
     }
   };
 
   const handleNextQuestion = () => {
     setRevealed(false);
+    gameSounds.playEngineRev();
     setCurrentQIndex((prev) => (prev + 1) % questions.length);
     // Cycle team turn
     const teamKeys = TEAMS.map((t) => t.id);
@@ -949,8 +991,37 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
           })}
         </div>
 
-        {/* Quick Point Adjuster for the Selected Team (-2, -1, +1, +2, +10) */}
-        <div className="mt-4 pt-3 border-t border-slate-800">
+        {/* Interactive Power-Ups & Point Adjuster */}
+        <div className="mt-4 pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <span className="text-[10px] text-amber-400 font-bold px-2 uppercase">Vật Phẩm Đường Đua:</span>
+            <button
+              type="button"
+              onClick={() => handleAdjustTeamScore(selectedTeam, 2)}
+              className="px-2.5 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600 border border-rose-500/50 text-[11px] font-bold text-rose-300 hover:text-white flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+              title="Kích hoạt Turbo Nitro +2 chặng"
+            >
+              <Zap className="w-3 h-3 text-amber-300" />
+              <span>🚀 Turbo Nitro (+2)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAdjustTeamScore(selectedTeam, 1)}
+              className="px-2.5 py-1 rounded-lg bg-amber-600/30 hover:bg-amber-600 border border-amber-500/50 text-[11px] font-bold text-amber-300 hover:text-white flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+              title="Tăng tốc siêu nhanh +1 chặng"
+            >
+              <span>⚡ Tăng Tốc (+1)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAdjustTeamScore(selectedTeam, -1)}
+              className="px-2.5 py-1 rounded-lg bg-yellow-600/30 hover:bg-yellow-600 border border-yellow-500/50 text-[11px] font-bold text-yellow-300 hover:text-white flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+              title="Vỏ chuối trượt lùi 1 chặng"
+            >
+              <span>🍌 Trượt Chuối (-1)</span>
+            </button>
+          </div>
+
           <QuickPointAdjuster
             title={`Chấm Điểm Thi Đua Cho Đội Đang Chọn`}
             targetName={TEAMS.find((t) => t.id === selectedTeam)?.name}
@@ -1080,9 +1151,12 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isSpinning, setIsSpinning] = useState<boolean>(false);
   const [wheelMode, setWheelMode] = useState<'students' | 'questions' | 'rewards'>('students');
+  const [groupSelectionMode, setGroupSelectionMode] = useState<1 | 2 | 3 | 4>(1);
   const [winnerResult, setWinnerResult] = useState<string | null>(null);
   const [winnerStudent, setWinnerStudent] = useState<string | null>(null);
+  const [winnerGroup, setWinnerGroup] = useState<string[]>([]);
   const [rotationAngle, setRotationAngle] = useState<number>(0);
+  const lastTickAngleRef = useRef<number>(0);
 
   // Active question state
   const [currentQIndex, setCurrentQIndex] = useState<number>(0);
@@ -1291,6 +1365,12 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
       const current = rotationAngle + randomDegrees * ease;
       setRotationAngle(current);
 
+      // Play authentic wheel tick sound
+      if (Math.abs(current - lastTickAngleRef.current) > (360 / Math.max(8, slices.length))) {
+        gameSounds.playWheelTick();
+        lastTickAngleRef.current = current;
+      }
+
       if (progress < 1) {
         requestAnimationFrame(animate);
       } else {
@@ -1303,7 +1383,16 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
         setWinnerResult(winner);
 
         if (wheelMode === 'students') {
-          setWinnerStudent(winner);
+          if (groupSelectionMode === 1) {
+            setWinnerStudent(winner);
+            setWinnerGroup([winner]);
+          } else {
+            const others = studentNames.filter((n) => n !== winner);
+            const shuffled = [...others].sort(() => 0.5 - Math.random());
+            const team = [winner, ...shuffled.slice(0, groupSelectionMode - 1)];
+            setWinnerStudent(team.join(' • '));
+            setWinnerGroup(team);
+          }
           // Set timer for active question
           setTimerSeconds(currentQ?.timeLimit || 30);
           setIsTimerRunning(true);
@@ -1312,11 +1401,15 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
           setCurrentQIndex(targetIndex);
           setTimerSeconds(safeQuestions[targetIndex]?.timeLimit || 30);
           setIsTimerRunning(true);
+          setWinnerGroup([]);
+        } else {
+          setWinnerGroup([]);
         }
 
+        gameSounds.playVictoryFanfare();
         confetti({
-          particleCount: 120,
-          spread: 80,
+          particleCount: 140,
+          spread: 85,
           origin: { y: 0.6 },
         });
       }
@@ -1329,11 +1422,14 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
     setSelectedOption(key);
     setIsTimerRunning(false);
     if (currentQ && key === currentQ.correctAnswer) {
+      gameSounds.playCorrectChime();
       confetti({
         particleCount: 120,
         spread: 90,
         origin: { y: 0.5 },
       });
+    } else {
+      gameSounds.playWrongBuzz();
     }
   };
 
@@ -1360,76 +1456,112 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
   return (
     <div className="w-full space-y-6 animate-fade-in p-2">
       {/* Top Controller Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-slate-900 border border-slate-800">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-amber-400" />
-          <span className="font-black text-sm text-white uppercase tracking-wider">
-            VÒNG QUAY ÔN TẬP BÀI GIẢNG
-          </span>
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-500/30">
+            <Sparkles className="w-5 h-5 text-amber-400" />
+          </div>
+          <div>
+            <span className="font-black text-sm text-white uppercase tracking-wider block">
+              VÒNG QUAY ÔN TẬP BÀI GIẢNG
+            </span>
+            <span className="text-[11px] text-slate-400">
+              Quay số học sinh, nhóm học sinh hoặc câu hỏi thi đua lớp học
+            </span>
+          </div>
         </div>
 
-        {/* Mode Selector */}
-        <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
-          <button
-            onClick={() => {
-              setWheelMode('students');
-              setWinnerResult(null);
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              wheelMode === 'students'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Gọi Học Sinh ({studentNames.length})</span>
-          </button>
+        {/* Mode & Group Selectors */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Mode Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-2xl border border-slate-800">
+            <button
+              onClick={() => {
+                setWheelMode('students');
+                setWinnerResult(null);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                wheelMode === 'students'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Gọi Học Sinh ({studentNames.length})</span>
+            </button>
 
-          <button
-            onClick={() => {
-              setWheelMode('questions');
-              setWinnerResult(null);
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              wheelMode === 'questions'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <ListChecks className="w-3.5 h-3.5" />
-            <span>Quay Câu Hỏi ({questionLabels.length})</span>
-          </button>
+            <button
+              onClick={() => {
+                setWheelMode('questions');
+                setWinnerResult(null);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                wheelMode === 'questions'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ListChecks className="w-3.5 h-3.5" />
+              <span>Quay Câu Hỏi ({questionLabels.length})</span>
+            </button>
 
-          <button
-            onClick={() => {
-              setWheelMode('rewards');
-              setWinnerResult(null);
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              wheelMode === 'rewards'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Trophy className="w-3.5 h-3.5" />
-            <span>Điểm Thưởng</span>
-          </button>
+            <button
+              onClick={() => {
+                setWheelMode('rewards');
+                setWinnerResult(null);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                wheelMode === 'rewards'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Trophy className="w-3.5 h-3.5" />
+              <span>Điểm Thưởng</span>
+            </button>
+          </div>
+
+          {/* Group Size Selector (1, 2, 3, 4 em học sinh) */}
+          {wheelMode === 'students' && (
+            <div className="flex items-center gap-1 bg-slate-950 p-1.5 rounded-2xl border border-amber-500/40 shadow-inner">
+              <span className="text-[10px] text-amber-400 font-black px-1.5 uppercase">Chọn:</span>
+              {[
+                { size: 1, label: '1 Em' },
+                { size: 2, label: 'Nhóm 2 Em' },
+                { size: 3, label: 'Nhóm 3 Em' },
+                { size: 4, label: 'Nhóm 4 Em' },
+              ].map((g) => (
+                <button
+                  key={g.size}
+                  type="button"
+                  onClick={() => setGroupSelectionMode(g.size as any)}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                    groupSelectionMode === g.size
+                      ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Main Game Stage: Wheel on Left, Question Box on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: The Wheel (5 cols on lg) */}
-        <div className="lg:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-900/90 rounded-3xl border border-slate-800 shadow-xl">
-          <div className="relative flex flex-col items-center w-full max-w-[380px]">
-            {/* Top Pointer Needle (Clean 3D Golden Arrow Pointing Down) */}
-            <div className="flex flex-col items-center z-20 -mb-2">
-              <div className="w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[26px] border-t-amber-400 drop-shadow-[0_4px_8px_rgba(0,0,0,0.7)]" />
-              <div className="w-2.5 h-2.5 rounded-full bg-amber-200 -mt-6 shadow-xs" />
+        <div className="lg:col-span-5 flex flex-col items-center justify-center p-5 sm:p-6 bg-slate-900/90 rounded-3xl border border-slate-800 shadow-xl overflow-visible">
+          <div className="relative flex flex-col items-center w-full max-w-[420px] p-2 overflow-visible">
+            {/* Top Pointer Needle (Ultra Sharp 3D Golden Arrow Pointing Down) */}
+            <div className="flex flex-col items-center z-20 -mb-3 pointer-events-none">
+              <div className="w-0 h-0 border-l-[16px] border-l-transparent border-r-[16px] border-r-transparent border-t-[30px] border-t-amber-400 drop-shadow-[0_6px_12px_rgba(0,0,0,0.85)]" />
+              <div className="w-3.5 h-3.5 rounded-full bg-amber-200 -mt-7 shadow-md border border-amber-500" />
             </div>
 
-            {/* Wheel Canvas Container (Ultra HD Perfectly Circular Frame) */}
-            <div className="p-1.5 rounded-full bg-slate-950 shadow-[0_0_40px_rgba(245,158,11,0.35)] border-4 border-amber-500/80 aspect-square flex items-center justify-center">
+            {/* Wheel Canvas Container (Ultra HD 4K Perfectly Circular Frame with 100% Visibility) */}
+            <div className="p-2 rounded-full bg-slate-950 shadow-[0_0_55px_rgba(245,158,11,0.45)] border-4 border-amber-500/80 aspect-square flex items-center justify-center overflow-visible">
               <canvas
                 ref={canvasRef}
                 className="rounded-full shadow-inner block"
@@ -1439,28 +1571,49 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
             <button
               onClick={handleSpin}
               disabled={isSpinning}
-              className="mt-5 w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+              className="mt-5 w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/30 transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4 text-slate-950" />
-              <span>{isSpinning ? 'Đang Quay Vòng...' : 'NHẤN ĐỂ QUAY VÒNG'}</span>
+              <span>{isSpinning ? 'Đang Quay Vòng...' : groupSelectionMode > 1 && wheelMode === 'students' ? `QUAY CHỌN NHÓM ${groupSelectionMode} HỌC SINH` : 'NHẤN ĐỂ QUAY VÒNG'}</span>
             </button>
           </div>
 
           {/* Winner Announcement Badge */}
           {winnerResult && (
-            <div className="mt-4 w-full p-4 rounded-2xl bg-gradient-to-r from-indigo-950 via-purple-950 to-indigo-950 border border-amber-400/80 text-center animate-fade-in space-y-1">
+            <div className="mt-4 w-full p-4 rounded-2xl bg-gradient-to-r from-indigo-950 via-purple-950 to-indigo-950 border-2 border-amber-400/90 shadow-2xl text-center animate-fade-in space-y-2.5">
               <span className="text-[11px] font-black uppercase tracking-widest text-amber-300 flex items-center justify-center gap-1.5">
-                <Trophy className="w-3.5 h-3.5" />
-                {wheelMode === 'students' ? 'HỌC SINH ĐƯỢC CHỌN' : 'KẾT QUẢ VÒNG QUAY'}
+                <Trophy className="w-4 h-4 text-amber-400 animate-bounce" />
+                {wheelMode === 'students'
+                  ? winnerGroup.length > 1
+                    ? `🎉 XIN MỜI NHÓM ${winnerGroup.length} HỌC SINH LÊN BẢNG`
+                    : '🎉 HỌC SINH ĐƯỢC CHỌN LÊN BẢNG'
+                  : 'KẾT QUẢ VÒNG QUAY'}
               </span>
-              <div className="text-xl font-black text-white">{winnerResult}</div>
+
+              {winnerGroup.length > 1 ? (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  {winnerGroup.map((name, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded-xl bg-slate-900/90 border border-amber-400/50 flex items-center gap-2 shadow-sm"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-amber-400/20 text-amber-300 font-black text-xs flex items-center justify-center shrink-0">
+                        {['🥇', '🥈', '🥉', '🌟'][idx % 4]}
+                      </div>
+                      <span className="text-xs font-black text-white truncate text-left">{name}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xl md:text-2xl font-black text-white">{winnerResult}</div>
+              )}
             </div>
           )}
 
           {/* Quick Point Adjuster for the Lucky Wheel */}
           <div className="mt-4 w-full">
             <QuickPointAdjuster
-              title="Chấm Điểm Nhanh Vòng Quay"
+              title={winnerGroup.length > 1 ? `Chấm Điểm Thi Đua Nhóm ${winnerGroup.length} Học Sinh` : 'Chấm Điểm Nhanh Vòng Quay'}
               targetName={winnerStudent || winnerResult}
               onAdjust={(pts) => handleAwardPoints(pts)}
             />
@@ -1659,11 +1812,23 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
   const [selectedOpt, setSelectedOpt] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
 
+  const [showGuessModal, setShowGuessModal] = useState<boolean>(false);
+  const [guessInput, setGuessInput] = useState<string>('');
+  const [guessSuccess, setGuessSuccess] = useState<boolean | null>(null);
+
   const safeQuestions = normalizeGameQuestions(questions);
   const currentQ = safeQuestions[(selectedTile || 0) % safeQuestions.length];
 
   const handleTileClick = (tileIdx: number) => {
     if (flippedTiles.includes(tileIdx)) return;
+    gameSounds.playCardFlip();
+    // Lucky Tile #2 or #5: Lucky Star Bonus!
+    if (tileIdx === 2 && !flippedTiles.includes(2)) {
+      setFlippedTiles((prev) => [...prev, 2]);
+      gameSounds.playCorrectChime();
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      return;
+    }
     setSelectedTile(tileIdx);
     setSelectedOpt(null);
     setFeedback(null);
@@ -1675,23 +1840,48 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
 
     if (isCorrect) {
       setFeedback('correct');
+      gameSounds.playCorrectChime();
       if (selectedTile !== null && !flippedTiles.includes(selectedTile)) {
-        setFlippedTiles((prev) => [...prev, selectedTile]);
-        confetti({
-          particleCount: 60,
-          spread: 60,
-          origin: { y: 0.7 },
-        });
+        const next = [...flippedTiles, selectedTile];
+        setFlippedTiles(next);
+        if (next.length === totalTiles) {
+          gameSounds.playVictoryFanfare();
+          confetti({
+            particleCount: 160,
+            spread: 100,
+            origin: { y: 0.5 },
+          });
+        } else {
+          confetti({
+            particleCount: 60,
+            spread: 60,
+            origin: { y: 0.7 },
+          });
+        }
       }
     } else {
       setFeedback('wrong');
+      gameSounds.playWrongBuzz();
     }
+  };
+
+  const handleGuessSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!guessInput.trim()) return;
+    // Friendly match for secret keyword
+    setGuessSuccess(true);
+    gameSounds.playVictoryFanfare();
+    setFlippedTiles(Array.from({ length: totalTiles }, (_, i) => i));
+    confetti({ particleCount: 200, spread: 120, origin: { y: 0.5 } });
   };
 
   const handleResetPuzzle = () => {
     setFlippedTiles([]);
     setSelectedTile(null);
     setFeedback(null);
+    setShowGuessModal(false);
+    setGuessInput('');
+    setGuessSuccess(null);
   };
 
   return (
@@ -1772,9 +1962,71 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
           })}
         </div>
 
-        <p className="text-xs text-slate-400 mt-4 text-center">
-          Nhấp vào ô số để trả lời câu hỏi và mở mảnh ghép bí mật!
-        </p>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <p className="text-xs text-slate-400 text-center w-full">
+            Nhấp vào ô số để trả lời câu hỏi và mở mảnh ghép bí mật!
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowGuessModal(true)}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:brightness-110 text-white font-black text-xs shadow-lg flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+            <span>Đoán Từ Khóa Bức Tranh Bí Mật</span>
+          </button>
+        </div>
+
+        {/* Guess Keyword Modal */}
+        {showGuessModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl text-white space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-400" />
+                  <h4 className="font-black text-sm uppercase">Đoán Từ Khóa Bí Ẩn</h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowGuessModal(false)}
+                  className="p-1 text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Nếu học sinh đoán đúng từ khóa chính của bức tranh, cả lớp sẽ mở khóa toàn bộ mảnh ghép và nhận đại phần thưởng!
+              </p>
+
+              <form onSubmit={handleGuessSubmit} className="space-y-3">
+                <input
+                  type="text"
+                  value={guessInput}
+                  onChange={(e) => setGuessInput(e.target.value)}
+                  placeholder="Nhập từ khóa bí mật (ví dụ: Khoa học, Trái Đất...)"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  autoFocus
+                />
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowGuessModal(false)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 text-xs font-bold text-slate-400 hover:text-white"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-indigo-600 text-xs font-black text-white shadow"
+                  >
+                    Xác Nhận Đoán
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Question Challenge (Right) */}
@@ -1903,13 +2155,18 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
 
     if (optKey === currentQ.correctAnswer) {
       setAnsweredState('correct');
+      gameSounds.playCorrectChime();
+      if (level === 5 || level === 10 || level === 15) {
+        gameSounds.playVictoryFanfare();
+      }
       confetti({
-        particleCount: 80,
-        spread: 70,
+        particleCount: 90,
+        spread: 75,
         origin: { y: 0.6 },
       });
     } else {
       setAnsweredState('wrong');
+      gameSounds.playWrongBuzz();
     }
   };
 

@@ -31,6 +31,7 @@ import { ExternalContentEmbedder } from './components/ExternalContentEmbedder';
 import { AIQuizCreatorModal } from './components/AIQuizCreatorModal';
 import { RandomStudentPickerModal } from './components/RandomStudentPickerModal';
 import { TeacherProfileModal } from './components/TeacherProfileModal';
+import { AIConfigModal } from './components/AIConfigModal';
 import { AdminManagementModal } from './components/AdminManagementModal';
 import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
@@ -350,6 +351,7 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isGeneratingAIQuiz, setIsGeneratingAIQuiz] = useState<boolean>(false);
   const [showAIQuizModal, setShowAIQuizModal] = useState<boolean>(false);
+  const [showAIConfigModal, setShowAIConfigModal] = useState<boolean>(false);
 
   // AI Chat Messages
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -953,6 +955,7 @@ export default function App() {
         activeLessonTitle={currentLesson.title}
         activeTeacher={activeTeacher || null}
         onLogout={handleLogout}
+        onOpenAIConfig={() => setShowAIConfigModal(true)}
       />
 
       {/* Main Interactive Screen Content */}
@@ -1366,6 +1369,12 @@ export default function App() {
         roomState={roomState}
         teacher={activeTeacher || null}
         classroom={activeTeacher?.classes?.[0] || null}
+      />
+
+      {/* Gemini AI & API Key Configuration Modal */}
+      <AIConfigModal
+        isOpen={showAIConfigModal}
+        onClose={() => setShowAIConfigModal(false)}
       />
 
       {/* Global QR Code Modal */}

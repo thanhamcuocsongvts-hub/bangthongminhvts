@@ -5,6 +5,7 @@
  */
 
 import { StrokePoint } from '../types';
+import { directRecognizeHandwriting } from './geminiClient';
 
 /**
  * Adaptive Anti-Jitter Low-Pass Filter
@@ -551,13 +552,14 @@ export function recognizeGeometricShape(points: StrokePoint[]): {
 
 /**
  * Call server AI / OCR to recognize Vietnamese handwriting with 16s timeout protection
+ * Seamlessly falls back to client-side direct Gemini API if server endpoint is unavailable (e.g. Vercel deployment)
  */
 export async function recognizeVietnameseHandwriting(
   imageDataUrl: string,
   contextHint = 'bài giảng lớp học, công thức toán học'
 ): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 18000); // 18s timeout for reliable AI recognition
+  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for reliable AI recognition
 
   try {
     const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');
@@ -579,15 +581,28 @@ export async function recognizeVietnameseHandwriting(
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      throw new Error(`HTTP error ${response.status}`);
+    // If server responded with JSON
+    if (response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await response.json();
+        if (data.success && data.text) {
+          return (data.text || '').trim();
+        }
+      }
     }
 
-    const data = await response.json();
-    return (data.text || '').trim();
+    // If server returned non-OK or non-JSON (e.g. 404 or index.html on Vercel)
+    console.info('[AI Client Fallback] Server API unavailable on this host, calling Gemini directly in browser...');
+    return await directRecognizeHandwriting(imageDataUrl, contextHint);
   } catch (err: any) {
     clearTimeout(timeoutId);
-    console.warn('recognizeVietnameseHandwriting API failed or timed out:', err?.message || err);
-    return '';
+    console.info('[AI Client Fallback] Server API error, attempting direct Gemini in browser...', err?.message || err);
+    try {
+      return await directRecognizeHandwriting(imageDataUrl, contextHint);
+    } catch (directErr) {
+      console.warn('Direct Gemini recognition also failed:', directErr);
+      return '';
+    }
   }
 }

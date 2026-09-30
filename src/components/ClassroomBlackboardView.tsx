@@ -1600,6 +1600,86 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     [handleConvertHandwritingToCalligraphy]
   );
 
+  // Smart mobile selection: Select all recently written strokes (last 1-6 strokes) without manual dragging
+  const handleSelectRecentStrokes = useCallback(() => {
+    const curr = pagesRef.current[currentPageIndexRef.current] || pages[currentPageIndex];
+    if (!curr || curr.strokes.length === 0) {
+      setCalligraphyStatusBanner('Chưa có nét chữ nào trên bảng để chọn');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+      return;
+    }
+    const sessionIds = calligraphySessionStrokesRef.current;
+    let targetStrokes: WhiteboardStroke[] = [];
+    if (sessionIds && sessionIds.length > 0) {
+      targetStrokes = curr.strokes.filter((s) => sessionIds.includes(s.id));
+    }
+    if (targetStrokes.length === 0) {
+      targetStrokes = curr.strokes.slice(-6);
+    }
+    if (targetStrokes.length === 0) return;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const ids: string[] = [];
+    for (const s of targetStrokes) {
+      const b = getStrokeBounds(s);
+      if (b) {
+        ids.push(s.id);
+        minX = Math.min(minX, b.minX);
+        minY = Math.min(minY, b.minY);
+        maxX = Math.max(maxX, b.maxX);
+        maxY = Math.max(maxY, b.maxY);
+      }
+    }
+    if (ids.length > 0) {
+      setSweptSelection({
+        box: {
+          minX: Math.max(0, minX - 16),
+          minY: Math.max(0, minY - 16),
+          maxX: maxX + 16,
+          maxY: maxY + 16,
+        },
+        strokeIds: ids,
+        textIds: [],
+      });
+      setCalligraphyStatusBanner(`✨ Đã chọn ${ids.length} nét vừa viết`);
+    }
+  }, [pages, currentPageIndex]);
+
+  // Smart mobile selection: Select all handwriting strokes on the current page
+  const handleSelectAllStrokes = useCallback(() => {
+    const curr = pagesRef.current[currentPageIndexRef.current] || pages[currentPageIndex];
+    if (!curr || curr.strokes.length === 0) {
+      setCalligraphyStatusBanner('Chưa có nét chữ nào trên bảng để chọn');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+      return;
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const ids: string[] = [];
+    for (const s of curr.strokes) {
+      const b = getStrokeBounds(s);
+      if (b) {
+        ids.push(s.id);
+        minX = Math.min(minX, b.minX);
+        minY = Math.min(minY, b.minY);
+        maxX = Math.max(maxX, b.maxX);
+        maxY = Math.max(maxY, b.maxY);
+      }
+    }
+    if (ids.length > 0) {
+      setSweptSelection({
+        box: {
+          minX: Math.max(0, minX - 20),
+          minY: Math.max(0, minY - 20),
+          maxX: maxX + 20,
+          maxY: maxY + 20,
+        },
+        strokeIds: ids,
+        textIds: [],
+      });
+      setCalligraphyStatusBanner(`✨ Đã chọn toàn bộ ${ids.length} nét trên bảng`);
+    }
+  }, [pages, currentPageIndex]);
+
   // Center selected stroke to the current visible viewport
   const handleCenterStroke = useCallback(() => {
     if (!selectedStrokeId) return;
@@ -2512,6 +2592,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         return updated;
       });
 
+      // Track session strokes for instant 1-tap mobile calligraphy selection
+      calligraphySessionStrokesRef.current.push(newStroke.id);
+
       // Automatically select function graphs so the user can easily zoom/scale and move them immediately
       if (isFunctionGraphTool(activeTool)) {
         setSelectedStrokeId(newStroke.id);
@@ -3215,44 +3298,67 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         {/* Floating Calligraphy Status / Indicator Banner - Gọn nhẹ, không che khuất bảng vẽ */}
         {(activeTool === 'calligraphy' || isConvertingCalligraphy || calligraphyStatusBanner) && !calligraphySweep && (
           isMobile ? (
-            <div className="absolute top-2 left-2 right-2 z-30 flex items-center justify-between gap-1.5 px-3 py-1.5 bg-slate-900/95 backdrop-blur-md border border-purple-500/40 rounded-xl text-white text-[11px] shadow-lg pointer-events-auto">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-pulse" />
-                <span className="truncate text-purple-200 font-semibold">
-                  {calligraphyStatusBanner || (sweptSelection ? `Đã chọn ${sweptSelection.strokeIds.length} nét chữ` : 'Kéo quét bao quanh chữ để chuyển')}
-                </span>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {lastConvertedInfo && (
+            <div className="absolute top-2 left-2 right-2 z-30 flex flex-col gap-1.5 p-2 bg-slate-950/95 backdrop-blur-md border border-purple-500/50 rounded-2xl text-white shadow-2xl pointer-events-auto">
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-pulse" />
+                  <span className="truncate text-purple-200 font-bold text-[11px]">
+                    {calligraphyStatusBanner || (sweptSelection ? `Đã chọn ${sweptSelection.strokeIds.length} nét chữ` : 'Chế độ Chuyển Chữ Đẹp')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {lastConvertedInfo && (
+                    <button
+                      onClick={handleUndoCalligraphy}
+                      className="px-2 py-0.5 bg-rose-600/80 hover:bg-rose-500 rounded-lg text-[10px] font-bold text-white transition-all shadow flex items-center gap-1 cursor-pointer"
+                      title="Khôi phục lại nét vẽ phấn tay ban đầu"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                      <span>Hoàn tác</span>
+                    </button>
+                  )}
                   <button
-                    onClick={handleUndoCalligraphy}
-                    className="px-2 py-0.5 bg-rose-600/80 hover:bg-rose-500 rounded-lg text-[10px] font-bold text-white transition-all shadow flex items-center gap-1 cursor-pointer"
-                    title="Khôi phục lại nét vẽ phấn tay ban đầu"
+                    onClick={() => {
+                      setCalligraphyStatusBanner(null);
+                      setSweptSelection(null);
+                      handleToolChange('pen');
+                    }}
+                    className="p-1 text-slate-400 hover:text-white"
+                    title="Đóng chế độ chữ đẹp"
                   >
-                    <RotateCcw className="w-2.5 h-2.5" />
-                    <span>Hoàn tác</span>
+                    <X className="w-3.5 h-3.5" />
                   </button>
-                )}
+                </div>
+              </div>
+
+              {/* Mobile Quick Action Selectors */}
+              <div className="flex items-center gap-1.5 pt-0.5 border-t border-purple-500/30">
+                <button
+                  type="button"
+                  onClick={handleSelectRecentStrokes}
+                  className="flex-1 py-1 px-2 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-400/40 text-[10px] font-black text-purple-200 flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-300" />
+                  <span>Chọn nét vừa viết</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSelectAllStrokes}
+                  className="py-1 px-2.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-400/40 text-[10px] font-black text-indigo-200 flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
+                >
+                  <span>Chọn cả bảng</span>
+                </button>
                 {sweptSelection && (
                   <button
+                    type="button"
                     onClick={() => handleConvertHandwritingToCalligraphy()}
                     disabled={isConvertingCalligraphy}
-                    className="px-2.5 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg text-[10.5px] font-bold text-white shadow active:scale-95 transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    className="py-1 px-3 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 text-white font-black text-[10.5px] shadow flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer disabled:opacity-50 shrink-0"
                   >
                     <Wand2 className="w-3 h-3 text-amber-300" />
-                    <span>{isConvertingCalligraphy ? 'Đang chuyển...' : 'Chuyển Đẹp'}</span>
+                    <span>{isConvertingCalligraphy ? 'Đang chuyển...' : 'Chuyển Ngay'}</span>
                   </button>
                 )}
-                <button
-                  onClick={() => {
-                    setCalligraphyStatusBanner(null);
-                    if (!sweptSelection) handleToolChange('pen');
-                  }}
-                  className="p-1 text-slate-400 hover:text-white"
-                  title="Đóng chế độ chữ đẹp"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
               </div>
             </div>
           ) : (
@@ -3665,20 +3771,25 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           <>
             {/* Dashed Outline Box around the Swept Text Area */}
             <div
-              className="absolute pointer-events-none border-2 border-dashed border-purple-400 z-40 transition-all"
+              className="absolute pointer-events-none border-2 border-dashed border-purple-400 z-40 transition-all rounded-xl"
               style={{
                 left: `${sweptSelection.box.minX - boardScrollX}px`,
                 top: `${sweptSelection.box.minY - boardScrollY}px`,
                 width: `${sweptSelection.box.maxX - sweptSelection.box.minX}px`,
                 height: `${sweptSelection.box.maxY - sweptSelection.box.minY}px`,
-                boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.35)',
-                backgroundColor: 'transparent',
+                boxShadow: isMobile ? '0 0 25px rgba(168, 85, 247, 0.5)' : '0 0 0 9999px rgba(0, 0, 0, 0.35)',
+                backgroundColor: isMobile ? 'rgba(168, 85, 247, 0.08)' : 'transparent',
               }}
             >
               <div className="absolute -top-3 left-3 px-2 py-0.5 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-full text-[10px] font-bold text-white shadow-lg flex items-center gap-1 border border-purple-300/40">
                 <Sparkles className="w-3 h-3 text-amber-300" />
-                <span>Vùng chữ đã chọn ({sweptSelection.strokeIds.length > 0 ? `${sweptSelection.strokeIds.length} nét` : `${sweptSelection.textIds.length} khối chữ`})</span>
+                <span>Vùng chữ ({sweptSelection.strokeIds.length > 0 ? `${sweptSelection.strokeIds.length} nét` : `${sweptSelection.textIds.length} khối chữ`})</span>
               </div>
+              {/* Corner Circular Handles */}
+              <div className="absolute -top-1.5 -left-1.5 w-3 h-3 rounded-full bg-purple-500 border border-white shadow-sm" />
+              <div className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full bg-purple-500 border border-white shadow-sm" />
+              <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 rounded-full bg-purple-500 border border-white shadow-sm" />
+              <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 rounded-full bg-purple-500 border border-white shadow-sm" />
             </div>
 
             {/* Floating Confirm Action Pill: Bấm Chọn Chuyển Chữ Đẹp */}
