@@ -28,6 +28,7 @@ import {
   CloudDownload,
   RefreshCw,
   Smartphone,
+  Zap,
 } from 'lucide-react';
 import { ClassRoom, ClassStudent, TeacherProfile, ConductRecord, SemesterScoreDetail } from '../types';
 import { exportGradebookToExcel } from '../utils/exportUtils';
@@ -161,6 +162,9 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
     fieldName: string;
     currentValue?: number | null;
   } | null>(null);
+
+  // Dedicated Mobile Ergonomic Quick Point Adjuster Modal
+  const [quickPointStudent, setQuickPointStudent] = useState<ClassStudent | null>(null);
 
   const currentClass =
     classes.find((c) => c.id === activeClassId) || classes[0] || null;
@@ -1068,51 +1072,120 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                     </div>
                   </div>
 
-                  {/* Fast Mobile Action Buttons */}
-                  <div className="flex items-center justify-between gap-1.5 pt-1">
-                    <button
-                      onClick={() => handleAdjustBonus(student.id, 1)}
-                      className="flex-1 py-1.5 px-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-800 border border-emerald-200 text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
-                      title="Cộng 1 điểm thưởng thi đua"
-                    >
-                      <Plus className="w-3 h-3 text-emerald-600" />
-                      <span>+1 Thưởng</span>
-                    </button>
-
-                    {/* Quick Oral Score (8, 9, 10) */}
-                    <div className="flex items-center gap-1">
-                      <span className="text-[9px] font-bold text-slate-400">Miệng:</span>
-                      {[8, 9, 10].map((score) => (
-                        <button
-                          key={score}
-                          onClick={() => {
-                            if ('vibrate' in navigator) navigator.vibrate(30);
-                            handleUpdateSemesterScore(
-                              student.id,
-                              activeSemester === 'hk2' ? 'hk2' : 'hk1',
-                              'tx1',
-                              score
-                            );
-                          }}
-                          className="w-8 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-600 hover:text-white active:scale-95 text-indigo-700 font-mono font-black text-xs border border-indigo-200 transition-all cursor-pointer"
-                          title={`Chấm ${score} điểm miệng`}
+                  {/* Ergonomic Mobile Score & Bonus Adjuster (Point 4) */}
+                  <div className="flex flex-col gap-2 pt-1.5 border-t border-slate-100">
+                    {/* Row 1: Direct Bonus Points (+ / -) with Current Total Badge & Chấm Điểm Button */}
+                    <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setQuickPointStudent(student)}
+                        className="flex items-center gap-1.5 shrink-0 hover:opacity-85 active:scale-95 transition-transform cursor-pointer"
+                        title="Chạm để mở bảng cộng trừ điểm nhanh"
+                      >
+                        <span className="text-[10px] font-black uppercase text-indigo-700">Thi đua:</span>
+                        <span
+                          className={`font-mono font-black text-xs px-2.5 py-0.5 rounded-lg border shadow-xs ${
+                            (student.bonusPoints || 0) > 0
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                              : (student.bonusPoints || 0) < 0
+                              ? 'bg-rose-100 text-rose-800 border-rose-300'
+                              : 'bg-slate-100 text-slate-700 border-slate-300'
+                          }`}
                         >
-                          {score}
+                          {(student.bonusPoints || 0) > 0 ? `+${student.bonusPoints}đ` : `${student.bonusPoints || 0}đ`}
+                        </span>
+                      </button>
+
+                      {/* Quick Adjust Buttons: -1, +1, +2 & Big 'Chấm Điểm' Action */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if ('vibrate' in navigator) navigator.vibrate(25);
+                            handleAdjustBonus(student.id, -1);
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 active:scale-90 text-rose-800 font-mono font-black text-xs border border-rose-300 cursor-pointer transition-transform"
+                          title="Trừ 1 điểm"
+                        >
+                          -1
                         </button>
-                      ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if ('vibrate' in navigator) navigator.vibrate(25);
+                            handleAdjustBonus(student.id, 1);
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 active:scale-90 text-emerald-800 font-mono font-black text-xs border border-emerald-300 cursor-pointer transition-transform"
+                          title="Cộng 1 điểm"
+                        >
+                          +1
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if ('vibrate' in navigator) navigator.vibrate(25);
+                            handleAdjustBonus(student.id, 2);
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-90 text-white font-mono font-black text-xs shadow-xs cursor-pointer transition-transform"
+                          title="Cộng 2 điểm"
+                        >
+                          +2
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQuickPointStudent(student)}
+                          className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs shadow-xs active:scale-90 transition-transform cursor-pointer flex items-center gap-1"
+                          title="Mở bảng cộng trừ điểm & chấm miệng chuyên sâu"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-yellow-300" />
+                          <span>Chấm Điểm</span>
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Conduct Button */}
-                    <button
-                      onClick={() => {
-                        setConductStudentId(student.id);
-                        setShowConductModal(true);
-                      }}
-                      className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-600 cursor-pointer"
-                      title="Ghi nhận thi đua học sinh"
-                    >
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                    </button>
+                    {/* Row 2: Quick Oral Score (Miệng: 7, 8, 9, 10) & Conduct */}
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-bold text-slate-400">Chấm miệng TX:</span>
+                        {[7, 8, 9, 10].map((score) => (
+                          <button
+                            key={score}
+                            type="button"
+                            onClick={() => {
+                              if ('vibrate' in navigator) navigator.vibrate(30);
+                              handleUpdateSemesterScore(
+                                student.id,
+                                activeSemester === 'hk2' ? 'hk2' : 'hk1',
+                                'tx1',
+                                score
+                              );
+                            }}
+                            className={`w-7 py-1 rounded-lg font-mono font-black text-xs border transition-all cursor-pointer active:scale-90 ${
+                              semData?.tx1 === score
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border-slate-200'
+                            }`}
+                            title={`Chấm ${score} điểm`}
+                          >
+                            {score}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Conduct Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConductStudentId(student.id);
+                          setShowConductModal(true);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-200 flex items-center gap-1 cursor-pointer"
+                        title="Ghi nhận nề nếp thi đua"
+                      >
+                        <AlertTriangle className="w-3 h-3 text-amber-600" />
+                        <span>Nề nếp</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -2308,6 +2381,238 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Xác Nhận Xóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* DEDICATED ERGONOMIC MOBILE QUICK POINT ADJUSTER MODAL */}
+      {quickPointStudent && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-2 sm:p-4 select-none animate-fade-in"
+          onClick={() => setQuickPointStudent(null)}
+        >
+          <div
+            className="bg-white rounded-3xl p-5 shadow-2xl max-w-md w-full border border-slate-200 space-y-4 animate-in slide-in-from-bottom duration-200 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header: Student Info & Close */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-black text-lg flex items-center justify-center shadow-md">
+                  {quickPointStudent.name.charAt(0)}
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 leading-tight">
+                    {quickPointStudent.name}
+                  </h3>
+                  <div className="flex items-center gap-2 text-xs text-slate-500 font-bold mt-0.5">
+                    <span className="font-mono text-indigo-600">{quickPointStudent.code || 'HS'}</span>
+                    <span>•</span>
+                    <span>{quickPointStudent.group || 'Tổ 1'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setQuickPointStudent(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Current Thi Đua Points Badge */}
+            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+              <span className="text-xs font-black uppercase text-slate-600">
+                Điểm Thi Đua Hiện Tại:
+              </span>
+              <span
+                className={`font-mono font-black text-lg px-3 py-1 rounded-xl shadow-xs border ${
+                  (quickPointStudent.bonusPoints || 0) > 0
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : (quickPointStudent.bonusPoints || 0) < 0
+                    ? 'bg-rose-100 text-rose-800 border-rose-300'
+                    : 'bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+              >
+                {(quickPointStudent.bonusPoints || 0) > 0
+                  ? `+${quickPointStudent.bonusPoints}đ`
+                  : `${quickPointStudent.bonusPoints || 0}đ`}
+              </span>
+            </div>
+
+            {/* Main Ergonomic Plus / Minus Buttons */}
+            <div className="space-y-2">
+              <span className="text-xs font-black uppercase text-indigo-700 block">
+                Cộng / Trừ Điểm Nhanh (1 Chạm):
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if ('vibrate' in navigator) navigator.vibrate(30);
+                    handleAdjustBonus(quickPointStudent.id, 1);
+                    setQuickPointStudent((prev) =>
+                      prev ? { ...prev, bonusPoints: (prev.bonusPoints || 0) + 1 } : null
+                    );
+                  }}
+                  className="py-3 px-2 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm shadow-md shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer flex flex-col items-center gap-0.5"
+                >
+                  <span className="text-lg font-black">+1 ĐIỂM</span>
+                  <span className="text-[10px] font-bold opacity-90">Phát biểu tốt</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if ('vibrate' in navigator) navigator.vibrate(35);
+                    handleAdjustBonus(quickPointStudent.id, 2);
+                    setQuickPointStudent((prev) =>
+                      prev ? { ...prev, bonusPoints: (prev.bonusPoints || 0) + 2 } : null
+                    );
+                  }}
+                  className="py-3 px-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer flex flex-col items-center gap-0.5"
+                >
+                  <span className="text-lg font-black">+2 ĐIỂM</span>
+                  <span className="text-[10px] font-bold opacity-90">Làm bài xuất sắc</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if ('vibrate' in navigator) navigator.vibrate(40);
+                    handleAdjustBonus(quickPointStudent.id, 5);
+                    setQuickPointStudent((prev) =>
+                      prev ? { ...prev, bonusPoints: (prev.bonusPoints || 0) + 5 } : null
+                    );
+                  }}
+                  className="py-3 px-2 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-sm shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer flex flex-col items-center gap-0.5"
+                >
+                  <span className="text-lg font-black">+5 ĐIỂM</span>
+                  <span className="text-[10px] font-bold opacity-90">Thắng trò chơi</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if ('vibrate' in navigator) navigator.vibrate(25);
+                    handleAdjustBonus(quickPointStudent.id, -1);
+                    setQuickPointStudent((prev) =>
+                      prev ? { ...prev, bonusPoints: (prev.bonusPoints || 0) - 1 } : null
+                    );
+                  }}
+                  className="py-2.5 px-2 rounded-2xl bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 font-black text-xs active:scale-95 transition-all cursor-pointer flex flex-col items-center gap-0.5"
+                >
+                  <span className="text-base font-black">-1 ĐIỂM</span>
+                  <span className="text-[9.5px] font-bold opacity-80">Nhắc nhở</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if ('vibrate' in navigator) navigator.vibrate(30);
+                    handleAdjustBonus(quickPointStudent.id, -2);
+                    setQuickPointStudent((prev) =>
+                      prev ? { ...prev, bonusPoints: (prev.bonusPoints || 0) - 2 } : null
+                    );
+                  }}
+                  className="py-2.5 px-2 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs shadow-md shadow-rose-500/20 active:scale-95 transition-all cursor-pointer flex flex-col items-center gap-0.5"
+                >
+                  <span className="text-base font-black">-2 ĐIỂM</span>
+                  <span className="text-[9.5px] font-bold opacity-90">Chưa làm bài</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if ('vibrate' in navigator) navigator.vibrate(20);
+                    handleAdjustBonus(quickPointStudent.id, 0.5);
+                    setQuickPointStudent((prev) =>
+                      prev ? { ...prev, bonusPoints: (prev.bonusPoints || 0) + 0.5 } : null
+                    );
+                  }}
+                  className="py-2.5 px-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 font-black text-xs active:scale-95 transition-all cursor-pointer flex flex-col items-center gap-0.5"
+                >
+                  <span className="text-base font-black">+0.5 Đ</span>
+                  <span className="text-[9.5px] font-bold opacity-80">Khích lệ</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Oral Score (Chấm điểm miệng: 5, 6, 7, 8, 9, 10) */}
+            <div className="space-y-1.5 pt-1 border-t border-slate-100">
+              <span className="text-[11px] font-bold text-slate-500 block">
+                Chấm điểm miệng trực tiếp (TX1):
+              </span>
+              <div className="grid grid-cols-6 gap-1.5 font-mono font-black text-sm">
+                {[5, 6, 7, 8, 9, 10].map((score) => (
+                  <button
+                    key={score}
+                    type="button"
+                    onClick={() => {
+                      if ('vibrate' in navigator) navigator.vibrate(30);
+                      handleUpdateSemesterScore(
+                        quickPointStudent.id,
+                        activeSemester === 'hk2' ? 'hk2' : 'hk1',
+                        'tx1',
+                        score
+                      );
+                    }}
+                    className={`py-2 rounded-xl border text-center transition-all cursor-pointer active:scale-90 ${
+                      quickPointStudent.scores?.[activeSemester === 'hk2' ? 'hk2' : 'hk1']?.tx1 === score
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : 'bg-slate-100 hover:bg-indigo-50 text-slate-800 border-slate-200'
+                    }`}
+                  >
+                    {score}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Navigation: Next / Prev Student */}
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  const sList = currentClass?.students || [];
+                  const idx = sList.findIndex((s) => s.id === quickPointStudent.id);
+                  if (idx > 0) {
+                    setQuickPointStudent(sList[idx - 1]);
+                  } else if (sList.length > 0) {
+                    setQuickPointStudent(sList[sList.length - 1]);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                ← HS Trước
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQuickPointStudent(null)}
+                className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-black transition-all cursor-pointer"
+              >
+                Xong
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const sList = currentClass?.students || [];
+                  const idx = sList.findIndex((s) => s.id === quickPointStudent.id);
+                  if (idx >= 0 && idx < sList.length - 1) {
+                    setQuickPointStudent(sList[idx + 1]);
+                  } else if (sList.length > 0) {
+                    setQuickPointStudent(sList[0]);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+              >
+                <span>HS Sau</span>
+                <span>→</span>
               </button>
             </div>
           </div>

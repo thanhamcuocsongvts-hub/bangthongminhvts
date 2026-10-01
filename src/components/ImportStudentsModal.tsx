@@ -21,8 +21,23 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist';
 import { ClassStudent, ClassRoom, SubjectType } from '../types';
 import { isEvaluationOrSummaryRow } from '../utils/studentFilter';
+import {
+  parseStudentDataMatrix,
+  extractMatrixFromPdf,
+  cleanStudentName,
+  ParsedStudentRow,
+} from '../utils/studentImportParser';
+
+if (typeof window !== 'undefined' && 'Worker' in window) {
+  try {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+  } catch (e) {
+    console.warn('PDF Worker init notice in ImportStudentsModal:', e);
+  }
+}
 
 interface ImportStudentsModalProps {
   isOpen?: boolean;
@@ -122,76 +137,24 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
       .replace(/^[0-9.\-_#\s]+/, ''); // remove leading index numbers like "1. " or "01 - "
   };
 
-  // Process raw 2D array (from Excel, CSV, TSV) into structured students and detect all columns
+  // Process raw 2D array (from Excel, CSV, TSV, PDF, Word) into structured students
   const process2DDataMatrix = (matrix: any[][], sourceFileName?: string) => {
     if (!matrix || matrix.length === 0) {
       throw new Error('Tệp không có dữ liệu');
     }
 
-    // 1. Detect Class Name from early title lines (e.g. "LỚP 10A1" or "BẢNG ĐIỂM LỚP 12B3")
-    let foundClassName = '';
-    for (let i = 0; i < Math.min(6, matrix.length); i++) {
-      const lineStr = (matrix[i] || []).join(' ');
-      const match = lineStr.match(/l[ớo]p\s*([0-9]{1,2}[A-Za-z0-9_-]{1,6})/i);
-      if (match && match[1]) {
-        foundClassName = match[1].toUpperCase();
-        break;
-      }
+    const result = parseStudentDataMatrix(matrix, sourceFileName);
+
+    if (result.detectedClassName) {
+      setDetectedClassName(result.detectedClassName);
+      setCustomClassName(result.detectedClassName);
     }
-    if (!foundClassName && sourceFileName) {
-      const match = sourceFileName.match(/([0-9]{1,2}[A-Za-z0-9_-]{1,6})/i);
-      if (match && match[1]) {
-        foundClassName = match[1].toUpperCase();
-      }
-    }
-    if (foundClassName) {
-      setDetectedClassName(foundClassName);
-      setCustomClassName(foundClassName);
-    }
+    setDetectedColumns(result.columns);
+    setExtractedStudents(result.students);
+    setActiveTab('preview');
+    return;
 
-    // 2. Find the Header Row (search first 12 rows for keywords)
-    let headerRowIndex = 0;
-    let maxKeywordScore = -1;
-
-    const keywords = [
-      'stt', 'mã', 'họ', 'tên', 'họ và tên', 'họ tên', 'giới tính', 'phái',
-      'ngày sinh', 'năm sinh', 'tổ', 'nhóm', 'miệng', 'ktm', '15p', '15 phút',
-      '1 tiết', 'giữa kỳ', 'giữa kì', 'cuối kỳ', 'cuối kì', 'học kỳ', 'học kì',
-      'điểm', 'tb', 'đtb', 'thi đua', 'cộng', 'ghi chú', 'nhận xét', 'sđt'
-    ];
-
-    for (let r = 0; r < Math.min(12, matrix.length); r++) {
-      const row = matrix[r];
-      if (!Array.isArray(row) || row.length === 0) continue;
-
-      let score = 0;
-      row.forEach((cell) => {
-        if (typeof cell === 'string') {
-          const lower = cell?.toLowerCase().trim();
-          keywords.forEach((kw) => {
-            if (lower.includes(kw)) score += 2;
-          });
-        }
-      });
-
-      if (score > maxKeywordScore && score >= 2) {
-        maxKeywordScore = score;
-        headerRowIndex = r;
-      }
-    }
-
-    // If no explicit keyword header found, pick the first row with >= 2 non-empty text cells
-    if (maxKeywordScore <= 0) {
-      for (let r = 0; r < Math.min(5, matrix.length); r++) {
-        const nonEmpties = (matrix[r] || []).filter((c) => c !== null && c !== undefined && String(c).trim() !== '');
-        if (nonEmpties.length >= 2) {
-          headerRowIndex = r;
-          break;
-        }
-      }
-    }
-
-    const headerRow = matrix[headerRowIndex] || [];
+    const headerRow = matrix[0] || [];
     const allHeaders: string[] = [];
 
     // Map each column index to a field role

@@ -1151,7 +1151,7 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isSpinning, setIsSpinning] = useState<boolean>(false);
   const [wheelMode, setWheelMode] = useState<'students' | 'questions' | 'rewards'>('students');
-  const [groupSelectionMode, setGroupSelectionMode] = useState<1 | 2 | 3 | 4>(1);
+  const [groupSelectionMode, setGroupSelectionMode] = useState<number>(1);
   const [winnerResult, setWinnerResult] = useState<string | null>(null);
   const [winnerStudent, setWinnerStudent] = useState<string | null>(null);
   const [winnerGroup, setWinnerGroup] = useState<string[]>([]);
@@ -1389,7 +1389,8 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
           } else {
             const others = studentNames.filter((n) => n !== winner);
             const shuffled = [...others].sort(() => 0.5 - Math.random());
-            const team = [winner, ...shuffled.slice(0, groupSelectionMode - 1)];
+            const targetCount = groupSelectionMode >= studentNames.length ? studentNames.length - 1 : groupSelectionMode - 1;
+            const team = [winner, ...shuffled.slice(0, targetCount)];
             setWinnerStudent(team.join(' • '));
             setWinnerGroup(team);
           }
@@ -1521,20 +1522,22 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
             </button>
           </div>
 
-          {/* Group Size Selector (1, 2, 3, 4 em học sinh) */}
+          {/* Group Size Selector (1, 2, 3, 4, 5, Tất Cả) */}
           {wheelMode === 'students' && (
-            <div className="flex items-center gap-1 bg-slate-950 p-1.5 rounded-2xl border border-amber-500/40 shadow-inner">
+            <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1.5 rounded-2xl border border-amber-500/40 shadow-inner">
               <span className="text-[10px] text-amber-400 font-black px-1.5 uppercase">Chọn:</span>
               {[
                 { size: 1, label: '1 Em' },
-                { size: 2, label: 'Nhóm 2 Em' },
-                { size: 3, label: 'Nhóm 3 Em' },
-                { size: 4, label: 'Nhóm 4 Em' },
+                { size: 2, label: '2 Em' },
+                { size: 3, label: '3 Em' },
+                { size: 4, label: '4 Em' },
+                { size: 5, label: '5 Em' },
+                { size: studentNames.length, label: `Tất Cả (${studentNames.length} Em)` },
               ].map((g) => (
                 <button
-                  key={g.size}
+                  key={g.label}
                   type="button"
-                  onClick={() => setGroupSelectionMode(g.size as any)}
+                  onClick={() => setGroupSelectionMode(g.size)}
                   className={`px-2.5 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
                     groupSelectionMode === g.size
                       ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 shadow-md'

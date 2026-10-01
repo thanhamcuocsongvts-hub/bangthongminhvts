@@ -159,11 +159,11 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   const [bombHolderId, setBombHolderId] = useState<string | null>(null);
   const [bombTicks, setBombTicks] = useState<number>(10);
 
-  // Game 6: Olympia Mountain Race State
-  const [olympiaStage, setOlympiaStage] = useState<'idle' | 'rolling' | 'climbing' | 'winner'>('idle');
-  const [olympiaPositions, setOlympiaPositions] = useState<number[]>([0, 0, 0, 0]);
-  const [diceRollValue, setDiceRollValue] = useState<number>(1);
-  const [activeClimberIdx, setActiveClimberIdx] = useState<number>(0);
+  // Game 6: 🎰 SỔ XỐ JACKPOT (6s HỒI HỘP CHỌN HỌC SINH)
+  const [jackpotStage, setJackpotStage] = useState<'idle' | 'rolling' | 'winner'>('idle');
+  const [jackpotCountdown, setJackpotCountdown] = useState<number>(6.0);
+  const [jackpotReels, setJackpotReels] = useState<string[]>(['777', 'JACKPOT', '777']);
+  const jackpotIntervalRef = useRef<any>(null);
 
   // Game 7: Penalty Kick State
   const [penaltyStage, setPenaltyStage] = useState<'idle' | 'aiming' | 'shooting' | 'goal'>('idle');
@@ -290,7 +290,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
       setIsSpinning(false);
       setBattleStage('idle');
       setBombStage('idle');
-      setOlympiaStage('idle');
+      setJackpotStage('idle');
       setPenaltyStage('idle');
       setClawStage('idle');
       setDartStage('idle');
@@ -640,49 +640,74 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   };
 
   // ==========================================
-  // GAME 6: 🏆 ĐỈNH NÚI OLYMPIA (OLYMPIA MOUNTAIN RACE)
+  // GAME 6: 🎰 SỔ XỐ JACKPOT (6s HỒI HỘP CHỌN HỌC SINH)
   // ==========================================
-  const handleRollOlympiaDice = () => {
-    if (olympiaStage === 'rolling' || olympiaStage === 'climbing' || validStudents.length === 0) return;
+  const handleRollJackpot = () => {
+    if (jackpotStage === 'rolling' || validStudents.length === 0) return;
     setSelectedStudent(null);
-    setOlympiaStage('rolling');
+    setSelectedGroup([]);
+    setJackpotStage('rolling');
+    setJackpotCountdown(6.0);
 
-    let rolls = 0;
-    const rollInterval = setInterval(() => {
-      const val = Math.floor(Math.random() * 6) + 1;
-      setDiceRollValue(val);
-      playSound(450 + Math.random() * 200, 0.04, 'square');
-      rolls++;
-      if (rolls > 8) {
-        clearInterval(rollInterval);
-        const finalVal = Math.floor(Math.random() * 6) + 1;
-        setDiceRollValue(finalVal);
-        setOlympiaStage('climbing');
-        playSound(750, 0.15, 'sine');
+    const startTime = performance.now();
+    const duration = 6000; // Exact 6 seconds
+    let lastTickTime = 0;
 
-        setOlympiaPositions((prev) => {
-          const next = [...prev];
-          const newPos = Math.min(5, next[activeClimberIdx] + finalVal);
-          next[activeClimberIdx] = newPos;
+    const interval = setInterval(() => {
+      const now = performance.now();
+      const elapsed = now - startTime;
+      const remaining = Math.max(0, duration - elapsed);
+      const remainingSec = Math.round((remaining / 1000) * 10) / 10;
+      setJackpotCountdown(remainingSec);
 
-          if (newPos >= 5) {
-            setTimeout(() => {
-              const climberStudent = validStudents[activeClimberIdx % validStudents.length];
-              setSelectedStudent(climberStudent);
-              setOlympiaStage('winner');
-              playVictorySound();
-              confetti({ particleCount: 160, spread: 90, origin: { y: 0.5 } });
-            }, 600);
-          } else {
-            setTimeout(() => {
-              setActiveClimberIdx((prevIdx) => (prevIdx + 1) % 4);
-              setOlympiaStage('idle');
-            }, 800);
+      // Fast rolling student names across 3 jackpot reels
+      const s1 = validStudents[Math.floor(Math.random() * validStudents.length)].name;
+      const s2 = validStudents[Math.floor(Math.random() * validStudents.length)].name;
+      const s3 = validStudents[Math.floor(Math.random() * validStudents.length)].name;
+      setJackpotReels([s1, s2, s3]);
+
+      // Sound ticker: rapid casino slot clicks that pitch up and slow down during final 1.5s
+      const tickInterval = remaining < 1500 ? 140 : remaining < 3000 ? 80 : 45;
+      if (now - lastTickTime > tickInterval) {
+        const pitchClimb = 400 + Math.floor(((6000 - remaining) / 6000) * 500);
+        playSound(pitchClimb + Math.random() * 80, 0.035, 'square');
+        lastTickTime = now;
+      }
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+        // Jackpot Stop!
+        if (mode === 'single') {
+          const winner = validStudents[Math.floor(Math.random() * validStudents.length)];
+          setSelectedStudent(winner);
+          setSelectedGroup([winner]);
+          setJackpotReels([winner.name, '🏆 JACKPOT 🏆', winner.name]);
+        } else {
+          const shuffled = [...validStudents].sort(() => Math.random() - 0.5);
+          const targetCount = groupSize >= validStudents.length ? validStudents.length : Math.max(1, groupSize);
+          const groupWinners = shuffled.slice(0, targetCount);
+          setSelectedGroup(groupWinners);
+          if (groupWinners.length > 0) {
+            setSelectedStudent(groupWinners[0]);
           }
-          return next;
+          setJackpotReels([
+            groupWinners[0]?.name || 'TRÚNG SỐ',
+            `🎉 ${groupWinners.length} HỌC SINH 🎉`,
+            groupWinners[1]?.name || groupWinners[0]?.name || 'JACKPOT'
+          ]);
+        }
+
+        setJackpotStage('winner');
+        playVictorySound();
+        confetti({
+          particleCount: 220,
+          spread: 110,
+          origin: { y: 0.5 },
         });
       }
-    }, 80);
+    }, 45);
+
+    jackpotIntervalRef.current = interval;
   };
 
   // ==========================================
@@ -1118,7 +1143,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
             { id: 'space_rocket' as GameType, icon: '🚀', label: '3. Tên Lửa' },
             { id: 'laser_battle' as GameType, icon: '⚡', label: '4. Đấu Trường' },
             { id: 'time_bomb' as GameType, icon: '💣', label: '5. Truyền Bom' },
-            { id: 'olympia_climb' as GameType, icon: '🏆', label: '6. Leo Núi Olympia' },
+            { id: 'olympia_climb' as GameType, icon: '🎰', label: '6. Xổ Số Jackpot (6s)' },
             { id: 'penalty_kick' as GameType, icon: '⚽', label: '7. Sút Penalty' },
             { id: 'claw_machine' as GameType, icon: '🕹️', label: '8. Gắp Thú' },
             { id: 'super_darts' as GameType, icon: '🎯', label: '9. Phi Tiêu' },
@@ -1143,30 +1168,95 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
           ))}
         </div>
 
-        {/* Sub-controls bar */}
-        <div className="flex items-center justify-between px-6 py-2 bg-slate-50 border-b border-slate-200 shrink-0 text-xs">
+        {/* Sub-controls bar: Calling Options 1, 2, 3, 4, 5... Tất Cả Các Em */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 md:px-6 py-2 bg-slate-50 border-b border-slate-200 shrink-0 text-xs">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-600">Lớp: {classroom?.name || 'Mặc định'}</span>
-            <span className="text-slate-400">|</span>
-            <span className="font-medium text-slate-500">{validStudents.length} học sinh sẵn sàng</span>
+            <span className="font-bold text-slate-700">Lớp: {classroom?.name || 'Mặc định'}</span>
+            <span className="text-slate-300">|</span>
+            <span className="font-medium text-slate-500">{validStudents.length} học sinh</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Caller Options: 1, 2, 3, 4, 5, Custom (+/-), Tất Cả Các Em */}
+          <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-2xl border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-black uppercase text-indigo-700 px-1.5">Gọi:</span>
+            {[1, 2, 3, 4, 5].map((count) => {
+              const isActive = (count === 1 && mode === 'single') || (mode === 'group' && groupSize === count);
+              return (
+                <button
+                  key={count}
+                  type="button"
+                  onClick={() => {
+                    if (count === 1) {
+                      setMode('single');
+                      setGroupSize(1);
+                    } else {
+                      setMode('group');
+                      setGroupSize(count);
+                    }
+                    setSelectedStudent(null);
+                    setSelectedGroup([]);
+                  }}
+                  className={`px-2.5 py-1 rounded-xl font-black text-xs transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  {count} Em
+                </button>
+              );
+            })}
+
+            {/* Custom counter (+ / -) */}
+            <div className="flex items-center gap-1 border-l border-slate-200 pl-1.5 ml-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('group');
+                  setGroupSize((prev) => Math.max(1, prev - 1));
+                  setSelectedStudent(null);
+                  setSelectedGroup([]);
+                }}
+                className="w-5 h-5 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 text-xs font-black cursor-pointer"
+                title="Giảm số học sinh gọi"
+              >
+                -
+              </button>
+              <span className="font-mono text-xs font-bold text-indigo-700 min-w-5 text-center">
+                {mode === 'single' ? 1 : groupSize}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('group');
+                  setGroupSize((prev) => Math.min(validStudents.length, prev + 1));
+                  setSelectedStudent(null);
+                  setSelectedGroup([]);
+                }}
+                className="w-5 h-5 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 text-xs font-black cursor-pointer"
+                title="Tăng số học sinh gọi"
+              >
+                +
+              </button>
+            </div>
+
+            {/* Tất Cả Các Em Button */}
             <button
-              onClick={() => setMode('single')}
-              className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                mode === 'single' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200'
+              type="button"
+              onClick={() => {
+                setMode('group');
+                setGroupSize(validStudents.length);
+                setSelectedStudent(null);
+                setSelectedGroup([]);
+              }}
+              className={`px-2.5 py-1 rounded-xl font-black text-xs transition-all cursor-pointer ml-1 ${
+                mode === 'group' && groupSize >= validStudents.length
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-xs'
+                  : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
               }`}
+              title="Gọi ngẫu nhiên tất cả học sinh cả lớp"
             >
-              Gọi 1 Em
-            </button>
-            <button
-              onClick={() => setMode('group')}
-              className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                mode === 'group' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              Gọi Nhóm ({groupSize})
+              Tất Cả ({validStudents.length} Em)
             </button>
           </div>
         </div>
@@ -1357,45 +1447,111 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
             </div>
           )}
 
-          {/* 6. 🏆 ĐỈNH NÚI OLYMPIA */}
+          {/* 6. 🎰 SỔ XỐ JACKPOT 777 (6s HỒI HỘP CHỌN HỌC SINH) */}
           {(activeGame === 'olympia_climb' || activeGame === 'treasure_chest') && (
-            <div className="space-y-5">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold text-slate-600 uppercase flex items-center gap-1.5">
-                  <Flag className="w-4 h-4 text-amber-500" />
-                  <span>Đoàn leo núi 4 người - Leo lên đỉnh Olympia giành Vòng Nguyệt Quế:</span>
+            <div className="flex flex-col items-center justify-center p-4 md:p-6 space-y-6 text-center max-w-2xl mx-auto animate-fade-in">
+              {/* Jackpot Header & Prize Banner */}
+              <div className="w-full bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 p-3 rounded-2xl shadow-lg border-2 border-amber-300 flex items-center justify-between text-slate-950">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl animate-bounce">🎰</span>
+                  <div className="text-left">
+                    <span className="font-black text-sm uppercase tracking-wider block">
+                      MÁY QUAY SỔ XỐ JACKPOT 777
+                    </span>
+                    <span className="text-[11px] font-bold opacity-80">
+                      Tên học sinh chạy liên tục • Chốt hạ người may mắn sau đúng 6 giây
+                    </span>
+                  </div>
                 </div>
-                <button
-                  onClick={handleRollOlympiaDice}
-                  disabled={olympiaStage === 'rolling' || olympiaStage === 'climbing'}
-                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs shadow-md active:scale-95 transition-all cursor-pointer flex items-center gap-2"
-                >
-                  <Dices className="w-4 h-4" />
-                  <span>ĐỔ XÚC XẮC ({diceRollValue} Điểm)</span>
-                </button>
+                <div className="flex items-center gap-1.5 bg-slate-950/90 text-amber-300 px-3 py-1.5 rounded-xl font-mono font-black text-sm border border-amber-400/50 shadow-inner">
+                  <span>⏱️</span>
+                  <span>{jackpotStage === 'rolling' ? `${jackpotCountdown.toFixed(1)}s` : '6.0s'}</span>
+                </div>
               </div>
 
-              <div className="space-y-3 bg-white p-4 rounded-3xl border border-slate-200">
-                {['🧗‍♂️ Đội Đỏ', '🧗‍♀️ Đội Xanh', '🧗‍♂️ Đội Vàng', '🧗‍♀️ Đội Tím'].map((team, idx) => {
-                  const student = validStudents[idx % validStudents.length];
-                  const pos = olympiaPositions[idx];
-                  const percent = Math.min(100, (pos / 5) * 100);
-                  return (
-                    <div key={team} className="space-y-1">
-                      <div className="flex justify-between text-xs font-bold">
-                        <span className="text-slate-800">{team}: {student?.name}</span>
-                        <span className="text-amber-600">{pos >= 5 ? '🏆 ĐÃ ĐẠT ĐỈNH OLYMPIA' : `Mốc ${pos}/5`}</span>
+              {/* 3-Reel Jackpot Slot Machine Container */}
+              <div className="w-full bg-slate-900 border-4 border-amber-500/80 rounded-3xl p-5 shadow-[0_0_45px_rgba(245,158,11,0.35)] relative overflow-hidden space-y-4">
+                {/* Flashing LED bulbs along the top */}
+                <div className="flex justify-between items-center px-2">
+                  {Array.from({ length: 9 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-3 h-3 rounded-full transition-all duration-200 ${
+                        jackpotStage === 'rolling'
+                          ? i % 2 === 0
+                            ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]'
+                            : 'bg-yellow-200 shadow-[0_0_8px_#fef08a]'
+                          : 'bg-amber-600/40'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {/* 3 Slot Reels Display Window */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-950 p-4 rounded-2xl border-2 border-amber-500/40 shadow-inner">
+                  {jackpotReels.map((reelText, idx) => (
+                    <div
+                      key={idx}
+                      className={`h-24 sm:h-28 rounded-xl bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 border-2 flex flex-col items-center justify-center p-2.5 transition-all shadow-md select-none ${
+                        jackpotStage === 'rolling'
+                          ? 'border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)] scale-102'
+                          : jackpotStage === 'winner'
+                          ? 'border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.5)]'
+                          : 'border-slate-700'
+                      }`}
+                    >
+                      <div className="text-[10px] font-mono font-bold text-amber-400 mb-1">
+                        CỘT #{idx + 1}
                       </div>
-                      <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
-                        <div
-                          className="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full transition-all duration-500"
-                          style={{ width: `${percent}%` }}
-                        />
+                      <div
+                        className={`font-black text-base sm:text-lg text-center truncate max-w-full px-1 ${
+                          jackpotStage === 'rolling'
+                            ? 'text-yellow-300 blur-[0.5px] animate-pulse'
+                            : jackpotStage === 'winner'
+                            ? 'text-emerald-300'
+                            : 'text-white'
+                        }`}
+                      >
+                        {reelText}
                       </div>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+
+                {/* Bottom LED Bulbs */}
+                <div className="flex justify-between items-center px-2">
+                  {Array.from({ length: 9 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-3 h-3 rounded-full transition-all duration-200 ${
+                        jackpotStage === 'rolling'
+                          ? i % 2 === 1
+                            ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]'
+                            : 'bg-yellow-200 shadow-[0_0_8px_#fef08a]'
+                          : 'bg-amber-600/40'
+                      }`}
+                    />
+                  ))}
+                </div>
               </div>
+
+              {/* Start Rolling Button */}
+              {jackpotStage === 'rolling' ? (
+                <div className="flex items-center gap-2.5 px-8 py-3.5 rounded-2xl bg-amber-500/20 border-2 border-amber-400 text-amber-300 font-black text-base animate-pulse">
+                  <RotateCw className="w-5 h-5 animate-spin" />
+                  <span>ĐANG QUAY SỔ XỐ... {jackpotCountdown.toFixed(1)}s</span>
+                </div>
+              ) : (
+                <button
+                  onClick={handleRollJackpot}
+                  className="px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-black text-base shadow-xl shadow-amber-500/30 active:scale-95 transition-all cursor-pointer flex items-center gap-2.5"
+                >
+                  <Sparkles className="w-5 h-5" />
+                  <span>
+                    {jackpotStage === 'winner' ? 'QUAY LẠI LẦN NỮA (6s)' : 'BẮT ĐẦU QUAY SỔ XỐ JACKPOT (6s)'}
+                  </span>
+                </button>
+              )}
             </div>
           )}
 

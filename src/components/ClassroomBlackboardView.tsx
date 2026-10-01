@@ -211,7 +211,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   );
 
   // Device detection & mobile phone optimization
-  const { isMobile } = useDeviceDetection();
+  const { isMobile, isLandscape } = useDeviceDetection();
   const [showMobileColorSheet, setShowMobileColorSheet] = useState<boolean>(false);
   const [showMobileShapeSheet, setShowMobileShapeSheet] = useState<boolean>(false);
   const [showMobileMoreSheet, setShowMobileMoreSheet] = useState<boolean>(false);
@@ -5064,7 +5064,283 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             <Pen className="w-5 h-5 text-white" />
           </button>
         ) : (
-        <div className={`absolute ${isFullBoard ? 'bottom-3' : 'bottom-[74px]'} left-1/2 -translate-x-1/2 z-40 pointer-events-auto w-[96vw] max-w-[420px] flex flex-col items-center gap-1.5 animate-in slide-in-from-bottom-2 select-none transition-all duration-200`}>
+        <div className={`absolute ${isFullBoard || (isMobile && isLandscape) ? 'bottom-2' : 'bottom-[74px]'} left-1/2 -translate-x-1/2 z-40 pointer-events-auto ${isLandscape ? 'w-[98vw] max-w-[620px]' : 'w-[96vw] max-w-[440px]'} flex flex-col items-center gap-1.5 animate-in slide-in-from-bottom-2 select-none transition-all duration-200`}>
+          {/* Sub-sheet: Mobile Function Graph Picker (Toán & Vật lý) */}
+          {showFunctionPicker && (
+            <div
+              className={`w-full bg-slate-900/98 backdrop-blur-2xl border-2 border-amber-500/80 rounded-2xl p-3 shadow-2xl text-white flex flex-col gap-2.5 animate-in fade-in ${
+                isLandscape ? 'max-h-[82vh]' : 'max-h-[72vh]'
+              } overflow-y-auto custom-scrollbar`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-white/10 shrink-0">
+                <span className="text-xs font-black uppercase text-amber-300 tracking-wider flex items-center gap-1.5">
+                  <TrendingUp className="w-4 h-4 text-amber-400" />
+                  Đồ Thị Hàm Số Toán Học & Vật Lý
+                </span>
+                <button
+                  onClick={() => setShowFunctionPicker(false)}
+                  className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Custom Equation Formula Input Button */}
+              <button
+                onClick={() => {
+                  setEditingEquationStrokeId(null);
+                  setShowEquationModal(true);
+                  setShowFunctionPicker(false);
+                }}
+                className="w-full p-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black shadow-md flex items-center justify-between transition-transform active:scale-98 cursor-pointer shrink-0"
+              >
+                <div className="flex items-center gap-2">
+                  <Calculator className="w-4 h-4 text-slate-950" />
+                  <span className="text-xs font-black">TỰ NHẬP CÔNG THỨC y = f(x) / x(t)</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-950/20 font-bold">Mở Bảng →</span>
+              </button>
+
+              {/* 1. Hàm Bậc Nhất & Bậc Hai */}
+              <div>
+                <span className="text-[10px] font-black uppercase text-amber-300 mb-1 block">
+                  1. Bậc Nhất & Bậc Hai (Parabol)
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_linear');
+                      setShowFunctionPicker(false);
+                    }}
+                    className={`p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                      activeTool === 'func_linear'
+                        ? 'bg-amber-500 text-slate-950 font-black border-amber-300'
+                        : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                    }`}
+                  >
+                    <span className="font-mono font-bold text-[11px] text-amber-300">y = ax + b</span>
+                    <span className="text-[9px] text-slate-300">Đường Thẳng</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_quadratic_up');
+                      setShowFunctionPicker(false);
+                    }}
+                    className={`p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                      activeTool === 'func_quadratic_up'
+                        ? 'bg-amber-500 text-slate-950 font-black border-amber-300'
+                        : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                    }`}
+                  >
+                    <span className="font-mono font-bold text-[11px] text-emerald-300">y = ax² (a&gt;0)</span>
+                    <span className="text-[9px] text-slate-300">Parabol Lõm Lên</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_quadratic_down');
+                      setShowFunctionPicker(false);
+                    }}
+                    className={`p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border transition-all ${
+                      activeTool === 'func_quadratic_down'
+                        ? 'bg-amber-500 text-slate-950 font-black border-amber-300'
+                        : 'bg-white/5 hover:bg-white/15 text-slate-200 border-white/10'
+                    }`}
+                  >
+                    <span className="font-mono font-bold text-[11px] text-rose-300">y = ax² (a&lt;0)</span>
+                    <span className="text-[9px] text-slate-300">Parabol Lõm Xuống</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Hàm Bậc Ba */}
+              <div>
+                <span className="text-[10px] font-black uppercase text-amber-300 mb-1 block">
+                  2. Hàm Bậc Ba (SGK Chuẩn)
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_cubic_2extrema_pos');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[11px] text-indigo-300">a &gt; 0 (2 Cực trị)</span>
+                    <span className="text-[9px] text-slate-300">Dạng chữ N chuẩn</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_cubic_2extrema_neg');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[11px] text-rose-300">a &lt; 0 (2 Cực trị)</span>
+                    <span className="text-[9px] text-slate-300">Chữ N ngược</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_cubic_noextrema_pos');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[11px] text-emerald-300">Đơn điệu tăng</span>
+                    <span className="text-[9px] text-slate-300">Không có cực trị</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Hàm Trùng Phương Bậc 4 */}
+              <div>
+                <span className="text-[10px] font-black uppercase text-amber-300 mb-1 block">
+                  3. Hàm Trùng Phương (Bậc 4)
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_biquadratic_3extrema_pos');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-amber-300">3 Cực trị (W)</span>
+                    <span className="text-[9px] text-slate-300">a &gt; 0, ab &lt; 0</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_biquadratic_3extrema_neg');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-rose-300">3 Cực trị (M)</span>
+                    <span className="text-[9px] text-slate-300">a &lt; 0, ab &lt; 0</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_biquadratic_1extremum_pos');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-emerald-300">1 Cực trị (U)</span>
+                    <span className="text-[9px] text-slate-300">a &gt; 0, ab ≥ 0</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_biquadratic_1extremum_neg');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-pink-300">1 Cực trị (∩)</span>
+                    <span className="text-[9px] text-slate-300">a &lt; 0, ab ≥ 0</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Hàm Phân Thức & Hàm Mũ / Logarit */}
+              <div>
+                <span className="text-[10px] font-black uppercase text-amber-300 mb-1 block">
+                  4. Phân Thức & Mũ / Logarit
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_rational_pos');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-sky-300">(ax+b)/(cx+d)</span>
+                    <span className="text-[9px] text-slate-300">Nhất biến (Đồng biến)</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_rational_neg');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-orange-300">(ax+b)/(cx+d)</span>
+                    <span className="text-[9px] text-slate-300">Nhất biến (Nghịch biến)</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_exp_pos');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-emerald-300">y = a^x (a &gt; 1)</span>
+                    <span className="text-[9px] text-slate-300">Hàm Số Mũ</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('func_log_pos');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-purple-300">log_a(x) (a &gt; 1)</span>
+                    <span className="text-[9px] text-slate-300">Hàm Số Logarit</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 5. Vật Lý: Dao Động & Sóng */}
+              <div>
+                <span className="text-[10px] font-black uppercase text-cyan-300 mb-1 block flex items-center gap-1">
+                  <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                  5. Vật Lý: Dao Động & Sóng
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  <button
+                    onClick={() => {
+                      setActiveTool('phys_shm_displacement');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-cyan-300">x = A·cos(ωt + φ)</span>
+                    <span className="text-[9px] text-slate-300">Ly Độ Dao Động</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('phys_shm_velocity');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-amber-300">v = -ωA·sin(...)</span>
+                    <span className="text-[9px] text-slate-300">Vận Tốc Dao Động</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTool('phys_wave');
+                      setShowFunctionPicker(false);
+                    }}
+                    className="p-2 rounded-xl text-xs flex flex-col items-center gap-0.5 border bg-white/5 hover:bg-white/15 text-slate-200 border-white/10"
+                  >
+                    <span className="font-mono font-bold text-[10.5px] text-emerald-300">Sóng Dừng</span>
+                    <span className="text-[9px] text-slate-300">Bụng Sóng & Nút Sóng</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Sub-sheet 0: Mobile Calligraphy / Chữ Đẹp AI Sheet */}
           {showCalligraphyPopover && (
             <div
@@ -5490,6 +5766,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 setShowMobileShapeSheet((v) => !v);
                 setShowMobileColorSheet(false);
                 setShowMobileMoreSheet(false);
+                setShowFunctionPicker(false);
               }}
               className={`p-2 rounded-xl text-xs font-bold cursor-pointer ${
                 ['line', 'arrow', 'rectangle', 'circle', 'triangle'].includes(activeTool) || showMobileShapeSheet
@@ -5499,6 +5776,25 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               title="Vẽ hình học cơ bản"
             >
               <Shapes className="w-4 h-4" />
+            </button>
+
+            {/* 5.1 Đồ Thị Hàm Số Toán Học (SGK) */}
+            <button
+              onClick={() => {
+                setShowFunctionPicker((v) => !v);
+                setShowMobileColorSheet(false);
+                setShowMobileShapeSheet(false);
+                setShowMobileMoreSheet(false);
+              }}
+              className={`px-2 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                showFunctionPicker
+                  ? 'bg-amber-500 text-slate-950 font-black shadow ring-2 ring-amber-300'
+                  : 'text-amber-300 hover:bg-white/10'
+              }`}
+              title="Vẽ đồ thị hàm số chuẩn SGK Toán"
+            >
+              <TrendingUp className="w-4 h-4 text-amber-400" />
+              <span className="text-[11px]">Đồ thị</span>
             </button>
 
             {/* 6. Hoàn Tác (Undo) */}
