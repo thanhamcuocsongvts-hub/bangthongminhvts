@@ -1744,8 +1744,12 @@ app.post("/api/ai/parse-students", async (req, res) => {
 Nhiệm vụ của bạn là nhận diện và trích xuất TOÀN BỘ DANH SÁCH VÀ CÁC CỘT DỮ LIỆU từ hình ảnh chụp danh sách lớp, sổ điểm, bảng điểm thi, sổ gọi tên hoặc văn bản.
 Hãy trích xuất chính xác:
 1. "name": Họ và tên đầy đủ của từng học sinh (viết hoa chữ cái đầu theo chuẩn tiếng Việt, ví dụ: "Nguyễn Văn An").
+CHÚ Ý QUAN TRỌNG: Cấu trúc bảng điểm chuẩn ngành giáo dục Việt Nam (VnEdu, SMAS) thường tách Họ và Tên thành 2 cột nằm liền kề:
+- Cột 1 (sau STT): "Họ và đệm" / "Họ và tên lót" (ví dụ: "Trần Thái", "Ngô Thị Lan", "Nguyễn Quách Thị Tuyết").
+- Cột 2 (cột tiếp theo): "Tên" (ví dụ: "An", "Anh", "Nhi").
+BẠN PHẢI LUÔN GHÉP LẠI THÀNH HỌ VÀ TÊN ĐẦY ĐỦ CHUẨN XÁC: "Họ và đệm" + " " + "Tên" (Ví dụ: "Trần Thái" + " " + "An" => "Trần Thái An"). Tuyệt đối không được để trống Tên hoặc chỉ lấy Họ! Nếu file đã có cột "Họ và tên" gộp sẵn thì giữ nguyên.
 2. "code": Mã số học sinh hoặc số thứ tự (ví dụ: "HS01", "HS02", "01", "202401"). Nếu không có thì tạo mã dạng "HS01", "HS02",...
-3. "gender": Giới tính ("Nam" / "Nữ" nếu có hoặc suy đoán theo tên).
+3. "gender": Giới tính ("Nam" / "Nữ" nếu có hoặc suy đoán theo tên, nếu cột 'Nữ' đánh dấu 'x' thì là Nữ).
 4. "birthDate": Ngày sinh / Năm sinh (nếu có trong bảng, ví dụ: "12/04/2008").
 5. "group": Tổ / Nhóm (nếu có, ví dụ: "Tổ 1").
 6. "oralScore": Điểm miệng / kiểm tra miệng (số thực từ 0 đến 10, nếu có).
@@ -1753,17 +1757,18 @@ Hãy trích xuất chính xác:
 8. "test1PeriodScore": Điểm 1 tiết / Điểm giữa kỳ (số thực từ 0 đến 10, nếu có).
 9. "finalScore": Điểm thi học kỳ / Cuối kỳ (số thực từ 0 đến 10, nếu có).
 10. "notes": Ghi chú / Nhận xét / Đánh giá (nếu có).
-11. "customFields": Bất kỳ cột bổ sung nào khác có trong bảng điểm (ví dụ: số điện thoại, địa chỉ, chức vụ, xếp loại...).
+11. "customFields": Bất kỳ cột bổ sung nào khác có trong bảng điểm.
 
-Bỏ qua các dòng tiêu đề chung của trường/sở (như "BẢNG ĐIỂM HỌC KỲ", "TRƯỜNG THPT..."). Chỉ lấy các dòng học sinh thực tế.
+Tự động nhận diện tên lớp như "Lớp 11A1" hoặc "Khối 11" từ tiêu đề đầu file.
+Bỏ qua các dòng tiêu đề phụ, dòng trống, dòng thống kê ở chân trang (như "THỐNG KÊ HỌC KỲ 1", "Số học sinh đạt...", "TỔNG CỘNG", "Giáo viên chủ nhiệm"). Chỉ lấy các dòng học sinh thực tế có STT từ 1 trở đi.
 Luôn trả về đúng chuẩn JSON object có cấu trúc:
 {
-  "className": "Tên lớp học nếu phát hiện được (ví dụ: 10A1, 12A8)",
+  "className": "Tên lớp học nếu phát hiện được (ví dụ: 11A1 hoặc Khối 11)",
   "columns": ["Mã HS", "Họ và Tên", "Giới tính", "Ngày sinh", "Tổ", "Điểm Miệng", "Điểm 15P", "Điểm 1 Tiết", "Điểm Cuối Kỳ", "Ghi Chú"],
   "students": [
     {
       "code": "HS01",
-      "name": "Nguyễn Văn An",
+      "name": "Trần Thái An",
       "gender": "Nam",
       "birthDate": "15/05/2009",
       "group": "Tổ 1",
@@ -1808,11 +1813,24 @@ ${rawText ? rawText.slice(0, 15000) : "Chưa có nội dung"}`;
 
     const parsed = JSON.parse(response.text || "{}");
     const rawStudents = Array.isArray(parsed) ? parsed : (parsed.students || []);
-    const nonStudentRegex = /tổng\s*số|tổng\s*cộng|giáo\s*viên|gvcn|hiệu\s*trưởng|bgh|người\s*lập|chữ\s*ký|ký\s*tên|học\s*sinh\s*giỏi|học\s*sinh\s*khá|ngày.*tháng/i;
-    const studentsList = rawStudents.filter((s: any) => {
-      const name = (s?.name || '').trim();
-      return name.length >= 2 && !nonStudentRegex.test(name);
-    });
+    const nonStudentRegex = /tổng\s*số|tổng\s*cộng|thống\s*kê|giáo\s*viên|gvcn|hiệu\s*trưởng|bgh|người\s*lập|chữ\s*ký|ký\s*tên|học\s*sinh\s*giỏi|học\s*sinh\s*khá|ngày.*tháng/i;
+    const studentsList = rawStudents
+      .map((s: any) => {
+        let name = (s?.name || '').trim();
+        const lastName = (s?.lastName || s?.ho || s?.hoVaDem || '').trim();
+        const firstName = (s?.firstName || s?.ten || '').trim();
+        if (lastName && firstName && (!name || name === lastName || name === firstName)) {
+          name = `${lastName} ${firstName}`.trim();
+        }
+        return {
+          ...s,
+          name,
+        };
+      })
+      .filter((s: any) => {
+        const name = (s?.name || '').trim();
+        return name.length >= 2 && !nonStudentRegex.test(name);
+      });
     const columnsList = Array.isArray(parsed?.columns) ? parsed.columns : [];
     const detectedClassName = parsed?.className || "";
     res.json({

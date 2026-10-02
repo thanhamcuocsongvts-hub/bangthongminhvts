@@ -52,33 +52,6 @@ interface ImportStudentsModalProps {
   ) => void;
 }
 
-interface ParsedStudentRow {
-  code: string;
-  name: string;
-  gender?: string;
-  birthDate?: string;
-  group?: string;
-  tx1?: number | null;
-  tx2?: number | null;
-  tx3?: number | null;
-  tx4?: number | null;
-  tx5?: number | null;
-  gk?: number | null;
-  ck?: number | null;
-  dtb?: number | null;
-  evaluation?: string;
-  hk1Dtb?: number | null;
-  hk2Dtb?: number | null;
-  cnDtb?: number | null;
-  oralScore?: number | null;
-  test15mScore?: number | null;
-  test1PeriodScore?: number | null;
-  finalScore?: number | null;
-  bonusPoints?: number;
-  notes?: string;
-  customFields?: Record<string, string | number | null | undefined>;
-}
-
 export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
   isOpen = true,
   classRoom,
@@ -152,468 +125,20 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
     setDetectedColumns(result.columns);
     setExtractedStudents(result.students);
     setActiveTab('preview');
-    return;
-
-    const headerRow = matrix[0] || [];
-    const allHeaders: string[] = [];
-
-    // Map each column index to a field role
-    const columnMap: Record<
-      number,
-      {
-        headerName: string;
-        role:
-          | 'stt'
-          | 'code'
-          | 'name'
-          | 'lastName'
-          | 'firstName'
-          | 'gender'
-          | 'birthDate'
-          | 'group'
-          | 'tx1'
-          | 'tx2'
-          | 'tx3'
-          | 'tx4'
-          | 'tx5'
-          | 'gk'
-          | 'ck'
-          | 'dtb'
-          | 'evaluation'
-          | 'hk1'
-          | 'hk2'
-          | 'cn'
-          | 'oralScore'
-          | 'test15mScore'
-          | 'test1PeriodScore'
-          | 'finalScore'
-          | 'bonusPoints'
-          | 'notes'
-          | 'custom';
-      }
-    > = {};
-
-    // First pass: identify all headers
-    headerRow.forEach((cellVal, colIdx) => {
-      let colName = cellVal ? String(cellVal).trim() : `Cột ${colIdx + 1}`;
-      if (!colName) colName = `Cột ${colIdx + 1}`;
-      allHeaders.push(colName);
-
-      const lower = colName?.toLowerCase();
-
-      let role: any = 'custom';
-
-      if (/^(stt|số tt|no\.?|tt)$/i.test(lower)) {
-        role = 'stt';
-      } else if (
-        /mã\s*(hs|học sinh|định danh|số)?/i.test(lower) ||
-        /^(code|id|sbd|số báo danh)$/i.test(lower)
-      ) {
-        role = 'code';
-      } else if (
-        /họ\s*(đệm|lót|và tên đệm|và tên lót|và chữ đệm|và đệm)/i.test(lower) ||
-        lower === 'họ' ||
-        lower === 'họ đệm' ||
-        lower === 'họ và đệm'
-      ) {
-        role = 'lastName';
-      } else if (
-        /^tên(\s*học sinh|\s*hs)?$/i.test(lower) ||
-        lower === 'tên' ||
-        lower === 'ten' ||
-        lower === 'first name' ||
-        lower === 'firstname'
-      ) {
-        role = 'firstName';
-      } else if (
-        /họ\s*(và|&)?\s*tên/i.test(lower)
-      ) {
-        role = 'name';
-      } else if (/giới\s*tính|phái|nam\/?nữ|gender/i.test(lower)) {
-        role = 'gender';
-      } else if (/ngày\s*sinh|năm\s*sinh|sinh\s*ngày|dob|birth/i.test(lower)) {
-        role = 'birthDate';
-      } else if (/^tổ(\s*\/|\s*nhóm)?$|^nhóm$/i.test(lower)) {
-        role = 'group';
-      } else if (/^(tx1|tx\.1|đđgtx1|đđgtx\s*1|tx\s*1)$/i.test(lower)) {
-        role = 'tx1';
-      } else if (/^(tx2|tx\.2|đđgtx2|đđgtx\s*2|tx\s*2)$/i.test(lower)) {
-        role = 'tx2';
-      } else if (/^(tx3|tx\.3|đđgtx3|đđgtx\s*3|tx\s*3)$/i.test(lower)) {
-        role = 'tx3';
-      } else if (/^(tx4|tx\.4|đđgtx4|đđgtx\s*4|tx\s*4)$/i.test(lower)) {
-        role = 'tx4';
-      } else if (/^(tx5|tx\.5|đđgtx5|đđgtx\s*5|tx\s*5)$/i.test(lower)) {
-        role = 'tx5';
-      } else if (/^(đđggk|gk|giữa\s*kỳ|giữa\s*kì|định\s*kỳ|kt\s*giữa\s*kỳ)$/i.test(lower)) {
-        role = 'gk';
-      } else if (/^(đđgck|ck|cuối\s*kỳ|cuối\s*kì|thi\s*hk|thi\s*cuối\s*kỳ|điểm\s*thi)$/i.test(lower)) {
-        role = 'ck';
-      } else if (/^(dtbmhk|đtb\s*mhk|đtb\s*môn|đtbm|dtb)$/i.test(lower)) {
-        role = 'dtb';
-      } else if (/^(hki|hk1|học\s*kỳ\s*1|học\s*kì\s*1|đtb\s*hk1|đtb\s*hki)$/i.test(lower)) {
-        role = 'hk1';
-      } else if (/^(hkii|hk2|học\s*kỳ\s*2|học\s*kì\s*2|đtb\s*hk2|đtb\s*hkii)$/i.test(lower)) {
-        role = 'hk2';
-      } else if (/^(cn|cả\s*năm|đtb\s*cn|đtb\s*cả\s*năm|tb\s*cả\s*năm)$/i.test(lower)) {
-        role = 'cn';
-      } else if (
-        /miệng|ktm|oral|kiểm tra miệng/i.test(lower) &&
-        !lower.includes('15') &&
-        !lower.includes('tiết')
-      ) {
-        role = 'oralScore';
-      } else if (
-        /15\s*(p|phút)|kt\s*15|15'/i.test(lower)
-      ) {
-        role = 'test15mScore';
-      } else if (
-        /1\s*tiết|45\s*(p|phút)|kt\s*45/i.test(lower)
-      ) {
-        role = 'test1PeriodScore';
-      } else if (
-        /cuối\s*(kỳ|kì)/i.test(lower)
-      ) {
-        role = 'finalScore';
-      } else if (
-        /thi\s*đua|cộng|thưởng|điểm\s*rèn\s*luyện/i.test(lower)
-      ) {
-        role = 'bonusPoints';
-      } else if (
-        /nhận\s*xét|đánh\s*giá|xếp\s*loại|kết\s*quả/i.test(lower)
-      ) {
-        role = 'evaluation';
-      } else if (
-        /ghi\s*chú|hạnh\s*kiểm|học\s*lực/i.test(lower)
-      ) {
-        role = 'notes';
-      }
-
-      columnMap[colIdx] = { headerName: colName, role };
-    });
-
-    // Check adjacent column after 'name' or 'lastName' to see if it represents 'firstName' (Tên)
-    // Common in Vietnamese Excel: Col 3 = "Họ và tên" (e.g. Lê Thị Ngọc), Col 4 = "Tên" or "Cột 4" (e.g. Anh)
-    Object.keys(columnMap).forEach((colIdxStr) => {
-      const idx = parseInt(colIdxStr, 10);
-      const cur = columnMap[idx];
-      const next = columnMap[idx + 1];
-      if (cur && (cur.role === 'name' || cur.role === 'lastName') && next && next.role === 'custom') {
-        // Sample next column values to see if they are 1-word Vietnamese names
-        let singleWordCount = 0;
-        let totalSampled = 0;
-        for (let r = headerRowIndex + 1; r < Math.min(headerRowIndex + 12, matrix.length); r++) {
-          const val = matrix[r]?.[idx + 1];
-          if (val !== null && val !== undefined && String(val).trim()) {
-            totalSampled++;
-            const str = String(val).trim();
-            if (!str.includes(' ') && str.length >= 1 && str.length <= 15 && !/^\d+$/.test(str)) {
-              singleWordCount++;
-            }
-          }
-        }
-        if (totalSampled > 0 && singleWordCount / totalSampled >= 0.7) {
-          // This column is definitely the first name (Tên)
-          next.role = 'firstName';
-        }
-      }
-    });
-
-    // Extract student rows
-    const parsedRows: ParsedStudentRow[] = [];
-
-    for (let r = headerRowIndex + 1; r < matrix.length; r++) {
-      const row = matrix[r];
-      if (!Array.isArray(row) || row.length === 0) continue;
-
-      // Skip summary / signature / statistics / evaluation rows (e.g. "KẾT QUẢ XẾP LOẠI", "THỐNG KÊ HỌC KỲ 2", "TỔNG CỘNG", "XẾP LOẠI")
-      const rowStr = row.join(' ').toLowerCase();
-      if (
-        isEvaluationOrSummaryRow('', rowStr) ||
-        rowStr.includes('tổng cộng') ||
-        rowStr.includes('thống kê') ||
-        rowStr.includes('trung bình chung') ||
-        rowStr.includes('tổng hợp') ||
-        rowStr.includes('tổng số') ||
-        rowStr.includes('kết quả xếp loại') ||
-        rowStr.includes('xếp loại') ||
-        rowStr.includes('giáo viên chủ nhiệm') ||
-        rowStr.includes('giáo viên bộ môn') ||
-        rowStr.includes('chữ ký') ||
-        rowStr.includes('ban giám hiệu') ||
-        rowStr.includes('hiệu trưởng')
-      ) {
-        continue;
-      }
-
-      let code = '';
-      let fullName = '';
-      let lastName = '';
-      let firstName = '';
-      let gender = '';
-      let birthDate = '';
-      let group = '';
-      let tx1: number | null = null;
-      let tx2: number | null = null;
-      let tx3: number | null = null;
-      let tx4: number | null = null;
-      let tx5: number | null = null;
-      let gk: number | null = null;
-      let ck: number | null = null;
-      let dtb: number | null = null;
-      let evaluation = '';
-      let hk1Dtb: number | null = null;
-      let hk2Dtb: number | null = null;
-      let cnDtb: number | null = null;
-      let oralScore: number | null = null;
-      let test15mScore: number | null = null;
-      let test1PeriodScore: number | null = null;
-      let finalScore: number | null = null;
-      let bonusPoints: number | undefined = undefined;
-      let notes = '';
-      const customFields: Record<string, any> = {};
-
-      row.forEach((cellVal, colIdx) => {
-        if (cellVal === null || cellVal === undefined) return;
-        const mapping = columnMap[colIdx];
-        const valStr = String(cellVal).trim();
-        if (!valStr) return;
-
-        if (mapping) {
-          switch (mapping.role) {
-            case 'code':
-              code = valStr;
-              break;
-            case 'name':
-              fullName = valStr;
-              break;
-            case 'lastName':
-              lastName = valStr;
-              break;
-            case 'firstName':
-              firstName = valStr;
-              break;
-            case 'gender':
-              gender = /^(nữ|nu|female|f)$/i.test(valStr)
-                ? 'Nữ'
-                : /^(nam|male|m)$/i.test(valStr)
-                ? 'Nam'
-                : valStr;
-              break;
-            case 'birthDate':
-              birthDate = valStr;
-              break;
-            case 'group':
-              group = valStr.startsWith('Tổ') ? valStr : `Tổ ${valStr}`;
-              break;
-            case 'tx1':
-              tx1 = parseScoreValue(cellVal);
-              break;
-            case 'tx2':
-              tx2 = parseScoreValue(cellVal);
-              break;
-            case 'tx3':
-              tx3 = parseScoreValue(cellVal);
-              break;
-            case 'tx4':
-              tx4 = parseScoreValue(cellVal);
-              break;
-            case 'tx5':
-              tx5 = parseScoreValue(cellVal);
-              break;
-            case 'gk':
-              gk = parseScoreValue(cellVal);
-              break;
-            case 'ck':
-              ck = parseScoreValue(cellVal);
-              break;
-            case 'dtb':
-              dtb = parseScoreValue(cellVal);
-              break;
-            case 'hk1':
-              hk1Dtb = parseScoreValue(cellVal);
-              break;
-            case 'hk2':
-              hk2Dtb = parseScoreValue(cellVal);
-              break;
-            case 'cn':
-              cnDtb = parseScoreValue(cellVal);
-              break;
-            case 'evaluation':
-              evaluation = valStr;
-              break;
-            case 'oralScore':
-              oralScore = parseScoreValue(cellVal);
-              break;
-            case 'test15mScore':
-              test15mScore = parseScoreValue(cellVal);
-              break;
-            case 'test1PeriodScore':
-              test1PeriodScore = parseScoreValue(cellVal);
-              break;
-            case 'finalScore':
-              finalScore = parseScoreValue(cellVal);
-              break;
-            case 'bonusPoints': {
-              const num = parseFloat(valStr.replace(',', '.'));
-              if (!isNaN(num)) bonusPoints = num;
-              break;
-            }
-            case 'notes':
-              notes = valStr;
-              break;
-            case 'custom':
-              customFields[mapping.headerName] = cellVal;
-              break;
-            default:
-              break;
-          }
-        }
-      });
-
-      // Assemble full student name (combine Họ đệm + Tên)
-      let finalName = '';
-      if (fullName && firstName) {
-        finalName = cleanName(`${fullName} ${firstName}`);
-      } else if (lastName && firstName) {
-        finalName = cleanName(`${lastName} ${firstName}`);
-      } else if (fullName) {
-        finalName = cleanName(fullName);
-      } else if (lastName) {
-        finalName = cleanName(lastName);
-      } else if (firstName) {
-        finalName = cleanName(firstName);
-      }
-
-      // Check if customFields has a column holding first name (e.g., 'Cột 4' or 'Tên')
-      Object.keys(customFields).forEach((ck) => {
-        const val = String(customFields[ck] || '').trim();
-        const lowerHeader = ck?.toLowerCase();
-        if (
-          (lowerHeader.includes('tên') || lowerHeader.includes('cột') || lowerHeader.includes('column')) &&
-          val &&
-          !val.includes(' ') &&
-          val.length >= 1 &&
-          val.length <= 15 &&
-          !/^\d+$/.test(val)
-        ) {
-          // If finalName does not already end with this first name
-          if (finalName && !finalName?.toLowerCase().endsWith(val?.toLowerCase())) {
-            finalName = cleanName(`${finalName} ${val}`);
-            delete customFields[ck];
-          }
-        }
-      });
-
-      // If still no name, find any cell in row that looks like a Vietnamese name
-      if (!finalName) {
-        for (let colIdx = 0; colIdx < row.length; colIdx++) {
-          const cell = row[colIdx];
-          if (typeof cell === 'string') {
-            const trimmed = cleanName(cell);
-            if (
-              trimmed.length >= 3 &&
-              !/^\d+$/.test(trimmed) &&
-              !/^(nam|nữ|tốt|khá|giỏi)$/i.test(trimmed) &&
-              trimmed.includes(' ')
-            ) {
-              finalName = trimmed;
-              break;
-            }
-          }
-        }
-      }
-
-      const isNonStudentRow =
-        isEvaluationOrSummaryRow(finalName, rowStr) ||
-        isEvaluationOrSummaryRow(code) ||
-        /^(tốt|khá|đạt|chưa\s*đạt|giỏi|xuất\s*sắc|trung\s*bình|yếu|kém)/i.test(finalName) ||
-        /thống\s*kê|tổng\s*số|tổng\s*cộng|tổng\s*kết|tổng\s*hợp|giáo\s*viên|gvcn|hiệu\s*trưởng|bgh|người\s*lập|chữ\s*ký|ký\s*tên|học\s*sinh\s*giỏi|học\s*sinh\s*khá|ngày.*tháng/i.test(finalName);
-      if (finalName && finalName.length >= 2 && !isNonStudentRow) {
-        // Calculate semester 1 DTB if components are provided
-        const txScores = [tx1, tx2, tx3, tx4, tx5].filter((s): s is number => typeof s === 'number' && !isNaN(s));
-        let semesterDtb = dtb;
-        if (semesterDtb === null && (txScores.length > 0 || gk !== null || ck !== null)) {
-          let sum = txScores.reduce((a, b) => a + b, 0);
-          let weights = txScores.length;
-          if (gk !== null && typeof gk === 'number') {
-            sum += gk * 2;
-            weights += 2;
-          }
-          if (ck !== null && typeof ck === 'number') {
-            sum += ck * 3;
-            weights += 3;
-          }
-          if (weights > 0) {
-            semesterDtb = Math.round((sum / weights) * 10) / 10;
-          }
-        }
-
-        // Auto evaluate
-        let autoEval = evaluation;
-        if (!autoEval && typeof semesterDtb === 'number') {
-          if (semesterDtb >= 9.0) autoEval = 'Xuất sắc';
-          else if (semesterDtb >= 8.0) autoEval = 'Giỏi';
-          else if (semesterDtb >= 6.5) autoEval = 'Khá';
-          else if (semesterDtb >= 5.0) autoEval = 'Đạt';
-          else autoEval = 'Chưa đạt';
-        }
-
-        // Calculate final year avg if HK1 and HK2 are known
-        let yearAvg = cnDtb;
-        if (yearAvg === null && typeof hk1Dtb === 'number' && typeof hk2Dtb === 'number') {
-          yearAvg = Math.round(((hk1Dtb + 2 * hk2Dtb) / 3) * 10) / 10;
-        }
-
-        parsedRows.push({
-          code: code || `HS${1000 + parsedRows.length + 1}`,
-          name: finalName,
-          gender: gender || undefined,
-          birthDate: birthDate || undefined,
-          group: group || undefined,
-          tx1,
-          tx2,
-          tx3,
-          tx4,
-          tx5,
-          gk,
-          ck,
-          dtb: semesterDtb,
-          evaluation: autoEval || undefined,
-          hk1Dtb: hk1Dtb ?? semesterDtb,
-          hk2Dtb,
-          cnDtb: yearAvg,
-          oralScore: oralScore ?? tx1 ?? (txScores[0] ?? null),
-          test15mScore: test15mScore ?? tx2 ?? (txScores[1] ?? null),
-          test1PeriodScore: test1PeriodScore ?? gk,
-          finalScore: finalScore ?? ck,
-          bonusPoints,
-          notes: notes || undefined,
-          customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
-        });
-      }
-    }
-
-    if (parsedRows.length === 0) {
-      throw new Error('Không trích xuất được học sinh nào từ cấu trúc bảng.');
-    }
-
-    setDetectedColumns(allHeaders);
-    setExtractedStudents(parsedRows);
-    setActiveTab('preview');
   };
 
   // Process Excel Files (.xlsx, .xls, .csv)
   const handleProcessExcel = async (file: File) => {
     try {
       const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array' });
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
       const rawJson: any[][] = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
         defval: '',
         blankrows: false,
+        raw: false,
       });
 
       process2DDataMatrix(rawJson, file.name || firstSheetName);
@@ -748,6 +273,29 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
     try {
       if (ext === 'xlsx' || ext === 'xls' || ext === 'csv' || ext === 'tsv') {
         await handleProcessExcel(file);
+      } else if (ext === 'pdf') {
+        let parsedLocally = false;
+        try {
+          const { matrix } = await extractMatrixFromPdf(file, pdfjsLib);
+          if (matrix && matrix.length >= 2) {
+            process2DDataMatrix(matrix, file.name);
+            parsedLocally = true;
+          }
+        } catch (pdfErr) {
+          console.warn('PDF local matrix extraction fallback:', pdfErr);
+        }
+
+        if (!parsedLocally) {
+          const reader = new FileReader();
+          reader.onload = async () => {
+            const base64 = reader.result as string;
+            await callAIParsing({
+              imageBase64: base64,
+              mimeType: 'application/pdf',
+            });
+          };
+          reader.readAsDataURL(file);
+        }
       } else if (ext === 'docx') {
         // High-Speed Local Word Extraction
         const arrayBuffer = await file.arrayBuffer();
