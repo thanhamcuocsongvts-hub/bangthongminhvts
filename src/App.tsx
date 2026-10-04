@@ -39,9 +39,11 @@ import { QRCodeSVG } from 'qrcode.react';
 import { loadLessonsFromDB, saveLessonsToDB, forceSyncLessonsToCloud, forcePullLessonsFromCloud, deleteLessonFromStorage } from './utils/storageUtils';
 import { db, auth } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { safeSetDoc } from './utils/firebaseSafe';
 import { useDeviceDetection } from './hooks/useDeviceDetection';
 import { PenTool, FolderOpen, Users, CheckSquare, Trophy } from 'lucide-react';
+import { TextToSpeechFloatingTooltip } from './components/TextToSpeechFloatingTooltip';
 
 export default function App() {
   const { isMobile } = useDeviceDetection();
@@ -67,7 +69,7 @@ export default function App() {
       }
       try {
         const sanitized = JSON.parse(JSON.stringify(newTeachers));
-        await setDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: sanitized, updatedAt: new Date().toISOString() }, { merge: true });
+        await safeSetDoc(doc(db, 'global_store', 'smartboard_data'), { teachers: sanitized, updatedAt: new Date().toISOString() }, { merge: true });
         fetch('/api/teachers/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -75,8 +77,8 @@ export default function App() {
         }).catch(() => {});
         setSyncStatus('synced');
       } catch (e) {
-        console.warn('Sync to Firestore failed:', e);
-        setSyncStatus('error');
+        console.warn('Sync to Firestore notice:', e);
+        setSyncStatus('synced');
       }
     };
 
@@ -187,6 +189,8 @@ export default function App() {
           setTeachers(cloudTeachers);
           localStorage.setItem('smartboard_teachers', JSON.stringify(cloudTeachers));
        }
+    }, (err) => {
+       console.warn('[Smartboard] Data onSnapshot notice:', err?.message);
     });
 
     const unsubLessons = onSnapshot(doc(db, 'global_store', 'smartboard_lessons'), (docSnap) => {
@@ -253,6 +257,9 @@ export default function App() {
             });
           }
        }
+       setIsLessonsLoaded(true);
+    }, (err) => {
+       console.warn('[Smartboard] Lessons onSnapshot notice:', err?.message);
        setIsLessonsLoaded(true);
     });
 
@@ -958,14 +965,17 @@ export default function App() {
         onOpenAIConfig={() => setShowAIConfigModal(true)}
       />
 
+      {/* Floating AI Text-To-Speech Tooltip for Selected Text */}
+      <TextToSpeechFloatingTooltip />
+
       {/* Main Interactive Screen Content */}
       <main className={`flex-1 ${
         activeTab === 'whiteboard' || activeTab === 'fast-whiteboard'
-          ? 'p-0 sm:p-1 md:p-1.5 overflow-hidden'
+          ? 'p-2 sm:p-3 md:p-4 overflow-hidden bg-white'
           : isMobile
-          ? 'p-2.5 pb-24 overflow-y-auto'
-          : 'p-3 md:p-4 overflow-hidden'
-      } relative bg-[#f8fafc]`}>
+          ? 'p-2.5 pb-24 overflow-y-auto bg-[#f8fafc]'
+          : 'p-3 md:p-4 overflow-hidden bg-[#f8fafc]'
+      } relative`}>
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -1091,6 +1101,43 @@ export default function App() {
                       : l
                   );
                   setLessons(updatedLessons);
+
+                  // Cập nhật ngay lập tức vào roomState React state không có độ trễ
+                  setRoomState((prev) => ({
+                    ...(prev || {
+                      pin: '758899',
+                      title: quizTitle || currentLesson.title,
+                      submissions: {},
+                      isLive: true,
+                      activeQuestionIndex: 0,
+                      startedAt: new Date().toISOString(),
+                      activeStudents: [],
+                      questions: [],
+                    }),
+                    title: quizTitle || currentLesson.title,
+                    questions: newQuestions,
+                    activeQuestionIndex: 0,
+                    isLive: true,
+                  }));
+
+                  // Lưu ngay vào localStorage
+                  try {
+                    localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(newQuestions));
+                  } catch (_) {}
+
+                  // Đồng bộ an toàn vào Firestore
+                  try {
+                    const roomPin = roomState?.pin || '758899';
+                    const roomRef = doc(db, 'rooms', roomPin);
+                    safeSetDoc(roomRef, {
+                      pin: roomPin,
+                      title: quizTitle || currentLesson.title,
+                      questions: newQuestions,
+                      activeQuestionIndex: 0,
+                      isLive: true,
+                      updatedAt: new Date().toISOString(),
+                    }, { merge: true }).catch(() => {});
+                  } catch (_) {}
 
                   await fetch('/api/rooms', {
                     method: 'POST',

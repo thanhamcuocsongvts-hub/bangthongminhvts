@@ -69,7 +69,18 @@ import {
   Wand2,
   Loader2,
   Zap,
+  Volume2,
+  Check,
 } from 'lucide-react';
+import {
+  VOICE_TONE_PRESETS,
+  VoiceTonePreset,
+  speakText,
+  stopAllSpeech,
+  speakWithGeminiAudio,
+} from '../utils/aiSpeechService';
+import { FloatingSelectionToolbar } from './FloatingSelectionToolbar';
+import { cropCanvasRegion, recognizeHandwritingFast } from '../utils/textRecognitionService';
 import {
   filterPointJitter,
   calculateDynamicStrokeWidth,
@@ -87,6 +98,7 @@ import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
 import { BlackboardWordTextBox, BlackboardTextBox } from './BlackboardWordTextBox';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
+import { VirtualMathKeyboard } from './VirtualMathKeyboard';
 
 interface BlackboardPage {
   id: string;
@@ -197,6 +209,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     textIds: string[];
   } | null>(null);
 
+  // Text-To-Speech (TTS) Voice reading state
+  const [isSpeakingTTS, setIsSpeakingTTS] = useState<boolean>(false);
+  const [showTTSVoiceMenu, setShowTTSVoiceMenu] = useState<boolean>(false);
+  const [showBottomTTSMenu, setShowBottomTTSMenu] = useState<boolean>(false);
+  const [ttsVoicePreset, setTtsVoicePreset] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[0]);
+  const [recognizedTextPreview, setRecognizedTextPreview] = useState<string | null>(null);
+
   const calligraphySessionStrokesRef = useRef<string[]>([]);
   const lastPointerPointRef = useRef<{ x: number; y: number; pressure: number; time: number; width?: number } | null>(null);
   const lastMidPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -293,6 +312,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   // Active stroke refs for high-fps smooth drawing without React re-render lags
   const activePointsRef = useRef<StrokePoint[]>([]);
   const isDrawingRef = useRef<boolean>(false);
+  const p0Ref = useRef<{ x: number; y: number } | null>(null);
+  const p1Ref = useRef<{ x: number; y: number } | null>(null);
 
   // 2-finger touch panning on 75" TV touch screen
   const twoFingerStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -328,24 +349,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const [showEquationModal, setShowEquationModal] = useState<boolean>(false);
   const [equationInput, setEquationInput] = useState<string>('y = 2x^3 - 3x + 1');
   const [editingEquationStrokeId, setEditingEquationStrokeId] = useState<string | null>(null);
-
-  // Memoized MathType-style parser & KaTeX HTML preview
-  const parsedEquation = useMemo(() => {
-    return compileMathExpression(equationInput);
-  }, [equationInput]);
-
-  const equationKatexHtml = useMemo(() => {
-    if (!parsedEquation.latex) return null;
-    try {
-      return katex.renderToString(parsedEquation.latex, {
-        displayMode: true,
-        throwOnError: false,
-        strict: false,
-      });
-    } catch {
-      return null;
-    }
-  }, [parsedEquation.latex]);
 
   // Helper to adjust graph scale (Zoom in / out)
   const handleZoomGraph = (strokeId: string, delta: number) => {
@@ -553,7 +556,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     const ctx = canvas.getContext('2d', { desynchronized: true });
     if (ctx) {
-      ctx.scale(dpr, dpr);
       redrawCanvas(ctx);
     }
   }, [strokes, texts, isSplitScreen, splitRatio]);
@@ -1143,12 +1145,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     ctx.restore();
   };
 
-  // Redraw all strokes & texts with boardScrollX & boardScrollY viewport translation
+  // Redraw all strokes with transparent background to preserve pedagogical grid lines
   const redrawCanvas = useCallback(
     (ctx: CanvasRenderingContext2D) => {
-      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-
+      const dpr = window.devicePixelRatio || 1;
       ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, ctx.canvas.width / dpr, ctx.canvas.height / dpr);
+
       ctx.translate(-boardScrollX, -boardScrollY);
 
       // Render all saved strokes
@@ -1447,11 +1451,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     setCalligraphyStatusBanner('⚡ Đang chuyển thành chữ đẹp siêu tốc...');
 
     try {
-      const teacherName = activeTeacher?.name || '';
-      const contextHint = `Giáo viên: ${teacherName}, học sinh lớp học Việt Nam, nhận diện tên riêng tiếng Việt, bài giảng môn học Toán/Tiếng Việt/Văn`;
-      const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, contextHint);
-      if (recognized && recognized.trim().length > 0) {
-        const text = recognized.trim();
+      let text = (recognizedTextPreview || '').trim();
+      if (!text) {
+        const teacherName = activeTeacher?.name || '';
+        const contextHint = `Giáo viên: ${teacherName}, học sinh lớp học Việt Nam, nhận diện tên riêng tiếng Việt, bài giảng môn học Toán/Tiếng Việt/Văn`;
+        const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, contextHint);
+        text = (recognized || '').trim();
+      }
+      if (text.length > 0) {
         // Tính toán chính xác kích thước và tọa độ thật của nét vẽ lúc giáo viên viết phấn
         let sMinX = Infinity, sMaxX = -Infinity;
         let sMinY = Infinity, sMaxY = -Infinity;
@@ -1564,6 +1571,118 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       setIsConvertingCalligraphy(false);
     }
   }, [boardScrollX, boardScrollY, activeColor, calligraphyFont, selectedStrokeId, sweptSelection]);
+
+  // Text-To-Speech (TTS): Phát âm văn bản hoặc chữ viết tay trên bảng xanh với bộ lọc giọng tự nhiên & tiền xử lý toán học
+  const speakTextWithWebSpeech = useCallback((text: string, preset: VoiceTonePreset) => {
+    stopAllSpeech();
+    setIsSpeakingTTS(true);
+
+    const ok = speakText(text, {
+      preset,
+      onStart: () => setIsSpeakingTTS(true),
+      onEnd: () => {
+        setIsSpeakingTTS(false);
+        setCalligraphyStatusBanner(null);
+      },
+      onError: (err) => {
+        console.warn('SpeechSynthesis error:', err);
+        setIsSpeakingTTS(false);
+        setCalligraphyStatusBanner(null);
+      },
+    });
+
+    if (!ok && !('speechSynthesis' in window)) {
+      alert('Trình duyệt không hỗ trợ Web Speech Synthesis API');
+      setIsSpeakingTTS(false);
+    }
+  }, []);
+
+  const handleStopTTS = useCallback(() => {
+    stopAllSpeech();
+    setIsSpeakingTTS(false);
+    setCalligraphyStatusBanner(null);
+  }, []);
+
+  const handleSpeakSweptContent = useCallback(async (overridePreset?: VoiceTonePreset) => {
+    const preset = overridePreset || ttsVoicePreset;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const currPages = pagesRef.current;
+    const currIdx = currentPageIndexRef.current;
+    const currPage = currPages[currIdx];
+    if (!currPage) return;
+
+    // 1. If swept selection contains existing text boxes:
+    if (sweptSelection && sweptSelection.textIds.length > 0) {
+      const textObjects = (currPage.texts || []).filter((t) => sweptSelection.textIds.includes(t.id));
+      const combinedText = textObjects.map((t) => t.text).join(' ').trim();
+      if (combinedText) {
+        setCalligraphyStatusBanner(`🔊 AI đang đọc: "${combinedText}"`);
+        speakTextWithWebSpeech(combinedText, preset);
+        return;
+      }
+    }
+
+    // 2. If a text box is selected:
+    if (selectedTextId) {
+      const targetText = (currPage.texts || []).find((t) => t.id === selectedTextId);
+      if (targetText && targetText.text) {
+        setCalligraphyStatusBanner(`🔊 AI đang đọc: "${targetText.text}"`);
+        speakTextWithWebSpeech(targetText.text, preset);
+        return;
+      }
+    }
+
+    // 3. If swept selection has handwriting strokes:
+    let strokeIds: string[] = sweptSelection?.strokeIds || [];
+    if (strokeIds.length === 0 && selectedStrokeId) {
+      strokeIds = [selectedStrokeId];
+    }
+
+    if (strokeIds.length === 0) {
+      setCalligraphyStatusBanner('💡 Thầy cô vui lòng quét bao quanh chữ cần đọc hoặc nhấp vào hộp chữ nhé!');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+      return;
+    }
+
+    const targetStrokes = currPage.strokes.filter((s) => strokeIds.includes(s.id));
+    if (targetStrokes.length === 0) return;
+
+    // Fast check: nếu đã có preview nhận diện trước đó (<0.5s), đọc ngay lập tức (<150ms)
+    if (recognizedTextPreview && recognizedTextPreview.trim().length > 0) {
+      setCalligraphyStatusBanner(`🔊 AI đang đọc: "${recognizedTextPreview}"`);
+      speakTextWithWebSpeech(recognizedTextPreview, preset);
+      return;
+    }
+
+    // Cắt ảnh vùng chọn siêu tốc (< 400px, grayscale tương phản cao)
+    const box = sweptSelection?.box || { minX: 0, minY: 0, maxX: 400, maxY: 400 };
+    const crop = cropCanvasRegion(canvas, box, targetStrokes, boardScrollX, boardScrollY, 12);
+    if (!crop) return;
+
+    setCalligraphyStatusBanner('⚡ AI đang nhận diện chữ siêu tốc...');
+    setIsSpeakingTTS(true);
+
+    try {
+      const recognized = await recognizeHandwritingFast(crop.dataUrl);
+      if (recognized && recognized.trim().length > 0) {
+        const cleanText = recognized.trim();
+        setRecognizedTextPreview(cleanText);
+        setCalligraphyStatusBanner(`🔊 AI đang đọc: "${cleanText}"`);
+        speakTextWithWebSpeech(cleanText, preset);
+      } else {
+        setCalligraphyStatusBanner('⚠️ Không nhận diện được chữ để đọc.');
+        setIsSpeakingTTS(false);
+        setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+      }
+    } catch (err) {
+      console.error('TTS error:', err);
+      setIsSpeakingTTS(false);
+      setCalligraphyStatusBanner('⚠️ Có lỗi xảy ra khi đọc.');
+      setTimeout(() => setCalligraphyStatusBanner(null), 3000);
+    }
+  }, [boardScrollX, boardScrollY, recognizedTextPreview, selectedStrokeId, selectedTextId, speakTextWithWebSpeech, sweptSelection, ttsVoicePreset]);
 
   // Undo Calligraphy: revert converted text box back to original handwritten chalk strokes
   const handleUndoCalligraphy = useCallback(() => {
@@ -1861,15 +1980,19 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       ? calculateDynamicStrokeWidth(strokeSize, { x, y, pressure: effectivePressure, time: now }, undefined, false)
       : strokeSize;
 
+    p0Ref.current = { x, y };
+    p1Ref.current = { x, y };
     lastPointerPointRef.current = { x, y, pressure: effectivePressure, time: now, width: initialWidth };
     lastMidPointRef.current = { x, y };
     const startPt: StrokePoint = { x, y, pressure: effectivePressure, time: now, width: initialWidth };
     activePointsRef.current = [startPt];
 
-    // Khởi tạo nét vẽ với ctx.lineCap = 'round' và ctx.lineJoin = 'round'
+    // Khởi tạo nét vẽ với ctx.lineCap = 'round' và ctx.lineJoin = 'round' cùng DPI chuẩn
     const ctx = canvas.getContext('2d');
     if (ctx && isFreehandStrokeTool(activeTool)) {
       ctx.save();
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.translate(-boardScrollX, -boardScrollY);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -2021,7 +2144,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     if (!isDrawingRef.current) return;
 
-    // Collect high-frequency touch samples (coalesced events) for ultra-smooth 120fps handwriting on 75" TV
+    // Bắt trọn điểm chạm phần cứng 120Hz qua getCoalescedEvents; gỡ bỏ hoàn toàn getPredictedEvents chống vệt gai nhọn li ti
     const coalescedList: { x: number; y: number; pressure: number }[] = [];
     const nativeEvt = e.nativeEvent as any;
     if (nativeEvt && typeof nativeEvt.getCoalescedEvents === 'function') {
@@ -2049,15 +2172,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     if (!ctx) return;
 
     if (isFreehandStrokeTool(activeTool)) {
-      // Tối ưu hóa vẽ nét liền lạc tốc độ cao, bẻ góc gắt không mất nét
       const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
       ctx.save();
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.translate(-boardScrollX, -boardScrollY);
 
-      // =========================================================================
-      // CẤU HÌNH BẮT BUỘC (Yêu cầu 3): Cấu hình ctx.lineCap = 'round' và ctx.lineJoin = 'round'
-      // Để khử hoàn toàn hiện tượng mất nét khi viết nhanh hoặc bẻ góc gắt
-      // =========================================================================
+      // Cấu hình nét vẽ bo tròn tự nhiên
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
@@ -2079,68 +2200,32 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       }
 
       for (const rawPt of coalescedList) {
-        // Tọa độ điểm quét hiện tại
-        const currentX = rawPt.x;
-        const currentY = rawPt.y;
+        const current = { x: rawPt.x, y: rawPt.y };
+        const p1 = p1Ref.current || current;
+        const midPoint = { x: (p1.x + current.x) / 2, y: (p1.y + current.y) / 2 };
 
-        // =========================================================================
-        // BẮT BUỘC (Yêu cầu 3): Lưu lại tọa độ điểm trước đó (lastX, lastY)
-        // =========================================================================
-        const lastX = lastPointerPointRef.current ? lastPointerPointRef.current.x : currentX;
-        const lastY = lastPointerPointRef.current ? lastPointerPointRef.current.y : currentY;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.quadraticCurveTo(p1.x, p1.y, midPoint.x, midPoint.y);
+        ctx.stroke();
+
+        p1Ref.current = current;
 
         const effectivePressure = Math.max(0.25, rawPt.pressure || 0.5);
         const dynWidth = activeTool === 'calligraphy'
-          ? calculateDynamicStrokeWidth(strokeSize, { x: currentX, y: currentY, pressure: effectivePressure, time: performance.now() }, lastPointerPointRef.current || undefined, true)
+          ? calculateDynamicStrokeWidth(strokeSize, { x: current.x, y: current.y, pressure: effectivePressure, time: performance.now() }, lastPointerPointRef.current || undefined, true)
           : (activeTool === 'pen'
-            ? calculateDynamicStrokeWidth(strokeSize, { x: currentX, y: currentY, pressure: effectivePressure, time: performance.now() }, lastPointerPointRef.current || undefined, false)
+            ? calculateDynamicStrokeWidth(strokeSize, { x: current.x, y: current.y, pressure: effectivePressure, time: performance.now() }, lastPointerPointRef.current || undefined, false)
             : strokeSize);
 
         const ptWithWidth = {
-          x: currentX,
-          y: currentY,
+          x: current.x,
+          y: current.y,
           pressure: effectivePressure,
           time: performance.now(),
           width: dynWidth,
         };
         pts.push(ptWithWidth);
-
-        if (activeTool === 'calligraphy' || activeTool === 'pen') {
-          ctx.lineWidth = dynWidth;
-        }
-
-        // =========================================================================
-        // THUẬT TOÁN NỘI SUY MIDPOINT QUADRATIC BÉZIER (Zero-Latency & Smooth Stroke):
-        // Khử gãy khúc, vẽ đường cong mượt mà liên tục từ phần cứng 120Hz
-        // =========================================================================
-        if (pts.length === 2) {
-          const midX = (pts[0].x + currentX) / 2;
-          const midY = (pts[0].y + currentY) / 2;
-          ctx.beginPath();
-          ctx.moveTo(pts[0].x, pts[0].y);
-          ctx.lineTo(midX, midY);
-          ctx.stroke();
-          lastMidPointRef.current = { x: midX, y: midY };
-        } else if (pts.length >= 3) {
-          const pPrev = pts[pts.length - 2];
-          const currentMidX = (pPrev.x + currentX) / 2;
-          const currentMidY = (pPrev.y + currentY) / 2;
-          const prevMid = lastMidPointRef.current || { x: pPrev.x, y: pPrev.y };
-
-          ctx.beginPath();
-          ctx.moveTo(prevMid.x, prevMid.y);
-          ctx.quadraticCurveTo(pPrev.x, pPrev.y, currentMidX, currentMidY);
-          ctx.stroke();
-
-          lastMidPointRef.current = { x: currentMidX, y: currentMidY };
-        } else {
-          ctx.beginPath();
-          ctx.moveTo(currentX, currentY);
-          ctx.lineTo(currentX, currentY);
-          ctx.stroke();
-        }
-
-        // Cập nhật lại tọa độ điểm trước đó
         lastPointerPointRef.current = ptWithWidth;
       }
 
@@ -2150,6 +2235,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       pts.push(coalescedList[coalescedList.length - 1]);
       redrawCanvas(ctx);
       ctx.save();
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.translate(-boardScrollX, -boardScrollY);
       renderSingleStroke(ctx, activeTool, pts, activeColor, strokeSize, 0, undefined, undefined, 1, undefined, {
         customEquation: activeTool === 'func_custom_equation' ? equationInput : undefined,
@@ -2374,14 +2461,28 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       }
 
       if (matchedStrokeIds.length > 0 || matchedTextIds.length > 0) {
+        const newBox = { minX: selMinX, minY: selMinY, maxX: selMaxX, maxY: selMaxY };
         setSweptSelection({
-          box: { minX: selMinX, minY: selMinY, maxX: selMaxX, maxY: selMaxY },
+          box: newBox,
           strokeIds: matchedStrokeIds,
           textIds: matchedTextIds,
         });
+        setRecognizedTextPreview(null);
         setCalligraphyStatusBanner(`✨ Đã chọn ${matchedStrokeIds.length > 0 ? `${matchedStrokeIds.length} nét chữ/công thức` : `${matchedTextIds.length} văn bản`}. Bấm nút nổi để chuyển đổi siêu tốc!`);
+
+        // Tự động nhận diện chữ chạy ngầm siêu tốc (< 300ms) để sẵn sàng khi giáo viên bấm nút
+        if (matchedStrokeIds.length > 0) {
+          const selectedStrokes = curr.strokes.filter((s) => matchedStrokeIds.includes(s.id));
+          const crop = cropCanvasRegion(canvasRef.current, newBox, selectedStrokes, boardScrollX, boardScrollY, 12);
+          if (crop) {
+            recognizeHandwritingFast(crop.dataUrl).then((text) => {
+              if (text) setRecognizedTextPreview(text);
+            }).catch(() => {});
+          }
+        }
       } else {
         setSweptSelection(null);
+        setRecognizedTextPreview(null);
         setCalligraphyStatusBanner('💡 Chạm hoặc quét bao quanh vùng chữ/công thức cần chuyển đổi nhé!');
         setTimeout(() => setCalligraphyStatusBanner(null), 3000);
       }
@@ -2486,6 +2587,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.save();
+        const dpr = window.devicePixelRatio || 1;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.translate(-boardScrollX, -boardScrollY);
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -2507,6 +2610,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         ctx.restore();
       }
     }
+    p0Ref.current = null;
+    p1Ref.current = null;
     lastPointerPointRef.current = null;
     lastMidPointRef.current = null;
 
@@ -2815,23 +2920,23 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const getBackgroundClass = () => {
     switch (bgTheme) {
       case 'blackboard':
-        return 'blackboard-bg border-8 border-[#3d2714] shadow-2xl';
+        return 'blackboard-bg border-[10px] md:border-[12px] border-[#3e2211] rounded-[24px] sm:rounded-[28px] md:rounded-[32px] shadow-[0_15px_45px_rgba(0,0,0,0.35),inset_0_2px_6px_rgba(0,0,0,0.5)]';
       case 'oli':
-        return 'oli-grid-bg border-8 border-[#3d2714] shadow-2xl';
+        return 'oli-grid-bg border-[10px] md:border-[12px] border-[#3e2211] rounded-[24px] sm:rounded-[28px] md:rounded-[32px] shadow-[0_15px_45px_rgba(0,0,0,0.35),inset_0_2px_6px_rgba(0,0,0,0.5)]';
       case 'lined':
-        return 'lined-blackboard-bg border-8 border-[#3d2714] shadow-2xl';
+        return 'lined-blackboard-bg border-[10px] md:border-[12px] border-[#3e2211] rounded-[24px] sm:rounded-[28px] md:rounded-[32px] shadow-[0_15px_45px_rgba(0,0,0,0.35),inset_0_2px_6px_rgba(0,0,0,0.5)]';
       case 'graph':
-        return 'graph-paper-bg border-8 border-slate-800 shadow-2xl';
+        return 'graph-paper-bg border-8 border-slate-800 rounded-3xl shadow-2xl';
       case 'slate':
-        return 'slate-board-bg border-8 border-slate-900 shadow-2xl';
+        return 'slate-board-bg border-8 border-slate-900 rounded-3xl shadow-2xl';
       case 'navy':
-        return 'navy-board-bg border-8 border-slate-900 shadow-2xl';
+        return 'navy-board-bg border-8 border-slate-900 rounded-3xl shadow-2xl';
       case 'wood':
-        return 'wood-board-bg border-8 border-[#29180d] shadow-2xl';
+        return 'wood-board-bg border-8 border-[#29180d] rounded-3xl shadow-2xl';
       case 'white':
-        return 'whiteboard-clean-bg border-8 border-slate-300 shadow-2xl text-slate-900';
+        return 'whiteboard-clean-bg border-8 border-slate-300 rounded-3xl shadow-2xl text-slate-900';
       default:
-        return 'blackboard-bg border-8 border-[#3d2714] shadow-2xl';
+        return 'blackboard-bg border-[10px] md:border-[12px] border-[#3e2211] rounded-[24px] sm:rounded-[28px] md:rounded-[32px] shadow-[0_15px_45px_rgba(0,0,0,0.35),inset_0_2px_6px_rgba(0,0,0,0.5)]';
     }
   };
 
@@ -2901,7 +3006,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       className={`relative w-full overflow-hidden transition-all duration-300 select-none flex ${
         isFullBoard
           ? 'fixed inset-0 z-50 h-screen w-screen rounded-none'
-          : 'h-full w-full min-h-[500px] rounded-2xl md:rounded-3xl'
+          : 'h-full w-full min-h-[500px]'
       } ${getBackgroundClass()}`}
     >
       {/* Hidden File Input */}
@@ -3207,24 +3312,24 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         )
       )}
 
-      {/* Floating Restore Pill when Top Bar is collapsed - Right Aligned to maximize blackboard space */}
+      {/* Floating Restore Pill when Top Bar is collapsed - Đúng chuẩn giao diện Ảnh 1 */}
       {(isTopBarCollapsed || isImmersiveMode) && (
-        <div className="absolute top-3 right-4 z-30 pointer-events-auto animate-fade-in flex items-center gap-2">
+        <div className="absolute top-3.5 right-4 z-30 pointer-events-auto animate-fade-in flex items-center gap-2">
           <button
             onClick={() => {
               setIsTopBarCollapsed(false);
               setIsImmersiveMode(false);
             }}
-            className="px-3.5 py-1.5 rounded-full bg-slate-950/90 hover:bg-slate-900 text-emerald-300 border-2 border-emerald-500/50 text-xs font-black shadow-2xl backdrop-blur-xl flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            className="px-3.5 py-1.5 rounded-full bg-slate-950/85 hover:bg-slate-900 text-emerald-400 border border-emerald-500/50 text-xs font-bold shadow-lg backdrop-blur-md flex items-center gap-1.5 transition-all cursor-pointer hover:scale-105 active:scale-95"
             title="Nhấp để hiển thị lại thanh điều khiển trên"
           >
-            <ChevronDown className="w-4 h-4 text-emerald-400" />
+            <ChevronDown className="w-3.5 h-3.5 text-emerald-400" />
             <span>Hiện Thanh Công Cụ</span>
           </button>
 
           <button
             onClick={() => setShowDocumentModal(true)}
-            className="px-3 py-1.5 rounded-full bg-indigo-600/90 hover:bg-indigo-600 text-white border border-indigo-400 text-xs font-bold shadow-xl flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            className="px-3.5 py-1.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg flex items-center gap-1.5 transition-all cursor-pointer hover:scale-105 active:scale-95"
             title="Mở Kho Tài Liệu"
           >
             <FolderOpen className="w-3.5 h-3.5" />
@@ -3264,6 +3369,22 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               ? '60%'
               : '40%'
             : '100%',
+          backgroundColor: bgTheme === 'blackboard' || bgTheme === 'oli' ? '#0c3323' : undefined,
+          backgroundImage: bgTheme === 'blackboard'
+            ? 'linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px), radial-gradient(ellipse at 50% 50%, rgba(14, 58, 39, 0.45) 0%, rgba(8, 36, 23, 0.95) 100%)'
+            : bgTheme === 'oli'
+            ? 'linear-gradient(to right, rgba(255, 255, 255, 0.16) 1.5px, transparent 1.5px), linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 1.5px, transparent 1.5px), linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px), radial-gradient(ellipse at 50% 50%, rgba(14, 58, 39, 0.55) 0%, rgba(8, 36, 23, 0.95) 100%)'
+            : undefined,
+          backgroundSize: bgTheme === 'blackboard'
+            ? '50px 50px, 50px 50px, 100% 100%'
+            : bgTheme === 'oli'
+            ? '200px 200px, 200px 200px, 40px 40px, 40px 40px, 100% 100%'
+            : undefined,
+          backgroundPosition: bgTheme === 'blackboard'
+            ? `${-boardScrollX}px ${-boardScrollY}px, ${-boardScrollX}px ${-boardScrollY}px, center center`
+            : bgTheme === 'oli'
+            ? `${-boardScrollX}px ${-boardScrollY}px, ${-boardScrollX}px ${-boardScrollY}px, ${-boardScrollX}px ${-boardScrollY}px, ${-boardScrollX}px ${-boardScrollY}px, center center`
+            : undefined,
         }}
       >
         {/* Main Touch Drawing Canvas */}
@@ -3274,7 +3395,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
           onPointerCancel={handlePointerCancel}
-          style={{ ...getCanvasCursorStyle(), touchAction: 'none' }}
+          style={{
+            ...getCanvasCursorStyle(),
+            touchAction: 'none',
+            userSelect: 'none',
+            willChange: 'transform',
+          }}
           className={`absolute inset-0 w-full h-full touch-canvas z-10 ${getCanvasCursorClass()}`}
         />
 
@@ -3766,101 +3892,28 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           />
         )}
 
-        {/* Swept Selection Highlight (Yêu cầu 1: Bám sát nét bút & Mờ đi ở ngoài vùng chọn) */}
+        {/* Swept Selection Highlight & Floating Selection Toolbar (Thanh công cụ nổi tím trên vùng chữ) */}
         {sweptSelection && (
-          <>
-            {/* Dashed Outline Box around the Swept Text Area */}
-            <div
-              className="absolute pointer-events-none border-2 border-dashed border-purple-400 z-40 transition-all rounded-xl"
-              style={{
-                left: `${sweptSelection.box.minX - boardScrollX}px`,
-                top: `${sweptSelection.box.minY - boardScrollY}px`,
-                width: `${sweptSelection.box.maxX - sweptSelection.box.minX}px`,
-                height: `${sweptSelection.box.maxY - sweptSelection.box.minY}px`,
-                boxShadow: isMobile ? '0 0 25px rgba(168, 85, 247, 0.5)' : '0 0 0 9999px rgba(0, 0, 0, 0.35)',
-                backgroundColor: isMobile ? 'rgba(168, 85, 247, 0.08)' : 'transparent',
-              }}
-            >
-              <div className="absolute -top-3 left-3 px-2 py-0.5 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-full text-[10px] font-bold text-white shadow-lg flex items-center gap-1 border border-purple-300/40">
-                <Sparkles className="w-3 h-3 text-amber-300" />
-                <span>Vùng chữ ({sweptSelection.strokeIds.length > 0 ? `${sweptSelection.strokeIds.length} nét` : `${sweptSelection.textIds.length} khối chữ`})</span>
-              </div>
-              {/* Corner Circular Handles */}
-              <div className="absolute -top-1.5 -left-1.5 w-3 h-3 rounded-full bg-purple-500 border border-white shadow-sm" />
-              <div className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full bg-purple-500 border border-white shadow-sm" />
-              <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 rounded-full bg-purple-500 border border-white shadow-sm" />
-              <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 rounded-full bg-purple-500 border border-white shadow-sm" />
-            </div>
-
-            {/* Floating Confirm Action Pill: Bấm Chọn Chuyển Chữ Đẹp */}
-            <div
-              className={
-                isMobile
-                  ? "fixed bottom-20 left-2 right-2 z-50 flex items-center justify-between gap-1.5 bg-slate-950/98 backdrop-blur-2xl border-2 border-purple-400/80 rounded-2xl p-2 shadow-2xl text-white animate-in slide-in-from-bottom-4 duration-200 pointer-events-auto"
-                  : "absolute z-50 flex flex-wrap items-center gap-2 bg-slate-950/95 backdrop-blur-2xl border-2 border-purple-400/80 rounded-2xl p-2 md:p-2.5 shadow-2xl text-white animate-in zoom-in-95 duration-150 pointer-events-auto"
-              }
-              style={
-                isMobile
-                  ? undefined
-                  : {
-                      left: `${Math.max(12, Math.min(window.innerWidth - 420, sweptSelection.box.minX - boardScrollX))}px`,
-                      top: `${Math.max(
-                        12,
-                        sweptSelection.box.minY - boardScrollY > 64
-                          ? sweptSelection.box.minY - boardScrollY - 60
-                          : sweptSelection.box.maxY - boardScrollY + 12
-                      )}px`,
-                    }
-              }
-            >
-              {/* Quick Font Selector */}
-              <div className="flex items-center gap-1 bg-white/10 px-2 py-1.5 rounded-xl border border-white/15 shrink-0 max-w-[130px] sm:max-w-none">
-                <Feather className="w-3.5 h-3.5 text-purple-300 shrink-0" />
-                <select
-                  value={calligraphyFont}
-                  onChange={(e) => setCalligraphyFont(e.target.value as any)}
-                  className="bg-transparent text-white text-[11px] font-bold focus:outline-none cursor-pointer truncate"
-                >
-                  <option value="tieuhoc_chuan" className="bg-slate-900 text-white">🌟 Chữ Mẫu Tiểu Học BGD (Playwrite VN)</option>
-                  <option value="tieuhoc_oly" className="bg-slate-900 text-white">📐 Tập Viết Kẻ Ô Ly (Guides)</option>
-                  <option value="luyenchu" className="bg-slate-900 text-white">✨ Vở Sạch Chữ Đẹp (Charm - Ảnh 3)</option>
-                  <option value="tapviet" className="bg-slate-900 text-white">📖 Tập Viết Nét Tròn (HP001)</option>
-                  <option value="primary" className="bg-slate-900 text-white">📝 Nét Phấn Học Trò</option>
-                  <option value="handwriting" className="bg-slate-900 text-white">✒️ Bút Mài Giáo Viên</option>
-                  <option value="calligraphy" className="bg-slate-900 text-white">🌸 Thư Pháp Mềm Mại</option>
-                  <option value="cursive" className="bg-slate-900 text-white">✍️ Nét Cọ Bay Bổng</option>
-                </select>
-              </div>
-
-              {/* Confirm / Action Button: User clicks this to activate conversion */}
-              <button
-                onClick={() => handleConvertHandwritingToCalligraphy()}
-                disabled={isConvertingCalligraphy}
-                className="flex-1 sm:flex-none px-3.5 py-2 bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:brightness-110 active:scale-95 text-white font-black text-xs rounded-xl shadow-xl flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all ring-2 ring-purple-300/50 shrink-0"
-              >
-                {isConvertingCalligraphy ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300" />
-                    <span>Đang chuyển...</span>
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="w-3.5 h-3.5 text-amber-300 animate-bounce" />
-                    <span>{isMobile ? 'Chuyển Đẹp' : 'Bấm chọn: Chuyển Chữ Đẹp'}</span>
-                  </>
-                )}
-              </button>
-
-              {/* Cancel / Dismiss button */}
-              <button
-                onClick={() => setSweptSelection(null)}
-                className="p-1.5 hover:bg-white/15 rounded-xl text-slate-400 hover:text-white cursor-pointer transition-colors shrink-0"
-                title="Hủy quét"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </>
+          <FloatingSelectionToolbar
+            sweptSelection={sweptSelection}
+            boardScrollX={boardScrollX}
+            boardScrollY={boardScrollY}
+            isMobile={isMobile}
+            calligraphyFont={calligraphyFont}
+            setCalligraphyFont={setCalligraphyFont}
+            isConvertingCalligraphy={isConvertingCalligraphy}
+            onConvert={() => handleConvertHandwritingToCalligraphy()}
+            isSpeakingTTS={isSpeakingTTS}
+            ttsVoicePreset={ttsVoicePreset}
+            setTtsVoicePreset={setTtsVoicePreset}
+            onSpeak={(preset) => handleSpeakSweptContent(preset)}
+            onStopTTS={handleStopTTS}
+            onClose={() => {
+              setSweptSelection(null);
+              setRecognizedTextPreview(null);
+            }}
+            recognizedTextPreview={recognizedTextPreview}
+          />
         )}
 
         {/* All Blackboard Word Text Boxes (Crisp HTML + KaTeX rendering + Word Formatting Toolbar + 8-Point Resizing) */}
@@ -5836,6 +5889,17 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           </div>
         </div>
         )
+      ) : isDockCollapsed ? (
+        /* Minimized Dock Trigger Button */
+        <button
+          onClick={() => setIsDockCollapsed(false)}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 rounded-full bg-slate-950/85 hover:bg-slate-900 text-emerald-300 border border-emerald-500/40 text-xs font-bold shadow-2xl backdrop-blur-xl flex items-center gap-2 cursor-pointer transition-all hover:scale-105 active:scale-95 pointer-events-auto"
+          title="Mở thanh công cụ sư phạm"
+        >
+          <PenLine className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Thanh Công Cụ</span>
+          <ChevronUp className="w-3.5 h-3.5 text-emerald-400" />
+        </button>
       ) : (
         /* AUTHENTIC BOTTOM CHALK & TOOL DOCK (75 INCH TOUCH OPTIMIZED - ALWAYS VISIBLE) */
         <div className="absolute bottom-2.5 sm:bottom-3 md:bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[98vw] flex justify-center">
@@ -6009,6 +6073,94 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     <Wand2 className="w-3.5 h-3.5 text-amber-300" />
                     <span>{isConvertingCalligraphy ? 'Đang chuyển siêu tốc...' : sweptSelection ? 'Bấm chọn chuyển ngay' : 'Chuyển chữ đẹp'}</span>
                   </button>
+                </div>
+              )}
+            </div>
+
+            {/* 2c. Giọng Đọc AI (TTS) với Menu Popover chọn 4 sắc thái giọng ngay cạnh */}
+            <div className="relative flex items-center shrink-0">
+              <div className="flex items-center rounded-xl overflow-hidden border border-emerald-500/40 bg-emerald-950/70 shadow-lg">
+                <button
+                  onClick={() => {
+                    if (isSpeakingTTS) {
+                      handleStopTTS();
+                      return;
+                    }
+                    if (sweptSelection || selectedTextId || selectedStrokeId) {
+                      handleSpeakSweptContent();
+                    } else {
+                      handleToolChange('calligraphy');
+                      setCalligraphyStatusBanner('🔊 Chế độ Đọc AI: Kéo quét bao quanh chữ trên bảng để AI phát âm to rõ!');
+                      setTimeout(() => setCalligraphyStatusBanner(null), 4500);
+                    }
+                  }}
+                  className={`px-2.5 py-2 flex items-center gap-1.5 text-xs font-black transition-all cursor-pointer ${
+                    isSpeakingTTS
+                      ? 'bg-emerald-600 text-white animate-pulse shadow-md'
+                      : 'hover:bg-emerald-800/80 text-emerald-300'
+                  }`}
+                  title={isSpeakingTTS ? 'Dừng đọc AI' : 'Đọc chữ viết tay hoặc văn bản trên bảng bằng giọng đọc AI (Nhấn để đọc)'}
+                >
+                  <Volume2 className={`w-4 h-4 ${isSpeakingTTS ? 'animate-bounce text-white' : 'text-emerald-400'}`} />
+                  <span className="text-[11px] font-black whitespace-nowrap">
+                    {isSpeakingTTS ? 'Đang Đọc' : '🔊 Đọc AI'}
+                  </span>
+                </button>
+
+                {/* Nút Popover chọn nhanh sắc thái giọng đọc AI */}
+                <button
+                  onClick={() => setShowBottomTTSMenu((prev) => !prev)}
+                  className="px-1.5 py-2 hover:bg-emerald-800/80 text-emerald-300 border-l border-emerald-500/30 flex items-center gap-0.5 cursor-pointer"
+                  title="Chọn sắc thái giọng đọc AI (4 giọng chuẩn)"
+                >
+                  <span className="text-xs">{ttsVoicePreset.icon || '🎙️'}</span>
+                  <ChevronDown className={`w-3 h-3 text-emerald-400 transition-transform ${showBottomTTSMenu ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+
+              {/* Popover Dropdown 4 Sắc Thái Giọng AI Chuẩn */}
+              {showBottomTTSMenu && (
+                <div className="absolute left-0 bottom-full mb-2 w-72 bg-slate-950/98 backdrop-blur-2xl border-2 border-emerald-500/70 rounded-2xl shadow-2xl p-2 z-50 text-white space-y-1.5 animate-in fade-in slide-in-from-bottom-2">
+                  <div className="flex items-center justify-between px-2 py-1 border-b border-white/10">
+                    <span className="text-[10px] font-black uppercase text-emerald-400 tracking-wider">
+                      4 SẮC THÁI GIỌNG AI (vi-VN)
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono">
+                      Âm lượng 1.0 (Max)
+                    </span>
+                  </div>
+
+                  {VOICE_TONE_PRESETS.map((preset) => {
+                    const isSelected = ttsVoicePreset.id === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        onClick={() => {
+                          setTtsVoicePreset(preset);
+                          setShowBottomTTSMenu(false);
+                          if (isSpeakingTTS) {
+                            handleStopTTS();
+                            setTimeout(() => handleSpeakSweptContent(preset), 50);
+                          }
+                        }}
+                        className={`w-full text-left px-2.5 py-2 rounded-xl text-xs transition-all flex flex-col gap-0.5 cursor-pointer ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white font-bold shadow-md ring-1 ring-emerald-400'
+                            : 'hover:bg-white/10 text-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <span>{preset.icon}</span>
+                            <span>{preset.name}</span>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-amber-300" />}
+                        </div>
+                        <p className="text-[10px] opacity-80 line-clamp-1">{preset.description}</p>
+                        <span className="text-[9px] opacity-60 font-mono">{preset.sub}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -7220,12 +7372,21 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             {onOpenRandomPicker && (
               <button
                 onClick={onOpenRandomPicker}
-                className="p-2 rounded-xl bg-amber-500/80 hover:bg-amber-500 text-white ml-1"
+                className="p-2 rounded-xl bg-amber-500/80 hover:bg-amber-500 text-white ml-1 cursor-pointer"
                 title="Vòng quay gọi học sinh ngẫu nhiên"
               >
                 <Dices className="w-4 h-4" />
               </button>
             )}
+
+            {/* Thu gọn thanh công cụ để ngắm trọn vẹn mặt bảng xanh như ảnh chụp */}
+            <button
+              onClick={() => setIsDockCollapsed(true)}
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer ml-0.5"
+              title="Thu gọn thanh công cụ để ngắm trọn vẹn mặt bảng"
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
@@ -7392,362 +7553,22 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         </div>
       )}
 
-      {/* MODAL: NHẬP HÀM SỐ TOÁN HỌC & CÔNG THỨC VẬT LÝ (CHUẨN MATHTYPE & PI TOÁN HỌC) */}
-      {showEquationModal && (
-        <div className="fixed inset-0 z-[65] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border-2 border-amber-500/80 rounded-3xl max-w-2xl w-full p-6 shadow-2xl text-white space-y-4 animate-scale-up max-h-[92vh] overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between pb-3 border-b border-white/10">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400">
-                  <Calculator className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-amber-300 flex items-center gap-2">
-                    <span>{editingEquationStrokeId ? 'CHỈNH SỬA CÔNG THỨC ĐỒ THỊ' : 'VẼ ĐỒ THỊ THEO HÀM SỐ / PHƯƠNG TRÌNH'}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-400/30">
-                      MathType Standard
-                    </span>
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Nhập tự nhiên chuẩn MathType &bull; Tự động nhân ngầm định &bull; Ký hiệu &pi; chuẩn toán học
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setShowEquationModal(false);
-                  setEditingEquationStrokeId(null);
-                }}
-                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Input formula field */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-black uppercase text-amber-300 tracking-wider flex items-center gap-1.5">
-                  <Sigma className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Công thức hàm số (Nhập tự nhiên như MathType):</span>
-                </label>
-                <span className="text-[11px] font-medium text-slate-400">
-                  Hỗ trợ biến x hoặc biến thời gian t
-                </span>
-              </div>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={equationInput}
-                  onChange={(e) => {
-                    // Auto-normalize physical typing 'pi' or 'PI' into standard math 'π'
-                    let val = e.target.value;
-                    val = val.replace(/\bpi\b/gi, 'π').replace(/([0-9xt\)])pi/gi, '$1π');
-                    setEquationInput(val);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleApplyEquationGraph(equationInput);
-                    }
-                  }}
-                  placeholder="Ví dụ: y = 2x³ - 3x + 1 hoặc x = 4cos(2πt - π/3)"
-                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/90 border-2 border-amber-500/60 focus:border-amber-400 text-white font-mono text-base outline-none shadow-inner placeholder:text-slate-600 transition-all tracking-wide"
-                  autoFocus
-                />
-              </div>
-              <p className="text-[11px] text-slate-400 italic">
-                * Thầy/Cô có thể gõ trực tiếp như sách giáo khoa: <span className="text-amber-300 font-mono">4cos(2πt)</span>, <span className="text-amber-300 font-mono">2x³ - 3x + 1</span>, <span className="text-amber-300 font-mono">(2x+1)/(x-1)</span> mà không cần gõ dấu '*' nhân.
-              </p>
-            </div>
-
-            {/* LIVE MATHTYPE / SGK FORMULA PREVIEW (KATEX RENDERED) */}
-            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-amber-500/30 space-y-2 shadow-inner">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black uppercase text-amber-300 tracking-wider flex items-center gap-1.5">
-                  <FunctionSquare className="w-3.5 h-3.5 text-amber-400" />
-                  <span>XEM TRƯỚC ĐỊNH DẠNG (CHUẨN MATHTYPE / TOÁN HỌC SGK)</span>
-                </span>
-                {parsedEquation.error ? (
-                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40 flex items-center gap-1">
-                    <span>⚠️</span> Đang hoàn thiện công thức
-                  </span>
-                ) : (
-                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 flex items-center gap-1">
-                    <span>✓</span> Chuẩn MathType &bull; Sẵn sàng vẽ
-                  </span>
-                )}
-              </div>
-
-              {/* KaTeX math display container */}
-              <div className="min-h-[58px] bg-slate-900/90 rounded-xl px-4 py-3 flex items-center justify-center border border-white/10 text-white overflow-x-auto custom-scrollbar">
-                {equationKatexHtml ? (
-                  <div
-                    className="text-lg md:text-xl text-amber-200 select-all"
-                    dangerouslySetInnerHTML={{ __html: equationKatexHtml }}
-                  />
-                ) : (
-                  <span className="text-sm font-mono text-slate-400">
-                    {parsedEquation.displayFormula || equationInput}
-                  </span>
-                )}
-              </div>
-
-              {/* Value verification test & variable info */}
-              {!parsedEquation.error && parsedEquation.sampleTest && (
-                <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 px-1 pt-0.5 gap-2 border-t border-white/5">
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                    <span>Hàm theo {parsedEquation.variableName === 't' ? 'biến thời gian (t)' : 'biến số (x)'}</span>
-                  </span>
-                  <span className="font-mono text-cyan-300 bg-cyan-950/40 px-2 py-0.5 rounded-lg border border-cyan-800/40">
-                    {parsedEquation.variableName === 't'
-                      ? `Kiểm tra giá trị: x(0) = ${parsedEquation.sampleTest.at0 ?? 'N/A'}, x(1) = ${parsedEquation.sampleTest.at1 ?? 'N/A'}`
-                      : `Kiểm tra giá trị: y(0) = ${parsedEquation.sampleTest.at0 ?? 'N/A'}, y(1) = ${parsedEquation.sampleTest.at1 ?? 'N/A'}`}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* VIRTUAL MATHTYPE KEYPAD (TOUCH-OPTIMIZED FOR 75 INCH SCREEN) */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-bold uppercase text-slate-400 block">
-                Bàn phím ký hiệu nhanh (Tiện lợi chạm trên bảng 75 inch):
-              </span>
-              
-              <div className="space-y-1.5">
-                {/* Row 1: Variables, Constants, Superscripts */}
-                <div className="grid grid-cols-8 gap-1.5 font-mono text-xs font-bold">
-                  {/* Variable x */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + 'x')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-cyan-300"
-                    title="Biến số x"
-                  >
-                    x
-                  </button>
-
-                  {/* Variable t */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + 't')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-cyan-300"
-                    title="Biến thời gian t (Vật lý)"
-                  >
-                    t
-                  </button>
-
-                  {/* MATHEMATICAL PI SYMBOL π - HIGHLIGHTED */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + 'π')}
-                    className="p-2 rounded-xl bg-amber-500/25 hover:bg-amber-500 hover:text-slate-950 text-amber-300 transition-all border-2 border-amber-400/80 text-center active:scale-95 cursor-pointer font-serif text-sm font-bold shadow-md shadow-amber-500/20"
-                    title="Số Pi chuẩn toán học (π ≈ 3.14159)"
-                  >
-                    &pi;
-                  </button>
-
-                  {/* Euler constant e */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + 'e')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-amber-200"
-                    title="Cơ số tự nhiên e (e ≈ 2.718)"
-                  >
-                    e
-                  </button>
-
-                  {/* x² (Square) */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '^2')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-emerald-300"
-                    title="Bình phương (^2)"
-                  >
-                    x²
-                  </button>
-
-                  {/* x³ (Cube) */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '^3')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-emerald-300"
-                    title="Lập phương (^3)"
-                  >
-                    x³
-                  </button>
-
-                  {/* Power ^ */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '^')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-emerald-300"
-                    title="Mũ lũy thừa (^)"
-                  >
-                    ^
-                  </button>
-
-                  {/* Square Root √( */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '√(')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-purple-300"
-                    title="Căn bậc hai √(...)"
-                  >
-                    &radic;(
-                  </button>
-                </div>
-
-                {/* Row 2: Basic Operators, Parentheses, Editing */}
-                <div className="grid grid-cols-8 gap-1.5 font-mono text-xs font-bold">
-                  {/* + */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '+')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer"
-                  >
-                    +
-                  </button>
-
-                  {/* - */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '-')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer"
-                  >
-                    -
-                  </button>
-
-                  {/* Multiply · */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '*')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer"
-                    title="Dấu nhân (* hoặc ·)"
-                  >
-                    &times;
-                  </button>
-
-                  {/* Division / Fraction */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '/')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer"
-                    title="Chia / Phân số"
-                  >
-                    /
-                  </button>
-
-                  {/* Open Paren ( */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + '(')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-amber-200"
-                  >
-                    (
-                  </button>
-
-                  {/* Close Paren ) */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev + ')')}
-                    className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-amber-200"
-                  >
-                    )
-                  </button>
-
-                  {/* Backspace Delete button */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput((prev) => prev.slice(0, -1))}
-                    className="p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white transition-all border border-rose-500/30 text-center active:scale-95 cursor-pointer"
-                    title="Xóa ký tự vừa nhập"
-                  >
-                    &larr; Xóa
-                  </button>
-
-                  {/* Clear All C */}
-                  <button
-                    type="button"
-                    onClick={() => setEquationInput('')}
-                    className="p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white transition-all border border-rose-500/30 text-center active:scale-95 cursor-pointer"
-                    title="Xóa toàn bộ công thức"
-                  >
-                    C
-                  </button>
-                </div>
-
-                {/* Row 3: Trigonometric & Advanced Functions */}
-                <div className="grid grid-cols-7 gap-1.5 font-mono text-xs font-bold">
-                  {['sin(', 'cos(', 'tan(', 'cot(', 'ln(', 'exp(', 'abs('].map((sym) => (
-                    <button
-                      key={sym}
-                      type="button"
-                      onClick={() => setEquationInput((prev) => prev + sym)}
-                      className="p-2 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-all border border-white/10 text-center active:scale-95 cursor-pointer text-cyan-200"
-                    >
-                      {sym}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Sample Presets (Standard Textbook & Physics Oscillations without '*' and with 'π') */}
-            <div className="space-y-2">
-              <span className="text-[11px] font-bold uppercase text-slate-400 block">
-                Mẫu hàm số & Dao động phổ biến (Chuẩn SGK & MathType):
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { label: 'Bậc 3: 2x³ - 3x + 1', val: 'y = 2x^3 - 3x + 1' },
-                  { label: 'Trùng phương: x⁴ - 2x² - 1', val: 'y = x^4 - 2x^2 - 1' },
-                  { label: 'Trùng phương: -x⁴ + 2x² + 1', val: 'y = -x^4 + 2x^2 + 1' },
-                  { label: 'Nhất biến: (2x+1)/(x-1)', val: 'y = (2x+1)/(x-1)' },
-                  { label: 'Lượng giác: 2sin(2x)', val: 'y = 2sin(2x)' },
-                  { label: 'Vật lý: Ly độ 4cos(2πt)', val: 'x = 4cos(2πt)' },
-                  { label: 'Vật lý: Dao động 4cos(2πt - π/3)', val: 'x = 4cos(2πt - π/3)' },
-                  { label: 'Vật lý: Vận tốc -8π sin(2πt)', val: 'v = -8π sin(2πt)' },
-                  { label: 'Vật lý: Dao động tắt dần', val: 'x = 4e^(-0.2t)cos(2πt)' },
-                  { label: 'Căn thức: √(4 - x²)', val: 'y = √(4 - x^2)' },
-                  { label: 'Parabol ném ngang', val: 'y = -0.049x^2 + 5' },
-                ].map((preset) => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() => setEquationInput(preset.val)}
-                    className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-amber-400 text-[11px] text-slate-300 hover:text-amber-300 transition-all active:scale-95 cursor-pointer"
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-white/10">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEquationModal(false);
-                  setEditingEquationStrokeId(null);
-                }}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
-              >
-                Đóng
-              </button>
-              <button
-                type="button"
-                onClick={() => handleApplyEquationGraph(equationInput)}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
-              >
-                <TrendingUp className="w-4 h-4" />
-                <span>{editingEquationStrokeId ? 'Cập Nhật Đồ Thị' : 'Vẽ Đồ Thị Lên Bảng Xanh'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* VIRTUAL MATHTYPE KEYBOARD & GRAPH PLOTTER MODAL (SEPARATED STATE FOR ZERO-LATENCY INPUT) */}
+      <VirtualMathKeyboard
+        isOpen={showEquationModal}
+        initialFormula={equationInput}
+        isEditing={Boolean(editingEquationStrokeId)}
+        onClose={() => {
+          setShowEquationModal(false);
+          setEditingEquationStrokeId(null);
+        }}
+        onApply={(formula) => {
+          setEquationInput(formula);
+          setShowEquationModal(false);
+          setEditingEquationStrokeId(null);
+          handleApplyEquationGraph(formula);
+        }}
+      />
 
       {/* MODAL: CONFIRM DELETE LESSON DOCUMENT (HIGH PRIORITY Z-INDEX Z-[70]) */}
       {docToDelete && (

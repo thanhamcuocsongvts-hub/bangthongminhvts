@@ -229,6 +229,8 @@ export function useSmoothChalkboard(options: SmoothChalkboardOptions = {}) {
       });
     }
 
+    // Tuyệt đối không dùng getPredictedEvents() vì cơ chế dự đoán điểm tạo điểm ảo gây răng cưa và vệt gai nhọn li ti chân rết.
+
     /**
      * Cấu hình nét vẽ trực tiếp lên Canvas Context
      * Tuyệt đối không setState mảng điểm để tránh kích hoạt React Lifecycle render
@@ -243,19 +245,16 @@ export function useSmoothChalkboard(options: SmoothChalkboardOptions = {}) {
     const now = performance.now();
 
     /**
-     * PHẦN 2: THUẬT TOÁN ĐIỂM GIỮA (MIDPOINT ALGORITHM) & ĐƯỜNG CONG QUADRATIC BEZIER
-     * Tuyệt đối KHÔNG dùng lineTo() nối các điểm thô vì sẽ tạo thành các đoạn thẳng gấp khúc sắc nhọn.
-     * Thuật toán:
-     * - Với mỗi điểm mới P_current:
-     *   1. Tính điểm giữa (midX, midY) nối giữa P_last và P_current:
-     *      midX = (P_last.x + P_current.x) / 2
-     *      midY = (P_last.y + P_current.y) / 2
-     *   2. Vẽ cung cong mượt từ điểm giữa cũ (lastMidPoint) đến điểm giữa mới (midX, midY)
-     *      với điểm kiểm soát (control point) chính là điểm thô P_last:
-     *      ctx.quadraticCurveTo(P_last.x, P_last.y, midX, midY)
-     *   3. Cập nhật lastMidPoint = (midX, midY) và P_last = P_current.
-     * Vì tiếp tuyến tại điểm giữa của 2 điểm liên tiếp luôn trơn tru (C1 continuity),
-     * kết quả đường cong tạo ra đạt độ tròn trịa và tự nhiên tuyệt đối.
+     * PHẦN 2: THUẬT TOÁN ĐIỂM TRUNG BÌNH (MIDPOINT QUADRATIC BÉZIER)
+     * Khi pointermove:
+     * - Tọa độ chuẩn xác: x = e.clientX - rect.left; y = e.clientY - rect.top
+     * - Tính trung điểm: midPoint = { x: (p1.x + current.x) / 2, y: (p1.y + current.y) / 2 }
+     * - Vẽ đường cong mềm:
+     *   ctx.beginPath();
+     *   ctx.moveTo(p1.x, p1.y);
+     *   ctx.quadraticCurveTo(p1.x, p1.y, midPoint.x, midPoint.y);
+     *   ctx.stroke();
+     * - Cập nhật: p1 = current
      */
     for (let i = 0; i < rawEvents.length; i++) {
       const raw = rawEvents[i];
@@ -270,25 +269,13 @@ export function useSmoothChalkboard(options: SmoothChalkboardOptions = {}) {
 
       currentStrokePointsRef.current.push(currentPt);
 
-      const pLast = lastPointRef.current;
-      const pMidLast = lastMidPointRef.current;
+      const p1 = lastPointRef.current || currentPt;
+      const midPoint = { x: (p1.x + currentPt.x) / 2, y: (p1.y + currentPt.y) / 2 };
 
-      if (pLast && pMidLast) {
-        // Tính điểm giữa mới
-        const currentMidX = (pLast.x + currentPt.x) / 2;
-        const currentMidY = (pLast.y + currentPt.y) / 2;
-
-        // Vẽ đường cong bậc hai mượt mà
-        ctx.beginPath();
-        ctx.moveTo(pMidLast.x, pMidLast.y);
-        ctx.quadraticCurveTo(pLast.x, pLast.y, currentMidX, currentMidY);
-        ctx.stroke();
-
-        // Lưu lại điểm giữa cho vòng lặp kế tiếp
-        lastMidPointRef.current = { x: currentMidX, y: currentMidY };
-      } else {
-        lastMidPointRef.current = { x: curX, y: curY };
-      }
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.quadraticCurveTo(p1.x, p1.y, midPoint.x, midPoint.y);
+      ctx.stroke();
 
       lastPointRef.current = currentPt;
     }

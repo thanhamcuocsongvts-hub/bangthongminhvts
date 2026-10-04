@@ -87,13 +87,13 @@ export const FastWhiteboard: React.FC<FastWhiteboardProps> = ({
     canvas.style.height = `${rect.height}px`;
 
     /**
-     * CỰC KỲ QUAN TRỌNG: desynchronized: true
+     * CỰC KỲ QUAN TRỌNG: desynchronized: true, alpha: false
      * Bỏ qua vòng lặp Composite của GPU/Browser Window Server,
      * truyền lệnh vẽ trực tiếp tới Front-Buffer của màn hình Tivi -> Giảm độ trễ từ ~35ms xuống <4ms!
      */
     const ctx = canvas.getContext('2d', {
       desynchronized: true,
-      alpha: true,
+      alpha: false,
       willReadFrequently: false,
     });
 
@@ -142,7 +142,9 @@ export const FastWhiteboard: React.FC<FastWhiteboardProps> = ({
 
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const themeColor = currentTheme === 'chalkboard' ? '#0b2e21' : currentTheme === 'dark' ? '#0f172a' : '#ffffff';
+    ctx.fillStyle = themeColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     ctx.scale(dpr, dpr);
 
@@ -302,6 +304,8 @@ export const FastWhiteboard: React.FC<FastWhiteboardProps> = ({
         time: performance.now(),
       });
     }
+
+    // Gỡ bỏ hoàn toàn việc sử dụng getPredictedEvents() để chống răng cưa và vệt gai nhọn li ti
 
     ctx.save();
     if (isEraserRef.current) {
@@ -530,6 +534,7 @@ export const FastWhiteboard: React.FC<FastWhiteboardProps> = ({
           WebkitTouchCallout: 'none',
           WebkitUserSelect: 'none',
           userSelect: 'none',
+          willChange: 'transform',
         }}
         className="absolute inset-0 w-full h-full cursor-crosshair z-10"
       />

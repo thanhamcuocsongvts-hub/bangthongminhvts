@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, addDoc, deleteDoc, doc, Timestamp } from 'firebase/firestore';
+import { collection, query, getDocs, doc, Timestamp } from 'firebase/firestore';
+import { safeAddDoc, safeDeleteDoc } from '../utils/firebaseSafe';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { auth, db, storage } from '../lib/firebase';
@@ -148,7 +149,7 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
           const fbUrl = await getDownloadURL(storageRef);
           if (!fileUrl) fileUrl = fbUrl;
 
-          await addDoc(collection(db, 'TaiLieuGiaoVien'), {
+          await safeAddDoc(collection(db, 'TaiLieuGiaoVien'), {
             uid: currentUser.uid,
             name: file.name,
             url: fbUrl || fileUrl,
@@ -220,7 +221,7 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
 
       // 2. Delete from Firestore if exists
       try {
-        await deleteDoc(doc(db, 'TaiLieuGiaoVien', fileId));
+        await safeDeleteDoc(doc(db, 'TaiLieuGiaoVien', fileId));
       } catch {}
 
       // 3. Delete from Firebase Storage if URL matches

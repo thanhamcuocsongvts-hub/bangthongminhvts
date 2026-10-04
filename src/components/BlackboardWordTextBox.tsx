@@ -15,8 +15,10 @@ import {
   GripHorizontal,
   StickyNote,
   Sparkles,
+  Volume2,
 } from 'lucide-react';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
+import { speakText, stopAllSpeech } from '../utils/aiSpeechService';
 
 export interface BlackboardTextBox {
   id: string;
@@ -520,6 +522,18 @@ export const BlackboardWordTextBox: React.FC<BlackboardWordTextBoxProps> = ({
           >
             <Check className="w-3.5 h-3.5" />
             <span>Xong</span>
+          </button>
+
+          {/* AI TTS Read Button */}
+          <button
+            onClick={() => {
+              speakText(textBox.text);
+            }}
+            className="px-2 py-1 rounded-xl bg-indigo-500/20 hover:bg-indigo-600 text-indigo-300 hover:text-white transition-colors flex items-center gap-1 text-xs font-bold cursor-pointer"
+            title="Đọc to nội dung văn bản này bằng AI"
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+            <span>Đọc AI</span>
           </button>
 
           {/* Delete Button */}

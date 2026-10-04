@@ -49,6 +49,9 @@ import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { directFastMatrixQuiz, getGeminiApiKey, saveGeminiApiKey, isGeminiConfigured } from '../utils/geminiClient';
+import { db } from '../lib/firebase';
+import { doc } from 'firebase/firestore';
+import { safeSetDoc } from '../utils/firebaseSafe';
 
 interface LiveQuizHubProps {
   roomState: RoomState | null;
@@ -123,19 +126,67 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
   const timerRef = useRef<any>(null);
 
-  const activeIndex = roomState?.activeQuestionIndex || 0;
-  const questions = roomState?.questions || [];
+  // State chung lưu trữ câu hỏi phòng thi trực tiếp (ưu tiên từ roomState, sau đó localStorage, hoặc currentLesson)
+  const [liveExamQuestions, setLiveExamQuestions] = useState<QuizQuestion[]>(() => {
+    if (roomState?.questions && roomState.questions.length > 0) return roomState.questions;
+    try {
+      const saved = localStorage.getItem('smartboard_live_exam_questions');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return currentLesson?.quizzes || [];
+  });
+
+  // Tự động đồng bộ liveExamQuestions mỗi khi roomState.questions cập nhật từ server/firestore
+  useEffect(() => {
+    if (roomState?.questions && roomState.questions.length > 0) {
+      setLiveExamQuestions(roomState.questions);
+      try {
+        localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(roomState.questions));
+      } catch (_) {}
+    }
+  }, [roomState?.questions]);
+
+  // Bộ câu hỏi phòng thi: đọc trực tiếp ngay lập tức, không bao giờ bị rỗng nếu vừa tạo câu hỏi
+  const questions: QuizQuestion[] = (
+    liveExamQuestions.length > 0
+      ? liveExamQuestions
+      : (roomState?.questions && roomState.questions.length > 0)
+      ? roomState.questions
+      : (generatedQuestions.length > 0)
+      ? generatedQuestions
+      : (currentLesson?.quizzes && currentLesson.quizzes.length > 0)
+      ? currentLesson.quizzes
+      : []
+  );
+
+  const activeIndex = Math.min(
+    Math.max(0, roomState?.activeQuestionIndex || 0),
+    Math.max(0, questions.length - 1)
+  );
   const currentQ: QuizQuestion | undefined = questions[activeIndex];
 
   const currentSubmissions: StudentSubmission[] =
     (currentQ && roomState?.submissions[currentQ.id]) || [];
+
+  // Tự động kích hoạt câu hỏi sang liveExamQuestions khi chuyển sang tab Phòng thi nếu đã có câu hỏi tạo sẵn
+  useEffect(() => {
+    if (activeMode === 'live' && liveExamQuestions.length === 0 && generatedQuestions.length > 0) {
+      setLiveExamQuestions(generatedQuestions);
+      try {
+        localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(generatedQuestions));
+      } catch (_) {}
+    }
+  }, [activeMode, liveExamQuestions.length, generatedQuestions]);
 
   // If room already has questions and generatedQuestions is empty, initialize preview
   useEffect(() => {
     if (questions.length > 0 && generatedQuestions.length === 0) {
       setGeneratedQuestions(questions);
     }
-  }, [questions]);
+  }, [questions.length]);
 
   // Reset timer whenever question changes in Live mode
   useEffect(() => {
@@ -496,16 +547,47 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
   // Launch Quiz to Live Classroom
   const handleDeployToStudents = async () => {
-    if (generatedQuestions.length === 0) return;
+    const questionsToDeploy = generatedQuestions.length > 0 ? generatedQuestions : questions;
+    if (questionsToDeploy.length === 0) return;
 
+    // 1. Lập tức gán mảng câu hỏi vừa tạo vào state chung của phòng thi (liveExamQuestions = createdQuestions)
+    setLiveExamQuestions(questionsToDeploy);
+
+    // 2. Đồng bộ ngay vào localStorage phòng thi
+    try {
+      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(questionsToDeploy));
+    } catch (e) {
+      console.warn('localStorage error', e);
+    }
+
+    // 3. Đồng bộ an toàn vào Firestore phòng thi (không nghẽn quota)
+    try {
+      const pin = roomState?.pin || '758899';
+      const roomDocRef = doc(db, 'rooms', pin);
+      safeSetDoc(roomDocRef, {
+        pin,
+        title: promptTopic ? `Đề thi: ${promptTopic}` : `${selectedSubject} - ${selectedGrade}`,
+        questions: questionsToDeploy,
+        activeQuestionIndex: 0,
+        isLive: true,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true }).catch(() => {});
+    } catch (e) {
+      console.warn('Firestore sync failed', e);
+    }
+
+    // 4. Gọi cập nhật cấp App và server API
     if (onApplyQuestions) {
       await onApplyQuestions(
-        generatedQuestions,
+        questionsToDeploy,
         promptTopic ? `Đề thi: ${promptTopic}` : `${selectedSubject} - ${selectedGrade}`
       );
     }
 
     onControlRoom(0, true);
+    setTimeLeft(questionsToDeploy[0]?.timeLimit || 30);
+    setIsTimerRunning(true);
+    setIsRevealed(false);
     setActiveMode('live');
 
     confetti({
@@ -1286,6 +1368,23 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 <Clock className="w-5 h-5" />
                 <span>{timeLeft}s</span>
               </div>
+
+              {/* Nút Bắt đầu đếm giờ / Tạm dừng */}
+              <button
+                onClick={() => {
+                  if (timeLeft === 0) setTimeLeft(currentQ?.timeLimit || 30);
+                  setIsTimerRunning((prev) => !prev);
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 ${
+                  isTimerRunning
+                    ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 shadow-emerald-600/30'
+                }`}
+                title={isTimerRunning ? 'Tạm dừng đếm giờ' : 'Bắt đầu đếm giờ làm bài'}
+              >
+                {isTimerRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                <span>{isTimerRunning ? 'Tạm dừng' : 'Bắt đầu đếm giờ'}</span>
+              </button>
 
               {/* Button to Switch Back to AI Creator */}
               <button

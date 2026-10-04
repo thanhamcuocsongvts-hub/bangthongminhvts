@@ -6,7 +6,8 @@ import { LessonDoc, SubjectType, SlideItem, QuizQuestion, ExtractedDocSummary } 
 import { parseDocxWithFullMathAndMedia, extractTextFromDocBinary } from './docxMathParser';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, storage, db } from '../lib/firebase';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, Timestamp } from 'firebase/firestore';
+import { safeAddDoc } from './firebaseSafe';
 import { signInAnonymously } from 'firebase/auth';
 
 if (typeof window !== 'undefined' && 'Worker' in window) {
@@ -184,7 +185,7 @@ export async function parseUploadedFileToLesson(
       const fbUrl = await getDownloadURL(storageRef);
       if (!serverFileUrl) serverFileUrl = fbUrl;
 
-      await addDoc(collection(db, 'TaiLieuGiaoVien'), {
+      await safeAddDoc(collection(db, 'TaiLieuGiaoVien'), {
         uid: currentUser.uid,
         name: file.name,
         url: fbUrl || serverFileUrl,

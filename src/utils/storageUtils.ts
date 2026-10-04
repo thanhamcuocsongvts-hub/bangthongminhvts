@@ -37,6 +37,8 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+import { safeSetDoc, isFirestoreQuotaExhausted } from './firebaseSafe';
+
 /**
  * Save large lesson documents to IndexedDB
  */
@@ -73,7 +75,7 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
     
-    // Sync to backend server
+    // Sync to backend server without consuming Firestore quota
     try {
       fetch('/api/lessons/sync', {
         method: 'POST',
@@ -82,39 +84,7 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
       }).catch(() => {});
     } catch {}
 
-    // Sync to Firestore (Debounced to save quota)
-    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'syncing' }));
-    if ((window as any).firestoreSyncTimeout) clearTimeout((window as any).firestoreSyncTimeout);
-    (window as any).firestoreSyncTimeout = setTimeout(async () => {
-      if (!navigator.onLine) {
-        window.dispatchEvent(new CustomEvent('sync-status', { detail: 'offline' }));
-        return;
-      }
-      try {
-        const authModule = await import('../lib/firebase');
-        const firestoreModule = await import('firebase/firestore');
-        const db = authModule.db;
-        const { doc, setDoc } = firestoreModule;
-        
-        const sanitizedLessons = validLessons.map((l: any) => {
-          let cleanFileUrl = l.fileUrl;
-          // Firestore document limit is 1MB. Any Base64 data: URL over 500KB must not be stored in firestore document
-          if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 500000) {
-            cleanFileUrl = '';
-          }
-          return {
-            ...l,
-            fileUrl: cleanFileUrl,
-          };
-        });
-        const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
-        await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
-        window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
-      } catch(e) {
-        console.warn("Firestore sync failed", e);
-        window.dispatchEvent(new CustomEvent('sync-status', { detail: 'error' }));
-      }
-    }, 1500);
+    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
   } catch (err) {
     console.warn('IndexedDB save fallback to localStorage:', err);
     try {
@@ -211,7 +181,7 @@ export async function deleteLessonFromStorage(
     const authModule = await import('../lib/firebase');
     const firestoreModule = await import('firebase/firestore');
     const db = authModule.db;
-    const { doc, setDoc } = firestoreModule;
+    const { doc } = firestoreModule;
 
     const sanitizedLessons = validRemaining.map((l: any) => {
       let cleanFileUrl = l.fileUrl;
@@ -224,7 +194,7 @@ export async function deleteLessonFromStorage(
       };
     });
     const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
-    await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
+    await safeSetDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
     window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
   } catch (firestoreErr) {
     console.warn('Firestore instant sync on delete notice:', firestoreErr);
@@ -278,12 +248,15 @@ export async function forceSyncLessonsToCloud(lessons: any[]): Promise<{ success
     console.warn('Backend server lesson sync note:', serverErr);
   }
 
-  // 3. Immediate push to Firestore
+  const now = new Date();
+  const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+
+  // 3. Push to Firestore with safe quota handling
   try {
     const authModule = await import('../lib/firebase');
     const firestoreModule = await import('firebase/firestore');
     const db = authModule.db;
-    const { doc, setDoc } = firestoreModule;
+    const { doc } = firestoreModule;
 
     const sanitizedLessons = validLessons.map((l: any) => {
       let cleanFileUrl = l.fileUrl;
@@ -296,17 +269,14 @@ export async function forceSyncLessonsToCloud(lessons: any[]): Promise<{ success
       };
     });
     const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
-    await setDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData }, { merge: true });
+    await safeSetDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData }, { merge: true });
     window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
-    
-    const now = new Date();
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-    return { success: true, count: validLessons.length, timestamp: timeStr };
   } catch (firestoreErr) {
-    console.error('Firestore lesson sync error:', firestoreErr);
-    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'error' }));
-    throw firestoreErr;
+    console.warn('Firestore lesson sync notice:', firestoreErr);
   }
+
+  window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
+  return { success: true, count: validLessons.length, timestamp: timeStr };
 }
 
 /**

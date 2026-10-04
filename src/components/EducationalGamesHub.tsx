@@ -1888,17 +1888,17 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row gap-6 animate-fade-in">
+    <div className="w-full max-w-[96vw] mx-auto min-h-[78vh] flex-1 flex flex-col lg:flex-row gap-6 animate-fade-in">
       {/* Puzzle Board (Left) */}
-      <div className="flex-1 p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col items-center">
-        <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-4">
-          <span className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4" />
+      <div className="flex-1 p-6 md:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col items-center justify-between">
+        <div className="w-full flex flex-wrap items-center justify-between gap-3 mb-4">
+          <span className="text-sm font-black uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+            <Sparkles className="w-5 h-5" />
             <span>Mảnh Ghép Bí Ẩn • {flippedTiles.length}/{totalTiles} đã mở</span>
           </span>
 
-          <div className="flex items-center gap-2">
-            <div className="flex items-center bg-slate-950/80 rounded-xl p-0.5 border border-slate-800 text-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center bg-slate-950/80 rounded-xl p-1 border border-slate-800 text-xs">
               {[6, 12].map((tCount) => (
                 <button
                   key={tCount}
@@ -1907,7 +1907,7 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
                     setTotalTiles(tCount);
                     handleResetPuzzle();
                   }}
-                  className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
+                  className={`px-3 py-1.5 rounded-lg font-black text-xs transition-all ${
                     totalTiles === tCount
                       ? 'bg-indigo-600 text-white shadow-xs'
                       : 'text-slate-400 hover:text-white'
@@ -1920,7 +1920,7 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
 
             <button
               onClick={handleResetPuzzle}
-              className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold cursor-pointer"
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold cursor-pointer"
             >
               Đóng Lại
             </button>
@@ -1929,20 +1929,20 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
 
         {/* The 6 or 12 tile grid hiding a secret educational illustration / theorem */}
         <div
-          className={`relative w-full max-w-md aspect-4/3 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-2xl grid gap-1 p-1 bg-slate-950 ${
+          className={`relative w-full max-w-2xl lg:max-w-3xl aspect-4/3 min-h-[360px] md:min-h-[420px] rounded-3xl overflow-hidden border-2 border-slate-700 shadow-2xl grid gap-2 p-2 bg-slate-950 ${
             totalTiles === 12 ? 'grid-cols-4 grid-rows-3' : 'grid-cols-3 grid-rows-2'
           }`}
         >
           {/* Background Secret Picture (Solar system & science) */}
-          <div className="absolute inset-0 z-0 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-br from-indigo-900 via-purple-950 to-slate-950">
-            <div className="text-5xl mb-2">🪐 ☀️ 🔬 📐</div>
-            <h4 className="text-xl font-black text-amber-300">THẾ GIỚI KHOA HỌC</h4>
-            <p className="text-xs text-indigo-200 mt-1">
+          <div className="absolute inset-0 z-0 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-br from-indigo-900 via-purple-950 to-slate-950">
+            <div className="text-6xl md:text-7xl mb-3 select-none">🪐 ☀️ 🔬 📐</div>
+            <h4 className="text-2xl md:text-3xl font-black text-amber-300 tracking-wide">THẾ GIỚI KHOA HỌC</h4>
+            <p className="text-sm md:text-base text-indigo-200 mt-2 font-medium">
               &ldquo;Tri thức là sức mạnh vĩ đại nhất của nhân loại&rdquo;
             </p>
           </div>
 
-          {/* Covering Mystery Tiles */}
+          {/* Covering Mystery Tiles - Phóng to chữ số #1 đến #12 to rõ ràng */}
           {Array.from({ length: totalTiles }).map((_, idx) => {
             const isFlipped = flippedTiles.includes(idx);
             const isCurrent = selectedTile === idx;
@@ -1951,12 +1951,12 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
               <div
                 key={idx}
                 onClick={() => handleTileClick(idx)}
-                className={`relative z-10 rounded-xl flex items-center justify-center transition-all cursor-pointer font-black text-lg select-none ${
+                className={`relative z-10 rounded-2xl flex items-center justify-center transition-all cursor-pointer font-black text-2xl md:text-3xl lg:text-4xl select-none shadow-lg ${
                   isFlipped
                     ? 'opacity-0 pointer-events-none'
                     : isCurrent
                     ? 'bg-indigo-600 text-white ring-4 ring-amber-400 scale-95 shadow-2xl'
-                    : 'bg-gradient-to-br from-slate-800 to-slate-900 text-amber-400 border border-slate-700 hover:from-indigo-900 hover:to-slate-800'
+                    : 'bg-gradient-to-br from-slate-800 to-slate-900 text-amber-400 border border-slate-700 hover:from-indigo-900 hover:to-slate-800 hover:scale-[1.02]'
                 }`}
               >
                 <span>#{idx + 1}</span>
@@ -1965,16 +1965,16 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
           })}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-          <p className="text-xs text-slate-400 text-center w-full">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+          <p className="text-sm text-slate-300 font-semibold text-center w-full">
             Nhấp vào ô số để trả lời câu hỏi và mở mảnh ghép bí mật!
           </p>
           <button
             type="button"
             onClick={() => setShowGuessModal(true)}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:brightness-110 text-white font-black text-xs shadow-lg flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+            className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:brightness-110 text-white font-black text-sm shadow-xl flex items-center gap-2 cursor-pointer active:scale-95 transition-all"
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
             <span>Đoán Từ Khóa Bức Tranh Bí Mật</span>
           </button>
         </div>
@@ -2054,7 +2054,7 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
               )}
             </div>
 
-            <div className="text-base font-bold text-white leading-relaxed">
+            <div className="text-xl md:text-2xl font-black text-white leading-relaxed p-4 bg-slate-950/60 rounded-2xl border border-slate-800">
               <QuizRichContentRenderer
                 content={currentQ.question}
                 diagramType={currentQ.diagramType}
@@ -2063,7 +2063,7 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               {currentQ.options.map((opt) => {
                 const isSelected = selectedOpt === opt.key;
                 const isCorrect = opt.key === currentQ.correctAnswer;
@@ -2072,17 +2072,17 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
                   <button
                     key={opt.key}
                     onClick={() => handleCheckAnswer(opt.key)}
-                    className={`w-full p-3 rounded-xl border text-left font-bold text-xs flex items-center gap-2.5 transition-all cursor-pointer ${
+                    className={`w-full p-4 md:p-4.5 rounded-2xl border-2 text-left font-bold text-base md:text-lg flex items-center gap-3.5 transition-all cursor-pointer shadow-md ${
                       feedback
                         ? isCorrect
-                          ? 'bg-emerald-600/30 border-emerald-400 text-emerald-200'
+                          ? 'bg-emerald-600/40 border-emerald-400 text-emerald-100 ring-2 ring-emerald-400'
                           : isSelected
-                          ? 'bg-rose-600/30 border-rose-400 text-rose-200'
+                          ? 'bg-rose-600/40 border-rose-400 text-rose-100'
                           : 'bg-slate-950/40 border-slate-800 text-slate-500'
-                        : 'bg-slate-800 hover:bg-indigo-600/30 border-slate-700 hover:border-indigo-400 text-slate-200'
+                        : 'bg-slate-800 hover:bg-indigo-600/40 border-slate-700 hover:border-indigo-400 text-slate-100 active:scale-98'
                     }`}
                   >
-                    <span className="w-6 h-6 rounded-lg bg-slate-700 text-slate-200 font-mono text-xs flex items-center justify-center font-bold">
+                    <span className="w-9 h-9 rounded-xl bg-indigo-600 text-white font-mono text-base font-black flex items-center justify-center shrink-0 shadow">
                       {opt.key}
                     </span>
                     <span className="flex-1">
@@ -2192,19 +2192,19 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row gap-6 animate-fade-in">
+    <div className="w-full max-w-[96vw] mx-auto min-h-[78vh] flex-1 flex flex-col lg:flex-row gap-6 animate-fade-in">
       {/* Left: Question Arena & Lifelines */}
-      <div className="flex-1 p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col justify-between space-y-5">
+      <div className="flex-1 p-6 md:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col justify-between space-y-6">
         {/* Lifelines Bar */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <span className="text-xs font-black uppercase tracking-wider text-indigo-400">
+          <span className="text-sm font-black uppercase tracking-wider text-indigo-400">
             Quyền Trợ Giúp
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={handleUse5050}
               disabled={used5050}
-              className={`px-3 py-1 rounded-xl font-bold text-xs flex items-center gap-1 transition-all ${
+              className={`px-4 py-2 rounded-xl font-black text-xs md:text-sm flex items-center gap-1.5 transition-all shadow-md ${
                 used5050
                   ? 'bg-slate-800 text-slate-600 line-through'
                   : 'bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 cursor-pointer'
@@ -2215,13 +2215,13 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
             <button
               onClick={handleUseAudience}
               disabled={usedAudience}
-              className={`px-3 py-1 rounded-xl font-bold text-xs flex items-center gap-1 transition-all ${
+              className={`px-4 py-2 rounded-xl font-black text-xs md:text-sm flex items-center gap-1.5 transition-all shadow-md ${
                 usedAudience
                   ? 'bg-slate-800 text-slate-600 line-through'
                   : 'bg-cyan-500/20 hover:bg-cyan-500 text-cyan-300 hover:text-slate-950 border border-cyan-500/40 cursor-pointer'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
+              <Users className="w-4 h-4" />
               <span>Hỏi Ý Kiến Cả Lớp</span>
             </button>
           </div>
@@ -2229,11 +2229,11 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
 
         {/* Audience Poll results if used */}
         {audiencePoll && (
-          <div className="p-3 rounded-2xl bg-cyan-950/60 border border-cyan-500/40 space-y-1.5 text-xs text-cyan-200">
-            <span className="font-bold">📊 Kết quả khảo sát học sinh trong lớp:</span>
-            <div className="grid grid-cols-4 gap-2 text-center font-mono font-bold text-[11px]">
+          <div className="p-3.5 rounded-2xl bg-cyan-950/70 border border-cyan-500/40 space-y-2 text-sm text-cyan-200">
+            <span className="font-black">📊 Kết quả khảo sát học sinh trong lớp:</span>
+            <div className="grid grid-cols-4 gap-2.5 text-center font-mono font-black text-sm">
               {Object.entries(audiencePoll).map(([key, val]) => (
-                <div key={key} className="p-1.5 rounded-lg bg-cyan-900/60">
+                <div key={key} className="p-2 rounded-xl bg-cyan-900/60 border border-cyan-700/50">
                   {key}: {val}%
                 </div>
               ))}
@@ -2241,12 +2241,12 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
           </div>
         )}
 
-        {/* Question Prompt */}
+        {/* Question Prompt - Phóng to lên text-2xl - text-3xl in đậm */}
         <div className="space-y-3">
-          <div className="text-xs font-mono font-black text-amber-400">
+          <div className="text-sm font-mono font-black text-amber-400 tracking-wider">
             CÂU HỎI MỐC SỐ {level} • {LADDER.find((l) => l.level === level)?.reward}
           </div>
-          <div className="text-lg md:text-xl font-black text-white leading-relaxed">
+          <div className="text-2xl md:text-3xl font-black text-white leading-relaxed p-6 bg-slate-950/70 rounded-3xl border border-slate-800/80 shadow-inner">
             <QuizRichContentRenderer
               content={currentQ.question}
               diagramType={currentQ.diagramType}
@@ -2256,8 +2256,8 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
           </div>
         </div>
 
-        {/* 4 Diamond-style options */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* 4 Diamond-style options - To bản, padding dày, tương phản cao, dễ nhìn từ cuối lớp học */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
           {currentQ.options.map((opt) => {
             const isDisabled = disabledOptions.includes(opt.key);
             const isCorrect = opt.key === currentQ.correctAnswer;
@@ -2267,20 +2267,20 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
                 key={opt.key}
                 disabled={isDisabled || answeredState !== 'pending'}
                 onClick={() => handleSelectOption(opt.key)}
-                className={`p-3.5 rounded-2xl border text-left font-bold text-xs md:text-sm flex items-center gap-2.5 transition-all ${
+                className={`p-5 md:p-6 rounded-2xl border-2 text-left font-black text-xl md:text-2xl flex items-center gap-4 transition-all shadow-lg cursor-pointer ${
                   isDisabled
                     ? 'opacity-20 pointer-events-none'
                     : answeredState !== 'pending'
                     ? isCorrect
-                      ? 'bg-emerald-600/40 border-emerald-400 text-emerald-200 ring-2 ring-emerald-400'
+                      ? 'bg-emerald-600/50 border-emerald-400 text-emerald-100 ring-4 ring-emerald-400 scale-[1.01]'
                       : 'bg-slate-950/50 border-slate-800 text-slate-600'
-                    : 'bg-slate-800/90 hover:bg-indigo-600/40 border-slate-700 hover:border-indigo-400 text-slate-100 cursor-pointer active:scale-95'
+                    : 'bg-slate-800/90 hover:bg-indigo-600/40 border-slate-700 hover:border-indigo-400 text-white active:scale-95'
                 }`}
               >
-                <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white font-mono text-xs flex items-center justify-center font-bold shrink-0">
+                <span className="w-12 h-12 md:w-14 md:h-14 rounded-2xl bg-indigo-600 text-white font-mono text-2xl md:text-3xl flex items-center justify-center font-black shrink-0 shadow-md ring-2 ring-indigo-400/50">
                   {opt.key}
                 </span>
-                <span className="flex-1">
+                <span className="flex-1 leading-snug">
                   <MathFormulaRenderer content={opt.text} />
                 </span>
               </button>
@@ -2292,25 +2292,25 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
         {answeredState !== 'pending' && (
           <div className="pt-2 flex items-center justify-between">
             <span
-              className={`font-black text-sm ${
+              className={`font-black text-base md:text-lg ${
                 answeredState === 'correct' ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >
-              {answeredState === 'correct' ? '🎉 CHÍNH XÁC!' : '❌ RẤT TIẾC, CHƯA CHÍNH XÁC!'}
+              {answeredState === 'correct' ? '🎉 CHÍNH XÁC! XUẤT SẮC!' : '❌ RẤT TIẾC, CHƯA CHÍNH XÁC!'}
             </span>
             {answeredState === 'correct' && level < LADDER.length && (
               <button
                 onClick={handleAdvance}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                className="px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm md:text-base flex items-center gap-2 shadow-xl cursor-pointer active:scale-95 transition-all"
               >
                 <span>Chinh Phục Mốc Tiếp Theo</span>
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-5 h-5" />
               </button>
             )}
             {answeredState === 'wrong' && (
               <button
                 onClick={handleReset}
-                className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
+                className="px-6 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm cursor-pointer"
               >
                 Thử Lại
               </button>
@@ -2327,9 +2327,9 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
         </div>
       </div>
 
-      {/* Right: The Millionaire Ladder */}
-      <div className="w-full md:w-64 p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col justify-between">
-        <span className="text-xs font-black uppercase text-amber-400 mb-3 block">
+      {/* Right: The Millionaire Ladder - Bố trí gọn gàng sát mép phải */}
+      <div className="w-full lg:w-72 xl:w-80 p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col justify-between shrink-0">
+        <span className="text-sm font-black uppercase text-amber-400 mb-3 block">
           Thang Điểm Triệu Phú
         </span>
 
@@ -2341,7 +2341,7 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
             return (
               <div
                 key={step.level}
-                className={`p-2.5 rounded-xl text-xs font-black flex items-center justify-between transition-all ${
+                className={`p-2.5 rounded-xl text-xs md:text-sm font-black flex items-center justify-between transition-all ${
                   isCurrent
                     ? 'bg-amber-500 text-slate-950 shadow-lg scale-105'
                     : isPassed
@@ -2360,7 +2360,7 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
 
         <button
           onClick={handleReset}
-          className="mt-6 w-full py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
+          className="mt-6 w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold transition-colors cursor-pointer"
         >
           Làm Mới Trò Chơi
         </button>

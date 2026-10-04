@@ -27,4 +27,12 @@ try {
   if (config.projectId) storageInstance = getStorage(app);
 } catch (e) { console.warn("Firebase Storage init failed", e); }
 export const storage = storageInstance;
+export {
+  safeSetDoc,
+  safeAddDoc,
+  safeUpdateDoc,
+  safeDeleteDoc,
+  isFirestoreQuotaExhausted,
+  markFirestoreQuotaExhausted,
+} from "../utils/firebaseSafe";
 export default app;

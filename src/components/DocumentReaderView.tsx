@@ -42,6 +42,7 @@ import { cleanDocumentText, parseUploadedFileToLesson } from '../utils/fileParse
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
 import { ScopeConstraintModal, ScopeActionType } from './ScopeConstraintModal';
+import { speakText, stopAllSpeech } from '../utils/aiSpeechService';
 
 interface DocumentReaderViewProps {
   lesson: LessonDoc;
@@ -311,23 +312,18 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
 
   // Text-to-Speech
   const handleToggleSpeak = () => {
-    if (!('speechSynthesis' in window)) {
-      alert('Trình duyệt không hỗ trợ đọc giọng nói.');
-      return;
-    }
     if (isSpeaking) {
-      window.speechSynthesis.cancel();
+      stopAllSpeech();
       setIsSpeaking(false);
     } else {
-      window.speechSynthesis.cancel();
-      const textToRead = notesDraft.slice(0, 1000);
-      const utterance = new SpeechSynthesisUtterance(textToRead);
-      utterance.lang = 'vi-VN';
-      utterance.rate = 0.95;
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-      window.speechSynthesis.speak(utterance);
+      const textToRead = notesDraft.slice(0, 1500);
+      if (!textToRead.trim()) return;
       setIsSpeaking(true);
+      speakText(textToRead, {
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => setIsSpeaking(false),
+        onError: () => setIsSpeaking(false),
+      });
     }
   };
 

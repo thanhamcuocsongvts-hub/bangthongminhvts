@@ -74,25 +74,26 @@
   animation: laser-pulse 1.2s infinite ease-in-out;
 }
 
-/* 1. Classroom Chalkboard Green (Truyền thống Sư Phạm) */
+/* 1. Classroom Chalkboard Green (Bảng Xanh Sư Phạm Chuẩn Ảnh 1 - Mờ dịu mắt 50px x 50px) */
 .blackboard-bg {
-  background-color: #0b2e21;
+  background-color: #0c3323;
   background-image: 
-    radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 0),
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 20px 20px, 60px 60px, 60px 60px;
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 50%, rgba(14, 58, 39, 0.45) 0%, rgba(8, 36, 23, 0.95) 100%);
+  background-size: 50px 50px, 50px 50px, 100% 100%;
 }
 
-/* 2. Vietnamese Primary / High School Grid Ô Ly Pattern */
+/* 2. Vietnamese Primary / High School Grid Ô Ly Pattern (Lưới ô vuông chuẩn Ảnh 2 khi chọn Ô Ly) */
 .oli-grid-bg {
-  background-color: #0b2e21;
-  background-size: 20px 20px, 100px 100px;
+  background-color: #0c3323;
+  background-size: 200px 200px, 200px 200px, 40px 40px, 40px 40px, 100% 100%;
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(to right, rgba(255, 255, 255, 0.12) 1.5px, transparent 1.5px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.12) 1.5px, transparent 1.5px);
+    linear-gradient(to right, rgba(255, 255, 255, 0.16) 1.5px, transparent 1.5px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 1.5px, transparent 1.5px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 50%, rgba(14, 58, 39, 0.55) 0%, rgba(8, 36, 23, 0.95) 100%);
 }
 
 /* 3. Classic Slate Dark Charcoal Velvet Blackboard (Bảng Đen Đá Cổ Điển) */

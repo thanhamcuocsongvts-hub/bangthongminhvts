@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
 import { auth, db } from './firebase';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { safeSetDoc } from '../utils/firebaseSafe';
 
 interface AuthContextType {
   user: User | null;
@@ -43,7 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     const userCred = await createUserWithEmailAndPassword(auth, registerEmail, pass);
     await updateProfile(userCred.user, { displayName: username });
-    await setDoc(doc(db, 'users', userCred.user.uid), {
+    await safeSetDoc(doc(db, 'users', userCred.user.uid), {
       username,
       email: registerEmail,
       createdAt: serverTimestamp()
