@@ -35,6 +35,7 @@ import {
   X,
   FileUp,
   BookmarkPlus,
+  Square,
 } from 'lucide-react';
 import { LessonDoc, TextScale, ExtractedDocSummary, SlideItem, QuizQuestion } from '../types';
 import { exportLessonToWord } from '../utils/exportUtils';
@@ -42,7 +43,7 @@ import { cleanDocumentText, parseUploadedFileToLesson } from '../utils/fileParse
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { UniversalDocumentViewer } from './UniversalDocumentViewer';
 import { ScopeConstraintModal, ScopeActionType } from './ScopeConstraintModal';
-import { speakText, stopAllSpeech } from '../utils/aiSpeechService';
+import { speakText, stopAllSpeech, VOICE_TONE_PRESETS, VoiceTonePreset } from '../utils/aiSpeechService';
 
 interface DocumentReaderViewProps {
   lesson: LessonDoc;
@@ -82,7 +83,6 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
   const [pdfZoom, setPdfZoom] = useState<number>(100);
   const [pdfRotation, setPdfRotation] = useState<number>(0);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
-
   // Open file modal states
   const [showOpenFileModal, setShowOpenFileModal] = useState<boolean>(false);
   const [showDeleteDocModal, setShowDeleteDocModal] = useState<boolean>(false);

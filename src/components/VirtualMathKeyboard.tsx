@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useDeferredValue } from 'react';
-import { Calculator, X, TrendingUp, AlertCircle, Check } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Calculator, X, TrendingUp, AlertCircle, Check, Delete, RotateCcw, Sparkles } from 'lucide-react';
 import { compileMathExpression } from '../utils/mathExpressionParser';
 import katex from 'katex';
 
@@ -18,75 +18,57 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
   onApply,
   isEditing = false,
 }) => {
-  // 1. Trạng thái chuỗi ký tự thô: Phản hồi gõ phím ngay lập tức (<16ms)
   const [formulaInput, setFormulaInput] = useState<string>(initialFormula);
+  const [activeTab, setActiveTab] = useState<'toan12' | 'vatly12' | 'coban'>('toan12');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Đồng bộ khi mở modal hoặc thay đổi initialFormula
+  // Đồng bộ khi mở modal
   useEffect(() => {
     if (isOpen) {
       setFormulaInput(initialFormula || 'y = 2x^3 - 3x + 1');
-      setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen, initialFormula]);
 
-  // 2. Trạng thái KaTeX xem trước tách biệt - áp dụng useDeferredValue và debounce 120ms
-  // để biên dịch toán học không làm đơ bàn phím ảo khi chạm liên tục trên màn hình 75 inch
-  const deferredFormula = useDeferredValue(formulaInput);
-  const [previewMath, setPreviewMath] = useState<{
-    latex: string | null;
-    katexHtml: string | null;
-    parsed: any;
-  }>({
-    latex: null,
-    katexHtml: null,
-    parsed: compileMathExpression(initialFormula),
-  });
+  // Biên dịch toán học & KaTeX trực tiếp tức thì (<16ms), không trễ debounce gây giật nhảy
+  const parsed = React.useMemo(() => {
+    return compileMathExpression(formulaInput);
+  }, [formulaInput]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        const parsed = compileMathExpression(deferredFormula);
-        let katexHtml: string | null = null;
-        if (parsed.latex) {
-          try {
-            katexHtml = katex.renderToString(parsed.latex, {
-              displayMode: true,
-              throwOnError: false,
-              strict: false,
-            });
-          } catch {
-            katexHtml = null;
-          }
-        }
-        setPreviewMath({ latex: parsed.latex, katexHtml, parsed });
-      } catch (err) {
-        setPreviewMath({
-          latex: null,
-          katexHtml: null,
-          parsed: { error: 'Lỗi công thức toán học' },
-        });
-      }
-    }, 120);
-
-    return () => clearTimeout(timer);
-  }, [deferredFormula]);
+  const katexHtml = React.useMemo(() => {
+    if (!parsed.latex) return null;
+    try {
+      return katex.renderToString(parsed.latex, {
+        displayMode: true,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch {
+      return null;
+    }
+  }, [parsed.latex]);
 
   if (!isOpen) return null;
 
-  // Xử lý chèn ký tự tức thì vào vị trí con trỏ (thời gian phản hồi < 16ms)
-  const insertSymbol = (sym: string) => {
+  /**
+   * Chèn ký hiệu hoặc số vào vị trí con trỏ
+   * - onPointerDown e.preventDefault() ngăn chặn OS virtual keyboard giật nhảy màn hình trên TV 75"
+   * - Hỗ trợ tự động đặt con trỏ vào giữa ngoặc (ví dụ: sin(|))
+   */
+  const insertSymbol = (sym: string, cursorOffset?: number) => {
     const input = inputRef.current;
     if (input) {
       const start = input.selectionStart ?? formulaInput.length;
       const end = input.selectionEnd ?? formulaInput.length;
       const nextVal = formulaInput.substring(0, start) + sym + formulaInput.substring(end);
       setFormulaInput(nextVal);
-      const nextPos = start + sym.length;
+
+      // Đặt vị trí con trỏ sau khi chèn
+      const nextPos = cursorOffset !== undefined ? start + cursorOffset : start + sym.length;
       requestAnimationFrame(() => {
         if (inputRef.current) {
-          inputRef.current.focus();
-          inputRef.current.setSelectionRange(nextPos, nextPos);
+          try {
+            inputRef.current.setSelectionRange(nextPos, nextPos);
+          } catch (_) {}
         }
       });
     } else {
@@ -94,6 +76,9 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
     }
   };
 
+  /**
+   * Xóa lùi 1 ký tự (Backspace)
+   */
   const handleDeleteChar = () => {
     const input = inputRef.current;
     if (input) {
@@ -104,8 +89,9 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
         setFormulaInput(nextVal);
         requestAnimationFrame(() => {
           if (inputRef.current) {
-            inputRef.current.focus();
-            inputRef.current.setSelectionRange(start - 1, start - 1);
+            try {
+              inputRef.current.setSelectionRange(start - 1, start - 1);
+            } catch (_) {}
           }
         });
       } else if (start !== end) {
@@ -113,8 +99,9 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
         setFormulaInput(nextVal);
         requestAnimationFrame(() => {
           if (inputRef.current) {
-            inputRef.current.focus();
-            inputRef.current.setSelectionRange(start, start);
+            try {
+              inputRef.current.setSelectionRange(start, start);
+            } catch (_) {}
           }
         });
       }
@@ -123,105 +110,131 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
     }
   };
 
+  /**
+   * Xóa trắng toàn bộ
+   */
   const handleClearAll = () => {
     setFormulaInput('');
-    inputRef.current?.focus();
+    inputRef.current?.focus({ preventScroll: true });
   };
 
-  const presets = [
-    { label: 'Bậc 3: 2x³ - 3x + 1', val: 'y = 2x^3 - 3x + 1' },
-    { label: 'Trùng phương: x⁴ - 2x² - 1', val: 'y = x^4 - 2x^2 - 1' },
-    { label: 'Trùng phương: -x⁴ + 2x² + 1', val: 'y = -x^4 + 2x^2 + 1' },
-    { label: 'Nhất biến: (2x+1)/(x-1)', val: 'y = (2x+1)/(x-1)' },
-    { label: 'Lượng giác: 2sin(2x)', val: 'y = 2sin(2x)' },
-    { label: 'Vật lý: Ly độ 4cos(2πt)', val: 'x = 4cos(2πt)' },
-    { label: 'Vật lý: Dao động 4cos(2πt - π/3)', val: 'x = 4cos(2πt - π/3)' },
-    { label: 'Vật lý: Vận tốc -8π sin(2πt)', val: 'v = -8π sin(2πt)' },
-    { label: 'Vật lý: Dao động tắt dần', val: 'x = 4e^(-0.2t)cos(2πt)' },
-    { label: 'Căn thức: √(4 - x²)', val: 'y = √(4 - x^2)' },
-    { label: 'Parabol ném ngang', val: 'y = -0.049x^2 + 5' },
+  // Mẫu công thức chuẩn SGK Toán 12
+  const toan12Presets = [
+    { label: 'Hàm bậc ba', val: 'y = 2x^3 - 3x + 1', desc: 'Cực đại, cực tiểu' },
+    { label: 'Trùng phương 1', val: 'y = x^4 - 2x^2 - 1', desc: 'Đồ thị chữ W' },
+    { label: 'Trùng phương 2', val: 'y = -x^4 + 2x^2 + 1', desc: 'Đồ thị chữ M' },
+    { label: 'Nhất biến (Phân thức)', val: 'y = (2x+1)/(x-1)', desc: 'Tiệm cận đứng & ngang' },
+    { label: 'Lượng giác sin', val: 'y = 2sin(2x)', desc: 'Tuần hoàn chu kỳ π' },
+    { label: 'Lượng giác cos', val: 'y = 3cos(x - π/4)', desc: 'Pha ban đầu π/4' },
+    { label: 'Căn thức', val: 'y = √(4 - x^2)', desc: 'Nửa đường tròn R=2' },
+    { label: 'Mũ & Logarit', val: 'y = e^x - 2', desc: 'Hàm số mũ cơ số e' },
   ];
 
-  const parsed = previewMath.parsed || {};
+  // Mẫu công thức chuẩn SGK Vật lý 12
+  const vatly12Presets = [
+    { label: 'Dao động điều hòa ly độ x(t)', val: 'x = 4cos(2πt)', desc: 'A=4cm, ω=2π rad/s' },
+    { label: 'Dao động lệch pha', val: 'x = 4cos(2πt - π/3)', desc: 'Pha ban đầu -π/3' },
+    { label: 'Vận tốc dao động v(t)', val: 'v = -8π sin(2πt)', desc: 'Sớm pha π/2 so với x' },
+    { label: 'Gia tốc dao động a(t)', val: 'a = -16π^2 cos(2πt)', desc: 'Ngược pha so với x' },
+    { label: 'Dao động tắt dần', val: 'x = 4e^(-0.2t)cos(2πt)', desc: 'Biên độ giảm theo hàm mũ' },
+    { label: 'Tổng hợp 2 dao động', val: 'x = 3cos(2πt) + 4sin(2πt)', desc: 'Hai dao động vuông pha' },
+    { label: 'Parabol ném ngang', val: 'y = -0.049x^2 + 5', desc: 'Quỹ đạo rơi tự do' },
+  ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in select-none">
-      <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-5 md:p-6 max-w-2xl w-full shadow-2xl text-white space-y-4 max-h-[92vh] overflow-y-auto custom-scrollbar">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/10 pb-3">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none animate-in fade-in duration-100">
+      <div className="bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-4 sm:p-5 max-w-3xl w-full shadow-2xl text-white space-y-3.5 max-h-[95vh] overflow-y-auto custom-scrollbar">
+        {/* Header Modal */}
+        <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            <div className="p-2 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40">
               <Calculator className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-black text-sm md:text-base text-white tracking-tight">
-                {isEditing ? 'Chỉnh Sửa Đồ Thị Hàm Số' : 'Vẽ Đồ Thị Hàm Số & Dao Động Vật Lý'}
+              <h3 className="font-black text-sm md:text-base text-white tracking-tight flex items-center gap-2">
+                <span>{isEditing ? 'Chỉnh Sửa Đồ Thị Hàm Số' : 'Bàn Phím Nhập Đồ Thị & Dao Động 75 Pro'}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hidden sm:inline">
+                  Không trễ &bull; Chạm nhạy
+                </span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                Nhập công thức tự do &bull; Hỗ trợ SGK Toán 12, Vật lý 12, MathType, KaTeX
+                Nhập tự do &bull; Hỗ trợ SGK Toán 12, Vật lý 12, MathType, KaTeX
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            title="Đóng cửa sổ"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Input box & Math Live Preview */}
-        <div className="space-y-2">
-          <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-            <span>Công thức hàm số (Nhập trực tiếp hoặc chạm bàn phím ảo bên dưới):</span>
-            <span className="text-[10px] text-amber-300 font-mono">Ví dụ: y = 2x^3 - 3x + 1 hoặc x = 4cos(2πt)</span>
-          </label>
+        {/* Ô nhập công thức trực tiếp */}
+        <div className="space-y-1.5">
           <div className="relative">
             <input
               ref={inputRef}
               type="text"
               value={formulaInput}
               onChange={(e) => setFormulaInput(e.target.value)}
-              placeholder="Nhập công thức hàm số (ví dụ: y = 2x^3 - 3x + 1 hoặc x = 4cos(2πt))"
-              className="w-full px-4 py-3 rounded-2xl bg-slate-950 border-2 border-slate-700 text-white font-mono text-sm focus:border-amber-400 focus:outline-none pr-10 shadow-inner"
+              placeholder="Nhập công thức (ví dụ: y = 2x^3 - 3x + 1 hoặc x = 4cos(2πt))"
+              className="w-full px-4 py-3 rounded-2xl bg-slate-950 border-2 border-slate-700 text-white font-mono text-sm sm:text-base focus:border-amber-400 focus:outline-none pr-20 shadow-inner"
             />
             {formulaInput && (
-              <button
-                type="button"
-                onClick={handleClearAll}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300 cursor-pointer"
-                title="Xóa trắng"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    handleDeleteChar();
+                  }}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer"
+                  title="Xóa ký tự cuối"
+                >
+                  <Delete className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    handleClearAll();
+                  }}
+                  className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white cursor-pointer"
+                  title="Xóa sạch"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              </div>
             )}
           </div>
 
-          {/* Validation Status */}
-          <div className="flex items-center justify-between pt-0.5">
+          {/* Hàng thông báo trạng thái cố định chiều cao (h-7) - CHỐNG NHẢY GIAO DIỆN */}
+          <div className="h-7 flex items-center justify-between px-1">
             <span className="text-[11px] text-slate-400 font-medium">
-              Xem trước hiển thị công thức chuẩn LaTeX / KaTeX:
+              Xem trước hiển thị công thức chuẩn KaTeX / MathType:
             </span>
             {parsed.error ? (
-              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                <span>{parsed.error}</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40 flex items-center gap-1 truncate max-w-[280px]">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{parsed.error}</span>
               </span>
             ) : (
-              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 flex items-center gap-1">
-                <Check className="w-3 h-3" />
-                <span>Chuẩn MathType &bull; Sẵn sàng vẽ</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" />
+                <span>Chuẩn công thức &bull; Sẵn sàng vẽ</span>
               </span>
             )}
           </div>
 
-          {/* KaTeX Math Display Container */}
-          <div className="min-h-[58px] bg-slate-950/80 rounded-2xl px-4 py-3 flex items-center justify-center border border-white/10 text-white overflow-x-auto custom-scrollbar shadow-inner">
-            {previewMath.katexHtml ? (
+          {/* Vùng hiển thị KaTeX cố định chiều cao (h-20) - TUYỆT ĐỐI KHÔNG BỊ CO GIÃN NHẢY MÀN HÌNH */}
+          <div className="h-20 bg-slate-950/90 rounded-2xl px-4 py-2 flex items-center justify-center border border-white/10 text-white overflow-x-auto overflow-y-hidden custom-scrollbar shadow-inner">
+            {katexHtml ? (
               <div
                 className="text-lg md:text-xl text-amber-200 select-all"
-                dangerouslySetInnerHTML={{ __html: previewMath.katexHtml }}
+                dangerouslySetInnerHTML={{ __html: katexHtml }}
               />
             ) : (
               <span className="text-sm font-mono text-slate-400">
@@ -229,227 +242,473 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
               </span>
             )}
           </div>
-
-          {/* Value verification test & variable info */}
-          {!parsed.error && parsed.sampleTest && (
-            <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 px-1 pt-0.5 gap-2 border-t border-white/5">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                <span>Hàm theo {parsed.variableName === 't' ? 'biến thời gian (t)' : 'biến số (x)'}</span>
-              </span>
-              <span className="font-mono text-cyan-300 bg-cyan-950/40 px-2 py-0.5 rounded-lg border border-cyan-800/40">
-                {parsed.variableName === 't'
-                  ? `Kiểm tra giá trị: x(0) = ${parsed.sampleTest.at0 ?? 'N/A'}, x(1) = ${parsed.sampleTest.at1 ?? 'N/A'}`
-                  : `Kiểm tra giá trị: y(0) = ${parsed.sampleTest.at0 ?? 'N/A'}, y(1) = ${parsed.sampleTest.at1 ?? 'N/A'}`}
-              </span>
-            </div>
-          )}
         </div>
 
-        {/* BÀN PHÍM KÝ HIỆU NHANH PHẢN HỒI SIÊU TỐC (<16ms) */}
-        <div className="space-y-1.5 pt-1">
-          <span className="text-[11px] font-bold uppercase text-slate-400 block">
-            Bàn phím ký hiệu nhanh (Tiện lợi chạm trên bảng 75 inch - Phản hồi siêu tốc):
-          </span>
+        {/* BÀN PHÍM CẢM ỨNG ĐA NĂNG CHO MÀN HÌNH 75 INCH (SỐ, BIẾN, PHÉP TÍNH, HÀM SỐ) */}
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase text-slate-400 px-1">
+            <span>Bàn phím cảm ứng thông minh (Chạm phản hồi tức thì 16ms):</span>
+            <span className="text-[10px] text-amber-300/80 font-mono">Không giật &bull; Không trễ</span>
+          </div>
 
-          <div className="space-y-1.5">
-            {/* Row 1: Variables, Constants, Superscripts */}
-            <div className="grid grid-cols-8 gap-1.5 font-mono text-xs font-bold">
+          {/* Bố cục bàn phím 2 cột: Bên trái là Phím số + Biến + Phép tính; Bên phải là Hàm nâng cao */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+            {/* Cột 1: Bàn phím số & Phép tính cơ bản (7 cột nhỏ) */}
+            <div className="md:col-span-8 grid grid-cols-6 gap-1.5 font-mono text-sm font-bold">
+              {/* Hàng 1 */}
               <button
                 type="button"
-                onClick={() => insertSymbol('x')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-cyan-300"
-                title="Biến số x"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('7');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
+              >
+                7
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('8');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
+              >
+                8
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('9');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
+              >
+                9
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol(' / ');
+                }}
+                className="p-3 rounded-xl bg-indigo-900/40 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-indigo-500/30 text-center active:scale-95 cursor-pointer text-indigo-300"
+                title="Phép chia / Phân thức"
+              >
+                ÷
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('(');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-amber-200"
+              >
+                (
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol(')');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-amber-200"
+              >
+                )
+              </button>
+
+              {/* Hàng 2 */}
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('4');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
+              >
+                4
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('5');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
+              >
+                5
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('6');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
+              >
+                6
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol(' * ');
+                }}
+                className="p-3 rounded-xl bg-indigo-900/40 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-indigo-500/30 text-center active:scale-95 cursor-pointer text-indigo-300"
+                title="Phép nhân"
+              >
+                &times;
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('x');
+                }}
+                className="p-3 rounded-xl bg-teal-900/40 hover:bg-teal-500 hover:text-slate-950 text-teal-300 transition-colors border border-teal-500/40 text-center active:scale-95 cursor-pointer font-bold"
+                title="Biến số x (Toán học)"
               >
                 x
               </button>
-
               <button
                 type="button"
-                onClick={() => insertSymbol('t')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-cyan-300"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('t');
+                }}
+                className="p-3 rounded-xl bg-teal-900/40 hover:bg-teal-500 hover:text-slate-950 text-teal-300 transition-colors border border-teal-500/40 text-center active:scale-95 cursor-pointer font-bold"
                 title="Biến thời gian t (Vật lý)"
               >
                 t
               </button>
 
+              {/* Hàng 3 */}
               <button
                 type="button"
-                onClick={() => insertSymbol('π')}
-                className="p-2.5 rounded-xl bg-amber-500/25 hover:bg-amber-500 hover:text-slate-950 text-amber-300 transition-colors border-2 border-amber-400/80 text-center active:scale-90 cursor-pointer font-serif text-sm font-bold shadow-md shadow-amber-500/20"
-                title="Số Pi chuẩn toán học (π ≈ 3.14159)"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('1');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
               >
-                &pi;
+                1
               </button>
-
               <button
                 type="button"
-                onClick={() => insertSymbol('e')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-amber-200"
-                title="Cơ số tự nhiên e (e ≈ 2.718)"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('2');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
               >
-                e
+                2
               </button>
-
               <button
                 type="button"
-                onClick={() => insertSymbol('^2')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-emerald-300"
-                title="Bình phương (^2)"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('3');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
+              >
+                3
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol(' - ');
+                }}
+                className="p-3 rounded-xl bg-indigo-900/40 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-indigo-500/30 text-center active:scale-95 cursor-pointer text-indigo-300"
+                title="Phép trừ"
+              >
+                -
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('^2');
+                }}
+                className="p-3 rounded-xl bg-emerald-900/40 hover:bg-emerald-500 hover:text-slate-950 text-emerald-300 transition-colors border border-emerald-500/40 text-center active:scale-95 cursor-pointer"
+                title="Bình phương"
               >
                 x²
               </button>
-
               <button
                 type="button"
-                onClick={() => insertSymbol('^3')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-emerald-300"
-                title="Lập phương (^3)"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('^3');
+                }}
+                className="p-3 rounded-xl bg-emerald-900/40 hover:bg-emerald-500 hover:text-slate-950 text-emerald-300 transition-colors border border-emerald-500/40 text-center active:scale-95 cursor-pointer"
+                title="Lập phương"
               >
                 x³
               </button>
 
+              {/* Hàng 4 */}
               <button
                 type="button"
-                onClick={() => insertSymbol('^')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-emerald-300"
-                title="Mũ lũy thừa (^)"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('0');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
               >
-                ^
+                0
               </button>
-
               <button
                 type="button"
-                onClick={() => insertSymbol('√(')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-purple-300"
-                title="Căn bậc hai √(...)"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('.');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-95 cursor-pointer text-white"
               >
-                &radic;(
+                .
               </button>
-            </div>
-
-            {/* Row 2: Basic Operators, Parentheses, Editing */}
-            <div className="grid grid-cols-8 gap-1.5 font-mono text-xs font-bold">
               <button
                 type="button"
-                onClick={() => insertSymbol('+')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol(' = ');
+                }}
+                className="p-3 rounded-xl bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 transition-colors border border-amber-500/40 text-center active:scale-95 cursor-pointer font-bold"
+              >
+                =
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol(' + ');
+                }}
+                className="p-3 rounded-xl bg-indigo-900/40 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-indigo-500/30 text-center active:scale-95 cursor-pointer text-indigo-300"
+                title="Phép cộng"
               >
                 +
               </button>
-
               <button
                 type="button"
-                onClick={() => insertSymbol('-')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('^');
+                }}
+                className="p-3 rounded-xl bg-emerald-900/40 hover:bg-emerald-500 hover:text-slate-950 text-emerald-300 transition-colors border border-emerald-500/40 text-center active:scale-95 cursor-pointer"
+                title="Số mũ lũy thừa"
               >
-                -
+                ^
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('√()', 2);
+                }}
+                className="p-3 rounded-xl bg-purple-900/40 hover:bg-purple-500 hover:text-slate-950 text-purple-300 transition-colors border border-purple-500/40 text-center active:scale-95 cursor-pointer"
+                title="Căn bậc hai"
+              >
+                &radic;
+              </button>
+            </div>
+
+            {/* Cột 2: Hàm lượng giác, Mũ, Logarit, Hằng số (4 cột nhỏ) */}
+            <div className="md:col-span-4 grid grid-cols-3 gap-1.5 font-mono text-xs font-bold">
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('sin()', 4);
+                }}
+                className="p-3 rounded-xl bg-slate-800/90 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 transition-colors border border-cyan-500/30 text-center active:scale-95 cursor-pointer"
+              >
+                sin
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('cos()', 4);
+                }}
+                className="p-3 rounded-xl bg-slate-800/90 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 transition-colors border border-cyan-500/30 text-center active:scale-95 cursor-pointer"
+              >
+                cos
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('tan()', 4);
+                }}
+                className="p-3 rounded-xl bg-slate-800/90 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 transition-colors border border-cyan-500/30 text-center active:scale-95 cursor-pointer"
+              >
+                tan
               </button>
 
               <button
                 type="button"
-                onClick={() => insertSymbol('*')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer"
-                title="Dấu nhân (* hoặc ·)"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('cot()', 4);
+                }}
+                className="p-3 rounded-xl bg-slate-800/90 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 transition-colors border border-cyan-500/30 text-center active:scale-95 cursor-pointer"
               >
-                &times;
+                cot
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('ln()', 3);
+                }}
+                className="p-3 rounded-xl bg-slate-800/90 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 transition-colors border border-cyan-500/30 text-center active:scale-95 cursor-pointer"
+              >
+                ln
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('e^()', 3);
+                }}
+                className="p-3 rounded-xl bg-slate-800/90 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 transition-colors border border-cyan-500/30 text-center active:scale-95 cursor-pointer"
+              >
+                eˣ
               </button>
 
               <button
                 type="button"
-                onClick={() => insertSymbol('/')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer"
-                title="Chia / Phân số"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('π');
+                }}
+                className="p-3 rounded-xl bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 transition-colors border border-amber-500/40 text-center active:scale-95 cursor-pointer font-serif text-sm font-bold"
+                title="Số Pi (π ≈ 3.14159)"
               >
-                /
+                &pi;
               </button>
-
               <button
                 type="button"
-                onClick={() => insertSymbol('(')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-amber-200"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  insertSymbol('abs()', 4);
+                }}
+                className="p-3 rounded-xl bg-slate-800/90 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 transition-colors border border-cyan-500/30 text-center active:scale-95 cursor-pointer"
+                title="Trị tuyệt đối"
               >
-                (
+                |x|
               </button>
-
               <button
                 type="button"
-                onClick={() => insertSymbol(')')}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-amber-200"
-              >
-                )
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDeleteChar}
-                className="p-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white transition-colors border border-rose-500/30 text-center active:scale-90 cursor-pointer"
-                title="Xóa ký tự vừa nhập"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  handleDeleteChar();
+                }}
+                className="p-3 rounded-xl bg-rose-500/25 hover:bg-rose-500 text-rose-300 hover:text-white transition-colors border border-rose-500/40 text-center active:scale-95 cursor-pointer flex items-center justify-center font-sans font-bold"
+                title="Xóa lùi"
               >
                 &larr; Xóa
               </button>
 
+              {/* Nút Xóa hết & Nút Trợ giúp */}
               <button
                 type="button"
-                onClick={handleClearAll}
-                className="p-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white transition-colors border border-rose-500/30 text-center active:scale-90 cursor-pointer"
-                title="Xóa toàn bộ công thức"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  handleClearAll();
+                }}
+                className="col-span-3 p-2.5 rounded-xl bg-rose-950/60 hover:bg-rose-600 text-rose-300 hover:text-white transition-colors border border-rose-500/30 text-center active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 font-sans font-bold text-xs"
               >
-                C
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Xóa Toàn Bộ Công Thức</span>
               </button>
-            </div>
-
-            {/* Row 3: Trigonometric & Advanced Functions */}
-            <div className="grid grid-cols-7 gap-1.5 font-mono text-xs font-bold">
-              {['sin(', 'cos(', 'tan(', 'cot(', 'ln(', 'exp(', 'abs('].map((sym) => (
-                <button
-                  key={sym}
-                  type="button"
-                  onClick={() => insertSymbol(sym)}
-                  className="p-2.5 rounded-xl bg-white/10 hover:bg-amber-500 hover:text-slate-950 transition-colors border border-white/10 text-center active:scale-90 cursor-pointer text-cyan-200"
-                >
-                  {sym}
-                </button>
-              ))}
             </div>
           </div>
         </div>
 
-        {/* Sample Presets */}
-        <div className="space-y-2">
-          <span className="text-[11px] font-bold uppercase text-slate-400 block">
-            Mẫu hàm số & Dao động phổ biến (Chuẩn SGK & MathType):
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {presets.map((preset) => (
+        {/* THƯ VIỆN CÔNG THỨC SGK 1-CHẠM TIỆN LỢI (PHÂN LOẠI TOÁN 12 & VẬT LÝ 12) */}
+        <div className="space-y-2 pt-1 border-t border-white/10">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase text-slate-400 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Mẫu đồ thị 1-chạm chuẩn SGK:</span>
+            </span>
+
+            {/* Tab chuyển đổi Toán 12 vs Vật lý 12 */}
+            <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-white/10 text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setActiveTab('toan12')}
+                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                  activeTab === 'toan12'
+                    ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Toán 12
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('vatly12')}
+                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                  activeTab === 'vatly12'
+                    ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Vật Lý 12
+              </button>
+            </div>
+          </div>
+
+          {/* Danh sách nút mẫu hàm số */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            {(activeTab === 'toan12' ? toan12Presets : vatly12Presets).map((preset) => (
               <button
                 key={preset.label}
                 type="button"
-                onClick={() => {
+                onPointerDown={(e) => {
+                  e.preventDefault();
                   setFormulaInput(preset.val);
-                  inputRef.current?.focus();
                 }}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-amber-400 text-[11px] text-slate-300 hover:text-amber-300 transition-colors active:scale-95 cursor-pointer"
+                className="px-2.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 hover:border-amber-400 text-left transition-all active:scale-95 cursor-pointer group"
               >
-                {preset.label}
+                <div className="text-[11px] font-bold text-amber-300 group-hover:text-amber-200 truncate">
+                  {preset.label}
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5 opacity-90">
+                  {preset.val}
+                </div>
               </button>
             ))}
           </div>
         </div>
 
         {/* Modal Actions */}
-        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-white/10">
+        <div className="flex items-center justify-between pt-2 border-t border-white/10">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
+            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold transition-colors cursor-pointer"
           >
             Đóng
           </button>
+
           <button
             type="button"
-            onClick={() => onApply(formulaInput)}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-transform active:scale-95 cursor-pointer"
+            onClick={() => {
+              if (formulaInput.trim()) {
+                onApply(formulaInput);
+              }
+            }}
+            disabled={!!parsed.error}
+            className={`px-6 py-2.5 rounded-2xl font-black text-xs md:text-sm shadow-xl flex items-center gap-2 transition-all cursor-pointer ${
+              parsed.error
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-white/5'
+                : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-amber-500/25 active:scale-95 ring-2 ring-amber-400/40'
+            }`}
           >
             <TrendingUp className="w-4 h-4" />
             <span>{isEditing ? 'Cập Nhật Đồ Thị' : 'Vẽ Đồ Thị Lên Bảng Xanh'}</span>

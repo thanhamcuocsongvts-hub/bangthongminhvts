@@ -9,6 +9,7 @@ import { auth, storage, db } from '../lib/firebase';
 import { collection, Timestamp } from 'firebase/firestore';
 import { safeAddDoc } from './firebaseSafe';
 import { signInAnonymously } from 'firebase/auth';
+import { extractCleanPdfText } from './pdfTextExtractor';
 
 if (typeof window !== 'undefined' && 'Worker' in window) {
   try {
@@ -246,10 +247,7 @@ export async function parseUploadedFileToLesson(
       for (let i = 1; i <= maxPages; i++) {
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
-        const pageText = textContent.items
-          .map((item: any) => item.str || '')
-          .join(' ')
-          .trim();
+        const pageText = extractCleanPdfText(textContent);
         if (pageText) {
           textParts.push(`--- Trang ${i} ---\n${pageText}`);
         }

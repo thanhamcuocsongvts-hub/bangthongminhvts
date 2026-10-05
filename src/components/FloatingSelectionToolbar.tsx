@@ -104,6 +104,9 @@ export const FloatingSelectionToolbar: React.FC<FloatingSelectionToolbarProps> =
 
       {/* 2. Floating Action Toolbar (Centered above the swept selection) */}
       <div
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
         className={
           isMobile
             ? 'fixed bottom-20 left-2 right-2 z-50 flex items-center justify-between gap-1.5 bg-slate-950/98 backdrop-blur-2xl border-2 border-purple-400/80 rounded-2xl p-2 shadow-2xl text-white animate-in slide-in-from-bottom-4 duration-200 pointer-events-auto'
@@ -142,9 +145,15 @@ export const FloatingSelectionToolbar: React.FC<FloatingSelectionToolbarProps> =
           </select>
         </div>
 
-        {/* Action Button: Bấm chọn: Chuyển Chữ Đẹp */}
+        {/* Action Button: Bấm chọn: Chuyển Chữ Đẹp - Cơ chế 1-Click tức thì */}
         <button
-          onClick={onConvert}
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onConvert();
+          }}
           disabled={isConvertingCalligraphy}
           className="flex-1 sm:flex-none px-3.5 py-2 bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:brightness-110 active:scale-95 text-white font-black text-xs rounded-xl shadow-xl flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all ring-2 ring-purple-300/50 shrink-0"
         >
@@ -156,7 +165,7 @@ export const FloatingSelectionToolbar: React.FC<FloatingSelectionToolbarProps> =
           ) : (
             <>
               <Wand2 className="w-3.5 h-3.5 text-amber-300 animate-bounce" />
-              <span>{isMobile ? 'Chuyển Đẹp' : 'Bấm chọn: Chuyển Chữ Đẹp'}</span>
+              <span>{isMobile ? 'Chuyển Đẹp' : '✨ Bấm chọn: Chuyển Chữ Đẹp'}</span>
             </>
           )}
         </button>

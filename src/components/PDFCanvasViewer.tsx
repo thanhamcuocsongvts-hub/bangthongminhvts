@@ -17,8 +17,15 @@ import {
   Pen,
   Sparkles,
   Hash,
+  Volume2,
+  Square,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
 import { TouchWhiteboard } from './TouchWhiteboard';
+import { speakText, stopAllSpeech, VOICE_TONE_PRESETS, VoiceTonePreset } from '../utils/aiSpeechService';
+import { cleanPdfVietnameseText, extractCleanPdfText } from '../utils/pdfTextExtractor';
+import 'pdfjs-dist/web/pdf_viewer.css';
 
 // Configure pdfjs worker using unpkg / cdnjs or inline worker to avoid Vite bundling worker issues
 if (typeof window !== 'undefined' && 'Worker' in window) {
@@ -59,7 +66,68 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const singleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const singleTextLayerRef = useRef<HTMLDivElement | null>(null);
   const singleRenderTaskRef = useRef<any>(null);
+  const [isSpeakingPage, setIsSpeakingPage] = useState<boolean>(false);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[0]);
+  const [showVoiceMenu, setShowVoiceMenu] = useState<boolean>(false);
+
+  // Helper to reconstruct clean Vietnamese text from PDF items without artificial kerning splits
+  const extractCleanPageText = useCallback((textContent: any): string => {
+    return extractCleanPdfText(textContent);
+  }, []);
+
+  // Quick Speech reader for currently viewed page
+  const handleReadCurrentPage = useCallback(async () => {
+    if (isSpeakingPage) {
+      stopAllSpeech();
+      setIsSpeakingPage(false);
+      return;
+    }
+    if (!pdfDoc) return;
+    try {
+      const page = await pdfDoc.getPage(currentPage);
+      const textContent = await page.getTextContent();
+      const pageText = extractCleanPageText(textContent);
+
+      if (!pageText || !pageText.trim()) {
+        alert('Trang này không có văn bản dạng ký tự (có thể là trang scan hình ảnh). Bạn có thể dùng chuột hoặc bút quét đoạn chữ để đọc.');
+        return;
+      }
+
+      setIsSpeakingPage(true);
+      speakText(pageText, {
+        preset: selectedVoice,
+        onStart: () => setIsSpeakingPage(true),
+        onEnd: () => setIsSpeakingPage(false),
+        onError: () => setIsSpeakingPage(false),
+      });
+    } catch (e: any) {
+      console.warn('Read page error:', e);
+      setIsSpeakingPage(false);
+    }
+  }, [isSpeakingPage, pdfDoc, currentPage, selectedVoice, extractCleanPageText]);
+
+  const handleReadWithVoice = useCallback(async (preset: VoiceTonePreset) => {
+    if (!pdfDoc) return;
+    try {
+      const page = await pdfDoc.getPage(currentPage);
+      const textContent = await page.getTextContent();
+      const pageText = extractCleanPageText(textContent);
+
+      if (!pageText || !pageText.trim()) return;
+
+      setIsSpeakingPage(true);
+      speakText(pageText, {
+        preset,
+        onStart: () => setIsSpeakingPage(true),
+        onEnd: () => setIsSpeakingPage(false),
+        onError: () => setIsSpeakingPage(false),
+      });
+    } catch (_) {
+      setIsSpeakingPage(false);
+    }
+  }, [pdfDoc, currentPage, extractCleanPageText]);
 
   // Drawing Annotation state (Synced with prop or local fallback)
   const [internalAnnotating, setInternalAnnotating] = useState<boolean>(false);
@@ -229,6 +297,24 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
         const task = page.render(renderContext);
         singleRenderTaskRef.current = task;
         await task.promise;
+
+        if (singleTextLayerRef.current && isCurrent) {
+          try {
+            const textContent = await page.getTextContent();
+            if (singleTextLayerRef.current && isCurrent) {
+              singleTextLayerRef.current.innerHTML = '';
+              singleTextLayerRef.current.style.setProperty('--scale-factor', `${scaleFactor}`);
+              const textTask = (pdfjsLib as any).renderTextLayer({
+                textContentSource: textContent,
+                container: singleTextLayerRef.current,
+                viewport: viewport,
+              });
+              await textTask.promise;
+            }
+          } catch (tErr) {
+            console.warn('Single text layer render notice:', tErr);
+          }
+        }
       } catch (err: any) {
         if (err?.name !== 'RenderingCancelledException') {
           console.warn('PDF single page render error:', err);
@@ -343,7 +429,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
     <div
       ref={containerRef}
       id="pdf-viewer-root-container"
-      className="flex-1 w-full h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 relative select-none"
+      className="flex-1 w-full h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 relative select-text"
     >
       {/* Top PDF Toolbar Strip */}
       <div className="px-3 py-2 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0 select-none shadow-md z-20">
@@ -466,6 +552,91 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
             </button>
           </div>
 
+          {/* AI Page Reader Button + Voice Selector */}
+          <div className="relative flex items-center">
+            <button
+              onClick={handleReadCurrentPage}
+              className={`px-3 py-1 rounded-l-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border-y border-l ${
+                isSpeakingPage
+                  ? 'bg-rose-600 text-white border-rose-400 ring-2 ring-rose-400/80 shadow-md'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/60 shadow-xs'
+              }`}
+              title={
+                isSpeakingPage
+                  ? 'Dừng đọc văn bản trang này'
+                  : `Đọc to toàn bộ văn bản trang hiện tại bằng ${selectedVoice.name}`
+              }
+            >
+              {isSpeakingPage ? (
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                  <span>⏹ Dừng</span>
+                </>
+              ) : (
+                <>
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span>🔊 Đọc Trang Này</span>
+                </>
+              )}
+            </button>
+
+            {/* Voice Dropdown Toggle Button */}
+            <button
+              onClick={() => setShowVoiceMenu((prev) => !prev)}
+              className="px-2 py-1 bg-emerald-700 hover:bg-emerald-600 text-white border-y border-r border-emerald-400/60 rounded-r-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-all"
+              title="Chọn giọng đọc: Nam, Nữ, Học Sinh, Podcast"
+            >
+              <span>{selectedVoice.icon}</span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${showVoiceMenu ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Dropdown Menu for 4 Voices */}
+            {showVoiceMenu && (
+              <div
+                className="absolute top-full mt-1.5 left-0 z-50 w-72 bg-slate-950/98 backdrop-blur-2xl border-2 border-emerald-500/70 rounded-2xl shadow-2xl p-2 text-white space-y-1 animate-in fade-in zoom-in-95 duration-100"
+                onMouseLeave={() => setShowVoiceMenu(false)}
+              >
+                <div className="px-2 py-1 text-[10px] font-black uppercase text-emerald-400 border-b border-white/10 flex items-center justify-between">
+                  <span>CHỌN GIỌNG ĐỌC TIẾNG VIỆT</span>
+                  <span className="text-[9px] text-slate-400 font-mono">100% Âm lượng</span>
+                </div>
+                {VOICE_TONE_PRESETS.map((preset) => {
+                  const isSel = selectedVoice.id === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      onClick={() => {
+                        setSelectedVoice(preset);
+                        setShowVoiceMenu(false);
+                        if (isSpeakingPage) {
+                          stopAllSpeech();
+                          setIsSpeakingPage(false);
+                          setTimeout(() => {
+                            handleReadWithVoice(preset);
+                          }, 60);
+                        }
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs flex items-center justify-between transition-all cursor-pointer ${
+                        isSel
+                          ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white font-bold ring-1 ring-emerald-400'
+                          : 'hover:bg-white/10 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{preset.icon}</span>
+                        <div>
+                          <div className="font-bold text-xs">{preset.name}</div>
+                          <div className="text-[10px] text-slate-400 opacity-80">{preset.sub}</div>
+                        </div>
+                      </div>
+                      {isSel && <Check className="w-3.5 h-3.5 text-amber-300 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Prominent Pen Annotation Button in Toolbar */}
           <button
             onClick={toggleAnnotating}
@@ -507,7 +678,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 w-full h-full overflow-y-auto overflow-x-auto p-4 flex flex-col items-center bg-slate-950/95 custom-scrollbar relative select-none touch-pan-y scroll-smooth overscroll-contain"
+        className="flex-1 w-full h-full overflow-y-auto overflow-x-auto p-4 flex flex-col items-center bg-slate-950/95 custom-scrollbar relative select-text touch-pan-y scroll-smooth overscroll-contain"
         style={{
           WebkitOverflowScrolling: 'touch',
         }}
@@ -552,9 +723,9 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
         }}
       >
         {viewMode === 'single' ? (
-          <div className="relative my-auto flex flex-col items-center transition-transform duration-100 ease-out">
+          <div className="relative my-auto flex flex-col items-center transition-transform duration-100 ease-out select-text">
             <div
-              className="rounded-xl shadow-2xl bg-white overflow-hidden"
+              className="rounded-xl shadow-2xl bg-white overflow-hidden relative select-text"
               style={{
                 boxShadow: '0 20px 50px rgba(0,0,0,0.85)',
                 width: `${pageWidth}px`,
@@ -569,8 +740,20 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
                   height: `${pageHeight}px`,
                 }}
               />
+              {/* Native PDF TextLayer for Drag-To-Select & Instant AI Speech */}
+              <div
+                ref={singleTextLayerRef}
+                className="textLayer absolute inset-0 select-text"
+                style={{
+                  width: `${pageWidth}px`,
+                  height: `${pageHeight}px`,
+                  pointerEvents: 'auto',
+                  userSelect: 'text',
+                  WebkitUserSelect: 'text',
+                }}
+              />
             </div>
-            <div className="mt-3 text-xs text-slate-400 font-medium">
+            <div className="mt-3 text-xs text-slate-400 font-medium select-none">
               Trang {currentPage} trên tổng số {numPages} • Thu phóng: {internalZoom}%
             </div>
           </div>
@@ -641,6 +824,7 @@ const PDFPageItem: React.FC<{
 }> = ({ pdfDoc, pageNumber, zoom, rotation, pageWidth, pageHeight }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const textLayerRef = useRef<HTMLDivElement | null>(null);
   const [isInViewport, setIsInViewport] = useState<boolean>(pageNumber <= 2);
   const [rendered, setRendered] = useState<boolean>(false);
   const renderTaskRef = useRef<any>(null);
@@ -708,6 +892,24 @@ const PDFPageItem: React.FC<{
         renderTaskRef.current = renderTask;
         await renderTask.promise;
 
+        if (textLayerRef.current && !isCancelled) {
+          try {
+            const textContent = await page.getTextContent();
+            if (textLayerRef.current && !isCancelled) {
+              textLayerRef.current.innerHTML = '';
+              textLayerRef.current.style.setProperty('--scale-factor', `${scaleFactor}`);
+              const textTask = (pdfjsLib as any).renderTextLayer({
+                textContentSource: textContent,
+                container: textLayerRef.current,
+                viewport: viewport,
+              });
+              await textTask.promise;
+            }
+          } catch (tErr) {
+            console.warn('Continuous text layer render notice:', tErr);
+          }
+        }
+
         if (!isCancelled) {
           setRendered(true);
         }
@@ -744,7 +946,7 @@ const PDFPageItem: React.FC<{
       }}
     >
       <div
-        className="relative bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700/50 transition-all hover:border-indigo-500/50"
+        className="relative bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700/50 transition-all hover:border-indigo-500/50 select-text"
         style={{
           width: `${pageWidth}px`,
           height: `${pageHeight}px`,
@@ -759,6 +961,18 @@ const PDFPageItem: React.FC<{
               style={{
                 width: `${pageWidth}px`,
                 height: `${pageHeight}px`,
+              }}
+            />
+            {/* Native PDF TextLayer for Drag-To-Select & Instant AI Speech */}
+            <div
+              ref={textLayerRef}
+              className="textLayer absolute inset-0 select-text"
+              style={{
+                width: `${pageWidth}px`,
+                height: `${pageHeight}px`,
+                pointerEvents: 'auto',
+                userSelect: 'text',
+                WebkitUserSelect: 'text',
               }}
             />
             {!rendered && (

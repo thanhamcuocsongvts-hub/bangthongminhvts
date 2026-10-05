@@ -262,9 +262,9 @@ export const DocxViewer: React.FC<DocxViewerProps> = ({
   };
 
   return (
-    <div className="flex flex-col w-full h-full bg-slate-200/90 select-none overflow-hidden relative font-sans">
+    <div className="flex flex-col w-full h-full bg-slate-200/90 select-text overflow-hidden relative font-sans">
       {/* 1. TOP TOOLBAR (Standard Word/A4 Desktop Controls) */}
-      <div className="h-12 bg-slate-900 border-b border-slate-700 px-3 md:px-5 flex items-center justify-between gap-2 shrink-0 z-30 shadow-md">
+      <div className="h-12 bg-slate-900 border-b border-slate-700 px-3 md:px-5 flex items-center justify-between gap-2 shrink-0 z-30 shadow-md select-none">
         {/* Left: Document Info */}
         <div className="flex items-center gap-2.5 overflow-hidden min-w-0">
           <span className="px-2.5 py-1 rounded-md bg-blue-600 text-white font-mono text-[11px] font-black uppercase shrink-0 shadow-xs flex items-center gap-1">

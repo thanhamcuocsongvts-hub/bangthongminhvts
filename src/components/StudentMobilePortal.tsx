@@ -22,6 +22,7 @@ import {
 import { QuizQuestion, RoomState } from '../types';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
+import { examAudio } from './ExamRoom';
 
 interface StudentMobilePortalProps {
   initialPin?: string;
@@ -40,6 +41,7 @@ export const StudentMobilePortal: React.FC<StudentMobilePortalProps> = ({
   const [roomState, setRoomState] = useState<RoomState | null>(null);
   const [currentExamIndex, setCurrentExamIndex] = useState<number>(0);
   const [answersMap, setAnswersMap] = useState<Record<string, string>>({});
+  const [resultsMap, setResultsMap] = useState<Record<string, { selected: string; isCorrect: boolean }>>({});
   const [submittedQuestions, setSubmittedQuestions] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -244,9 +246,30 @@ export const StudentMobilePortal: React.FC<StudentMobilePortalProps> = ({
   const selectedOption = currentQ ? (answersMap[currentQ.id] || null) : null;
   const isCurrentSubmitted = currentQ ? Boolean(submittedQuestions[currentQ.id]) : false;
 
+  const getCorrectKey = (q: QuizQuestion): string => {
+    const raw = q.correctAnswer || (q as any).answer || '';
+    const match = raw.match(/^[A-Da-d]/);
+    if (match) return match[0].toUpperCase();
+    return raw.trim().toUpperCase();
+  };
+
   const handleSubmitAnswer = async (optKey: string) => {
     if (!currentQ) return;
+    const correctKey = getCorrectKey(currentQ);
+    const isCorrect = optKey.toUpperCase() === correctKey;
+
     setAnswersMap((prev) => ({ ...prev, [currentQ.id]: optKey }));
+    setResultsMap((prev) => ({
+      ...prev,
+      [currentQ.id]: { selected: optKey, isCorrect },
+    }));
+
+    // Trigger instant Web Audio feedback
+    if (isCorrect) {
+      examAudio.playCorrectSound();
+    } else {
+      examAudio.playWrongSound();
+    }
 
     const timeSpent = Math.max(1, Math.round((Date.now() - startTime) / 1000));
 
@@ -260,6 +283,7 @@ export const StudentMobilePortal: React.FC<StudentMobilePortalProps> = ({
           studentId,
           studentName,
           selectedOption: optKey,
+          isCorrect,
           timeSpentSeconds: timeSpent,
         }),
       });
@@ -492,23 +516,37 @@ export const StudentMobilePortal: React.FC<StudentMobilePortalProps> = ({
       </div>
 
       {/* Exam Mode Question Navigator Bar (1, 2, 3, 4...) */}
-      {isExamMode && questions.length > 0 && (
-        <div className="w-full max-w-2xl mx-auto mb-4 p-2.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-2 overflow-x-auto scrollbar-none">
+      {questions.length > 0 && (
+        <div className="w-full max-w-2xl mx-auto mb-4 p-2.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-2 overflow-x-auto scrollbar-none shadow-md">
           <span className="text-xs font-bold text-slate-400 uppercase pl-1 shrink-0">Câu:</span>
           {questions.map((q, idx) => {
+            const res = resultsMap[q.id];
             const isAnswered = Boolean(answersMap[q.id]);
             const isCurrent = idx === activeQIndex;
+
+            let badgeClasses = 'bg-slate-800 text-slate-400 hover:bg-slate-700'; // Chưa làm: xám
+            if (res) {
+              if (res.isCorrect) {
+                badgeClasses = 'bg-emerald-800/90 text-emerald-100 font-bold border border-emerald-500 shadow-sm ring-1 ring-emerald-500/30';
+              } else {
+                badgeClasses = 'bg-rose-900/80 text-rose-100 font-bold border border-rose-600/80 shadow-sm';
+              }
+            } else if (isAnswered) {
+              badgeClasses = 'bg-indigo-700 text-white';
+            }
+
+            if (isCurrent) {
+              badgeClasses += ' ring-2 ring-indigo-400 scale-105';
+            }
+
             return (
               <button
                 key={q.id}
-                onClick={() => setCurrentExamIndex(idx)}
-                className={`w-8 h-8 rounded-xl font-mono text-xs font-black shrink-0 transition-all ${
-                  isCurrent
-                    ? 'bg-indigo-600 text-white ring-2 ring-indigo-400 shadow-md scale-105'
-                    : isAnswered
-                    ? 'bg-emerald-900/80 text-emerald-300 border border-emerald-600'
-                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                }`}
+                onClick={() => {
+                  if (isExamMode) setCurrentExamIndex(idx);
+                }}
+                className={`w-8 h-8 rounded-xl font-mono text-xs font-black shrink-0 transition-all ${badgeClasses}`}
+                title={`Câu ${idx + 1}`}
               >
                 {idx + 1}
               </button>
@@ -548,48 +586,79 @@ export const StudentMobilePortal: React.FC<StudentMobilePortalProps> = ({
               </div>
             </div>
 
-            {/* 4 Large Options (A, B, C, D) */}
-            <div className="grid grid-cols-1 gap-3">
-              {currentQ.options.map((opt) => {
-                const isSelected = selectedOption === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    onClick={() => handleSubmitAnswer(opt.key)}
-                    disabled={isLoading || overallTimeLeft === 0}
-                    className={`p-4 rounded-2xl border-2 transition-all flex items-center gap-4 text-left active:scale-98 shadow-xs cursor-pointer ${
-                      isSelected
-                        ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-600/30'
-                        : 'bg-slate-900 border-slate-800 text-slate-200 hover:border-slate-700 hover:bg-slate-850'
-                    }`}
-                  >
-                    <div
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xl shrink-0 ${
-                        isSelected
-                          ? 'bg-white text-indigo-950'
-                          : 'bg-slate-800 text-indigo-400 border border-slate-700'
-                      }`}
-                    >
-                      {opt.key}
-                    </div>
-                    <div className="font-bold text-base md:text-lg flex-1">
-                      <MathFormulaRenderer content={opt.text} />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            {/* 4 Large Options (A, B, C, D) with Correct/Wrong Instant Feedback */}
+            {(() => {
+              const res = resultsMap[currentQ.id];
+              const correctKey = getCorrectKey(currentQ);
 
-            {/* Question Navigation Controls in Exam Mode */}
-            {isExamMode && questions.length > 1 && (
+              return (
+                <div className="grid grid-cols-1 gap-3">
+                  {currentQ.options.map((opt) => {
+                    const optUpper = opt.key.toUpperCase();
+                    const isSelected = selectedOption === opt.key;
+                    const isCorrectOption = optUpper === correctKey;
+
+                    let cardClasses = 'bg-slate-900 border-slate-800 text-slate-200 hover:border-slate-700 hover:bg-slate-850';
+                    let letterClasses = 'bg-slate-800 text-indigo-400 border border-slate-700';
+                    let iconElement = null;
+
+                    if (res) {
+                      if (isSelected) {
+                        if (res.isCorrect) {
+                          // Đúng: Màu xanh êm dịu, không chói mắt
+                          cardClasses = 'bg-emerald-950/75 border-emerald-500 text-emerald-100 shadow-md ring-1 ring-emerald-500/40';
+                          letterClasses = 'bg-emerald-600 text-white font-black';
+                          iconElement = <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0 ml-auto" />;
+                        } else {
+                          // Sai: Viền đỏ dịu nhẹ, nền tối hài hòa
+                          cardClasses = 'bg-rose-950/45 border-rose-500/70 text-rose-200 shadow-sm';
+                          letterClasses = 'bg-rose-700 text-white font-black';
+                          iconElement = <XCircle className="w-6 h-6 text-rose-400 shrink-0 ml-auto" />;
+                        }
+                      } else if (isCorrectOption) {
+                        // Hiện đáp án đúng màu xanh dịu mắt
+                        cardClasses = 'bg-emerald-950/50 border-emerald-500/70 text-emerald-200 ring-1 ring-emerald-500/40';
+                        letterClasses = 'bg-emerald-600 text-white font-black';
+                        iconElement = <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 ml-auto" />;
+                      } else {
+                        cardClasses = 'bg-slate-900/40 border-slate-800/40 text-slate-500 opacity-60';
+                      }
+                    } else if (isSelected) {
+                      cardClasses = 'bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-600/30';
+                      letterClasses = 'bg-white text-indigo-950';
+                    }
+
+                    return (
+                      <button
+                        key={opt.key}
+                        onClick={() => handleSubmitAnswer(opt.key)}
+                        disabled={isLoading || overallTimeLeft === 0 || Boolean(res)}
+                        className={`p-4 rounded-2xl border-2 transition-all flex items-center gap-4 text-left active:scale-98 shadow-xs cursor-pointer ${cardClasses}`}
+                      >
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xl shrink-0 ${letterClasses}`}>
+                          {opt.key}
+                        </div>
+                        <div className="font-bold text-base md:text-lg flex-1">
+                          <MathFormulaRenderer content={opt.text} />
+                        </div>
+                        {iconElement}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Question Navigation Controls in Exam Mode: [ ⬅ Câu trước ] và [ Câu tiếp theo ➔ ] */}
+            {questions.length > 1 && (
               <div className="flex items-center justify-between pt-2">
                 <button
                   onClick={() => setCurrentExamIndex((prev) => Math.max(0, prev - 1))}
                   disabled={activeQIndex === 0}
-                  className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 text-sm font-bold flex items-center gap-1 disabled:opacity-30 disabled:pointer-events-none"
+                  className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 text-sm font-bold flex items-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4" />
-                  <span>Câu trước</span>
+                  <span>⬅ Câu trước</span>
                 </button>
 
                 <div className="text-xs text-slate-400 font-bold">
@@ -599,9 +668,9 @@ export const StudentMobilePortal: React.FC<StudentMobilePortalProps> = ({
                 <button
                   onClick={() => setCurrentExamIndex((prev) => Math.min(questions.length - 1, prev + 1))}
                   disabled={activeQIndex >= questions.length - 1}
-                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold flex items-center gap-1 disabled:opacity-30 disabled:pointer-events-none"
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white text-sm font-bold flex items-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-all shadow-md cursor-pointer"
                 >
-                  <span>Câu tiếp</span>
+                  <span>Câu tiếp theo ➔</span>
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>

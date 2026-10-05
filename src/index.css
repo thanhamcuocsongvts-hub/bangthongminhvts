@@ -7,6 +7,51 @@
     user-select: none;
     -webkit-user-select: none;
   }
+
+  /* Allow text selection inside documents, reading views, and text layers */
+  .select-text,
+  .select-text *,
+  .textLayer,
+  .textLayer *,
+  [data-selectable="true"],
+  article,
+  .document-content,
+  .docx-content {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+  }
+}
+
+/* PDF Text Layer rules for highlighting & OCR selection */
+.textLayer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1.0;
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.textLayer > span,
+.textLayer > br {
+  color: transparent !important;
+  position: absolute !important;
+  white-space: pre !important;
+  cursor: text !important;
+  transform-origin: 0% 0% !important;
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.textLayer ::selection {
+  background: rgba(16, 185, 129, 0.45) !important;
+  color: transparent !important;
 }
 
 /* Custom scrollbars for TV touch displays - Sleek Interface Theme */

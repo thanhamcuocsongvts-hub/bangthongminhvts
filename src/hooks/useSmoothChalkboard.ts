@@ -256,6 +256,15 @@ export function useSmoothChalkboard(options: SmoothChalkboardOptions = {}) {
      *   ctx.stroke();
      * - Cập nhật: p1 = current
      */
+    let prevPt = lastPointRef.current;
+    let prevMid = lastMidPointRef.current;
+
+    if (!prevPt) return;
+    if (!prevMid) prevMid = { x: prevPt.x, y: prevPt.y };
+
+    ctx.beginPath();
+    ctx.moveTo(prevMid.x, prevMid.y);
+
     for (let i = 0; i < rawEvents.length; i++) {
       const raw = rawEvents[i];
       const curX = raw.clientX - rect.left;
@@ -269,16 +278,22 @@ export function useSmoothChalkboard(options: SmoothChalkboardOptions = {}) {
 
       currentStrokePointsRef.current.push(currentPt);
 
-      const p1 = lastPointRef.current || currentPt;
-      const midPoint = { x: (p1.x + currentPt.x) / 2, y: (p1.y + currentPt.y) / 2 };
+      const midPoint = { x: (prevPt.x + currentPt.x) / 2, y: (prevPt.y + currentPt.y) / 2 };
 
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.quadraticCurveTo(p1.x, p1.y, midPoint.x, midPoint.y);
-      ctx.stroke();
+      // 1. Đường cong mượt bậc 2 từ midpoint trước qua prevPt đến midPoint
+      ctx.quadraticCurveTo(prevPt.x, prevPt.y, midPoint.x, midPoint.y);
 
-      lastPointRef.current = currentPt;
+      prevMid = midPoint;
+      prevPt = currentPt;
     }
+
+    // 2. KHẮC PHỤC TRIỆT ĐỂ ĐỘ TRỄ TRÊN TV 75":
+    // Nối tức thời từ midpoint đến chính xác tọa độ ngòi bút hiện tại (Zero Latency)
+    ctx.lineTo(prevPt.x, prevPt.y);
+    ctx.stroke();
+
+    lastPointRef.current = prevPt;
+    lastMidPointRef.current = prevMid;
 
     ctx.restore();
   }, []);
@@ -311,7 +326,7 @@ export function useSmoothChalkboard(options: SmoothChalkboardOptions = {}) {
 
       ctx.beginPath();
       ctx.moveTo(pMidLast.x, pMidLast.y);
-      ctx.quadraticCurveTo(pLast.x, pLast.y, pLast.x, pLast.y);
+      ctx.lineTo(pLast.x, pLast.y);
       ctx.stroke();
       ctx.restore();
     }

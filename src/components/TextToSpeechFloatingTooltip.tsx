@@ -46,19 +46,20 @@ export const TextToSpeechFloatingTooltip: React.FC = () => {
 
         try {
           const range = selection.getRangeAt(0);
-          const rect = range.getBoundingClientRect();
+          const clientRects = range.getClientRects();
+          const rect = clientRects.length > 0 ? clientRects[0] : range.getBoundingClientRect();
 
-          if (rect.width === 0 && rect.height === 0) return;
+          if (!rect || (rect.width === 0 && rect.height === 0)) return;
 
           // Position tooltip centered above the selection (or below if close to viewport top)
-          const placeAbove = rect.top > 70;
+          const placeAbove = rect.top > 75;
           const x = Math.max(160, Math.min(window.innerWidth - 160, rect.left + rect.width / 2));
-          const y = placeAbove ? rect.top - 12 : rect.bottom + 12;
+          const y = placeAbove ? rect.top - 14 : rect.bottom + 14;
 
           setSelectedText(text);
           setTooltipPos({ x, y, placeAbove });
         } catch (_) {}
-      }, 10);
+      }, 15);
     };
 
     const handlePointerDown = (e: PointerEvent | MouseEvent) => {
@@ -71,21 +72,25 @@ export const TextToSpeechFloatingTooltip: React.FC = () => {
             setTooltipPos(null);
             setSelectedText('');
           }
-        }, 80);
+        }, 120);
       }
     };
 
-    // Ultra-fast pointer & touch listeners
+    // Ultra-fast pointer & selection listeners
+    document.addEventListener('selectionchange', handleSelection);
     document.addEventListener('pointerup', handleSelection, { passive: true });
     document.addEventListener('mouseup', handleSelection, { passive: true });
     document.addEventListener('touchend', handleSelection, { passive: true });
+    document.addEventListener('keyup', handleSelection, { passive: true });
     document.addEventListener('pointerdown', handlePointerDown as any, { passive: true });
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
+      document.removeEventListener('selectionchange', handleSelection);
       document.removeEventListener('pointerup', handleSelection);
       document.removeEventListener('mouseup', handleSelection);
       document.removeEventListener('touchend', handleSelection);
+      document.removeEventListener('keyup', handleSelection);
       document.removeEventListener('pointerdown', handlePointerDown as any);
       stopAllSpeech();
     };

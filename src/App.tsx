@@ -23,6 +23,8 @@ import { LiveQuizHub } from './components/LiveQuizHub';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ClassGradebook } from './components/ClassGradebook';
 import { DocumentLibrary } from './components/DocumentLibrary';
+import { StorageManagementView } from './components/StorageManagementView';
+import { ExamRoom } from './components/ExamRoom';
 import { AITeacherAssistant } from './components/AITeacherAssistant';
 import { ExportModal } from './components/ExportModal';
 import { EducationalAuthScreen } from './components/EducationalAuthScreen';
@@ -965,9 +967,6 @@ export default function App() {
         onOpenAIConfig={() => setShowAIConfigModal(true)}
       />
 
-      {/* Floating AI Text-To-Speech Tooltip for Selected Text */}
-      <TextToSpeechFloatingTooltip />
-
       {/* Main Interactive Screen Content */}
       <main className={`flex-1 ${
         activeTab === 'whiteboard' || activeTab === 'fast-whiteboard'
@@ -1202,9 +1201,9 @@ export default function App() {
               />
             )}
 
-            {/* Tab 7: Document Library & Cloud Sync */}
+            {/* Tab 7: Kho Lưu Trữ & Đồng Bộ Cloud Đa Thiết Bị */}
             {activeTab === 'documents' && (
-              <DocumentLibrary
+              <StorageManagementView
                 activeTeacher={activeTeacher}
                 lessons={lessons}
                 activeLessonId={activeLessonId}
@@ -1472,7 +1471,7 @@ export default function App() {
         >
           {[
             { id: 'whiteboard' as ActiveTab, label: 'Bảng Viết', icon: <PenTool className="w-5 h-5" />, activeColor: 'text-emerald-600' },
-            { id: 'documents' as ActiveTab, label: 'Kho Bài', icon: <FolderOpen className="w-5 h-5" />, activeColor: 'text-amber-600' },
+            { id: 'documents' as ActiveTab, label: 'Lưu Trữ', icon: <FolderOpen className="w-5 h-5" />, activeColor: 'text-amber-600' },
             { id: 'gradebook' as ActiveTab, label: 'Lớp Học', icon: <Users className="w-5 h-5" />, activeColor: 'text-blue-600' },
             { id: 'quiz' as ActiveTab, label: 'Trắc Nghiệm', icon: <CheckSquare className="w-5 h-5" />, activeColor: 'text-orange-500' },
           ].map((item) => {
@@ -1494,6 +1493,9 @@ export default function App() {
           })}
         </nav>
       )}
+
+      {/* Instant < 100ms Natural Voice Vietnamese Text-To-Speech Floating Tooltip */}
+      <TextToSpeechFloatingTooltip />
     </div>
   );
 }

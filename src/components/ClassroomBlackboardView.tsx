@@ -81,6 +81,7 @@ import {
 } from '../utils/aiSpeechService';
 import { FloatingSelectionToolbar } from './FloatingSelectionToolbar';
 import { cropCanvasRegion, recognizeHandwritingFast } from '../utils/textRecognitionService';
+import { recognizeHandwritingOneClick } from '../utils/handwritingRecognition';
 import {
   filterPointJitter,
   calculateDynamicStrokeWidth,
@@ -1448,10 +1449,20 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
 
     setIsConvertingCalligraphy(true);
-    setCalligraphyStatusBanner('⚡ Đang chuyển thành chữ đẹp siêu tốc...');
+    setCalligraphyStatusBanner('⚡ Đang chuyển thành chữ đẹp 1-click...');
 
     try {
+      // 1-Click Fast Recognition
       let text = (recognizedTextPreview || '').trim();
+      let oneClickResult = null;
+
+      if (!text) {
+        oneClickResult = await recognizeHandwritingOneClick(targetStrokes, sweptSelection ? sweptSelection.box : undefined, recognizedTextPreview);
+        if (oneClickResult && oneClickResult.text) {
+          text = oneClickResult.text;
+        }
+      }
+
       if (!text) {
         const teacherName = activeTeacher?.name || '';
         const contextHint = `Giáo viên: ${teacherName}, học sinh lớp học Việt Nam, nhận diện tên riêng tiếng Việt, bài giảng môn học Toán/Tiếng Việt/Văn`;
@@ -2199,17 +2210,22 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         ctx.lineWidth = strokeSize;
       }
 
-      for (const rawPt of coalescedList) {
+      let prevPt = p1Ref.current || { x, y };
+      let prevMid = lastMidPointRef.current || prevPt;
+
+      ctx.beginPath();
+      ctx.moveTo(prevMid.x, prevMid.y);
+
+      for (let i = 0; i < coalescedList.length; i++) {
+        const rawPt = coalescedList[i];
         const current = { x: rawPt.x, y: rawPt.y };
-        const p1 = p1Ref.current || current;
-        const midPoint = { x: (p1.x + current.x) / 2, y: (p1.y + current.y) / 2 };
+        const midPoint = { x: (prevPt.x + current.x) / 2, y: (prevPt.y + current.y) / 2 };
 
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.quadraticCurveTo(p1.x, p1.y, midPoint.x, midPoint.y);
-        ctx.stroke();
+        // 1. Nối mượt đường cong bậc hai qua prevPt đến midPoint
+        ctx.quadraticCurveTo(prevPt.x, prevPt.y, midPoint.x, midPoint.y);
 
-        p1Ref.current = current;
+        prevMid = midPoint;
+        prevPt = current;
 
         const effectivePressure = Math.max(0.25, rawPt.pressure || 0.5);
         const dynWidth = activeTool === 'calligraphy'
@@ -2228,6 +2244,15 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         pts.push(ptWithWidth);
         lastPointerPointRef.current = ptWithWidth;
       }
+
+      // 2. KHẮC PHỤC TRIỆT ĐỂ ĐỘ TRỄ TRÊN MÀN HÌNH TIVI 75 INCH:
+      // Nối trực tiếp từ midpoint cuối cùng đến chính xác ngòi bút (prevPt) tức thời
+      // giúp mực bám sát 100% đầu bút cảm ứng, triệt tiêu hoàn toàn cảm giác nét vẽ đi sau cây bút (Zero-latency stylus tracking)!
+      ctx.lineTo(prevPt.x, prevPt.y);
+      ctx.stroke();
+
+      p1Ref.current = prevPt;
+      lastMidPointRef.current = prevMid;
 
       ctx.restore();
     } else {

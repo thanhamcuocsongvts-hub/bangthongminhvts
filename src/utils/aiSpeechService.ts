@@ -18,6 +18,9 @@
 
 import { GoogleGenAI } from '@google/genai';
 import { getGeminiApiKey, isGeminiConfigured } from './geminiClient';
+import { cleanPdfVietnameseText } from './pdfTextExtractor';
+
+export { cleanPdfVietnameseText };
 
 export interface VoiceTonePreset {
   id: string;
@@ -30,56 +33,61 @@ export interface VoiceTonePreset {
   rate: number;
   volume: number;
   gender: 'female' | 'male' | 'neutral';
+  geminiVoice?: string;
 }
 
 export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
   {
-    id: 'nu_truyen_cam',
-    name: 'Cô giáo dịu dàng',
-    label: '👩‍🏫 Cô giáo dịu dàng',
-    sub: 'Pitch: 1.05 • Rate: 1.0 • Vol: 1.0',
-    description: 'Giọng truyền cảm, ấm áp, nhịp điệu sư phạm chuẩn mực',
-    icon: '👩‍🏫',
-    pitch: 1.05,
-    rate: 1.0,
-    volume: 1.0,
-    gender: 'female',
-  },
-  {
     id: 'nam_tram_am',
-    name: 'Thầy giáo trầm ấm',
-    label: '👨‍🏫 Thầy giáo trầm ấm',
-    sub: 'Pitch: 0.88 • Rate: 0.98 • Vol: 1.0',
-    description: 'Giọng sư phạm đĩnh đạc, rõ từng từ, vang và chắc khỏe',
+    name: 'Giọng Nam (Thầy giáo trầm ấm)',
+    label: '👨‍🏫 Giọng Nam (Thầy giáo)',
+    sub: 'Trầm ấm • Đĩnh đạc • Chuẩn phát thanh',
+    description: 'Giọng thầy giáo trầm ấm, uy nghiêm, phát âm rõ ràng từng âm tiết tiếng Việt',
     icon: '👨‍🏫',
     pitch: 0.88,
     rate: 0.98,
     volume: 1.0,
     gender: 'male',
+    geminiVoice: 'Fenrir',
   },
   {
-    id: 'mc_soi_dong',
-    name: 'MC Sôi động / Năng động',
-    label: '⚡ MC Sôi động / Năng động',
-    sub: 'Pitch: 1.15 • Rate: 1.10 • Vol: 1.0',
-    description: 'Giọng hoạt náo, vang rực rỡ, kích thích tinh thần lớp học',
-    icon: '⚡',
-    pitch: 1.15,
-    rate: 1.10,
-    volume: 1.0,
-    gender: 'female',
-  },
-  {
-    id: 'chuan_phat_thanh_vien',
-    name: 'Phát thanh viên chuẩn',
-    label: '🎙️ Phát thanh viên chuẩn',
-    sub: 'Pitch: 1.00 • Rate: 1.00 • Vol: 1.0',
-    description: 'Giọng thời sự to rõ, dứt khoát, chuẩn âm tiếng Việt phổ thông',
-    icon: '🎙️',
-    pitch: 1.0,
+    id: 'nu_diu_dang',
+    name: 'Giọng Nữ (Cô giáo dịu dàng)',
+    label: '👩‍🏫 Giọng Nữ (Cô giáo)',
+    sub: 'Dịu dàng • Truyền cảm • Chuẩn mực',
+    description: 'Giọng cô giáo dịu dàng, êm ái, truyền cảm hứng, phát âm chuẩn xác sư phạm',
+    icon: '👩‍🏫',
+    pitch: 1.05,
     rate: 1.0,
     volume: 1.0,
-    gender: 'neutral',
+    gender: 'female',
+    geminiVoice: 'Kore',
+  },
+  {
+    id: 'hoc_sinh',
+    name: 'Giọng Học Sinh (Trong trẻo, vui tươi)',
+    label: '🎒 Giọng Học Sinh',
+    sub: 'Trong trẻo • Vui tươi • Hồn nhiên',
+    description: 'Giọng em học sinh trong trẻo, hồn nhiên, phát biểu bài sôi nổi và tràn đầy năng lượng',
+    icon: '🎒',
+    pitch: 1.28,
+    rate: 1.06,
+    volume: 1.0,
+    gender: 'female',
+    geminiVoice: 'Puck',
+  },
+  {
+    id: 'podcast',
+    name: 'Giọng Đọc Podcast (Sâu lắng, tự sự)',
+    label: '🎙️ Giọng Đọc Podcast',
+    sub: 'Sâu lắng • Truyền cảm hứng • Nhấn nhá',
+    description: 'Giọng đọc Podcast Radio nghệ thuật, nhịp điệu thư thái, giàu cảm xúc và tự sự',
+    icon: '🎙️',
+    pitch: 0.94,
+    rate: 0.90,
+    volume: 1.0,
+    gender: 'male',
+    geminiVoice: 'Charon',
   },
 ];
 
@@ -133,7 +141,7 @@ export function getBestVietnameseVoice(gender: 'female' | 'male' | 'neutral' = '
   });
 
   if (viVoices.length === 0) {
-    return voices.find((v) => v.default) || voices[0] || null;
+    return null;
   }
 
   const naturalKeywords = ['natural', 'online', 'neural', 'neural2', 'wavenet'];
@@ -211,7 +219,7 @@ function singleDigitToVietnamese(d: string): string {
 }
 
 /**
- * Đọc số nguyên tiếng Việt chuẩn xác (1..999)
+ * Đọc số nguyên tiếng Việt chuẩn xác (1..999,999)
  */
 function numberToVietnameseWords(numStr: string): string {
   const n = parseInt(numStr, 10);
@@ -238,6 +246,15 @@ function numberToVietnameseWords(numStr: string): string {
     if (rem === 0) return hStr;
     if (rem < 10) return hStr + ' linh ' + singleDigitToVietnamese(String(rem));
     return hStr + ' ' + numberToVietnameseWords(String(rem));
+  }
+  if (n < 1000000) {
+    const thousands = Math.floor(n / 1000);
+    const rem = n % 1000;
+    const thStr = numberToVietnameseWords(String(thousands)) + ' nghìn';
+    if (rem === 0) return thStr;
+    if (rem < 10) return thStr + ' không trăm linh ' + singleDigitToVietnamese(String(rem));
+    if (rem < 100) return thStr + ' không trăm ' + numberToVietnameseWords(String(rem));
+    return thStr + ' ' + numberToVietnameseWords(String(rem));
   }
   return numStr;
 }
@@ -308,7 +325,39 @@ export function convertDigitsAndMathToVietnamese(raw: string): string {
 export function preprocessSpeechText(rawText: string): string {
   if (!rawText) return '';
 
-  let t = rawText;
+  // Khắc phục triệt để lỗi vỡ font tiếng Việt từ PDF/Scan trước khi chuyển thành lời đọc
+  let t = cleanPdfVietnameseText(rawText);
+
+  // 0. Mở rộng từ viết tắt hành chính giáo dục & tiêu đề tài liệu chuẩn tiếng Việt
+  t = t.replace(/\bTHPT\b/g, 'Trung học phổ thông');
+  t = t.replace(/\bTHCS\b/g, 'Trung học cơ sở');
+  t = t.replace(/\bTN\.THPT\b/gi, 'Tốt nghiệp Trung học phổ thông');
+  t = t.replace(/\bBGH\b/g, 'Ban giám hiệu');
+  t = t.replace(/\bGD&ĐT\b/gi, 'Giáo dục và Đào tạo');
+  t = t.replace(/\bGD-ĐT\b/gi, 'Giáo dục và Đào tạo');
+  t = t.replace(/\bHK\s*II\b/gi, 'Học kỳ hai');
+  t = t.replace(/\bHK\s*I\b/gi, 'Học kỳ một');
+  t = t.replace(/\bHK2\b/gi, 'Học kỳ hai');
+  t = t.replace(/\bHK1\b/gi, 'Học kỳ một');
+  t = t.replace(/\bNH\s*(\d{4})\s*[-–]\s*(\d{4})\b/gi, 'Năm học $1 đến $2');
+  t = t.replace(/\bNH\b/g, 'Năm học');
+
+  // Mở rộng ngày tháng: DD/MM/YYYY
+  t = t.replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g, (_, d, m, y) => `ngày ${parseInt(d, 10)} tháng ${parseInt(m, 10)} năm ${y}`);
+
+  // Mở rộng số La Mã ở đầu phần: I., II., III., IV., V., VI.
+  t = t.replace(/(^|\n)\s*I\.\s+/g, '$1Phần một La Mã, ');
+  t = t.replace(/(^|\n)\s*II\.\s+/g, '$1Phần hai La Mã, ');
+  t = t.replace(/(^|\n)\s*III\.\s+/g, '$1Phần ba La Mã, ');
+  t = t.replace(/(^|\n)\s*IV\.\s+/g, '$1Phần bốn La Mã, ');
+  t = t.replace(/(^|\n)\s*V\.\s+/g, '$1Phần năm La Mã, ');
+  t = t.replace(/(^|\n)\s*VI\.\s+/g, '$1Phần sáu La Mã, ');
+
+  // Mở rộng mục đánh số: 1. -> Mục 1:
+  t = t.replace(/(^|\n)\s*(\d+)\.\s+/g, (_, pre, num) => `${pre}Mục ${num}: `);
+
+  // Mở rộng tỷ số: 498 / 11 lớp -> 498 trên 11 lớp
+  t = t.replace(/(\d+)\s*\/\s*(\d+)\s*(lớp|học sinh|em)/gi, '$1 trên $2 $3');
 
   // 1. Remove LaTeX enclosing tags: $, $$, \( \), \[ \]
   t = t.replace(/\$\$(.+?)\$\$/gs, ' $1 ');
@@ -418,10 +467,13 @@ export function preprocessSpeechText(rawText: string): string {
   return t;
 }
 
+let isSpeechCancelled = false;
+
 /**
- * Immediate stop of any active speech synthesis or Gemini audio
+ * Immediate stop of any active speech synthesis or Google Cloud / Gemini audio
  */
 export function stopAllSpeech(): void {
+  isSpeechCancelled = true;
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel();
@@ -440,19 +492,175 @@ export function stopAllSpeech(): void {
 export interface SpeakOptions {
   preset?: VoiceTonePreset;
   preferGemini?: boolean;
+  preferWebSpeech?: boolean;
   onStart?: () => void;
   onEnd?: () => void;
   onError?: (err: any) => void;
 }
 
 /**
+ * Chia văn bản thành các câu hoặc phân đoạn tự nhiên (tối đa ~220 ký tự) để đọc liền mạch
+ */
+function splitIntoSentences(text: string, maxLen: number = 220): string[] {
+  const parts: string[] = [];
+  const rawSentences = text.split(/(?<=[.!?:;\n])\s+/);
+  let current = '';
+
+  for (const s of rawSentences) {
+    if (!s.trim()) continue;
+    if (current && (current.length + s.length + 1) > maxLen) {
+      parts.push(current.trim());
+      current = s;
+    } else {
+      current = current ? current + ' ' + s : s;
+    }
+  }
+  if (current.trim()) {
+    parts.push(current.trim());
+  }
+  return parts;
+}
+
+/**
+ * Phát giọng đọc Google Cloud Text-To-Speech Tiếng Việt (100% Chuẩn Ngữ Âm Bản Địa)
+ * Hỗ trợ 4 phong cách giọng: Nam trầm ấm, Nữ dịu dàng, Học sinh vui tươi, Podcast tự sự
+ */
+export async function speakWithGoogleCloudTTS(
+  processedText: string,
+  preset: VoiceTonePreset = VOICE_TONE_PRESETS[0],
+  onStart?: () => void,
+  onEnd?: () => void,
+  onError?: (err: any) => void
+): Promise<boolean> {
+  const sentences = splitIntoSentences(processedText, 220);
+  if (sentences.length === 0) return false;
+
+  stopAllSpeech();
+  isSpeechCancelled = false;
+
+  let currentIndex = 0;
+
+  return new Promise((resolve) => {
+    const playNext = async () => {
+      if (isSpeechCancelled || currentIndex >= sentences.length) {
+        if (!isSpeechCancelled && onEnd) onEnd();
+        currentAudioElement = null;
+        resolve(true);
+        return;
+      }
+
+      const sentence = sentences[currentIndex];
+      currentIndex++;
+
+      try {
+        const url = `/api/tts?text=${encodeURIComponent(sentence)}`;
+        const audio = new Audio(url);
+        currentAudioElement = audio;
+
+        // Tinh chỉnh tốc độ theo 4 sắc thái:
+        // Nam: 0.96x, Nữ: 1.0x, Học sinh: 1.08x, Podcast: 0.90x
+        if (preset.id === 'hoc_sinh') {
+          audio.playbackRate = 1.08;
+        } else if (preset.id === 'podcast') {
+          audio.playbackRate = 0.90;
+        } else if (preset.id === 'nam_tram_am') {
+          audio.playbackRate = 0.96;
+        } else {
+          audio.playbackRate = 1.0;
+        }
+
+        audio.onplay = () => {
+          if (currentIndex === 1 && onStart) onStart();
+        };
+
+        audio.onended = () => {
+          if (!isSpeechCancelled) {
+            playNext();
+          }
+        };
+
+        audio.onerror = (e) => {
+          console.warn('Google Cloud TTS network error, fallback to Web Speech:', e);
+          currentAudioElement = null;
+          // Fallback to Web Speech
+          speakWithWebSpeech(sentence, preset, onStart, onEnd, onError);
+          resolve(false);
+        };
+
+        await audio.play();
+      } catch (playErr) {
+        console.warn('Audio play exception, fallback to Web Speech:', playErr);
+        currentAudioElement = null;
+        speakWithWebSpeech(processedText, preset, onStart, onEnd, onError);
+        resolve(false);
+      }
+    };
+
+    playNext();
+  });
+}
+
+/**
+ * Web Speech API Fallback (Chỉ gán giọng tiếng Việt, tuyệt đối không dùng giọng tiếng Anh)
+ */
+export function speakWithWebSpeech(
+  processedText: string,
+  preset: VoiceTonePreset = VOICE_TONE_PRESETS[0],
+  onStart?: () => void,
+  onEnd?: () => void,
+  onError?: (err: any) => void
+): boolean {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    if (onError) onError(new Error('Web Speech API is not supported in this browser.'));
+    return false;
+  }
+
+  try {
+    const utterance = new SpeechSynthesisUtterance(processedText);
+    utterance.lang = 'vi-VN';
+    utterance.pitch = preset.pitch;
+    utterance.rate = preset.rate;
+    utterance.volume = 1.0;
+
+    const matchedVoice = getBestVietnameseVoice(preset.gender);
+    if (matchedVoice) {
+      utterance.voice = matchedVoice;
+    }
+
+    utterance.onstart = () => {
+      if (onStart) onStart();
+    };
+
+    utterance.onend = () => {
+      if (onEnd) onEnd();
+    };
+
+    utterance.onerror = (e) => {
+      if (e.error !== 'canceled' && e.error !== 'interrupted') {
+        console.warn('Web Speech synthesis error:', e);
+        if (onError) onError(e);
+      } else {
+        if (onEnd) onEnd();
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+    return true;
+  } catch (err) {
+    console.error('Error starting Web Speech synthesis:', err);
+    if (onError) onError(err);
+    return false;
+  }
+}
+
+/**
  * Ultra-fast Text-to-Speech execution (<150ms).
- * CỐ ĐỊNH 100% TIẾNG VIỆT (vi-VN) - LUÔN GÁN VOICE TIẾNG VIỆT
+ * ƯU TIÊN 1: Google Cloud Text-To-Speech Tiếng Việt chuẩn 100%, rõ ràng, truyền cảm.
+ * ƯU TIÊN 2: Web Speech API vi-VN (không đọc giọng tiếng Anh).
  */
 export function speakText(text: string, options: SpeakOptions = {}): boolean {
   if (!text || !text.trim()) return false;
 
-  // Immediate cancellation to prevent delay or overlapping
   stopAllSpeech();
 
   const preset = options.preset || VOICE_TONE_PRESETS[0];
@@ -460,62 +668,9 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
 
   if (!processed) return false;
 
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-    if (options.onError) {
-      options.onError(new Error('Web Speech API is not supported in this browser.'));
-    }
-    return false;
-  }
-
-  try {
-    const utterance = new SpeechSynthesisUtterance(processed);
-    
-    // Yêu cầu 1: Cấu hình cố định utterance.lang = 'vi-VN' tuyệt đối
-    utterance.lang = 'vi-VN';
-    utterance.pitch = preset.pitch;
-    utterance.rate = preset.rate;
-    // Maximum volume for 75" interactive smartboard speakers
-    utterance.volume = 1.0;
-
-    // Yêu cầu 1: Luôn lọc và gán voice tiếng Việt
-    const allVoices = window.speechSynthesis.getVoices();
-    const viVoices = allVoices.filter(
-      (v) => (v.lang && (v.lang.toLowerCase().includes('vi') || v.lang.includes('VIE'))) ||
-             (v.name && (v.name.toLowerCase().includes('vietnam') || v.name.toLowerCase().includes('tiếng việt')))
-    );
-
-    const matchedVoice = getBestVietnameseVoice(preset.gender);
-    if (matchedVoice) {
-      utterance.voice = matchedVoice;
-    } else if (viVoices.length > 0) {
-      utterance.voice = viVoices[0]; // Ưu tiên giọng tiếng Việt tìm thấy
-    }
-
-    utterance.onstart = () => {
-      if (options.onStart) options.onStart();
-    };
-
-    utterance.onend = () => {
-      if (options.onEnd) options.onEnd();
-    };
-
-    utterance.onerror = (e) => {
-      if (e.error !== 'canceled' && e.error !== 'interrupted') {
-        console.warn('Speech synthesis notice:', e);
-        if (options.onError) options.onError(e);
-      } else {
-        if (options.onEnd) options.onEnd();
-      }
-    };
-
-    // Immediate dispatch (<150ms)
-    window.speechSynthesis.speak(utterance);
-    return true;
-  } catch (err) {
-    console.error('Error starting speech synthesis:', err);
-    if (options.onError) options.onError(err);
-    return false;
-  }
+  // Khởi động phát giọng đọc Google Cloud TTS Tiếng Việt
+  speakWithGoogleCloudTTS(processed, preset, options.onStart, options.onEnd, options.onError);
+  return true;
 }
 
 /**
@@ -540,22 +695,32 @@ export async function speakWithGeminiAudio(
   try {
     const ai = new GoogleGenAI({ apiKey });
     
-    const tonePrompt =
-      preset.gender === 'male'
-        ? 'Giọng nam giáo viên trầm ấm, đĩnh đạc, rõ chữ'
-        : preset.id === 'mc_soi_dong'
-        ? 'Giọng nữ MC sôi động, tươi vui, hào hứng'
-        : 'Giọng nữ cô giáo dịu dàng, truyền cảm, ấm áp';
+    let tonePrompt = 'Giọng đọc tiếng Việt tự nhiên, rõ ràng, giàu cảm xúc';
+    let voiceName = preset.geminiVoice || 'Fenrir';
+
+    if (preset.id === 'nam_tram_am') {
+      tonePrompt = 'Giọng nam giáo viên Việt Nam trầm ấm, đĩnh đạc, phát âm to rõ từng từ, chuẩn phát thanh viên';
+      voiceName = 'Fenrir';
+    } else if (preset.id === 'nu_diu_dang') {
+      tonePrompt = 'Giọng nữ cô giáo Việt Nam dịu dàng, ấm áp, truyền cảm, nhịp điệu sư phạm chuẩn mực êm ái';
+      voiceName = 'Kore';
+    } else if (preset.id === 'hoc_sinh') {
+      tonePrompt = 'Giọng em học sinh Việt Nam trong trẻo, hồn nhiên, vui tươi, phát biểu sôi nổi và tràn đầy năng lượng';
+      voiceName = 'Puck';
+    } else if (preset.id === 'podcast') {
+      tonePrompt = 'Giọng đọc Podcast Radio nghệ thuật sâu lắng, tự sự, nhịp điệu thư thái, trầm bổng giàu cảm xúc';
+      voiceName = 'Charon';
+    }
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.8-flash',
-      contents: `Hãy đóng vai giáo viên Việt Nam với sắc thái "${tonePrompt}". Đọc to, rõ ràng, dứt khoát thuần tiếng Việt đoạn văn sau:\n\n"${processed}"`,
+      contents: `Hãy đọc to bằng TIẾNG VIỆT với sắc thái "${tonePrompt}". Phát âm chuẩn âm, ngữ điệu tự nhiên, ngắt nghỉ đúng dấu câu theo đoạn văn sau:\n\n"${processed}"`,
       config: {
         responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: {
-              voiceName: preset.gender === 'male' ? 'Fenrir' : 'Kore',
+              voiceName: voiceName,
             },
           },
         },

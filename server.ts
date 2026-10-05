@@ -21,6 +21,39 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
+// Google Cloud High-Fidelity Vietnamese Text-To-Speech Proxy Route
+app.get("/api/tts", async (req, res) => {
+  try {
+    const text = String(req.query.text || "").trim();
+    if (!text) {
+      return res.status(400).send("Text is required");
+    }
+
+    const slice = text.slice(0, 300);
+    const encoded = encodeURIComponent(slice);
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=vi&client=tw-ob`;
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://translate.google.com/",
+      },
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).send("Failed to fetch audio from Google TTS");
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(Buffer.from(arrayBuffer));
+  } catch (err: any) {
+    console.error("TTS endpoint error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Persistent Cloud Storage Directories
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 const BACKUP_UPLOADS_DIR = path.join(process.cwd(), "data", "uploads");

@@ -222,12 +222,13 @@ export function compileMathExpression(rawInput: string): ParsedFunctionResult {
   let jsCode = expr;
 
   // Power operator ^ -> Math.pow(base, exp)
-  // Safely handles nested powers like x^3, (x+1)^3, 10^-2, e^(-0.2*t)
+  // Safely handles nested powers like x^3, (x+1)^3, 10^-2, e^(-0.2*t), ^exp(x), etc.
   let prevCode = '';
   while (jsCode.includes('^') && jsCode !== prevCode) {
     prevCode = jsCode;
+    // Match function call exponent first: e.g. base^(exp(...)) or base^exp(...)
     jsCode = jsCode.replace(
-      /([a-zA-Z0-9_\.]+|\([^\(\)]+\))\s*\^\s*([+-]?[a-zA-Z0-9_\.]+|\([^\(\)]+\))/,
+      /([a-zA-Z0-9_\.]+|\([^\(\)]+\))\s*\^\s*([a-zA-Z0-9_]+\([^\(\)]*\)|\([^\(\)]+\)|[+-]?[a-zA-Z0-9_\.]+)/,
       'Math.pow($1, $2)'
     );
   }
@@ -235,7 +236,7 @@ export function compileMathExpression(rawInput: string): ParsedFunctionResult {
   // Math constants & functions replacements
   const replacements: Array<[RegExp, string]> = [
     [/\bMath\.PI\b/g, 'Math.PI'],
-    [/\be\b/gi, 'Math.E'],
+    [/(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])/g, 'Math.E'],
     [/\bsin\s*\(/gi, 'Math.sin('],
     [/\bcos\s*\(/gi, 'Math.cos('],
     [/\btan\s*\(/gi, 'Math.tan('],
@@ -254,6 +255,13 @@ export function compileMathExpression(rawInput: string): ParsedFunctionResult {
 
   for (const [re, rep] of replacements) {
     jsCode = jsCode.replace(re, rep);
+  }
+
+  // Auto-balance any open parentheses if typing in progress
+  const openCount = (jsCode.match(/\(/g) || []).length;
+  const closeCount = (jsCode.match(/\)/g) || []).length;
+  if (openCount > closeCount) {
+    jsCode += ')'.repeat(openCount - closeCount);
   }
 
   // Security check: Only allow safe characters (letters, numbers, operators, parens, Math methods)
