@@ -65,15 +65,26 @@ export function formatEquationToLatex(raw: string, variable: 'x' | 't', prefix?:
   s = s.replace(/\s*\*\s*/g, ' \\cdot ');
 
   // Convert fractions (A)/(B) -> \frac{A}{B}
-  s = s.replace(/\(([^()]+)\)\s*\/\s*\(([^()]+)\)/g, '\\frac{$1}{$2}');
+  // Support empty numerator or denominator: ()/() -> \frac{\square}{\square}
+  s = s.replace(/\(([^()]*)\)\s*\/\s*\(([^()]*)\)/g, (_, n, d) => {
+    return `\\frac{${n.trim() || '\\square'}}{${d.trim() || '\\square'}}`;
+  });
   s = s.replace(/\(([^()]+)\)\s*\/\s*([0-9a-zA-Z\\pi]+)/g, '\\frac{$1}{$2}');
   s = s.replace(/([0-9a-zA-Z\\pi]+)\s*\/\s*\(([^()]+)\)/g, '\\frac{$1}{$2}');
   s = s.replace(/([0-9a-zA-Z\\pi]+)\s*\/\s*([0-9a-zA-Z\\pi]+)/g, '\\frac{$1}{$2}');
+  s = s.replace(/\(([^()]*)\)\s*\/\s*$/g, (_, n) => `\\frac{${n.trim() || '\\square'}}{\\square}`);
+  s = s.replace(/([0-9a-zA-Z\\pi]+)\s*\/\s*$/g, '\\frac{$1}{\\square}');
+  s = s.replace(/(^|[^0-9a-zA-Z\\pi\)])\/\s*$/g, '$1\\frac{\\square}{\\square}');
+
+  // Convert cube root ∛
+  s = s.replace(/(?:∛|cbrt)\s*\(([^()]*)\)/g, (_, e) => `\\sqrt[3]{${e.trim() || '\\square'}}`);
+  s = s.replace(/∛([0-9a-zA-Z\\pi]+)/g, '\\sqrt[3]{$1}');
+  s = s.replace(/∛\s*$/g, '\\sqrt[3]{\\square}');
 
   // Convert sqrt
-  s = s.replace(/sqrt\s*\(([^()]+)\)/g, '\\sqrt{$1}');
-  s = s.replace(/√\s*\(([^()]+)\)/g, '\\sqrt{$1}');
+  s = s.replace(/(?:sqrt|√)\s*\(([^()]*)\)/g, (_, e) => `\\sqrt{${e.trim() || '\\square'}}`);
   s = s.replace(/√([0-9a-zA-Z\\pi]+)/g, '\\sqrt{$1}');
+  s = s.replace(/(?:sqrt|√)\s*$/g, '\\sqrt{\\square}');
 
   // Convert exp
   s = s.replace(/exp\s*\(([^()]+)\)/g, 'e^{$1}');
@@ -82,8 +93,10 @@ export function formatEquationToLatex(raw: string, variable: 'x' | 't', prefix?:
   // Convert functions to LaTeX
   s = s.replace(/(^|[^a-zA-Z\\])(sin|cos|tan|cot|ln|log|abs)(?![a-zA-Z])/g, '$1\\$2');
 
-  // Convert powers x^3 -> x^{3}
-  s = s.replace(/\^([0-9a-zA-Z\\pi\-\.]+)/g, '^{$1}');
+  // Convert powers x^3 -> x^{3} (CRITICAL: do not swallow '-' in 2x^3-3x into exponent)
+  s = s.replace(/\^\(([^()]*)\)/g, (_, p) => `^{${p.trim() || '\\square'}}`);
+  s = s.replace(/\^(-?[0-9a-zA-Z\\pi\.]+)/g, '^{$1}');
+  s = s.replace(/\^\s*$/g, '^{\\square}');
 
   return `${lhs} = ${s}`;
 }
@@ -125,9 +138,23 @@ export function sanitizeMathExpression(raw: string): {
   // Convert unicode superscripts (e.g. 2x² -> 2x^2)
   clean = normalizeSuperscripts(clean);
 
+  // Support empty Casio fx-580VN Plus templates during live input
+  clean = clean.replace(/\(\s*\)\s*\/\s*\(\s*\)/g, '((0)/(1))');
+  clean = clean.replace(/\/\s*\(\s*\)/g, '/(1)');
+  clean = clean.replace(/\(\s*\)\s*\//g, '((0))/');
+  clean = clean.replace(/\/\s*$/g, '/1');
+  clean = clean.replace(/(?:∛|cbrt)\s*\(\s*\)/g, 'cbrt(0)');
+  clean = clean.replace(/(?:∛|cbrt)\s*$/g, 'cbrt(0)');
+  clean = clean.replace(/(?:sqrt|√)\s*\(\s*\)/g, 'sqrt(0)');
+  clean = clean.replace(/(?:sqrt|√)\s*$/g, 'sqrt(0)');
+  clean = clean.replace(/\^\s*\(\s*\)/g, '^1');
+  clean = clean.replace(/\^\s*$/g, '^1');
+
   // Math symbols normalization
   clean = clean.replace(/[×·•]/g, '*');
   clean = clean.replace(/[÷:]/g, '/');
+  clean = clean.replace(/(?:∛|cbrt)\s*\(([^)]+)\)/g, 'cbrt($1)');
+  clean = clean.replace(/∛([0-9a-zA-Z_]+)/g, 'cbrt($1)');
   clean = clean.replace(/√\s*\(([^)]+)\)/g, 'sqrt($1)');
   clean = clean.replace(/√([0-9a-zA-Z_]+)/g, 'sqrt($1)');
   clean = clean.replace(/\|([^|]+)\|/g, 'abs($1)');
@@ -264,12 +291,17 @@ export function compileMathExpression(rawInput: string): ParsedFunctionResult {
     jsCode += ')'.repeat(openCount - closeCount);
   }
 
+  // Handle trailing operators gracefully during live typing (e.g., 2x^3 - 3x +)
+  let cleanEvalCode = jsCode.replace(/[+\-*/^]\s*$/g, '');
+
   // Security check: Only allow safe characters (letters, numbers, operators, parens, Math methods)
-  const disallowed = jsCode
+  const disallowed = cleanEvalCode
     .replace(/\bMath\.(PI|E|sin|cos|tan|asin|acos|atan|sqrt|cbrt|abs|exp|log|log10|log2|pow)\b/g, '')
     .replace(/[0-9\.\+\-\*\/\(\)\s,xXtT]/g, '');
 
   if (disallowed.trim().length > 0) {
+    const rawDis = disallowed.trim();
+    const isTypingFunc = /^(s|si|sin|c|co|cos|t|ta|tan|l|ln|lo|log|e|ex|exp|sq|sqr|sqrt)$/i.test(rawDis);
     return {
       fn: () => NaN,
       variableName: variable,
@@ -277,13 +309,13 @@ export function compileMathExpression(rawInput: string): ParsedFunctionResult {
       originalInput: rawInput,
       displayFormula,
       latex,
-      error: `Ký tự không hợp lệ: "${disallowed.trim()}"`,
+      error: isTypingFunc ? 'Đang nhập hàm toán học...' : `Ký tự chưa hợp lệ: "${rawDis}"`,
     };
   }
 
   try {
     // Construct evaluator function safely with parameter 'x' or 't'
-    const evalFn = new Function(variable, `"use strict"; try { return Number(${jsCode}); } catch(e) { return NaN; }`);
+    const evalFn = new Function(variable, `"use strict"; try { return Number(${cleanEvalCode}); } catch(e) { return NaN; }`);
 
     // Test evaluation at sample values 0 and 1
     const valAt0 = evalFn(0);

@@ -148,6 +148,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasRectRef = useRef<DOMRect | null>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Fullscreen state
@@ -348,7 +350,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
   // Custom Equation Dialog state (Hàm số toán học & vật lý do giáo viên tự nhập)
   const [showEquationModal, setShowEquationModal] = useState<boolean>(false);
-  const [equationInput, setEquationInput] = useState<string>('y = 2x^3 - 3x + 1');
+  const [equationInput, setEquationInput] = useState<string>('y = 2x^3-3x+1');
   const [editingEquationStrokeId, setEditingEquationStrokeId] = useState<string | null>(null);
 
   // Helper to adjust graph scale (Zoom in / out)
@@ -557,8 +559,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     const ctx = canvas.getContext('2d', { desynchronized: true });
     if (ctx) {
+      ctxRef.current = ctx;
       redrawCanvas(ctx);
     }
+    canvasRectRef.current = canvas.getBoundingClientRect();
   }, [strokes, texts, isSplitScreen, splitRatio]);
 
   useEffect(() => {
@@ -1905,14 +1909,15 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return;
     }
 
-    if (activeTool === 'select') {
-      // Yêu cầu người dùng: "Khi viết thì chữ viết không tính là ảnh và bấm chuột vào chữ không ảnh hưởng. Chỉ vẽ đường thẳng, đường tròn, hình, đồ thị thì tính năng chọn của chuột mới thực hiện"
-      // Loại trừ chữ viết / text khi nhấp chuột; chỉ thực hiện chọn trên hình học, đường thẳng, đường tròn, đồ thị.
-
-      // Hit-test ONLY on geometric shapes & math graphs (NOT handwriting, NOT text)
+    if (activeTool === 'select' || isFunctionGraphTool(activeTool)) {
+      // Yêu cầu người dùng: "Thiết kế khi bấm chọn thì khung chữ nhật hiện ra"
+      // Cho phép bấm chọn hình học và đồ thị toán học khi ở công cụ Chọn hoặc bấm trực tiếp vào đồ thị đã vẽ
       const hitStroke = strokes.slice().reverse().find((s) => {
         // Freehand pen strokes, highlighters, erasers, creative brushes are handwriting - NEVER select them with mouse/pointer
         if (isFreehandStrokeTool(s.tool) || s.tool === 'laser') {
+          return false;
+        }
+        if (isFunctionGraphTool(activeTool) && !isFunctionGraphTool(s.tool)) {
           return false;
         }
         const bounds = getStrokeBounds(s);
@@ -1953,17 +1958,19 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         return;
       }
 
-      // If clicked on empty space, allow dragging to sweep a marquee box over handwriting or text
-      setCalligraphySweep({ startX: x, startY: y, curX: x, curY: y });
-      setSweptSelection(null);
-      setSelectedTextId(null);
-      setSelectedStrokeId(null);
-      setIsStrokeToolbarExpanded(false);
-      setDragLivePos(null);
-      try {
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      } catch (_) {}
-      return;
+      if (activeTool === 'select') {
+        // If clicked on empty space in select mode, allow dragging to sweep a marquee box over handwriting or text
+        setCalligraphySweep({ startX: x, startY: y, curX: x, curY: y });
+        setSweptSelection(null);
+        setSelectedTextId(null);
+        setSelectedStrokeId(null);
+        setIsStrokeToolbarExpanded(false);
+        setDragLivePos(null);
+        try {
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        } catch (_) {}
+        return;
+      }
     }
 
     // Deselect active items when clicking anywhere on the blackboard with other tools
@@ -1984,6 +1991,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     try {
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     } catch (_) {}
+    canvasRectRef.current = canvas.getBoundingClientRect();
+    ctxRef.current = canvas.getContext('2d', { desynchronized: true });
 
     const now = performance.now();
     const effectivePressure = e.pressure && e.pressure > 0 ? Math.max(0.25, e.pressure) : 0.5;
@@ -2034,7 +2043,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const rect = canvas.getBoundingClientRect();
+    const rect = canvasRectRef.current || canvas.getBoundingClientRect();
     const canvasX = e.clientX - rect.left;
     const canvasY = e.clientY - rect.top;
     const x = canvasX + boardScrollX;
@@ -2179,7 +2188,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
 
     const pts = activePointsRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = ctxRef.current || canvas.getContext('2d', { desynchronized: true });
     if (!ctx) return;
 
     if (isFreehandStrokeTool(activeTool)) {
@@ -2211,48 +2220,43 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       }
 
       let prevPt = p1Ref.current || { x, y };
-      let prevMid = lastMidPointRef.current || prevPt;
+      const now = performance.now();
 
       ctx.beginPath();
-      ctx.moveTo(prevMid.x, prevMid.y);
+      ctx.moveTo(prevPt.x, prevPt.y);
 
       for (let i = 0; i < coalescedList.length; i++) {
         const rawPt = coalescedList[i];
         const current = { x: rawPt.x, y: rawPt.y };
-        const midPoint = { x: (prevPt.x + current.x) / 2, y: (prevPt.y + current.y) / 2 };
+        const midPoint = { x: (prevPt.x + current.x) * 0.5, y: (prevPt.y + current.y) * 0.5 };
 
-        // 1. Nối mượt đường cong bậc hai qua prevPt đến midPoint
+        // 1. Nối mượt đường cong bậc hai và bám sát 100% ngòi bút tức thời (Zero Latency trên TV 75 inch)
         ctx.quadraticCurveTo(prevPt.x, prevPt.y, midPoint.x, midPoint.y);
+        ctx.lineTo(current.x, current.y);
 
-        prevMid = midPoint;
         prevPt = current;
 
         const effectivePressure = Math.max(0.25, rawPt.pressure || 0.5);
         const dynWidth = activeTool === 'calligraphy'
-          ? calculateDynamicStrokeWidth(strokeSize, { x: current.x, y: current.y, pressure: effectivePressure, time: performance.now() }, lastPointerPointRef.current || undefined, true)
+          ? calculateDynamicStrokeWidth(strokeSize, { x: current.x, y: current.y, pressure: effectivePressure, time: now }, lastPointerPointRef.current || undefined, true)
           : (activeTool === 'pen'
-            ? calculateDynamicStrokeWidth(strokeSize, { x: current.x, y: current.y, pressure: effectivePressure, time: performance.now() }, lastPointerPointRef.current || undefined, false)
+            ? calculateDynamicStrokeWidth(strokeSize, { x: current.x, y: current.y, pressure: effectivePressure, time: now }, lastPointerPointRef.current || undefined, false)
             : strokeSize);
 
         const ptWithWidth = {
           x: current.x,
           y: current.y,
           pressure: effectivePressure,
-          time: performance.now(),
+          time: now,
           width: dynWidth,
         };
         pts.push(ptWithWidth);
         lastPointerPointRef.current = ptWithWidth;
       }
 
-      // 2. KHẮC PHỤC TRIỆT ĐỂ ĐỘ TRỄ TRÊN MÀN HÌNH TIVI 75 INCH:
-      // Nối trực tiếp từ midpoint cuối cùng đến chính xác ngòi bút (prevPt) tức thời
-      // giúp mực bám sát 100% đầu bút cảm ứng, triệt tiêu hoàn toàn cảm giác nét vẽ đi sau cây bút (Zero-latency stylus tracking)!
-      ctx.lineTo(prevPt.x, prevPt.y);
       ctx.stroke();
-
       p1Ref.current = prevPt;
-      lastMidPointRef.current = prevMid;
+      lastMidPointRef.current = prevPt;
 
       ctx.restore();
     } else {
@@ -2289,7 +2293,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       startMouseX: e.clientX,
       startMouseY: e.clientY,
       origScale: selectedStroke.scale || 1,
-      origBounds: { centerX: bounds.centerX, centerY: bounds.centerY, width: bounds.width, height: bounds.height },
+      origBounds: {
+        centerX: bounds.centerX,
+        centerY: bounds.centerY,
+        width: bounds.width,
+        height: bounds.height,
+        minX: bounds.minX,
+        maxX: bounds.maxX,
+        minY: bounds.minY,
+        maxY: bounds.maxY,
+      },
       direction,
     };
   };
@@ -2300,6 +2313,69 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const { startMouseX, startMouseY, origScale, origBounds, direction } = resizeStrokeStartRef.current;
     const dx = e.clientX - startMouseX;
     const dy = e.clientY - startMouseY;
+
+    const currStroke = strokes.find((s) => s.id === selectedStrokeId);
+    if (!currStroke) return;
+
+    // 1. ĐỐI VỚI ĐỒ THỊ TOÁN HỌC / VẬT LÝ (isFunctionGraphTool)
+    // Yêu cầu người dùng: "và khi tăng kích thước khung chữ nhật thì sẽ thấy thêm được phần đồ thị hàm số"
+    // Trực tiếp mở rộng khung chữ nhật (points), giữ unitPx = 36px để miền toạ độ x, y mở rộng ra,
+    // cho phép nhìn thấy thêm trọn vẹn các nhánh, cực trị, chu kỳ của đồ thị!
+    if (isFunctionGraphTool(currStroke.tool)) {
+      const padding = 24;
+      const bMinX = (origBounds as any).minX + padding;
+      const bMaxX = (origBounds as any).maxX - padding;
+      const bMinY = (origBounds as any).minY + padding;
+      const bMaxY = (origBounds as any).maxY - padding;
+
+      let newMinX = bMinX;
+      let newMaxX = bMaxX;
+      let newMinY = bMinY;
+      let newMaxY = bMaxY;
+
+      if (direction.includes('e')) {
+        newMaxX = Math.max(bMinX + 160, bMaxX + dx);
+      }
+      if (direction.includes('w')) {
+        newMinX = Math.min(bMaxX - 160, bMinX + dx);
+      }
+      if (direction.includes('s')) {
+        newMaxY = Math.max(bMinY + 120, bMaxY + dy);
+      }
+      if (direction.includes('n')) {
+        newMinY = Math.min(bMaxY - 120, bMinY + dy);
+      }
+
+      const newPoints: StrokePoint[] = [
+        { x: newMinX, y: newMinY, pressure: 0.5 },
+        { x: newMaxX, y: newMaxY, pressure: 0.5 },
+      ];
+
+      if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
+      strokeRafRef.current = requestAnimationFrame(() => {
+        setPages((prev) => {
+          const updated = [...prev];
+          const curr = updated[currentPageIndex];
+          if (!curr) return prev;
+          const newStrokes = curr.strokes.map((s) =>
+            s.id === selectedStrokeId
+              ? {
+                  ...s,
+                  points: newPoints,
+                  scale: 1, // Giữ scale = 1 để đồ thị sắc nét và hệ trục toạ độ nở rộng tự nhiên
+                  centerX: (newMinX + newMaxX) / 2,
+                  centerY: (newMinY + newMaxY) / 2,
+                }
+              : s
+          );
+          updated[currentPageIndex] = { ...curr, strokes: newStrokes };
+          return updated;
+        });
+      });
+      return;
+    }
+
+    // 2. Các hình học 2D / 3D thông thường
     const signX = direction.includes('e') ? 1 : direction.includes('w') ? -1 : 0;
     const signY = direction.includes('s') ? 1 : direction.includes('n') ? -1 : 0;
     const factorX = signX !== 0 ? (dx * signX) / Math.max(origBounds.width, 60) : 0;
@@ -2605,6 +2681,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
+    canvasRectRef.current = null;
 
     // Nối mượt mà đoạn cuối cùng đến chính xác vị trí nhấc bút
     const pLast = lastPointerPointRef.current;
@@ -4433,7 +4510,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   onPointerUp={handleShapeResizePointerUp}
                   onPointerCancel={handleShapeResizePointerUp}
                   className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
-                  title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+                  title="Kéo góc trên-trái để mở rộng / thu nhỏ"
                 >
                   <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
                 </div>
@@ -4443,7 +4520,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   onPointerUp={handleShapeResizePointerUp}
                   onPointerCancel={handleShapeResizePointerUp}
                   className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
-                  title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+                  title="Kéo góc trên-phải để mở rộng / thu nhỏ"
                 >
                   <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
                 </div>
@@ -4453,7 +4530,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   onPointerUp={handleShapeResizePointerUp}
                   onPointerCancel={handleShapeResizePointerUp}
                   className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nesw-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
-                  title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+                  title="Kéo góc dưới-trái để mở rộng / thu nhỏ"
                 >
                   <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
                 </div>
@@ -4463,10 +4540,59 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   onPointerUp={handleShapeResizePointerUp}
                   onPointerCancel={handleShapeResizePointerUp}
                   className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-nwse-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
-                  title="Kéo co giãn phóng to / thu nhỏ hình vẽ"
+                  title="Kéo góc dưới-phải để mở rộng / thu nhỏ"
                 >
                   <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
                 </div>
+
+                {/* 4 Active Draggable Edge Handles for Expanding Graph in Specific Directions */}
+                <div
+                  onPointerDown={(e) => handleShapeResizePointerDown(e, 'n')}
+                  onPointerMove={handleShapeResizePointerMove}
+                  onPointerUp={handleShapeResizePointerUp}
+                  onPointerCancel={handleShapeResizePointerUp}
+                  className="absolute -top-2 left-1/2 -translate-x-1/2 w-6 h-3 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-ns-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
+                  title="Kéo cạnh trên để mở rộng trục Oy lên trên"
+                >
+                  <div className="w-2.5 h-0.5 bg-cyan-600 rounded-full" />
+                </div>
+                <div
+                  onPointerDown={(e) => handleShapeResizePointerDown(e, 's')}
+                  onPointerMove={handleShapeResizePointerMove}
+                  onPointerUp={handleShapeResizePointerUp}
+                  onPointerCancel={handleShapeResizePointerUp}
+                  className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-6 h-3 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-ns-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
+                  title="Kéo cạnh dưới để mở rộng trục Oy xuống dưới"
+                >
+                  <div className="w-2.5 h-0.5 bg-cyan-600 rounded-full" />
+                </div>
+                <div
+                  onPointerDown={(e) => handleShapeResizePointerDown(e, 'w')}
+                  onPointerMove={handleShapeResizePointerMove}
+                  onPointerUp={handleShapeResizePointerUp}
+                  onPointerCancel={handleShapeResizePointerUp}
+                  className="absolute top-1/2 -left-2 -translate-y-1/2 w-3 h-6 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-ew-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
+                  title="Kéo cạnh trái để mở rộng trục Ox sang trái"
+                >
+                  <div className="w-0.5 h-2.5 bg-cyan-600 rounded-full" />
+                </div>
+                <div
+                  onPointerDown={(e) => handleShapeResizePointerDown(e, 'e')}
+                  onPointerMove={handleShapeResizePointerMove}
+                  onPointerUp={handleShapeResizePointerUp}
+                  onPointerCancel={handleShapeResizePointerUp}
+                  className="absolute top-1/2 -right-2 -translate-y-1/2 w-3 h-6 bg-white border-2 border-cyan-500 rounded-full shadow-lg cursor-ew-resize pointer-events-auto hover:scale-125 transition-transform flex items-center justify-center z-30 touch-none"
+                  title="Kéo cạnh phải để mở rộng trục Ox sang phải"
+                >
+                  <div className="w-0.5 h-2.5 bg-cyan-600 rounded-full" />
+                </div>
+
+                {/* Function Graph expansion helper badge */}
+                {isFunctionGraphTool(selectedStroke.tool) && (
+                  <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-slate-950/90 text-cyan-300 text-[10px] font-semibold px-2.5 py-0.5 rounded-full border border-cyan-400/60 shadow-lg pointer-events-none whitespace-nowrap">
+                    Kéo các cạnh/góc để thấy thêm đồ thị • Kéo giữa để di chuyển
+                  </div>
+                )}
 
                 {/* Center crosshair */}
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 border border-cyan-300 rounded-full flex items-center justify-center pointer-events-none">
@@ -4990,7 +5116,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingEquationStrokeId(selectedStroke.id);
-                        setEquationInput(selectedStroke.customEquation || 'y = 2x^3 - 3x + 1');
+                        setEquationInput(selectedStroke.customEquation || 'y = 2x^3-3x+1');
                         setShowEquationModal(true);
                       }}
                       className="px-2.5 py-1 bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/50 rounded-xl text-amber-200 text-[10.5px] font-bold flex items-center gap-1 cursor-pointer"

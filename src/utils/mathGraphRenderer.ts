@@ -341,6 +341,7 @@ function drawTextbookProjection(
 
 /**
  * Draws Asymptote Line (Đường tiệm cận nét đứt chuẩn SGK)
+ * Yêu cầu người dùng: "khỏi hiển thị tên tiệm cận" -> Chỉ vẽ nét đứt tinh tế, không chèn chữ lên đường tiệm cận
  */
 function drawAsymptote(
   ctx: CanvasRenderingContext2D,
@@ -348,26 +349,286 @@ function drawAsymptote(
   y1: number,
   x2: number,
   y2: number,
-  label?: string,
-  labelX?: number,
-  labelY?: number,
+  _label?: string,
+  _labelX?: number,
+  _labelY?: number,
   color: string = '#38bdf8'
 ) {
   ctx.save();
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.25;
-  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 1.3;
+  ctx.setLineDash([5, 4]);
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
   ctx.stroke();
+  ctx.restore();
+}
 
-  if (label && labelX !== undefined && labelY !== undefined) {
-    ctx.setLineDash([]);
-    ctx.fillStyle = color;
-    ctx.font = 'italic 11px "Cambria", "Times New Roman", serif';
-    ctx.fillText(label, labelX, labelY);
+/**
+ * Phân tích đa thức bậc 0, 1, 2 cho tử số và mẫu số để tìm tiệm cận chuẩn SGK Toán 12
+ */
+function parsePolynomialForAsymptotes(str: string): { a: number; b: number; c: number; deg: number } {
+  let s = str.replace(/\s+/g, '').replace(/\^2/g, '²').replace(/\^3/g, '³');
+  let a = 0, b = 0, c = 0;
+
+  // Hạng tử bậc 2: ax²
+  const m2 = s.match(/([+-]?[0-9]*\.?[0-9]*)x[²2]/);
+  if (m2) {
+    const coef = m2[1];
+    a = coef === '' || coef === '+' ? 1 : coef === '-' ? -1 : parseFloat(coef);
+    s = s.replace(m2[0], '');
   }
+
+  // Hạng tử bậc 1: bx
+  const m1 = s.match(/([+-]?[0-9]*\.?[0-9]*)x(?![²2³3])/);
+  if (m1) {
+    const coef = m1[1];
+    b = coef === '' || coef === '+' ? 1 : coef === '-' ? -1 : parseFloat(coef);
+    s = s.replace(m1[0], '');
+  }
+
+  // Hệ số tự do: c
+  if (s && s !== '+' && s !== '-') {
+    c = parseFloat(s) || 0;
+  }
+
+  return { a, b, c, deg: a !== 0 ? 2 : b !== 0 ? 1 : 0 };
+}
+
+function formatAsymptoteNumber(val: number): string {
+  if (Number.isInteger(val)) return String(val);
+  const commonFracs = [
+    { v: 0.5, s: '1/2' }, { v: -0.5, s: '-1/2' },
+    { v: 0.25, s: '1/4' }, { v: -0.25, s: '-1/4' },
+    { v: 0.75, s: '3/4' }, { v: -0.75, s: '-3/4' },
+    { v: 1.5, s: '3/2' }, { v: -1.5, s: '-3/2' },
+    { v: 2.5, s: '5/2' }, { v: -2.5, s: '-5/2' },
+    { v: 0.3333, s: '1/3' }, { v: -0.3333, s: '-1/3' },
+    { v: 0.6667, s: '2/3' }, { v: -0.6667, s: '-2/3' },
+  ];
+  const found = commonFracs.find((f) => Math.abs(f.v - val) < 0.01);
+  if (found) return found.s;
+  return Number(val.toFixed(2)).toString();
+}
+
+/**
+ * Tự động phát hiện các đường tiệm cận đứng (TCĐ), tiệm cận ngang (TCN), tiệm cận xiên (TCX)
+ * cho hàm phân thức nhất biến và bậc 2 trên bậc 1
+ */
+function detectCustomFunctionAsymptotes(eqInput: string): {
+  tcD?: { x: number; label: string; xStr: string };
+  tcN?: { y: number; label: string; yStr: string };
+  tcX?: { a: number; b: number; label: string };
+  I?: { x: number; y: number; xStr: string; yStr: string };
+  discontinuities: number[];
+} | null {
+  const s = eqInput.replace(/^(y|x\(t\)|f\(x\))\s*=\s*/i, '').trim();
+  const fracMatch = s.match(/(?:\(([^()]+)\)|([a-zA-Z0-9^+\-*.]+))\s*\/\s*(?:\(([^()]+)\)|([a-zA-Z0-9^+\-*.]+))/);
+  if (!fracMatch) return null;
+
+  const numStr = fracMatch[1] || fracMatch[2] || '';
+  const denStr = fracMatch[3] || fracMatch[4] || '';
+  const np = parsePolynomialForAsymptotes(numStr);
+  const dp = parsePolynomialForAsymptotes(denStr);
+
+  // Mẫu số bậc 1: dx + e (d khác 0)
+  if (dp.deg === 1 && dp.b !== 0) {
+    const d = dp.b;
+    const e = dp.c;
+    const x0 = -e / d;
+    const xStr = formatAsymptoteNumber(x0);
+    const tcD = { x: x0, label: `x = ${xStr}`, xStr };
+    const discontinuities = [x0];
+
+    // 1. Hàm Phân Thức Nhất Biến: (ax + b)/(cx + d)
+    if (np.deg <= 1) {
+      const a = np.b;
+      const y0 = a / d;
+      const yStr = formatAsymptoteNumber(y0);
+      const tcN = { y: y0, label: `y = ${yStr}`, yStr };
+      const I = { x: x0, y: y0, xStr, yStr };
+      return { tcD, tcN, I, discontinuities };
+    }
+
+    // 2. Hàm Phân Thức Bậc 2 trên Bậc 1: (ax² + bx + c)/(dx + e)
+    if (np.deg === 2) {
+      const a = np.a;
+      const b = np.b;
+      const A = a / d;
+      const B = (b - A * e) / d;
+      const strA = A === 1 ? 'x' : A === -1 ? '-x' : `${formatAsymptoteNumber(A)}x`;
+      const strB = B === 0 ? '' : B > 0 ? ` + ${formatAsymptoteNumber(B)}` : ` - ${formatAsymptoteNumber(Math.abs(B))}`;
+      const label = `y = ${strA}${strB}`;
+      const yI = A * x0 + B;
+      const I = { x: x0, y: yI, xStr, yStr: formatAsymptoteNumber(yI) };
+      return { tcD, tcX: { a: A, b: B, label }, I, discontinuities };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Vẽ nhãn tên đồ thị chuẩn toán học (phân số có gạch ngang, căn thức có gạch đầu, số mũ)
+ * VỊ TRÍ: NẰM Ở PHÍA DƯỚI ĐỒ THỊ, TUYỆT ĐỐI KHÔNG CHE KHUẤT HỆ TRỤC TỌA ĐỘ VÀ ĐƯỜNG CONG
+ */
+function drawStandardMathBanner(
+  ctx: CanvasRenderingContext2D,
+  eqInput: string,
+  parsed: any,
+  asymptotes: any,
+  cx: number,
+  bottom: number,
+  width: number,
+  labelVarX: string,
+  labelVarY: string,
+  left: number = 0,
+  right: number = 1000
+) {
+  ctx.save();
+
+  if (parsed.error) {
+    const errorTxt = `⚠️ ${parsed.error}`;
+    ctx.font = 'bold 12px "Cambria", "Times New Roman", serif';
+    const errW = Math.min(width - 20, ctx.measureText(errorTxt).width + 28);
+    const bannerH = 30;
+    const bannerY = bottom - bannerH - 4;
+    const bannerX = Math.max(left + 8, Math.min(right - errW - 8, cx - errW / 2));
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(bannerX, bannerY, errW, bannerH, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#f87171';
+    ctx.fillText(errorTxt, bannerX + 12, bannerY + 19);
+    ctx.restore();
+    return;
+  }
+
+  const rawClean = (parsed.displayFormula || eqInput).trim();
+  const prefixMatch = rawClean.match(/^([yufxvas]\s*(?:\([^)]*\))?)\s*=\s*/i);
+  const prefixStr = (prefixMatch ? prefixMatch[1].trim() : labelVarY) + ' = ';
+  const bodyStr = prefixMatch ? rawClean.substring(prefixMatch[0].length).trim() : rawClean;
+
+  // Kiểm tra cấu trúc phân số
+  const fracMatch =
+    bodyStr.match(/^\(([^()]+)\)\s*\/\s*\(([^()]+)\)$/) ||
+    bodyStr.match(/^([a-zA-Z0-9^+\-*.]+)\s*\/\s*\(([^()]+)\)$/) ||
+    bodyStr.match(/^\(([^()]+)\)\s*\/\s*([a-zA-Z0-9^+\-*.]+)$/);
+
+  // Kiểm tra căn thức
+  const sqrtMatch = bodyStr.match(/^(?:sqrt|√)\s*\(([^()]+)\)$/i);
+
+  ctx.font = 'bold 13px "Cambria", "Times New Roman", serif';
+  const wPrefix = ctx.measureText(prefixStr).width;
+
+  let bannerH = 34;
+  let formulaW = 0;
+  let isFrac = false;
+  let isSqrt = false;
+  let numStr = '';
+  let denStr = '';
+  let rootStr = '';
+  let standardStr = '';
+  let wNum = 0;
+  let wDen = 0;
+  let wBar = 0;
+
+  if (fracMatch) {
+    isFrac = true;
+    bannerH = 40;
+    numStr = fracMatch[1].replace(/\^2/g, '²').replace(/\^3/g, '³').replace(/\^4/g, '⁴').trim();
+    denStr = fracMatch[2].replace(/\^2/g, '²').replace(/\^3/g, '³').replace(/\^4/g, '⁴').trim();
+    ctx.font = 'bold 11.5px "Cambria", "Times New Roman", serif';
+    wNum = ctx.measureText(numStr).width;
+    wDen = ctx.measureText(denStr).width;
+    wBar = Math.max(wNum, wDen) + 14;
+    formulaW = wPrefix + wBar;
+  } else if (sqrtMatch) {
+    isSqrt = true;
+    rootStr = sqrtMatch[1].replace(/\^2/g, '²').replace(/\^3/g, '³').replace(/\^4/g, '⁴').trim();
+    ctx.font = 'bold 12.5px "Cambria", "Times New Roman", serif';
+    const wRoot = ctx.measureText(rootStr).width;
+    formulaW = wPrefix + 14 + wRoot;
+  } else {
+    standardStr = bodyStr.replace(/\^2/g, '²').replace(/\^3/g, '³').replace(/\^4/g, '⁴').trim();
+    ctx.font = 'bold 12.5px "Cambria", "Times New Roman", serif';
+    formulaW = wPrefix + ctx.measureText(standardStr).width;
+  }
+
+  // Yêu cầu người dùng: "Tên đồ thị nằm phía dưới và không che khuất phần đồ thị đang vẽ, khỏi hiển thị tên tiệm cận."
+  // Banner chỉ hiển thị tên công thức hàm số toán học (phân số, căn thức, luỹ thừa...), không chèn tiệm cận làm rối mắt
+  const bannerW = Math.min(width - 20, Math.max(120, formulaW + 24));
+
+  // VỊ TRÍ: NẰM Ở PHÍA DƯỚI ĐỒ THỊ (sát cạnh dưới bottom - bannerH - 2) - Hoàn toàn không che khuất đồ thị!
+  const bannerY = bottom - bannerH - 2;
+  const bannerX = Math.max(left + 6, Math.min(right - bannerW - 6, cx - bannerW / 2));
+
+  // Khung nền đen mờ sang trọng, viền vàng ánh kim/xanh cyan thanh mảnh
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(bannerX, bannerY, bannerW, bannerH, 8);
+  ctx.fill();
+  ctx.stroke();
+
+  const startX = bannerX + (bannerW - formulaW) / 2;
+  const centerY = bannerY + bannerH / 2;
+
+  // Vẽ tiền tố (y = )
+  ctx.fillStyle = '#facc15';
+  ctx.font = 'bold 13px "Cambria", "Times New Roman", serif';
+  ctx.fillText(prefixStr, startX, centerY + 4.5);
+
+  let currentDrawX = startX + wPrefix;
+
+  if (isFrac) {
+    // 1. Vẽ gạch ngang phân số chuẩn
+    const barStartX = currentDrawX + 2;
+    const barEndX = barStartX + wBar;
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(barStartX, centerY);
+    ctx.lineTo(barEndX, centerY);
+    ctx.stroke();
+
+    // 2. Vẽ tử số (ở trên gạch ngang)
+    ctx.font = 'bold 11.5px "Cambria", "Times New Roman", serif';
+    ctx.fillStyle = '#fef08a';
+    ctx.fillText(numStr, barStartX + (wBar - wNum) / 2, centerY - 4);
+
+    // 3. Vẽ mẫu số (ở dưới gạch ngang)
+    ctx.fillText(denStr, barStartX + (wBar - wDen) / 2, centerY + 13.5);
+  } else if (isSqrt) {
+    // Ký hiệu căn bậc hai √
+    ctx.fillStyle = '#facc15';
+    ctx.font = '14px "Cambria", "Times New Roman", serif';
+    ctx.fillText('√', currentDrawX, centerY + 5);
+
+    // Dấu gạch ngang trên đầu biểu thức căn
+    ctx.font = 'bold 12.5px "Cambria", "Times New Roman", serif';
+    ctx.fillStyle = '#fef08a';
+    const textStartX = currentDrawX + 12;
+    ctx.fillText(rootStr, textStartX, centerY + 4.5);
+
+    const wRootText = ctx.measureText(rootStr).width;
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(textStartX - 2, centerY - 8.5);
+    ctx.lineTo(textStartX + wRootText + 2, centerY - 8.5);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = '#facc15';
+    ctx.font = 'bold 12.5px "Cambria", "Times New Roman", serif';
+    ctx.fillText(standardStr, currentDrawX, centerY + 4.5);
+  }
+
   ctx.restore();
 }
 
@@ -489,8 +750,9 @@ export function drawFunctionGraph(
   const bottom = maxY - 12;
 
   // Mathematical unit scaling (1 unit = unitPx)
-  // Adaptive unit size so graphs look clean across any box size
-  const baseUnitPx = Math.max(24, Math.min(65, width / 8.5));
+  // Yêu cầu người dùng: "và khi tăng kích thước khung chữ nhật thì sẽ thấy thêm được phần đồ thị hàm số"
+  // Cố định baseUnitPx = 36px (chuẩn SGK) để khi mở rộng khung chữ nhật, miền giá trị x, y mở rộng ra, hiển thị thêm các phần đồ thị
+  const baseUnitPx = 36;
   const unitPx = baseUnitPx * gScale;
 
   // Apply Panning offset to the coordinate origin
@@ -971,8 +1233,9 @@ export function drawFunctionGraph(
       // 10. Hàm Phân Thức Nhất Biến: y = (x - 1)/(x + 1) = 1 - 2/(x + 1)
       // Đồng biến trên từng khoảng (ad - bc = 1 - (-1) = 2 > 0)
       // Tiệm cận đứng: x = -1. Tiệm cận ngang: y = 1. Tâm đối xứng: I(-1, 1)
-      const originX = graphOriginX + width * 0.08;
-      const originY = graphOriginY + height * 0.08;
+      // Cân đối tâm đối xứng I(-1, 1) chính giữa khung hình để 2 nhánh đối xứng tuyệt đối
+      const originX = graphOriginX + 1 * unitPx;
+      const originY = graphOriginY + 1 * unitPx;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX - 1 * unitPx; // x = -1
@@ -1014,6 +1277,8 @@ export function drawFunctionGraph(
         // Giao Ox: (1, 0)
         drawTextbookProjection(ctx, originX, originY, originX + 1 * unitPx, originY, '1', '', '#38bdf8', '#38bdf8');
       }
+
+      drawStandardMathBanner(ctx, 'y = (x - 1)/(x + 1)', { displayFormula: 'y = (x - 1)/(x + 1)' }, { tcD: { label: 'x = -1' }, tcN: { label: 'y = 1' } }, cx, bottom, width, 'x', 'y', left, right);
       break;
     }
 
@@ -1021,8 +1286,9 @@ export function drawFunctionGraph(
       // 11. Hàm Phân Thức Nhất Biến: y = (2x - 1)/(x - 1) = 2 + 1/(x - 1)
       // Nghịch biến trên từng khoảng (ad - bc = -2 - (-1) = -1 < 0)
       // Tiệm cận đứng: x = 1. Tiệm cận ngang: y = 2. Tâm đối xứng: I(1, 2)
-      const originX = graphOriginX - width * 0.08;
-      const originY = graphOriginY + height * 0.12;
+      // Cân đối tâm đối xứng I(1, 2) chính giữa khung hình để 2 nhánh nhìn thấy trọn vẹn đối xứng nhau
+      const originX = graphOriginX - 1 * unitPx;
+      const originY = graphOriginY + 2 * unitPx;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX + 1 * unitPx; // x = 1
@@ -1063,15 +1329,16 @@ export function drawFunctionGraph(
         // Giao Ox: (0.5, 0)
         drawTextbookProjection(ctx, originX, originY, originX + 0.5 * unitPx, originY, '0.5', '', '#38bdf8', '#38bdf8');
       }
+
+      drawStandardMathBanner(ctx, 'y = (2x - 1)/(x - 1)', { displayFormula: 'y = (2x - 1)/(x - 1)' }, { tcD: { label: 'x = 1' }, tcN: { label: 'y = 2' } }, cx, bottom, width, 'x', 'y', left, right);
       break;
     }
 
     case 'func_rational_pos_right': {
       // 11b. Hàm Nhất Biến Đồng Biến (TCĐ dương x = 1, TCN dương y = 1): y = (x - 2)/(x - 1) = 1 - 1/(x - 1)
-      // ad - bc = -1 - (-2) = 1 > 0 => Đồng biến trên từng khoảng
-      // Tiệm cận đứng: x = 1. Tiệm cận ngang: y = 1. Tâm đối xứng I(1, 1)
-      const originX = graphOriginX - width * 0.08;
-      const originY = graphOriginY + height * 0.08;
+      // Tâm đối xứng I(1, 1)
+      const originX = graphOriginX - 1 * unitPx;
+      const originY = graphOriginY + 1 * unitPx;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX + 1 * unitPx; // x = 1
@@ -1109,16 +1376,16 @@ export function drawFunctionGraph(
         // Giao Ox: (2, 0)
         drawTextbookProjection(ctx, originX, originY, originX + 2 * unitPx, originY, '2', '', '#38bdf8', '#38bdf8');
       }
+
+      drawStandardMathBanner(ctx, 'y = (x - 2)/(x - 1)', { displayFormula: 'y = (x - 2)/(x - 1)' }, { tcD: { label: 'x = 1' }, tcN: { label: 'y = 1' } }, cx, bottom, width, 'x', 'y', left, right);
       break;
     }
 
     case 'func_rational_neg_left': {
-      // 11c. Hàm Nhất Biến Nghịch Biến (TCĐ âm x = -1, TCN âm y = -1): y = (-x - 2)/(x + 1) = -1 - 1/(x + 1)
-      // ad - bc = -1 - (-2) = 1 > 0 nhưng c>0, a<0 => y' = 1/(x+1)^2 > 0 hay y = (-x)/(x+1) - 2/(x+1)
-      // Dạng nghịch biến: y = (-x + 1)/(x + 1) có ad - bc = -1 - 1 = -2 < 0 => Nghịch biến
-      // Tiệm cận đứng: x = -1. Tiệm cận ngang: y = -1. Tâm đối xứng I(-1, -1)
-      const originX = graphOriginX + width * 0.12;
-      const originY = graphOriginY - height * 0.08;
+      // 11c. Hàm Nhất Biến Nghịch Biến (TCĐ âm x = -1, TCN âm y = -1): y = (-x + 1)/(x + 1)
+      // Tâm đối xứng I(-1, -1)
+      const originX = graphOriginX + 1 * unitPx;
+      const originY = graphOriginY - 1 * unitPx;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX - 1 * unitPx; // x = -1
@@ -1156,16 +1423,16 @@ export function drawFunctionGraph(
         // Giao Ox: (1, 0)
         drawTextbookProjection(ctx, originX, originY, originX + 1 * unitPx, originY, '1', '', '#38bdf8', '#38bdf8');
       }
+
+      drawStandardMathBanner(ctx, 'y = (-x + 1)/(x + 1)', { displayFormula: 'y = (-x + 1)/(x + 1)' }, { tcD: { label: 'x = -1' }, tcN: { label: 'y = -1' } }, cx, bottom, width, 'x', 'y', left, right);
       break;
     }
 
     case 'func_frac21': {
       // 12. Hàm Bậc 2 trên Bậc 1: y = (x² - x + 1)/(x - 1) = x + 1/(x - 1)
-      // Tiệm cận đứng: x = 1
-      // Tiệm cận xiên: y = x
-      // Cực tiểu: (2, 3). Cực đại: (0, -1). Tâm đối xứng I(1, 1)
-      const originX = graphOriginX - width * 0.08;
-      const originY = graphOriginY + height * 0.05;
+      // Tâm đối xứng I(1, 1)
+      const originX = graphOriginX - 1 * unitPx;
+      const originY = graphOriginY + 1 * unitPx;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX + 1 * unitPx;
@@ -1223,15 +1490,15 @@ export function drawFunctionGraph(
         ctx.fill();
         ctx.fillText('I', iX + 6, iY - 4);
       }
+
+      drawStandardMathBanner(ctx, 'y = (x² - x + 1)/(x - 1)', { displayFormula: 'y = (x² - x + 1)/(x - 1)' }, { tcD: { label: 'x = 1' }, tcX: { label: 'y = x' } }, cx, bottom, width, 'x', 'y', left, right);
       break;
     }
 
     case 'func_frac21_neg_slope': {
       // 12b. Hàm Bậc 2 trên Bậc 1: Có 2 cực trị, Tiệm cận xiên dốc xuống (m < 0)
-      // y = -x + 1 - 1/(x - 1) = (-x² + 2x - 2)/(x - 1)
-      // Tiệm cận đứng: x = 1. Tiệm cận xiên: y = -x + 1 (m = -1 < 0)
-      // Cực tiểu (nhánh trái): (0, 2). Cực đại (nhánh phải): (2, -2). Tâm đối xứng I(1, 0)
-      const originX = graphOriginX - width * 0.08;
+      // Tâm đối xứng I(1, 0)
+      const originX = graphOriginX - 1 * unitPx;
       const originY = graphOriginY;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
@@ -1249,7 +1516,7 @@ export function drawFunctionGraph(
         originY - (-x2Math + 1) * unitPx,
         'y = -x + 1',
         right - 55,
-        originY - (-x2Math + 1) * unitPx - 10,
+        originY - (-x2Math + 1) * unitPx + 15,
         '#38bdf8'
       );
 
@@ -1289,15 +1556,16 @@ export function drawFunctionGraph(
         ctx.fill();
         ctx.fillText('I', iX + 6, iY - 4);
       }
+
+      drawStandardMathBanner(ctx, 'y = (-x² + 2x - 2)/(x - 1)', { displayFormula: 'y = (-x² + 2x - 2)/(x - 1)' }, { tcD: { label: 'x = 1' }, tcX: { label: 'y = -x + 1' } }, cx, bottom, width, 'x', 'y', left, right);
       break;
     }
 
     case 'func_frac21_noextrema_pos': {
-      // 12c. Hàm Bậc 2 trên Bậc 1: Không có cực trị, Luôn đồng biến (m > 0, k < 0)
-      // y = x - 1/(x - 1) => y' = 1 + 1/(x-1)² > 0
-      // Tiệm cận đứng: x = 1. Tiệm cận xiên: y = x. Tâm đối xứng I(1, 1)
-      const originX = graphOriginX - width * 0.08;
-      const originY = graphOriginY + height * 0.05;
+      // 12c. Hàm Bậc 2 trên Bậc 1: Không có cực trị, Luôn đồng biến
+      // Tâm đối xứng I(1, 1)
+      const originX = graphOriginX - 1 * unitPx;
+      const originY = graphOriginY + 1 * unitPx;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX + 1 * unitPx;
@@ -1346,15 +1614,16 @@ export function drawFunctionGraph(
         ctx.fill();
         ctx.fillText('I', iX + 6, iY - 4);
       }
+
+      drawStandardMathBanner(ctx, 'y = (x² - x - 1)/(x - 1)', { displayFormula: 'y = (x² - x - 1)/(x - 1)' }, { tcD: { label: 'x = 1' }, tcX: { label: 'y = x' } }, cx, bottom, width, 'x', 'y', left, right);
       break;
     }
 
     case 'func_frac21_noextrema_neg': {
-      // 12d. Hàm Bậc 2 trên Bậc 1: Không có cực trị, Luôn nghịch biến (m < 0, k > 0)
-      // y = -x + 1/(x + 1) => y' = -1 - 1/(x+1)² < 0
-      // Tiệm cận đứng: x = -1. Tiệm cận xiên: y = -x. Tâm đối xứng I(-1, 1)
-      const originX = graphOriginX + width * 0.08;
-      const originY = graphOriginY + height * 0.05;
+      // 12d. Hàm Bậc 2 trên Bậc 1: Không có cực trị, Luôn nghịch biến
+      // Tâm đối xứng I(-1, 1)
+      const originX = graphOriginX + 1 * unitPx;
+      const originY = graphOriginY + 1 * unitPx;
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid);
 
       const tcDX = originX - 1 * unitPx;
@@ -1403,6 +1672,8 @@ export function drawFunctionGraph(
         ctx.fill();
         ctx.fillText('I', iX - 12, iY - 4);
       }
+
+      drawStandardMathBanner(ctx, 'y = (-x² - x + 1)/(x + 1)', { displayFormula: 'y = (-x² - x + 1)/(x + 1)' }, { tcD: { label: 'x = -1' }, tcX: { label: 'y = -x' } }, cx, bottom, width, 'x', 'y', left, right);
       break;
     }
 
@@ -1995,14 +2266,72 @@ export function drawFunctionGraph(
 
     case 'func_custom_equation': {
       // Đồ thị do giáo viên tự nhập công thức toán học hoặc vật lý
-      const originX = graphOriginX;
-      const originY = graphOriginY;
-      const eqInput = options?.customEquation?.trim() || 'y = 2*x^3 - 3*x + 1';
+      const eqInput = options?.customEquation?.trim() || 'y = 2x^3-3x+1';
       const parsed = compileMathExpression(eqInput);
+
+      // Tự động phát hiện và vẽ các đường tiệm cận (TCĐ, TCN, TCX) và tâm đối xứng I
+      const asymptotes = detectCustomFunctionAsymptotes(eqInput);
+
+      let originX = graphOriginX;
+      let originY = graphOriginY;
+
+      // Yêu cầu người dùng: "Khi vẽ đồ thị nên chú ý đến sự đối xứng của đồ thị. Ví dụ như ảnh phải vẽ sao cho 2 nhánh đồ thị nhìn thấy được đối xứng nhau. Vì hiện tại nhánh trên thấy trọn vẹn nhánh dưới chỉ thấy 1 chút."
+      if (asymptotes?.I && Number.isFinite(asymptotes.I.x) && Number.isFinite(asymptotes.I.y)) {
+        // Cân đối tâm đối xứng I(x0, y0) nằm chính giữa khung nhìn (cx + gOffsetX, cy + gOffsetY)
+        // để 2 nhánh đồ thị hyperbol hiển thị hoàn toàn đối xứng, không bị lệch hoặc mất nhánh
+        const targetIX = cx + gOffsetX;
+        const targetIY = cy + gOffsetY;
+        const maxOffset = Math.min(width, height) * 0.42;
+        const offsetX = Math.max(-maxOffset, Math.min(maxOffset, asymptotes.I.x * unitPx));
+        const offsetY = Math.max(-maxOffset, Math.min(maxOffset, asymptotes.I.y * unitPx));
+        originX = targetIX - offsetX;
+        originY = targetIY + offsetY;
+      }
 
       const labelVarX = parsed.variableName === 't' ? 't' : 'x';
       const labelVarY = parsed.variableName === 't' ? 'x(t)' : 'y';
       drawTextbookAxes(ctx, originX, originY, left, right, top, bottom, unitPx, color, 0.4, showGrid, labelVarX, labelVarY);
+
+      if (asymptotes) {
+        // 1. Tiệm cận đứng x = x0 (chuẩn SGK Toán 12)
+        if (asymptotes.tcD) {
+          const tcDX = originX + asymptotes.tcD.x * unitPx;
+          drawAsymptote(ctx, tcDX, top + 5, tcDX, bottom - 5, asymptotes.tcD.label, tcDX + 6, top + 18, '#38bdf8');
+        }
+
+        // 2. Tiệm cận ngang y = y0 (Hàm bậc 1 / bậc 1)
+        if (asymptotes.tcN) {
+          const tcNY = originY - asymptotes.tcN.y * unitPx;
+          drawAsymptote(ctx, left + 5, tcNY, right - 5, tcNY, asymptotes.tcN.label, right - 46, tcNY - 6, '#38bdf8');
+        }
+
+        // 3. Tiệm cận xiên y = ax + b (Hàm bậc 2 / bậc 1)
+        if (asymptotes.tcX) {
+          const x1Math = (left - originX) / unitPx;
+          const x2Math = (right - originX) / unitPx;
+          const y1Math = asymptotes.tcX.a * x1Math + asymptotes.tcX.b;
+          const y2Math = asymptotes.tcX.a * x2Math + asymptotes.tcX.b;
+          const x1Px = originX + x1Math * unitPx;
+          const y1Px = originY - y1Math * unitPx;
+          const x2Px = originX + x2Math * unitPx;
+          const y2Px = originY - y2Math * unitPx;
+          drawAsymptote(ctx, x1Px, y1Px, x2Px, y2Px, asymptotes.tcX.label, right - 68, y2Px - 8, '#38bdf8');
+        }
+
+        // 4. Tâm đối xứng I(x0, y0)
+        if (asymptotes.I) {
+          const iX = originX + asymptotes.I.x * unitPx;
+          const iY = originY - asymptotes.I.y * unitPx;
+          ctx.save();
+          ctx.fillStyle = '#facc15';
+          ctx.beginPath();
+          ctx.arc(iX, iY, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.font = 'bold 12px "Cambria", "Times New Roman", serif';
+          ctx.fillText('I', iX + 6, iY - 6);
+          ctx.restore();
+        }
+      }
 
       if (!parsed.error) {
         plotAnalyticalFunction(
@@ -2016,28 +2345,14 @@ export function drawFunctionGraph(
           top,
           bottom,
           color,
-          size
+          size,
+          asymptotes?.discontinuities
         );
       }
 
-      // Equation banner at top
-      ctx.save();
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-      ctx.strokeStyle = parsed.error ? '#f43f5e' : '#38bdf8';
-      ctx.lineWidth = 1.2;
-      const bannerW = Math.min(320, width - 24);
-      ctx.beginPath();
-      ctx.roundRect(left + 8, top + 8, bannerW, 30, 8);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = parsed.error ? '#f87171' : '#facc15';
-      ctx.font = 'bold 12.5px "Cambria", "Times New Roman", serif';
-      const displayTxt = parsed.error
-        ? `⚠️ ${parsed.error}`
-        : (parsed.displayFormula || `f(${labelVarX}) = ${eqInput}`);
-      ctx.fillText(displayTxt.length > 40 ? displayTxt.substring(0, 38) + '...' : displayTxt, left + 16, top + 27);
-      ctx.restore();
+      // NHÃN TÊN ĐỒ THỊ CHUẨN TOÁN HỌC: Hiển thị ở PHÍA DƯỚI ĐỒ THỊ (dưới cùng, không che khuất đồ thị)
+      // với dấu phân số có gạch ngang, dấu căn, số mũ, thông tin tiệm cận
+      drawStandardMathBanner(ctx, eqInput, parsed, asymptotes, cx, bottom, width, labelVarX, labelVarY, left, right);
       break;
     }
     default:
