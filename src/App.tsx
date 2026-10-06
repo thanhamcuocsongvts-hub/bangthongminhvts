@@ -44,7 +44,7 @@ import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { safeSetDoc } from './utils/firebaseSafe';
 import { useDeviceDetection } from './hooks/useDeviceDetection';
-import { PenTool, FolderOpen, Users, CheckSquare, Trophy } from 'lucide-react';
+import { PenTool, FolderOpen, Users, CheckSquare, Trophy, LogOut, Lock, Clock, User, ShieldCheck, Mail, Phone, School, Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { TextToSpeechFloatingTooltip } from './components/TextToSpeechFloatingTooltip';
 
 export default function App() {
@@ -160,6 +160,10 @@ export default function App() {
   const activeTeacher = isGuestMode 
     ? guestTeacherData 
     : (teachers || []).find((t) => t.id === activeTeacherId) || null;
+
+  const pendingTeachersCount = useMemo(() => {
+    return (teachers || []).filter((t) => t.status === 'pending').length;
+  }, [teachers]);
 
   // Guest mode cleanup on exit
   useEffect(() => {
@@ -937,6 +941,266 @@ export default function App() {
     );
   }
 
+  // YÊU CẦU NGƯỜI DÙNG: "Chổ tài khoản bị khóa không bấm vào được. hãy mở để có thể bấm đăng xuất và xem thông tin"
+  // Khi tài khoản ở trạng thái 'pending' (chờ duyệt) hoặc 'locked' (tạm khóa):
+  // Hiển thị giao diện thông báo trạng thái tài khoản trang trọng, ĐẦY ĐỦ các nút bấm để ĐĂNG XUẤT, XEM THÔNG TIN, HOẶC ĐĂNG NHẬP ADMIN ĐỂ DUYỆT!
+  if (!isGuestMode && activeTeacher && activeTeacher.role !== 'admin' && (activeTeacher.status === 'pending' || activeTeacher.status === 'locked')) {
+    const isPending = activeTeacher.status === 'pending';
+    return (
+      <div className="w-screen min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white flex flex-col justify-between p-4 sm:p-6 md:p-10 select-none overflow-y-auto">
+        {/* Top Header */}
+        <div className="flex items-center justify-between pb-6 border-b border-white/10 max-w-4xl mx-auto w-full">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-white shadow-md">
+              <School className="w-6 h-6 text-indigo-300" />
+            </div>
+            <div>
+              <div className="text-[10px] font-black tracking-widest text-indigo-400 uppercase">
+                SMARTBOARD 75 PRO
+              </div>
+              <div className="text-base font-black text-white">
+                Cổng Quản Lý Hồ Sơ Giáo Viên
+              </div>
+            </div>
+          </div>
+
+          {/* Teacher Badge & Quick Logout */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowProfileModal(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-bold text-xs transition-all cursor-pointer shadow-xs active:scale-95"
+              title="Bấm để xem hồ sơ giáo viên"
+            >
+              <span className="text-base">{activeTeacher.avatar || '👨‍🏫'}</span>
+              <span className="truncate max-w-[120px] font-black">{activeTeacher.name}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs transition-all cursor-pointer shadow-md shadow-rose-600/30 active:scale-95"
+              title="Đăng xuất khỏi tài khoản này ngay"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Đăng Xuất</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Central Status Card */}
+        <div className="max-w-2xl mx-auto w-full my-auto py-8">
+          <div className="bg-white text-slate-800 rounded-3xl border border-slate-200/80 shadow-2xl overflow-hidden p-6 sm:p-8 space-y-6 animate-in fade-in zoom-in-95 duration-200">
+            {/* Status Header Badge */}
+            <div className="flex items-center gap-4">
+              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shrink-0 shadow-md ${
+                isPending ? 'bg-amber-100 text-amber-600 border border-amber-300 ring-4 ring-amber-400/20' : 'bg-rose-100 text-rose-600 border border-rose-300 ring-4 ring-rose-400/20'
+              }`}>
+                {isPending ? <Clock className="w-8 h-8 text-amber-600 animate-pulse" /> : <Lock className="w-8 h-8 text-rose-600" />}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                    {isPending ? 'Tài Khoản Đang Chờ Phê Duyệt' : 'Tài Khoản Đang Bị Tạm Khóa'}
+                  </h2>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    isPending ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-rose-100 text-rose-900 border border-rose-300'
+                  }`}>
+                    {isPending ? 'CHỜ ADMIN DUYỆT' : 'TẠM KHÓA'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                  {isPending
+                    ? 'Hồ sơ giáo viên của Thầy/Cô đã được ghi nhận trên SmartBoard và đang chờ Quản trị viên (Admin) xét duyệt để kích hoạt giảng dạy.'
+                    : 'Tài khoản của Thầy/Cô đang trong trạng thái tạm khóa. Vui lòng liên hệ Quản trị viên hoặc quản lý nhà trường để mở khóa.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Profile Information Box (Xem thông tin) */}
+            <div className="bg-slate-50 rounded-2xl border border-slate-200 p-5 space-y-3">
+              <div className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="flex items-center gap-1.5 text-indigo-700">
+                  <User className="w-4 h-4" />
+                  THÔNG TIN TÀI KHOẢN GIÁO VIÊN
+                </span>
+                <span className="text-[11px] text-slate-400 font-normal">
+                  Mã: {activeTeacher.id}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div
+                  onClick={() => setShowProfileModal(true)}
+                  className="p-2 -m-1 rounded-xl hover:bg-indigo-50/80 transition-all cursor-pointer group border border-transparent hover:border-indigo-200"
+                  title="Bấm để xem & chỉnh sửa hồ sơ giáo viên"
+                >
+                  <span className="text-slate-400 group-hover:text-indigo-600 font-medium flex items-center justify-between">
+                    <span>Họ và Tên:</span>
+                    <span className="text-[10px] text-indigo-500 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">Xem hồ sơ &rarr;</span>
+                  </span>
+                  <div className="font-bold text-slate-900 group-hover:text-indigo-700 text-sm mt-0.5">{activeTeacher.name}</div>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 font-medium">Tên đăng nhập (Username):</span>
+                  <div className="font-bold text-indigo-700 font-mono mt-0.5">{activeTeacher.username || activeTeacher.id}</div>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 font-medium">Bộ môn giảng dạy:</span>
+                  <div className="font-bold text-slate-800 mt-0.5">{activeTeacher.subject}</div>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 font-medium">Đơn vị trường học:</span>
+                  <div className="font-bold text-slate-800 mt-0.5">{activeTeacher.school || 'Trường THPT'}</div>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 font-medium">Địa chỉ Email:</span>
+                  <div className="font-bold text-slate-800 mt-0.5">{activeTeacher.email}</div>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 font-medium">Số điện thoại:</span>
+                  <div className="font-bold text-slate-800 mt-0.5">{activeTeacher.phone || 'Chưa cập nhật'}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons Section */}
+            <div className="space-y-2.5 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Button 1: Xem & Sửa Thông Tin */}
+                <button
+                  type="button"
+                  onClick={() => setShowProfileModal(true)}
+                  className="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-indigo-600/25 active:scale-98 transition-all cursor-pointer"
+                >
+                  <User className="w-4 h-4" />
+                  <span>Xem & Cập Nhật Hồ Sơ</span>
+                </button>
+
+                {/* Button 2: Đăng Xuất */}
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="w-full py-3 px-4 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-black text-xs flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Đăng Xuất Tài Khoản</span>
+                </button>
+              </div>
+
+              {/* Button 3: Chuyển sang tài khoản Quản trị viên để duyệt ngay */}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTeacherId('teacher_admin_root');
+                  localStorage.setItem('smartboard_active_teacher', 'teacher_admin_root');
+                  setShowAdminModal(true);
+                }}
+                className="w-full py-3 px-4 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 active:scale-98 transition-all cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>Đăng Nhập Quản Trị Viên (Admin) Để Phê Duyệt Ngay</span>
+              </button>
+
+              {/* Button 4: Dùng thử Guest */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsGuestMode(true);
+                  setGuestTeacherData({
+                    id: 'guest',
+                    name: 'Khách (Dùng thử)',
+                    username: 'guest',
+                    email: 'guest@smartboard.local',
+                    phone: '',
+                    subject: 'Khác',
+                    school: '',
+                    avatar: '👤',
+                    classes: [],
+                    createdAt: new Date().toISOString(),
+                  });
+                  setActiveTab('whiteboard');
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+              >
+                <span>Dùng Thử Bảng Thông Minh Ngay (Chế độ Khách)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="text-center text-xs text-indigo-200/60 pb-2">
+          Hệ Thống Bảng Tương Tác Giảng Dạy & Sổ Điểm Sư Phạm 75 Inch • Phát triển bởi Thầy Trịnh Tuấn Kiệt
+        </div>
+
+        {/* Include modals if triggered */}
+        {showProfileModal && (
+          <TeacherProfileModal
+            isOpen={showProfileModal}
+            onClose={() => setShowProfileModal(false)}
+            teacher={activeTeacher}
+            onUpdateTeacher={handleUpdateActiveTeacher}
+            onLogout={handleLogout}
+            onOpenAccountSwitcher={() => {
+              setShowProfileModal(false);
+              setShowTeacherAuthModal(true);
+            }}
+            onOpenAdminPanel={() => {
+              setShowProfileModal(false);
+              setShowAdminModal(true);
+            }}
+          />
+        )}
+
+        {showAdminModal && (
+          <AdminManagementModal
+            isOpen={showAdminModal}
+            onClose={() => setShowAdminModal(false)}
+            teachers={teachers}
+            activeTeacher={activeTeacher}
+            onDeleteTeacher={(id) => {
+              const next = teachers.filter((t) => t.id !== id);
+              setTeachers(next);
+              localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+              syncTeachersToCloud(next);
+            }}
+            onResetPassword={(id, newPassword) => {
+              const next = teachers.map((t) => (t.id === id ? { ...t, password: newPassword || '123456' } : t));
+              setTeachers(next);
+              localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+              syncTeachersToCloud(next);
+            }}
+            onUpdateTeacher={(updated) => {
+              const next = teachers.map((t) => (t.id === updated.id ? updated : t));
+              setTeachers(next);
+              localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+              syncTeachersToCloud(next);
+            }}
+            onAddNewTeacher={(newT) => {
+              setTeachers((prev) => {
+                const next = [...prev, newT];
+                localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+                syncTeachersToCloud(next);
+                return next;
+              });
+            }}
+            onSelectTeacher={(t) => {
+              setActiveTeacherId(t.id);
+              localStorage.setItem('smartboard_active_teacher', t.id);
+              setShowAdminModal(false);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
   const joinUrl = `${window.location.origin}/?mode=student&room=${roomState?.pin || '758899'}`;
 
   return (
@@ -965,6 +1229,7 @@ export default function App() {
         activeTeacher={activeTeacher || null}
         onLogout={handleLogout}
         onOpenAIConfig={() => setShowAIConfigModal(true)}
+        pendingTeachersCount={pendingTeachersCount}
       />
 
       {/* Main Interactive Screen Content */}

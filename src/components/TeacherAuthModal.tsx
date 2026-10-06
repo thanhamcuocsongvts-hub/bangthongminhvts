@@ -247,9 +247,19 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-black text-lg text-slate-900">{activeTeacher.name}</span>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold uppercase">
-                        Đang Đăng Nhập
-                      </span>
+                      {activeTeacher.status === 'pending' ? (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold uppercase animate-pulse">
+                          Chờ Duyệt
+                        </span>
+                      ) : activeTeacher.status === 'locked' ? (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-bold uppercase">
+                          Tạm Khóa
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold uppercase">
+                          Đang Đăng Nhập
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-indigo-700 font-semibold mt-0.5">
                       Môn: {activeTeacher.subject} • {activeTeacher.school}
@@ -327,7 +337,19 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({
                           {teacher.avatar || '👨‍🏫'}
                         </div>
                         <div>
-                          <div className="font-bold text-slate-900 text-sm leading-tight">{teacher.name}</div>
+                          <div className="font-bold text-slate-900 text-sm leading-tight flex items-center gap-1.5 flex-wrap">
+                            <span>{teacher.name}</span>
+                            {teacher.status === 'pending' && (
+                              <span className="px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 text-[9px] font-black border border-amber-300">
+                                Chờ duyệt
+                              </span>
+                            )}
+                            {teacher.status === 'locked' && (
+                              <span className="px-1.5 py-0.2 rounded-md bg-rose-100 text-rose-800 text-[9px] font-black border border-rose-300">
+                                Tạm khóa
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-slate-500">{teacher.subject} • {teacher.classes.length} Lớp</div>
                         </div>
                       </div>

@@ -294,7 +294,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     startMouseX: number;
     startMouseY: number;
     origScale: number;
-    origBounds: { centerX: number; centerY: number; width: number; height: number };
+    origBounds: {
+      centerX: number;
+      centerY: number;
+      width: number;
+      height: number;
+      minX?: number;
+      maxX?: number;
+      minY?: number;
+      maxY?: number;
+    };
     direction: string;
   } | null>(null);
   const strokeRafRef = useRef<number | null>(null);

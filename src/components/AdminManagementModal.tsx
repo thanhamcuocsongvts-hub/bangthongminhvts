@@ -52,6 +52,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSubject, setSelectedSubject] = useState<string>('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'pending' | 'approved' | 'locked'>('all');
   const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -64,6 +65,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
   const [editPhone, setEditPhone] = useState('');
   const [editSubject, setEditSubject] = useState<SubjectType>('Toán học');
   const [editSchool, setEditSchool] = useState('');
+  const [editStatus, setEditStatus] = useState<'pending' | 'approved' | 'locked'>('approved');
 
   // Reset Password Dialog State
   const [resettingTeacher, setResettingTeacher] = useState<TeacherProfile | null>(null);
@@ -109,6 +111,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
     setEditPhone(t.phone || '');
     setEditSubject(t.subject);
     setEditSchool(t.school);
+    setEditStatus((t.status as 'pending' | 'approved' | 'locked') || (t.role === 'admin' ? 'approved' : 'pending'));
   };
 
   // Save Edit
@@ -125,6 +128,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
       phone: editPhone.trim(),
       subject: editSubject,
       school: editSchool.trim() || editingTeacher.school,
+      status: editStatus,
     };
 
     onUpdateTeacher(updated);
@@ -138,6 +142,71 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
 
     showToast(`Đã cập nhật thông tin tài khoản ${updated.name}!`);
     setEditingTeacher(null);
+  };
+
+  // Phê duyệt / Chấp nhận giáo viên đăng ký
+  const handleApproveTeacher = (t: TeacherProfile) => {
+    const updated: TeacherProfile = {
+      ...t,
+      status: 'approved',
+    };
+    onUpdateTeacher(updated);
+    fetch('/api/teachers/update-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    }).catch((err) => console.warn('Sync approve teacher warning:', err));
+    showToast(`✓ Đã chấp nhận & kích hoạt tài khoản giáo viên ${t.name}! Thầy/Cô có thể vào dạy.`);
+  };
+
+  // Phê duyệt tất cả giáo viên đang chờ
+  const handleApproveAllPending = () => {
+    const pending = teachers.filter((t) => t.status === 'pending');
+    if (pending.length === 0) return;
+    pending.forEach((t) => {
+      const updated: TeacherProfile = { ...t, status: 'approved' };
+      onUpdateTeacher(updated);
+      fetch('/api/teachers/update-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      }).catch((err) => console.warn('Sync approve warning:', err));
+    });
+    showToast(`✓ Đã phê duyệt tất cả ${pending.length} tài khoản giáo viên mới thành công!`);
+  };
+
+  // Khóa tài khoản giáo viên
+  const handleLockTeacher = (t: TeacherProfile) => {
+    if (t.id === 'teacher_admin_root' || t.role === 'admin') {
+      showToast('Tài khoản Quản Trị Viên không thể bị khóa!');
+      return;
+    }
+    const updated: TeacherProfile = {
+      ...t,
+      status: 'locked',
+    };
+    onUpdateTeacher(updated);
+    fetch('/api/teachers/update-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    }).catch((err) => console.warn('Sync lock teacher warning:', err));
+    showToast(`🔒 Đã tạm khóa tài khoản của ${t.name}.`);
+  };
+
+  // Mở khóa tài khoản giáo viên
+  const handleUnlockTeacher = (t: TeacherProfile) => {
+    const updated: TeacherProfile = {
+      ...t,
+      status: 'approved',
+    };
+    onUpdateTeacher(updated);
+    fetch('/api/teachers/update-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    }).catch((err) => console.warn('Sync unlock teacher warning:', err));
+    showToast(`🔓 Đã mở khóa tài khoản cho giáo viên ${t.name}!`);
   };
 
   // Confirm Reset Password
@@ -208,18 +277,32 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
     setNewPhone('');
   };
 
+  // Phân loại giáo viên theo trạng thái
+  const pendingTeachers = teachers.filter((t) => t.status === 'pending');
+  const approvedTeachers = teachers.filter((t) => (!t.status && t.role === 'admin') || t.status === 'approved');
+  const lockedTeachers = teachers.filter((t) => t.status === 'locked');
+
   // Filter teachers
   const filteredTeachers = teachers.filter((t) => {
     const matchesSubject = selectedSubject === 'all' || t.subject === selectedSubject;
+    let matchesStatus = true;
+    if (selectedStatusFilter === 'pending') {
+      matchesStatus = t.status === 'pending';
+    } else if (selectedStatusFilter === 'approved') {
+      matchesStatus = t.status === 'approved' || (!t.status && t.role === 'admin');
+    } else if (selectedStatusFilter === 'locked') {
+      matchesStatus = t.status === 'locked';
+    }
+
     const q = searchQuery?.toLowerCase().trim();
-    if (!q) return matchesSubject;
+    if (!q) return matchesSubject && matchesStatus;
     const matchesSearch =
       t.name?.toLowerCase().includes(q) ||
       (t.username && t.username?.toLowerCase().includes(q)) ||
       t.email?.toLowerCase().includes(q) ||
       (t.school && t.school?.toLowerCase().includes(q)) ||
       (t.phone && t.phone.includes(q));
-    return matchesSubject && matchesSearch;
+    return matchesSubject && matchesStatus && matchesSearch;
   });
 
   return (
@@ -241,7 +324,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-300 font-medium mt-0.5">
-                Quản lý toàn diện danh sách giáo viên, xem mật khẩu, đặt lại mật khẩu và cập nhật hồ sơ
+                Quản lý toàn diện danh sách giáo viên, phê duyệt giáo viên đăng ký mới, xem mật khẩu và phân quyền
               </p>
             </div>
           </div>
@@ -265,20 +348,90 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
           </div>
         </div>
 
+        {/* Banner cảnh báo giáo viên mới đăng ký chờ duyệt */}
+        {pendingTeachers.length > 0 && (
+          <div className="bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-amber-500/10 border-b border-amber-300/40 px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-black text-sm shrink-0 shadow-sm animate-pulse">
+                {pendingTeachers.length}
+              </div>
+              <div>
+                <div className="text-xs font-black text-amber-950 flex items-center gap-2">
+                  <span>Có {pendingTeachers.length} tài khoản giáo viên mới đăng ký đang chờ phê duyệt</span>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[9px] font-black uppercase">
+                    CẦN XÉT DUYỆT
+                  </span>
+                </div>
+                <div className="text-[11px] text-amber-800">
+                  Thầy/Cô có thể bấm nút <b>"Chấp Nhận"</b> tại từng tài khoản hoặc bấm nút bên phải để duyệt tất cả cùng lúc.
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleApproveAllPending}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Chấp Nhận Tất Cả ({pendingTeachers.length})</span>
+            </button>
+          </div>
+        )}
+
         {/* Stats & Search Filter Bar */}
         <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row gap-3 items-center justify-between shrink-0">
-          {/* Stats Badges */}
-          <div className="flex items-center gap-2 text-xs w-full md:w-auto">
-            <div className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-2xs font-bold text-slate-700 flex items-center gap-2">
-              <span className="text-slate-400">Tổng tài khoản:</span>
-              <span className="font-black text-indigo-600 text-sm">{teachers.length}</span>
-            </div>
-            <div className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-2xs font-bold text-slate-700 flex items-center gap-2">
-              <span className="text-slate-400">Đang chọn:</span>
-              <span className="font-black text-emerald-600 text-sm">
-                {activeTeacher ? activeTeacher.name : 'Chưa đăng nhập'}
-              </span>
-            </div>
+          {/* Status Filter Tabs */}
+          <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-2xl w-full md:w-auto overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setSelectedStatusFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 ${
+                selectedStatusFilter === 'all'
+                  ? 'bg-white text-indigo-700 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Tất cả ({teachers.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedStatusFilter('pending')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                selectedStatusFilter === 'pending'
+                  ? 'bg-amber-500 text-white shadow-2xs'
+                  : 'text-amber-800 hover:text-amber-950 font-bold'
+              }`}
+            >
+              <span>Chờ duyệt</span>
+              {pendingTeachers.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black animate-pulse">
+                  {pendingTeachers.length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedStatusFilter('approved')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 ${
+                selectedStatusFilter === 'approved'
+                  ? 'bg-white text-emerald-700 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Đã duyệt ({approvedTeachers.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedStatusFilter('locked')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 ${
+                selectedStatusFilter === 'locked'
+                  ? 'bg-white text-rose-700 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Đã khóa ({lockedTeachers.length})
+            </button>
           </div>
 
           {/* Search and Subject Filter */}
@@ -371,7 +524,11 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                 <div
                   key={t.id}
                   className={`p-4 rounded-2xl border transition-all ${
-                    isActive
+                    t.status === 'pending'
+                      ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/30 shadow-md'
+                      : t.status === 'locked'
+                      ? 'bg-rose-50/40 border-rose-200 shadow-2xs opacity-90'
+                      : isActive
                       ? 'bg-indigo-50/50 border-indigo-300 ring-2 ring-indigo-400/30 shadow-sm'
                       : isAdmin
                       ? 'bg-amber-50/40 border-amber-200/80 shadow-2xs'
@@ -392,12 +549,24 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                           </span>
                         )}
                         {t.status === 'pending' && !isAdmin && (
-                          <span className="px-2 py-0.5 rounded-md bg-orange-100 text-orange-800 text-[10px] font-black border border-orange-300 animate-pulse">
-                            CHỜ DUYỆT
+                          <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-black border border-amber-400 animate-pulse flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+                            CHỜ PHÊ DUYỆT
+                          </span>
+                        )}
+                        {t.status === 'locked' && !isAdmin && (
+                          <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 text-[10px] font-black border border-rose-300 flex items-center gap-1">
+                            <Lock className="w-3 h-3" />
+                            ĐÃ TẠM KHÓA
+                          </span>
+                        )}
+                        {(!t.status || t.status === 'approved') && !isAdmin && (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-300">
+                            ĐÃ DUYỆT
                           </span>
                         )}
                         {isActive && (
-                          <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-300">
+                          <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 text-[10px] font-black border border-blue-300">
                             Đang Đăng Nhập
                           </span>
                         )}
@@ -511,8 +680,46 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                     })()}
                   </div>
 
-                  {/* Right Actions: Edit, Login As, Delete */}
-                  <div className="flex items-center gap-1.5 shrink-0 self-end md:self-auto">
+                  {/* Right Actions: Phê Duyệt / Mở Khóa / Khóa / Vào Dạy / Sửa / Xóa */}
+                  <div className="flex items-center gap-1.5 shrink-0 self-end md:self-auto flex-wrap">
+                    {/* NÚT CHẤP NHẬN PHÊ DUYỆT (CHỈ HIỂN THỊ KHI CHỜ DUYỆT) */}
+                    {t.status === 'pending' && !isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => handleApproveTeacher(t)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/30 active:scale-95 transition-all cursor-pointer ring-2 ring-emerald-400/40"
+                        title="Chấp nhận giáo viên này tham gia hệ thống"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Chấp Nhận</span>
+                      </button>
+                    )}
+
+                    {/* NÚT MỞ KHÓA CHO TÀI KHOẢN ĐÃ BỊ KHÓA */}
+                    {t.status === 'locked' && !isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => handleUnlockTeacher(t)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                        title="Mở khóa tài khoản cho giáo viên"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Mở Khóa</span>
+                      </button>
+                    )}
+
+                    {/* NÚT TẠM KHÓA TÀI KHOẢN */}
+                    {t.status !== 'locked' && !isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => handleLockTeacher(t)}
+                        className="p-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200 font-bold text-xs transition-all cursor-pointer"
+                        title={t.status === 'pending' ? 'Từ chối / Khóa yêu cầu này' : 'Tạm khóa tài khoản giáo viên này'}
+                      >
+                        <Lock className="w-4 h-4" />
+                      </button>
+                    )}
+
                     {/* Switch/Login As */}
                     {!isActive && (
                       <button
@@ -522,7 +729,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                           showToast(`Đã chuyển sang tài khoản ${t.name}!`);
                           onClose();
                         }}
-                        className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs flex items-center gap-1 transition-all"
+                        className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
                         title="Vào dạy với tài khoản này"
                       >
                         <LogIn className="w-3.5 h-3.5" />
@@ -534,7 +741,7 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                     <button
                       type="button"
                       onClick={() => openEditModal(t)}
-                      className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-xs flex items-center gap-1 transition-all"
+                      className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
                       title="Sửa thông tin tài khoản"
                     >
                       <Edit className="w-4 h-4" />
@@ -779,6 +986,21 @@ export const AdminManagementModal: React.FC<AdminManagementModalProps> = ({
                     className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black uppercase text-slate-700 mb-1">
+                  Trạng Thái Tài Khoản
+                </label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as 'pending' | 'approved' | 'locked')}
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="approved">✓ Đã Phê Duyệt (Kích hoạt dạy)</option>
+                  <option value="pending">⏳ Chờ Phê Duyệt</option>
+                  <option value="locked">🔒 Tạm Khóa Tài Khoản</option>
+                </select>
               </div>
 
               <div className="pt-3 flex items-center gap-2">

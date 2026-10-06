@@ -39,6 +39,7 @@ interface HeaderBarProps {
   activeTeacher: TeacherProfile | null;
   onLogout: () => void;
   onOpenAIConfig?: () => void;
+  pendingTeachersCount?: number;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -59,26 +60,34 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   activeTeacher,
   onLogout,
   onOpenAIConfig,
+  pendingTeachersCount = 0,
 }) => {
   const { isMobile } = useDeviceDetection();
   const [showTeacherMenu, setShowTeacherMenu] = useState<boolean>(false);
   const [showStudentMenu, setShowStudentMenu] = useState<boolean>(false);
   const [showMobileDrawer, setShowMobileDrawer] = useState<boolean>(false);
+  const [showTeacherAccountModal, setShowTeacherAccountModal] = useState<boolean>(false);
 
   const teacherMenuRef = useRef<HTMLDivElement>(null);
   const studentMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (teacherMenuRef.current && !teacherMenuRef.current.contains(e.target as Node)) {
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (teacherMenuRef.current && !teacherMenuRef.current.contains(target)) {
         setShowTeacherMenu(false);
       }
-      if (studentMenuRef.current && !studentMenuRef.current.contains(e.target as Node)) {
+      if (studentMenuRef.current && !studentMenuRef.current.contains(target)) {
         setShowStudentMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
   }, []);
 
   // 8 Main Navigation Tabs - Chuẩn tên gọi ngắn gọn sư phạm, dàn trải 1 dòng duy nhất
@@ -103,14 +112,19 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         <div className="flex items-center gap-1.5 shrink-0">
           {activeTeacher ? (
             <button
-              onClick={() => setShowMobileDrawer(true)}
-              className="flex items-center gap-1.5 p-1 pr-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 transition-all text-left cursor-pointer"
+              type="button"
+              onClick={() => setShowTeacherAccountModal(true)}
+              className="flex items-center gap-1.5 p-1 pr-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 transition-all text-left cursor-pointer active:scale-95"
+              title={`Tài khoản: ${activeTeacher.name} (Bấm để xem thông tin & Đăng xuất)`}
             >
-              <div className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-sm">
+              <div className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-sm shadow-xs">
                 {activeTeacher.avatar || '👨‍🏫'}
               </div>
-              <div className="max-w-[85px] truncate text-[11px] font-black text-slate-200 leading-tight">
-                {activeTeacher.name.split(' ').slice(-2).join(' ')}
+              <div className="flex items-center gap-1">
+                <span className="max-w-[90px] truncate text-[11px] font-black text-slate-200 leading-tight">
+                  {activeTeacher.name.split(' ').slice(-2).join(' ')}
+                </span>
+                <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
               </div>
             </button>
           ) : (
@@ -311,10 +325,17 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                         setShowMobileDrawer(false);
                         onOpenAdmin?.();
                       }}
-                      className="w-full p-2 rounded-xl text-xs font-bold text-amber-400 hover:bg-amber-950/50 flex items-center gap-2 cursor-pointer"
+                      className="w-full p-2 rounded-xl text-xs font-bold text-amber-400 hover:bg-amber-950/50 flex items-center justify-between cursor-pointer"
                     >
-                      <ShieldCheck className="w-4 h-4 text-amber-400" />
-                      <span>Quản trị Admin Hệ thống</span>
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-amber-400" />
+                        <span>Quản trị Admin Hệ thống</span>
+                      </div>
+                      {pendingTeachersCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black animate-pulse">
+                          {pendingTeachersCount}
+                        </span>
+                      )}
                     </button>
                   )}
                   <button
@@ -362,100 +383,263 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             </div>
           </div>
         )}
+
+        {/* MODAL CHI TIẾT TÀI KHOẢN GIÁO VIÊN & ĐĂNG XUẤT CHO MOBILE */}
+        {showTeacherAccountModal && activeTeacher && (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+            <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden text-white flex flex-col p-5 space-y-4 animate-in zoom-in-95 duration-150">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-11 h-11 rounded-xl bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-2xl shadow-xs">
+                    {activeTeacher.avatar || '👨‍🏫'}
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-white">{activeTeacher.name}</h3>
+                    <div className="text-[11px] text-emerald-400 font-medium">
+                      {activeTeacher.subject} • {activeTeacher.school || 'SmartBoard Pro'}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTeacherAccountModal(false)}
+                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Account Info Details */}
+              <div className="bg-slate-800/60 rounded-2xl p-3 border border-slate-700/60 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 font-medium">Trạng thái:</span>
+                  {activeTeacher.role === 'admin' ? (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold text-[10px] border border-amber-500/40">
+                      QUẢN TRỊ VIÊN (ADMIN)
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/40">
+                      GIÁO VIÊN BỘ MÔN
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 font-medium">Tên đăng nhập:</span>
+                  <span className="font-mono font-bold text-indigo-300">{activeTeacher.username || activeTeacher.id}</span>
+                </div>
+                {activeTeacher.email && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-medium">Email:</span>
+                    <span className="text-slate-300 truncate max-w-[180px] font-mono text-[11px]">{activeTeacher.email}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-2 pt-1">
+                {/* NÚT ĐĂNG XUẤT NỔI BẬT NHẤT */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTeacherAccountModal(false);
+                    onLogout();
+                  }}
+                  className="w-full py-3 px-4 rounded-2xl bg-rose-600 hover:bg-rose-700 active:scale-98 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>ĐĂNG XUẤT TÀI KHOẢN</span>
+                </button>
+
+                {activeTeacher.role === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTeacherAccountModal(false);
+                      onOpenAdmin?.();
+                    }}
+                    className="w-full py-2.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-amber-400" />
+                    <span>Quản Trị Admin Hệ Thống</span>
+                    {pendingTeachersCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white text-[10px] font-black animate-pulse">
+                        {pendingTeachersCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTeacherAccountModal(false);
+                    onOpenProfile?.();
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                >
+                  <KeyRound className="w-4 h-4 text-slate-400" />
+                  <span>Xem & Sửa Thông Tin Hồ Sơ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTeacherAccountModal(false);
+                    onOpenTeacherAuth();
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4 text-slate-400" />
+                  <span>Đổi Tài Khoản Giáo Viên</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTeacherAccountModal(false);
+                    onOpenAIConfig?.();
+                  }}
+                  className="w-full py-2 px-3 rounded-xl text-purple-300 hover:bg-purple-950/40 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Cấu hình Gemini AI / API Key</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
     );
   }
 
   // ================= DESKTOP & 75-INCH TV HEADER BAR (ZERO HORIZONTAL SCROLLBAR - SINGLE ROW) =================
   return (
-    <header className="w-full flex items-center justify-between px-3 py-1.5 overflow-hidden select-none bg-slate-900 border-b border-slate-800 text-white z-30 shadow-xs relative">
-      {/* 1. LEFT: Huy hiệu giáo viên siêu gọn (Avatar + Thầy Kiệt + Icon Trường) */}
-      <div className="relative shrink-0" ref={teacherMenuRef}>
+    <header className="w-full flex items-center justify-between px-3 py-1.5 select-none bg-slate-900 border-b border-slate-800 text-white z-50 shadow-xs relative overflow-visible">
+      {/* 1. LEFT: Huy hiệu giáo viên siêu gọn (Avatar + Thầy Kiệt + Icon Trường) + Nút Admin */}
+      <div className="flex items-center gap-1.5 shrink-0">
         {activeTeacher ? (
-          <div>
+          <div className="relative shrink-0" ref={teacherMenuRef}>
             <button
-              onClick={() => setShowTeacherMenu((prev) => !prev)}
-              className="flex items-center gap-1.5 p-1 pr-2 rounded-xl bg-slate-800/90 hover:bg-slate-750 border border-slate-700/80 transition-all text-left shadow-xs cursor-pointer group shrink-0"
-              title={`Tài khoản: ${activeTeacher.name}`}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowTeacherMenu((prev) => !prev);
+              }}
+              className="flex items-center gap-1.5 p-1 pr-2 rounded-xl bg-slate-800/90 hover:bg-slate-750 border border-slate-700/80 transition-all text-left shadow-xs cursor-pointer group shrink-0 active:scale-95"
+              title={`Tài khoản: ${activeTeacher.name} (Bấm để xem thông tin & Đăng xuất)`}
             >
               <div className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-sm shadow-xs group-hover:scale-105 transition-transform">
                 {activeTeacher.avatar || '👨‍🏫'}
               </div>
               <div className="flex items-center gap-1">
-                <span className="font-black text-xs text-slate-200 truncate max-w-[105px]">
+                <span className="font-black text-xs text-slate-200 truncate max-w-[110px]">
                   {activeTeacher.name || 'Thầy Kiệt'}
                 </span>
                 <GraduationCap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               </div>
-              <ChevronDown className="w-3 h-3 text-slate-400 group-hover:text-slate-200 transition-transform shrink-0" />
+              <ChevronDown className={`w-3 h-3 text-slate-400 group-hover:text-slate-200 transition-transform shrink-0 ${showTeacherMenu ? 'rotate-180' : ''}`} />
             </button>
 
-            {/* Dropdown Menu for Teacher options */}
+            {/* Dropdown Menu for Teacher options - Floats directly under teacher button */}
             {showTeacherMenu && (
-              <div className="absolute left-0 top-full mt-2 w-64 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150 text-white">
-                <div className="px-3.5 py-2 border-b border-slate-800">
-                  <div className="font-bold text-xs text-white">{activeTeacher.name}</div>
-                  <div className="text-[11px] text-slate-400 font-mono truncate">{activeTeacher.email || 'GiaoVien@smartboard.edu.vn'}</div>
+              <div className="absolute left-0 top-full mt-2 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150 text-white ring-1 ring-white/10">
+                <div className="px-3.5 py-2.5 border-b border-slate-800 flex items-center justify-between">
+                  <div>
+                    <div className="font-black text-xs text-white flex items-center gap-1.5">
+                      <span>{activeTeacher.name}</span>
+                      {activeTeacher.role === 'admin' && (
+                        <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-300 text-[9px] font-black border border-amber-500/40">
+                          QUẢN TRỊ VIÊN
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono truncate max-w-[210px]">
+                      {activeTeacher.email || 'GiaoVien@smartboard.edu.vn'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowTeacherMenu(false)}
+                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
 
-                {activeTeacher.role === 'admin' && (
+                <div className="p-1.5 space-y-0.5">
+                  {activeTeacher.role === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTeacherMenu(false);
+                        onOpenAdmin?.();
+                      }}
+                      className="w-full px-3 py-2 text-left text-xs font-bold text-amber-400 hover:bg-amber-950/40 rounded-xl flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-amber-400" />
+                        <span>Quản Trị Admin Hệ Thống</span>
+                      </div>
+                      {pendingTeachersCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black animate-pulse">
+                          {pendingTeachersCount} chờ duyệt
+                        </span>
+                      )}
+                    </button>
+                  )}
+
                   <button
+                    type="button"
                     onClick={() => {
                       setShowTeacherMenu(false);
-                      onOpenAdmin?.();
+                      onOpenAIConfig?.();
                     }}
-                    className="w-full px-3.5 py-2 text-left text-xs font-bold text-amber-400 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer"
+                    className="w-full px-3 py-2 text-left text-xs font-bold text-purple-300 hover:bg-purple-950/40 rounded-xl flex items-center gap-2 transition-colors cursor-pointer"
                   >
-                    <ShieldCheck className="w-4 h-4 text-amber-400" />
-                    <span>Quản Trị Admin Hệ Thống</span>
+                    <Sparkles className="w-4 h-4 text-purple-400" />
+                    <span>Cấu hình Gemini AI / API Key</span>
                   </button>
-                )}
 
-                <button
-                  onClick={() => {
-                    setShowTeacherMenu(false);
-                    onOpenAIConfig?.();
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs font-bold text-purple-300 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <Sparkles className="w-4 h-4 text-purple-400" />
-                  <span>Cấu hình Gemini AI / API Key</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTeacherMenu(false);
+                      onOpenProfile?.();
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs font-bold text-slate-200 hover:bg-slate-800 rounded-xl flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <KeyRound className="w-4 h-4 text-slate-400" />
+                    <span>Sửa thông tin & Đổi mật khẩu</span>
+                  </button>
 
-                <button
-                  onClick={() => {
-                    setShowTeacherMenu(false);
-                    onOpenProfile?.();
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs font-bold text-slate-200 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <KeyRound className="w-4 h-4 text-slate-400" />
-                  <span>Sửa thông tin & Đổi mật khẩu</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTeacherMenu(false);
+                      onOpenTeacherAuth();
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs font-bold text-slate-200 hover:bg-slate-800 rounded-xl flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4 text-slate-400" />
+                    <span>Chuyển tài khoản giáo viên</span>
+                  </button>
 
-                <button
-                  onClick={() => {
-                    setShowTeacherMenu(false);
-                    onOpenTeacherAuth();
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs font-bold text-slate-200 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <RefreshCw className="w-4 h-4 text-slate-400" />
-                  <span>Chuyển tài khoản giáo viên</span>
-                </button>
+                  <div className="my-1 border-t border-slate-800" />
 
-                <div className="my-1 border-t border-slate-800" />
-
-                <button
-                  onClick={() => {
-                    setShowTeacherMenu(false);
-                    onLogout();
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs font-bold text-rose-400 hover:bg-rose-950/50 flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4 text-rose-400" />
-                  <span>Đăng xuất tài khoản</span>
-                </button>
+                  {/* NÚT ĐĂNG XUẤT TÀI KHOẢN NỔI BẬT */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTeacherMenu(false);
+                      onLogout();
+                    }}
+                    className="w-full px-3 py-2.5 text-left text-xs font-black text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-xl flex items-center gap-2 transition-all cursor-pointer border border-rose-500/20 hover:border-rose-600 shadow-sm"
+                  >
+                    <LogOut className="w-4 h-4 text-rose-400" />
+                    <span>Đăng xuất tài khoản</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -466,6 +650,37 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           >
             <LogIn className="w-3.5 h-3.5" />
             <span>Đăng Nhập</span>
+          </button>
+        )}
+
+        {/* Quick Admin Button for Instant Access */}
+        {activeTeacher && activeTeacher.role === 'admin' && (
+          <button
+            type="button"
+            onClick={onOpenAdmin}
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-xs font-black transition-all shadow-xs cursor-pointer shrink-0 ml-1 active:scale-95"
+            title="Mở Bảng Quản Trị Admin (Duyệt giáo viên & Quản lý)"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+            <span>Admin</span>
+            {pendingTeachersCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-orange-500 text-white text-[10px] font-black animate-pulse">
+                {pendingTeachersCount}
+              </span>
+            )}
+          </button>
+        )}
+
+        {/* Nút Đăng Xuất Nhanh Trực Tiếp Trên Header */}
+        {activeTeacher && (
+          <button
+            type="button"
+            onClick={onLogout}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-white text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0 ml-1 active:scale-95"
+            title="Đăng xuất khỏi tài khoản này ngay"
+          >
+            <LogOut className="w-3.5 h-3.5 text-rose-400" />
+            <span className="hidden xl:inline">Đăng Xuất</span>
           </button>
         )}
       </div>

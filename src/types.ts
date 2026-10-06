@@ -300,7 +300,7 @@ export interface TeacherProfile {
   phone?: string;
   avatar?: string;
   role?: 'admin' | 'teacher';
-  status?: 'pending' | 'approved';
+  status?: 'pending' | 'approved' | 'locked';
   subject: SubjectType;
   school: string;
   classes: ClassRoom[];

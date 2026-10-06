@@ -89,12 +89,14 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
     );
 
     if (matched) {
-      if (matched.role !== 'admin' && matched.status === 'pending') {
-        setLoginError('Tài khoản của bạn đang chờ phê duyệt. Vui lòng liên hệ quản trị viên.');
-        return;
-      }
       onSelectTeacher(matched);
-      showToast('Đăng nhập thành công!');
+      if (matched.role !== 'admin' && matched.status === 'pending') {
+        showToast('Tài khoản đang chờ Quản trị viên duyệt kích hoạt.', 'error');
+      } else if (matched.role !== 'admin' && matched.status === 'locked') {
+        showToast('Tài khoản đang trong trạng thái tạm khóa.', 'error');
+      } else {
+        showToast('Đăng nhập thành công!');
+      }
       if (onClose) setTimeout(onClose, 600);
     } else {
       setLoginError('Tên đăng nhập hoặc mật khẩu không chính xác.');
@@ -207,8 +209,15 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
 
         <div className="relative z-10 pt-6 mt-6 border-t border-white/10">
           {activeTeacher ? (
-            <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 overflow-hidden">
+            <div className="p-3 rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-between gap-2.5">
+              <div 
+                onClick={() => {
+                  onLogout();
+                  showToast('Đã đăng xuất tài khoản thành công.');
+                }}
+                className="flex items-center gap-2.5 overflow-hidden cursor-pointer hover:opacity-90 transition-opacity"
+                title="Bấm để đăng xuất khỏi tài khoản này"
+              >
                 <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-lg shrink-0">
                   {activeTeacher.avatar || '👨‍🏫'}
                 </div>
@@ -223,10 +232,11 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                   onLogout();
                   showToast('Đã đăng xuất tài khoản thành công.');
                 }}
-                className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-rose-200 border border-rose-400/30 transition-colors"
-                title="Đăng xuất"
+                className="px-2.5 py-1.5 rounded-xl bg-rose-500/25 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-400/40 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 shrink-0"
+                title="Đăng xuất khỏi tài khoản"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Đăng Xuất</span>
               </button>
             </div>
           ) : (

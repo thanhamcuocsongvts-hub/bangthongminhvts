@@ -453,6 +453,16 @@ app.post("/api/teachers/update-profile", (req, res) => {
   });
 });
 
+app.post("/api/teachers/approve", (req, res) => {
+  const { teacherId, status = 'approved' } = req.body;
+  if (!teacherId) return res.status(400).json({ error: "Thiếu mã giáo viên (teacherId)" });
+  const teacher = teachersStore.find((t) => t.id === teacherId);
+  if (!teacher) return res.status(404).json({ error: "Không tìm thấy tài khoản giáo viên" });
+  teacher.status = status;
+  writeJsonFileSync(TEACHERS_FILE, teachersStore);
+  res.json({ success: true, teacher, teachers: teachersStore });
+});
+
 app.delete("/api/teachers/:id", (req, res) => {
   const { id } = req.params;
   if (id === 'teacher_admin_root') {
