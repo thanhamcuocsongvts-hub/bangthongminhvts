@@ -33,57 +33,131 @@ export interface RecognitionResult {
 // Memory cache for sub-20ms repeats
 const instantOcrCache = new Map<string, string>();
 
-/**
- * Fast structural analysis of raw stroke points
- * Detects common numerals, mathematical operations, and simple letters locally in 0ms
- */
-export function analyzeStrokeGeometryLocally(strokes: WhiteboardStroke[]): string | null {
-  if (!strokes || strokes.length === 0) return null;
-
-  const allPoints: StrokePoint[] = [];
-  strokes.forEach((s) => {
-    if (s.points) allPoints.push(...s.points);
-  });
-
-  if (allPoints.length < 3) return null;
-
+function getBoundsOfPoints(points: StrokePoint[]): { minX: number; maxX: number; minY: number; maxY: number } {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const p of allPoints) {
+  for (const p of points) {
     if (p.x < minX) minX = p.x;
     if (p.x > maxX) maxX = p.x;
     if (p.y < minY) minY = p.y;
     if (p.y > maxY) maxY = p.y;
   }
+  return { minX, maxX, minY, maxY };
+}
 
-  const w = maxX - minX;
-  const h = maxY - minY;
-  if (w < 4 || h < 4) return null;
-
-  const aspectRatio = w / Math.max(1, h);
-
-  // If single stroke and nearly a vertical line
-  if (strokes.length === 1 && aspectRatio < 0.28 && h > 20) {
-    return '1';
+function isStraightSegment(points: StrokePoint[]): boolean {
+  if (points.length <= 2) return true;
+  const start = points[0];
+  const end = points[points.length - 1];
+  const directDist = Math.hypot(end.x - start.x, end.y - start.y);
+  if (directDist < 5) return false;
+  let pathDist = 0;
+  for (let i = 1; i < points.length; i++) {
+    pathDist += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
   }
+  return directDist / Math.max(1, pathDist) > 0.88;
+}
 
-  // If single stroke and closed circle/oval
-  if (strokes.length === 1 && aspectRatio >= 0.65 && aspectRatio <= 1.4) {
-    const startPt = strokes[0].points![0];
-    const endPt = strokes[0].points![strokes[0].points!.length - 1];
-    const gap = Math.hypot(startPt.x - endPt.x, startPt.y - endPt.y);
-    if (gap < Math.max(20, (w + h) * 0.25)) {
-      return '0';
-    }
-  }
+/**
+ * Strict structural analysis of raw stroke points.
+ * ONLY returns a symbol if geometric characteristics are mathematically indisputable.
+ * NEVER resets or guesses '=' merely from stroke count or aspect ratio.
+ */
+export function analyzeStrokeGeometryLocally(strokes: WhiteboardStroke[]): string | null {
+  if (!strokes || strokes.length === 0) return null;
 
-  // If two perpendicular lines crossing in center
-  if (strokes.length === 2 && aspectRatio >= 0.7 && aspectRatio <= 1.3) {
-    return '+';
-  }
+  // Handwriting with more than 2 strokes or many points must be read by AI OCR
+  if (strokes.length > 2) return null;
 
-  // If two parallel horizontal lines
-  if (strokes.length === 2 && aspectRatio > 1.2) {
+  const validStrokes = strokes.filter((s) => s.points && s.points.length >= 2);
+  if (validStrokes.length !== strokes.length) return null;
+
+  // Strict check for genuine equals sign '=':
+  // Must be EXACTLY two parallel, horizontal, vertically stacked lines with high straightness
+  if (strokes.length === 2) {
+    const s1 = strokes[0].points!;
+    const s2 = strokes[1].points!;
+
+    // Must each have limited points (not a long cursive word or sentence)
+    if (s1.length > 30 || s2.length > 30) return null;
+
+    const b1 = getBoundsOfPoints(s1);
+    const b2 = getBoundsOfPoints(s2);
+
+    const w1 = b1.maxX - b1.minX;
+    const h1 = b1.maxY - b1.minY;
+    const w2 = b2.maxX - b2.minX;
+    const h2 = b2.maxY - b2.minY;
+
+    // Must be substantial horizontal bars
+    if (w1 < 14 || w2 < 14) return null;
+
+    // Both must be flat: height significantly less than width (flatness ratio < 0.32)
+    if (h1 / w1 > 0.32 || h2 / w2 > 0.32) return null;
+
+    // Endpoints must also be relatively horizontal
+    const p1Start = s1[0];
+    const p1End = s1[s1.length - 1];
+    const p2Start = s2[0];
+    const p2End = s2[s2.length - 1];
+
+    const dy1 = Math.abs(p1End.y - p1Start.y);
+    const dx1 = Math.abs(p1End.x - p1Start.x);
+    const dy2 = Math.abs(p2End.y - p2Start.y);
+    const dx2 = Math.abs(p2End.x - p2Start.x);
+
+    if (dy1 / Math.max(1, dx1) > 0.25 || dy2 / Math.max(1, dx2) > 0.25) return null;
+
+    // Widths must be comparable (within 40%)
+    if (Math.abs(w1 - w2) / Math.max(w1, w2) > 0.40) return null;
+
+    // Must be vertically stacked: one strictly above the other
+    const topStroke = b1.minY < b2.minY ? b1 : b2;
+    const bottomStroke = b1.minY < b2.minY ? b2 : b1;
+
+    const vGap = bottomStroke.minY - topStroke.maxY;
+    const maxW = Math.max(w1, w2);
+
+    // Gap between lines must be clean (positive gap, between 3px and 0.85 * width)
+    if (vGap < 3 || vGap > maxW * 0.85) return null;
+
+    // Horizontal overlap between the two lines must be at least 70%
+    const overlapMinX = Math.max(b1.minX, b2.minX);
+    const overlapMaxX = Math.min(b1.maxX, b2.maxX);
+    const overlapW = overlapMaxX - overlapMinX;
+    if (overlapW / maxW < 0.70) return null;
+
+    // Both lines must be straight (no curved letters or loops)
+    if (!isStraightSegment(s1) || !isStraightSegment(s2)) return null;
+
     return '=';
+  }
+
+  // Strict check for '+' symbol: two intersecting perpendicular lines
+  if (strokes.length === 2) {
+    const s1 = strokes[0].points!;
+    const s2 = strokes[1].points!;
+    if (s1.length > 25 || s2.length > 25) return null;
+
+    const b1 = getBoundsOfPoints(s1);
+    const b2 = getBoundsOfPoints(s2);
+    const w1 = b1.maxX - b1.minX;
+    const h1 = b1.maxY - b1.minY;
+    const w2 = b2.maxX - b2.minX;
+    const h2 = b2.maxY - b2.minY;
+
+    const s1Horizontal = w1 > h1 * 2.2 && h2 > w2 * 2.2;
+    const s2Horizontal = w2 > h2 * 2.2 && h1 > w1 * 2.2;
+
+    if ((s1Horizontal || s2Horizontal) && isStraightSegment(s1) && isStraightSegment(s2)) {
+      const c1x = (b1.minX + b1.maxX) / 2;
+      const c1y = (b1.minY + b1.maxY) / 2;
+      const c2x = (b2.minX + b2.maxX) / 2;
+      const c2y = (b2.minY + b2.maxY) / 2;
+      const dist = Math.hypot(c1x - c2x, c1y - c2y);
+      if (dist < Math.max(12, Math.max(w1, h1, w2, h2) * 0.35)) {
+        return '+';
+      }
+    }
   }
 
   return null;
@@ -239,12 +313,16 @@ export async function recognizeHandwritingOneClick(
   const bounds = { minX, minY, maxX, maxY };
 
   // 2. If cached preview exists and is valid, use immediately (<1ms)
+  // Guard against stale '=' cache: only trust '=' preview if local geometry strictly confirms it
   if (cachedPreview && cachedPreview.trim().length > 0) {
-    const text = cleanHandwritingText(cachedPreview);
-    return buildRecognitionResult(text, bounds, actualWidth, actualHeight);
+    const trimmed = cachedPreview.trim();
+    if (trimmed !== '=' || analyzeStrokeGeometryLocally(strokes) === '=') {
+      const text = cleanHandwritingText(trimmed);
+      return buildRecognitionResult(text, bounds, actualWidth, actualHeight);
+    }
   }
 
-  // 3. Fast local geometry check (numbers 0, 1, +, =)
+  // 3. Strict local geometry check (genuine =, +, etc.)
   const localMatch = analyzeStrokeGeometryLocally(strokes);
   if (localMatch) {
     return buildRecognitionResult(localMatch, bounds, actualWidth, actualHeight);
@@ -283,7 +361,7 @@ async function executeFastOCR(base64Image: string): Promise<string> {
   // Attempt 1: Server proxy route
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
+    const timeout = setTimeout(() => controller.abort(), 7000);
 
     const res = await fetch('/api/ai/recognize-handwriting', {
       method: 'POST',
@@ -311,7 +389,7 @@ async function executeFastOCR(base64Image: string): Promise<string> {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const resp = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-2.5-flash',
         contents: [
           {
             role: 'user',

@@ -81,13 +81,16 @@ import {
 } from '../utils/aiSpeechService';
 import { FloatingSelectionToolbar } from './FloatingSelectionToolbar';
 import { cropCanvasRegion, recognizeHandwritingFast } from '../utils/textRecognitionService';
-import { recognizeHandwritingOneClick } from '../utils/handwritingRecognition';
+import { recognizeHandwritingOneClick, analyzeStrokeGeometryLocally } from '../utils/handwritingRecognition';
+import { directRecognizeHandwriting } from '../utils/geminiClient';
 import {
   filterPointJitter,
   calculateDynamicStrokeWidth,
   simplifyPoints,
   cropStrokesToImage,
   recognizeVietnameseHandwriting,
+  drawSmoothSpline,
+  beautifyStroke,
 } from '../utils/strokeSmoothing';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint, StrokeVertex, ClassRoom, LessonDoc, TeacherProfile, BlackboardBackground } from '../types';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
@@ -100,6 +103,14 @@ import { UniversalDocumentViewer } from './UniversalDocumentViewer';
 import { BlackboardWordTextBox, BlackboardTextBox } from './BlackboardWordTextBox';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
 import { VirtualMathKeyboard } from './VirtualMathKeyboard';
+
+// Hàm tối ưu hóa Pixel Ratio phần cứng theo nguyên tắc 4:
+// Giới hạn devicePixelRatio ở mức 1.5 để giảm tải khối lượng tính toán nội suy pixel trên màn hình 4K của Tivi 75 inch
+export const getOptimalDpr = (): number => {
+  if (typeof window === 'undefined') return 1;
+  const rawDpr = window.devicePixelRatio || 1;
+  return Math.min(Math.max(1, rawDpr), 1.5);
+};
 
 interface BlackboardPage {
   id: string;
@@ -197,6 +208,26 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     replacedStrokes: WhiteboardStroke[];
   } | null>(null);
 
+  // Stable Handwriting Smoothing & Beautification Toggle State
+  const [isHandwritingSmoothingEnabled, setIsHandwritingSmoothingEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('smartboard_handwriting_smoothing');
+      return saved !== null ? saved === 'true' : true;
+    } catch (_) {
+      return true;
+    }
+  });
+
+  const handleToggleHandwritingSmoothing = useCallback(() => {
+    setIsHandwritingSmoothingEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('smartboard_handwriting_smoothing', String(next));
+      } catch (_) {}
+      return next;
+    });
+  }, []);
+
   // Marquee sweep state for Viết Chữ Đẹp (Quét văn bản)
   const [calligraphySweep, setCalligraphySweep] = useState<{
     startX: number;
@@ -220,7 +251,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const [recognizedTextPreview, setRecognizedTextPreview] = useState<string | null>(null);
 
   const calligraphySessionStrokesRef = useRef<string[]>([]);
-  const lastPointerPointRef = useRef<{ x: number; y: number; pressure: number; time: number; width?: number } | null>(null);
+  const lastPointerPointRef = useRef<StrokePoint | null>(null);
   const lastMidPointRef = useRef<{ x: number; y: number } | null>(null);
 
   const isFreehandStrokeTool = useCallback(
@@ -326,6 +357,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const isDrawingRef = useRef<boolean>(false);
   const p0Ref = useRef<{ x: number; y: number } | null>(null);
   const p1Ref = useRef<{ x: number; y: number } | null>(null);
+
+  // Đồng bộ tần số quét phần cứng màn hình Tivi 75 inch (120Hz/V-Sync) qua requestAnimationFrame
+  const drawAnimFrameIdRef = useRef<number | null>(null);
+  const pendingDrawPointsRef = useRef<Array<{ x: number; y: number; pressure: number }>>([]);
 
   // 2-finger touch panning on 75" TV touch screen
   const twoFingerStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -560,9 +595,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     const targetHeight = container.clientHeight;
 
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = targetWidth * dpr;
-    canvas.height = targetHeight * dpr;
+    const dpr = getOptimalDpr();
+    canvas.width = Math.round(targetWidth * dpr);
+    canvas.height = Math.round(targetHeight * dpr);
     canvas.style.width = `${targetWidth}px`;
     canvas.style.height = `${targetHeight}px`;
 
@@ -577,7 +612,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   useEffect(() => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
-    return () => window.removeEventListener('resize', resizeCanvas);
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      if (drawAnimFrameIdRef.current !== null) {
+        cancelAnimationFrame(drawAnimFrameIdRef.current);
+        drawAnimFrameIdRef.current = null;
+      }
+    };
   }, [resizeCanvas]);
 
   // Helper to calculate accurate bounding box and center of any whiteboard stroke
@@ -1123,37 +1164,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     } else {
       // Freehand chalk & calligraphy stroke with ultra-smooth Catmull-Rom / Midpoint Bezier interpolation
       // BẢO ĐẢM HIỂN THỊ TRỌN VẸN MỌI NÉT CHẠM NHẸ, CHẤM PHẤN, DẤU CÂU & LƯỚT NHANH
-      const dotRadius = Math.max(1.8, (tool === 'highlighter' ? size * 2.5 : size) / 2);
-
-      if (points.length === 1) {
-        ctx.beginPath();
-        ctx.arc(points[0].x, points[0].y, dotRadius, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (points.length === 2) {
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        ctx.lineTo(points[1].x, points[1].y);
-        ctx.stroke();
-
-        // Vẽ 2 điểm tròn hai đầu để những nét chạm nhẹ / vẩy bút cực ngắn không bao giờ bị mất
-        ctx.beginPath();
-        ctx.arc(points[0].x, points[0].y, dotRadius, 0, Math.PI * 2);
-        ctx.arc(points[1].x, points[1].y, dotRadius, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 0; i < points.length - 1; i++) {
-          const p0 = points[i];
-          const p1 = points[i + 1];
-          const midX = (p0.x + p1.x) / 2;
-          const midY = (p0.y + p1.y) / 2;
-          ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
-        }
-        const last = points[points.length - 1];
-        ctx.lineTo(last.x, last.y);
-        ctx.stroke();
-      }
+      drawSmoothSpline(ctx, points, color, size, {
+        isHighlighter: tool === 'highlighter',
+        isEraser: tool === 'eraser',
+        isCalligraphy: tool === 'calligraphy',
+      });
     }
 
     ctx.restore();
@@ -1162,7 +1177,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   // Redraw all strokes with transparent background to preserve pedagogical grid lines
   const redrawCanvas = useCallback(
     (ctx: CanvasRenderingContext2D) => {
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = getOptimalDpr();
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, ctx.canvas.width / dpr, ctx.canvas.height / dpr);
@@ -1466,11 +1481,20 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     try {
       // 1-Click Fast Recognition
-      let text = (recognizedTextPreview || '').trim();
-      let oneClickResult = null;
+      let text = '';
 
+      // Chỉ sử dụng recognizedTextPreview nếu hợp lệ và không bị dính lỗi '=' khi quét nhiều nét
+      if (recognizedTextPreview && recognizedTextPreview.trim().length > 0) {
+        const candidate = recognizedTextPreview.trim();
+        const isTrueEqual = analyzeStrokeGeometryLocally(targetStrokes) === '=';
+        if (candidate !== '=' || isTrueEqual) {
+          text = candidate;
+        }
+      }
+
+      let oneClickResult = null;
       if (!text) {
-        oneClickResult = await recognizeHandwritingOneClick(targetStrokes, sweptSelection ? sweptSelection.box : undefined, recognizedTextPreview);
+        oneClickResult = await recognizeHandwritingOneClick(targetStrokes, sweptSelection ? sweptSelection.box : undefined);
         if (oneClickResult && oneClickResult.text) {
           text = oneClickResult.text;
         }
@@ -1481,6 +1505,16 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         const contextHint = `Giáo viên: ${teacherName}, học sinh lớp học Việt Nam, nhận diện tên riêng tiếng Việt, bài giảng môn học Toán/Tiếng Việt/Văn`;
         const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, contextHint);
         text = (recognized || '').trim();
+      }
+
+      // Dự phòng bổ sung: Gọi trực tiếp Vision API nếu endpoint proxy tạm thời trễ
+      if (!text) {
+        try {
+          const directText = await directRecognizeHandwriting(crop.dataUrl);
+          if (directText && directText.trim().length > 0) {
+            text = directText.trim();
+          }
+        } catch (_) {}
       }
       if (text.length > 0) {
         // Tính toán chính xác kích thước và tọa độ thật của nét vẽ lúc giáo viên viết phấn
@@ -1879,6 +1913,88 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedStrokeId, handleNudgeStroke, moveSpeed]);
 
+  // Vẽ trực tiếp đồng thời các điểm chạm phần cứng lên Canvas (Zero-Latency Instant Inking trên TV 75")
+  const drawDirectFreehandSegment = useCallback((coalescedList: { x: number; y: number; pressure: number }[]) => {
+    if (!isDrawingRef.current) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas || coalescedList.length === 0) return;
+    const ctx = ctxRef.current || canvas.getContext('2d', { desynchronized: true });
+    if (!ctx) return;
+
+    const pts = activePointsRef.current;
+    const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
+
+    ctx.save();
+    const dpr = getOptimalDpr();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(-boardScrollX, -boardScrollY);
+
+    // Cấu hình nét vẽ bo tròn tự nhiên
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (activeTool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = '#000000';
+      ctx.fillStyle = '#000000';
+      ctx.lineWidth = strokeSize;
+    } else if (activeTool === 'highlighter') {
+      ctx.strokeStyle = activeColor;
+      ctx.fillStyle = activeColor;
+      ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
+      ctx.lineWidth = strokeSize * 2.5;
+    } else {
+      ctx.strokeStyle = activeColor;
+      ctx.fillStyle = activeColor;
+      ctx.globalAlpha = 0.98;
+      ctx.lineWidth = strokeSize;
+    }
+
+    let prevPt = p1Ref.current || coalescedList[0];
+    let prevMid = lastMidPointRef.current || prevPt;
+    const now = performance.now();
+
+    ctx.beginPath();
+    ctx.moveTo(prevMid.x, prevMid.y);
+
+    for (let i = 0; i < coalescedList.length; i++) {
+      const rawPt = coalescedList[i];
+      const effectivePressure = Math.max(0.25, rawPt.pressure || 0.5);
+      const dynWidth = activeTool === 'calligraphy'
+        ? calculateDynamicStrokeWidth(strokeSize, { x: rawPt.x, y: rawPt.y, pressure: effectivePressure, time: now }, lastPointerPointRef.current || undefined, true)
+        : (activeTool === 'pen'
+          ? calculateDynamicStrokeWidth(strokeSize, { x: rawPt.x, y: rawPt.y, pressure: effectivePressure, time: now }, lastPointerPointRef.current || undefined, false)
+          : strokeSize);
+
+      const ptWithWidth: StrokePoint = {
+        x: rawPt.x,
+        y: rawPt.y,
+        pressure: effectivePressure,
+        time: now,
+        width: dynWidth,
+      };
+      pts.push(ptWithWidth);
+
+      // Đường cong mượt bậc 2 từ prevMid qua prevPt đến midPoint
+      const midPoint = { x: (prevPt.x + rawPt.x) * 0.5, y: (prevPt.y + rawPt.y) * 0.5 };
+      ctx.quadraticCurveTo(prevPt.x, prevPt.y, midPoint.x, midPoint.y);
+
+      prevMid = midPoint;
+      prevPt = rawPt;
+      lastPointerPointRef.current = ptWithWidth;
+    }
+
+    // Nối tức thời từ midPoint đến tọa độ ngòi bút hiện tại: loại bỏ 100% độ trễ trên TV cảm ứng 75"
+    ctx.lineTo(prevPt.x, prevPt.y);
+    ctx.stroke();
+
+    p1Ref.current = prevPt;
+    lastMidPointRef.current = prevMid;
+
+    ctx.restore();
+  }, [activeTool, activeColor, strokeSize, boardScrollX, boardScrollY]);
+
   // Pointer Event Handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     // Chống va chạm thao tác cuộn 2 ngón tay trên màn hình Tivi cảm ứng
@@ -1997,6 +2113,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
 
     isDrawingRef.current = true;
+    if (drawAnimFrameIdRef.current !== null) {
+      cancelAnimationFrame(drawAnimFrameIdRef.current);
+      drawAnimFrameIdRef.current = null;
+    }
+    pendingDrawPointsRef.current = [];
+
     try {
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     } catch (_) {}
@@ -2020,7 +2142,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     const ctx = canvas.getContext('2d');
     if (ctx && isFreehandStrokeTool(activeTool)) {
       ctx.save();
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = getOptimalDpr();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.translate(-boardScrollX, -boardScrollY);
       ctx.lineCap = 'round';
@@ -2201,87 +2323,27 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     if (!ctx) return;
 
     if (isFreehandStrokeTool(activeTool)) {
-      const isLiveFluo = activeColor === '#ccff00' || activeColor === '#ff007f' || activeColor === '#00ffff';
-      ctx.save();
-      const dpr = window.devicePixelRatio || 1;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.translate(-boardScrollX, -boardScrollY);
-
-      // Cấu hình nét vẽ bo tròn tự nhiên
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
-      if (activeTool === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.strokeStyle = '#000000';
-        ctx.fillStyle = '#000000';
-        ctx.lineWidth = strokeSize;
-      } else if (activeTool === 'highlighter') {
-        ctx.strokeStyle = activeColor;
-        ctx.fillStyle = activeColor;
-        ctx.globalAlpha = isLiveFluo ? 0.65 : 0.45;
-        ctx.lineWidth = strokeSize * 2.5;
-      } else {
-        ctx.strokeStyle = activeColor;
-        ctx.fillStyle = activeColor;
-        ctx.globalAlpha = 0.98;
-        ctx.lineWidth = strokeSize;
-      }
-
-      let prevPt = p1Ref.current || { x, y };
-      const now = performance.now();
-
-      ctx.beginPath();
-      ctx.moveTo(prevPt.x, prevPt.y);
-
-      for (let i = 0; i < coalescedList.length; i++) {
-        const rawPt = coalescedList[i];
-        const current = { x: rawPt.x, y: rawPt.y };
-        const midPoint = { x: (prevPt.x + current.x) * 0.5, y: (prevPt.y + current.y) * 0.5 };
-
-        // 1. Nối mượt đường cong bậc hai và bám sát 100% ngòi bút tức thời (Zero Latency trên TV 75 inch)
-        ctx.quadraticCurveTo(prevPt.x, prevPt.y, midPoint.x, midPoint.y);
-        ctx.lineTo(current.x, current.y);
-
-        prevPt = current;
-
-        const effectivePressure = Math.max(0.25, rawPt.pressure || 0.5);
-        const dynWidth = activeTool === 'calligraphy'
-          ? calculateDynamicStrokeWidth(strokeSize, { x: current.x, y: current.y, pressure: effectivePressure, time: now }, lastPointerPointRef.current || undefined, true)
-          : (activeTool === 'pen'
-            ? calculateDynamicStrokeWidth(strokeSize, { x: current.x, y: current.y, pressure: effectivePressure, time: now }, lastPointerPointRef.current || undefined, false)
-            : strokeSize);
-
-        const ptWithWidth = {
-          x: current.x,
-          y: current.y,
-          pressure: effectivePressure,
-          time: now,
-          width: dynWidth,
-        };
-        pts.push(ptWithWidth);
-        lastPointerPointRef.current = ptWithWidth;
-      }
-
-      ctx.stroke();
-      p1Ref.current = prevPt;
-      lastMidPointRef.current = prevPt;
-
-      ctx.restore();
+      // Vẽ đồng thời trực tiếp lên Canvas Context: Đạt độ trễ 0ms trên màn hình Tivi 75 inch
+      drawDirectFreehandSegment(coalescedList);
     } else {
-      // For geometric 2D/3D shapes, preview shape with full redraw
+      // For geometric 2D/3D shapes, preview shape with full redraw using rAF
       pts.push(coalescedList[coalescedList.length - 1]);
-      redrawCanvas(ctx);
-      ctx.save();
-      const dpr = window.devicePixelRatio || 1;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.translate(-boardScrollX, -boardScrollY);
-      renderSingleStroke(ctx, activeTool, pts, activeColor, strokeSize, 0, undefined, undefined, 1, undefined, {
-        customEquation: activeTool === 'func_custom_equation' ? equationInput : undefined,
-        hatchPattern: activeTool === 'shape_curved_trapezoid_area' ? true : undefined,
-        fillColor: (activeTool === 'shape_curved_trapezoid_area' || activeTool === 'shape_solid_revolution_volume') ? 'rgba(56, 189, 248, 0.25)' : undefined,
-      });
-      ctx.restore();
+      if (drawAnimFrameIdRef.current === null) {
+        drawAnimFrameIdRef.current = requestAnimationFrame(() => {
+          drawAnimFrameIdRef.current = null;
+          redrawCanvas(ctx);
+          ctx.save();
+          const dpr = getOptimalDpr();
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.translate(-boardScrollX, -boardScrollY);
+          renderSingleStroke(ctx, activeTool, pts, activeColor, strokeSize, 0, undefined, undefined, 1, undefined, {
+            customEquation: activeTool === 'func_custom_equation' ? equationInput : undefined,
+            hatchPattern: activeTool === 'shape_curved_trapezoid_area' ? true : undefined,
+            fillColor: (activeTool === 'shape_curved_trapezoid_area' || activeTool === 'shape_solid_revolution_volume') ? 'rgba(56, 189, 248, 0.25)' : undefined,
+          });
+          ctx.restore();
+        });
+      }
     }
   };
 
@@ -2689,6 +2751,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     }
 
     if (!isDrawingRef.current) return;
+    if (drawAnimFrameIdRef.current !== null) {
+      cancelAnimationFrame(drawAnimFrameIdRef.current);
+      drawAnimFrameIdRef.current = null;
+    }
+
     isDrawingRef.current = false;
     canvasRectRef.current = null;
 
@@ -2698,7 +2765,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.save();
-        const dpr = window.devicePixelRatio || 1;
+        const dpr = getOptimalDpr();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.translate(-boardScrollX, -boardScrollY);
         ctx.lineCap = 'round';
@@ -2731,10 +2798,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
     if (completedPoints.length > 0) {
       let finalPoints = completedPoints;
-      // High-precision RDP curve smoothing to remove infrared jitter & redundant samples
-      // Chỉ làm mượt RDP khi nét đủ dài (>= 5 điểm) để không làm suy biến nét chạm nhẹ, dấu chấm, dấu câu
+      // High-precision stroke beautification & smoothing to remove infrared jitter and persist stable calligraphy curves
       if (isFreehandStrokeTool(activeTool)) {
-        finalPoints = completedPoints.length >= 5 ? simplifyPoints(completedPoints, 0.65) : completedPoints;
+        finalPoints = isHandwritingSmoothingEnabled
+          ? beautifyStroke(completedPoints, strokeSize, activeTool)
+          : completedPoints.length >= 5
+          ? simplifyPoints(completedPoints, 0.65)
+          : completedPoints;
       }
       if (isFunctionGraphTool(activeTool) && completedPoints.length <= 2) {
         const p0 = completedPoints[0];
@@ -5913,23 +5983,29 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <span className="text-[11px]">Phấn</span>
             </button>
 
-            {/* 2. Chữ Đẹp AI (Quét để chọn văn bản - Không bật hộp thoại) */}
+            {/* 2. Chữ Đẹp AI (Quét để chọn văn bản - Chế độ Chữ Đẹp) */}
             <button
               onClick={() => {
-                handleToolChange('calligraphy');
-                setShowCalligraphyPopover(false);
-                setShowMobileColorSheet(false);
-                setShowMobileShapeSheet(false);
-                setShowMobileMoreSheet(false);
-                setCalligraphyStatusBanner('✨ Chế độ Quét Chữ Đẹp: Kéo quét bao quanh vùng chữ trên bảng để chọn. Kiểu chữ chọn trên thanh công cụ phía trên!');
-                setTimeout(() => setCalligraphyStatusBanner(''), 4500);
+                if (activeTool === 'calligraphy') {
+                  handleToolChange('pen');
+                  setCalligraphyStatusBanner(null);
+                  setSweptSelection(null);
+                } else {
+                  handleToolChange('calligraphy');
+                  setShowCalligraphyPopover(false);
+                  setShowMobileColorSheet(false);
+                  setShowMobileShapeSheet(false);
+                  setShowMobileMoreSheet(false);
+                  setCalligraphyStatusBanner('✨ Chế độ Quét Chữ Đẹp: Kéo quét bao quanh vùng chữ trên bảng để chọn. Kiểu chữ chọn trên thanh công cụ phía trên!');
+                  setTimeout(() => setCalligraphyStatusBanner(''), 4500);
+                }
               }}
               className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 activeTool === 'calligraphy'
                   ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow ring-2 ring-purple-400'
                   : 'text-purple-300 hover:bg-white/10'
               }`}
-              title="Quét để chọn vùng chữ cần chuyển sang chữ đẹp"
+              title={activeTool === 'calligraphy' ? 'Tắt chế độ chữ đẹp (quay về phấn thường)' : 'Bật chế độ chữ đẹp: Quét để chọn vùng chữ cần chuyển sang chữ đẹp'}
             >
               <div className="relative w-4 h-4 flex items-center justify-center">
                 <Feather className="w-3.5 h-3.5 text-purple-200" />
@@ -6101,21 +6177,27 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
             <div className="relative shrink-0 flex items-center">
               <button
                 onClick={() => {
-                  handleToolChange('calligraphy');
-                  setShowCalligraphyPopover(false);
-                  setShowShapePicker(false);
-                  setShowFunctionPicker(false);
-                  setShowColorPopover(false);
-                  setShowSizePopover(false);
-                  setCalligraphyStatusBanner('✨ Chế độ Quét Chữ Đẹp: Kéo quét bao quanh vùng chữ trên bảng để chọn. Kiểu chữ chọn trên thanh công cụ phía trên!');
-                  setTimeout(() => setCalligraphyStatusBanner(''), 4500);
+                  if (activeTool === 'calligraphy') {
+                    handleToolChange('pen');
+                    setCalligraphyStatusBanner(null);
+                    setSweptSelection(null);
+                  } else {
+                    handleToolChange('calligraphy');
+                    setShowCalligraphyPopover(false);
+                    setShowShapePicker(false);
+                    setShowFunctionPicker(false);
+                    setShowColorPopover(false);
+                    setShowSizePopover(false);
+                    setCalligraphyStatusBanner('✨ Chế độ Quét Chữ Đẹp: Kéo quét bao quanh vùng chữ trên bảng để chọn. Kiểu chữ chọn trên thanh công cụ phía trên!');
+                    setTimeout(() => setCalligraphyStatusBanner(''), 4500);
+                  }
                 }}
                 className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 cursor-pointer ${
                   activeTool === 'calligraphy'
                     ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-2 ring-purple-400'
                     : 'hover:bg-white/10 text-slate-300'
                 }`}
-                title="Quét để chọn vùng chữ trên bảng cần chuyển sang chữ đẹp (chọn kiểu chữ trên thanh công cụ phía trên)"
+                title={activeTool === 'calligraphy' ? 'Tắt chế độ chữ đẹp (quay về phấn thường)' : 'Bật chế độ chữ đẹp: Quét để chọn vùng chữ trên bảng cần chuyển sang chữ đẹp'}
               >
                 <div className="relative w-4 h-4 flex items-center justify-center">
                   <Feather className="w-3.5 h-3.5 text-purple-200" />
@@ -6123,6 +6205,23 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 </div>
                 <span className="text-[11px] font-bold">Chữ Đẹp</span>
                 <span className="text-[8px] px-1 py-0.5 bg-amber-400 text-slate-950 font-black rounded-full leading-none">AI</span>
+              </button>
+
+              {/* Calligraphy Popover Settings Trigger */}
+              <button
+                onClick={() => {
+                  setShowCalligraphyPopover((prev) => !prev);
+                  setShowShapePicker(false);
+                  setShowFunctionPicker(false);
+                  setShowColorPopover(false);
+                  setShowSizePopover(false);
+                }}
+                className={`p-1 -ml-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer transition-all ${
+                  showCalligraphyPopover ? 'text-purple-300 bg-white/15' : ''
+                }`}
+                title="Tùy chọn phông chữ đẹp & bật/tắt làm mượt chữ viết"
+              >
+                <ChevronUp className={`w-3.5 h-3.5 transition-transform ${showCalligraphyPopover ? 'rotate-180' : ''}`} />
               </button>
 
               {/* Calligraphy Options Popover */}
@@ -6138,10 +6237,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                       </div>
                       <div>
                         <div className="text-xs font-bold flex items-center gap-1.5 text-white">
-                          Viết Chữ Đẹp
+                          Viết Chữ Đẹp & Làm Mượt
                           <span className="text-[9px] px-1.5 py-0.5 bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 font-black rounded-md">AI OCR</span>
                         </div>
-                        <div className="text-[10px] text-slate-400">Viết tự do rồi ứng dụng tự động biến thành font chữ đẹp</div>
+                        <div className="text-[10px] text-slate-400">Tự động làm mượt nét phấn & chuyển font chữ đẹp</div>
                       </div>
                     </div>
                     <button
@@ -6149,6 +6248,33 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                       className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Stable Handwriting Smoothing Toggle */}
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-purple-500/15 border border-purple-400/30 mb-3">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        Làm Mượt Nét Viết Tay
+                      </span>
+                      <span className="text-[10px] text-purple-200">
+                        {isHandwritingSmoothingEnabled ? 'Khử rung TV, nét thanh nét đậm' : 'Nét vẽ thô nguyên bản'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleHandwritingSmoothing}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        isHandwritingSmoothingEnabled ? 'bg-emerald-500' : 'bg-slate-700'
+                      }`}
+                      title="Bật/Tắt thuật toán làm mượt chữ viết tay"
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                          isHandwritingSmoothingEnabled ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
                     </button>
                   </div>
 

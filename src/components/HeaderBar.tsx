@@ -670,19 +670,6 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             )}
           </button>
         )}
-
-        {/* Nút Đăng Xuất Nhanh Trực Tiếp Trên Header */}
-        {activeTeacher && (
-          <button
-            type="button"
-            onClick={onLogout}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-white text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0 ml-1 active:scale-95"
-            title="Đăng xuất khỏi tài khoản này ngay"
-          >
-            <LogOut className="w-3.5 h-3.5 text-rose-400" />
-            <span className="hidden xl:inline">Đăng Xuất</span>
-          </button>
-        )}
       </div>
 
       {/* 2. CENTER: DÀN TRỰC TIẾP TRÊN 1 HÀNG DUY NHẤT (flex-nowrap, justify-center, BỎ HOÀN TOÀN THANH TRƯỢT NGANG) */}

@@ -144,7 +144,7 @@ function perpendicularDistance(point: StrokePoint, lineStart: StrokePoint, lineE
 
 /**
  * Render an ultra-smooth spline path onto a 2D canvas context.
- * Uses mid-point quadratic/cubic bezier curves with round caps.
+ * Uses mid-point quadratic bezier curves with round caps and authentic calligraphic dynamics.
  */
 export function drawSmoothSpline(
   ctx: CanvasRenderingContext2D,
@@ -184,27 +184,77 @@ export function drawSmoothSpline(
   if (points.length === 1) {
     // Single touch/click dot
     const p = points[0];
-    const r = (options?.isHighlighter ? baseSize * 2.5 : baseSize) / 2;
+    const r = (options?.isHighlighter ? baseSize * 2.5 : (p.width || baseSize)) / 2;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, Math.max(1.8, r), 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
     return;
   }
 
   if (points.length === 2) {
-    const midX = (points[0].x + points[1].x) / 2;
-    const midY = (points[0].y + points[1].y) / 2;
+    const p0 = points[0];
+    const p1 = points[1];
+    const w = p1.width || p0.width || baseSize;
+    ctx.lineWidth = options?.isHighlighter ? baseSize * 2.5 : w;
     ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    ctx.quadraticCurveTo(points[0].x, points[0].y, midX, midY);
-    ctx.quadraticCurveTo(points[1].x, points[1].y, points[1].x, points[1].y);
+    ctx.moveTo(p0.x, p0.y);
+    ctx.lineTo(p1.x, p1.y);
     ctx.stroke();
+
+    // Round caps
+    const r = Math.max(1.5, (ctx.lineWidth) / 2);
+    ctx.beginPath();
+    ctx.arc(p0.x, p0.y, r, 0, Math.PI * 2);
+    ctx.arc(p1.x, p1.y, r, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.restore();
     return;
   }
 
-  // Smooth continuous midpoint bezier curve
+  const hasVariableWidth =
+    !options?.isEraser &&
+    (options?.isCalligraphy || points.some((p) => p.width && Math.abs(p.width - baseSize) > 0.35));
+
+  // Variable width calligraphic rendering
+  if (hasVariableWidth && points.length >= 3) {
+    const n = points.length;
+    for (let i = 0; i < n - 1; i++) {
+      const pCurr = points[i];
+      const pNext = points[i + 1];
+
+      const prevMid =
+        i === 0
+          ? { x: pCurr.x, y: pCurr.y }
+          : { x: (points[i - 1].x + pCurr.x) / 2, y: (points[i - 1].y + pCurr.y) / 2 };
+
+      const nextMid =
+        i === n - 2
+          ? { x: pNext.x, y: pNext.y }
+          : { x: (pCurr.x + pNext.x) / 2, y: (pCurr.y + pNext.y) / 2 };
+
+      // Gentle calligraphic taper at stroke start and finish
+      let taper = 1.0;
+      if (i === 0) taper = 0.78;
+      else if (i === 1) taper = 0.90;
+      else if (i === n - 3) taper = 0.90;
+      else if (i === n - 2) taper = 0.72;
+
+      const segWidth = Math.max(1.8, (pNext.width || pCurr.width || baseSize) * taper);
+
+      ctx.beginPath();
+      ctx.lineWidth = segWidth;
+      ctx.moveTo(prevMid.x, prevMid.y);
+      ctx.quadraticCurveTo(pCurr.x, pCurr.y, nextMid.x, nextMid.y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+    return;
+  }
+
+  // Smooth continuous midpoint bezier curve for uniform width
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
 
@@ -220,6 +270,107 @@ export function drawSmoothSpline(
   ctx.stroke();
 
   ctx.restore();
+}
+
+/**
+ * Stable, high-precision handwriting beautification & smoothing pipeline
+ * 1. Filters infrared / touch sensor jitter (adaptive low-pass filter)
+ * 2. Simplifies redundant collinear points using RDP (retaining short strokes/Vietnamese accents)
+ * 3. Smooths trajectory using Catmull-Rom midpoint interpolation
+ * 4. Computes and persists natural dynamic width for each point
+ * This ensures strokes look identical in live drawing and upon redraw/persistence.
+ */
+export function beautifyStroke(
+  points: StrokePoint[],
+  baseSize: number,
+  tool: 'pen' | 'calligraphy' | 'highlighter' | 'eraser' | string = 'pen'
+): StrokePoint[] {
+  if (!points || points.length === 0) return [];
+  if (points.length <= 2) {
+    return points.map((p) => ({
+      ...p,
+      width: p.width || Math.max(1.8, baseSize),
+    }));
+  }
+
+  const isCalligraphy = tool === 'calligraphy';
+
+  // 1. Anti-jitter smoothing pass
+  const jitterFiltered: StrokePoint[] = [];
+  jitterFiltered.push({ ...points[0], width: points[0].width || baseSize });
+
+  for (let i = 1; i < points.length; i++) {
+    const filtered = filterPointJitter(points[i], jitterFiltered[i - 1]);
+    const dynWidth = calculateDynamicStrokeWidth(
+      baseSize,
+      filtered,
+      jitterFiltered[i - 1],
+      isCalligraphy
+    );
+    jitterFiltered.push({
+      ...filtered,
+      width: dynWidth,
+    });
+  }
+
+  // 2. RDP curve simplification: remove noise while protecting accents
+  const simplified = simplifyPoints(jitterFiltered, 0.60);
+  if (simplified.length < 3) return simplified;
+
+  // 3. Catmull-Rom midpoint smoothing for organic ink flow
+  const smoothed: StrokePoint[] = [];
+  smoothed.push(simplified[0]);
+
+  for (let i = 0; i < simplified.length - 1; i++) {
+    const p0 = i > 0 ? simplified[i - 1] : simplified[i];
+    const p1 = simplified[i];
+    const p2 = simplified[i + 1];
+    const p3 = i < simplified.length - 2 ? simplified[i + 2] : p2;
+
+    const steps = isCalligraphy ? 3 : 2;
+    for (let t = 1; t <= steps; t++) {
+      const u = t / steps;
+      const u2 = u * u;
+      const u3 = u2 * u;
+
+      // Catmull-Rom formula with tension 0.5
+      const f1 = -0.5 * u3 + u2 - 0.5 * u;
+      const f2 = 1.5 * u3 - 2.5 * u2 + 1.0;
+      const f3 = -1.5 * u3 + 2.0 * u2 + 0.5 * u;
+      const f4 = 0.5 * u3 - 0.5 * u2;
+
+      const x = p0.x * f1 + p1.x * f2 + p2.x * f3 + p3.x * f4;
+      const y = p0.y * f1 + p1.y * f2 + p2.y * f3 + p3.y * f4;
+
+      const interpolatedPressure = (p1.pressure || 0.5) * (1 - u) + (p2.pressure || 0.5) * u;
+      const interpolatedTime = (p1.time || 0) * (1 - u) + (p2.time || 0) * u;
+      const prevPt = smoothed[smoothed.length - 1];
+
+      const w = calculateDynamicStrokeWidth(
+        baseSize,
+        { x, y, pressure: interpolatedPressure, time: interpolatedTime },
+        prevPt,
+        isCalligraphy
+      );
+
+      smoothed.push({
+        x: Math.round(x * 10) / 10,
+        y: Math.round(y * 10) / 10,
+        pressure: Math.round(interpolatedPressure * 100) / 100,
+        time: Math.round(interpolatedTime),
+        width: Math.round(w * 10) / 10,
+      });
+    }
+  }
+
+  // Preserve final endpoint
+  const lastRaw = simplified[simplified.length - 1];
+  smoothed[smoothed.length - 1] = {
+    ...lastRaw,
+    width: smoothed[smoothed.length - 1]?.width || lastRaw.width || baseSize,
+  };
+
+  return smoothed;
 }
 
 /**
@@ -299,14 +450,28 @@ export function cropStrokesToImage(
 
   try {
     // 1. Tạo OffscreenCanvas ẩn kích thước bám sát nét chữ + padding an toàn
-    const pad = Math.max(24, padding);
+    const pad = Math.max(20, padding);
     const rawW = strokeW + pad * 2;
     const rawH = strokeH + pad * 2;
 
-    // Chuẩn hóa độ phân giải tối ưu cho OCR nhận diện chữ viết tay (360px - 800px)
-    const targetW = Math.max(360, Math.min(800, rawW * 1.5));
-    const scale = targetW / rawW;
-    const targetH = Math.max(140, Math.min(600, Math.round(rawH * scale)));
+    // Chuẩn hóa độ phân giải tối ưu cho OCR nhận diện chữ viết tay: bảo toàn 100% tỷ lệ khung hình không bị cắt mép
+    const maxDim = 800;
+    const minDim = 220;
+    const maxRaw = Math.max(rawW, rawH);
+    const minRaw = Math.min(rawW, rawH);
+
+    let scale = 1.0;
+    if (maxRaw > maxDim) {
+      scale = maxDim / maxRaw;
+    } else if (minRaw < minDim) {
+      scale = Math.min(2.5, minDim / Math.max(minRaw, 1));
+      if (maxRaw * scale > maxDim) {
+        scale = maxDim / maxRaw;
+      }
+    }
+
+    const targetW = Math.max(120, Math.round(rawW * scale));
+    const targetH = Math.max(60, Math.round(rawH * scale));
 
     let offscreen: HTMLCanvasElement;
     if (typeof document !== 'undefined') {
@@ -317,7 +482,7 @@ export function cropStrokesToImage(
       offscreen = new (globalThis as any).OffscreenCanvas(targetW, targetH);
     }
 
-    const offCtx = offscreen.getContext('2d', { alpha: false });
+    const offCtx = offscreen.getContext('2d');
     if (!offCtx) return null;
 
     // BẮT BUỘC 1: Nền TRẮNG (#FFFFFF) tuyệt đối 100%
@@ -332,7 +497,7 @@ export function cropStrokesToImage(
     offCtx.lineJoin = 'round';
     offCtx.strokeStyle = '#000000';
     offCtx.fillStyle = '#000000';
-    offCtx.lineWidth = 5.0; // Nét mực đậm đà giúp AI nhận diện chữ xấu cực kỳ dễ dàng
+    offCtx.lineWidth = Math.max(3.5, 4.8 / Math.max(0.6, scale)); // Nét mực đậm đà tỷ lệ chuẩn giúp AI nhận diện cực kỳ chính xác
 
     for (const segment of strokeSegments) {
       if (segment.length === 1) {

@@ -174,10 +174,12 @@ async function generateWithGemini(ai: any, params: any) {
 // Ultra-low latency vision caller specifically for live classroom handwriting recognition
 async function generateFastVisionWithGemini(ai: any, params: any) {
   const modelsToTry = [
-    "gemini-3.8-flash",      // Multimodal primary model
-    "gemini-flash-latest",   // Fast fallback
-    "gemini-3.1-flash-lite", // Fast lite fallback
-    "gemini-3.1-pro-preview", // High-intelligence fallback
+    "gemini-2.5-flash",       // Ultra-fast official multimodal vision
+    "gemini-2.0-flash",       // Fast fallback
+    "gemini-1.5-flash",       // Stable legacy fallback
+    "gemini-3.8-flash",       // Developer platform model
+    "gemini-flash-latest",    // Alias fallback
+    "gemini-3.1-flash-lite",  // Fast lite fallback
   ];
   let lastError: any = null;
 
@@ -185,7 +187,7 @@ async function generateFastVisionWithGemini(ai: any, params: any) {
     for (const model of modelsToTry) {
       try {
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Timeout after 8s for ${model}`)), 8000)
+          setTimeout(() => reject(new Error(`Timeout after 4.5s for ${model}`)), 4500)
         );
         const callPromise = ai.models.generateContent({
           ...params,
@@ -197,12 +199,12 @@ async function generateFastVisionWithGemini(ai: any, params: any) {
         const msg = err?.message || String(err);
         console.warn(`[AI Notice] Fast vision model ${model} (attempt ${attempt + 1}) unavailable: ${msg.slice(0, 90)}, trying next candidate...`);
         if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("429")) {
-          await new Promise((r) => setTimeout(r, 350));
+          await new Promise((r) => setTimeout(r, 200));
         }
       }
     }
     if (attempt === 0) {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 300));
     }
   }
   throw lastError;

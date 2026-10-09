@@ -118,7 +118,7 @@ export function cropCanvasRegion(
       offscreen = new (globalThis as any).OffscreenCanvas(targetW, targetH);
     }
 
-    const ctx = offscreen.getContext('2d', { alpha: false });
+    const ctx = offscreen.getContext('2d');
     if (!ctx) return null;
 
     // 1. Nền trắng tinh (#FFFFFF)
@@ -218,12 +218,13 @@ export async function recognizeHandwritingFast(
   const mimeMatch = imageDataUrl.match(/^data:(image\/\w+);base64,/);
   const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
 
-  const fastPrompt = 'Chỉ đọc các chữ/số/công thức có trong ảnh, trả về text thuần tiếng Việt, không giải thích';
+  const fastPrompt =
+    'Chỉ đọc chính xác chữ/số/ký tự/công thức có trong ảnh nét vẽ bảng. Trả về đúng ký tự hoặc từ ngữ nhận diện (ví dụ: "C", "A", "Toán", "12"). TUYỆT ĐỐI KHÔNG xuất cú pháp ánh xạ như "->", "=>", không giải thích, không bọc nháy kép.';
 
-  // 1. Thử gửi server endpoint với timeout ngắn 4s
+  // 1. Thử gửi server endpoint với timeout 6s
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     const res = await fetch('/api/ai/recognize-handwriting', {
       method: 'POST',
@@ -257,7 +258,7 @@ export async function recognizeHandwritingFast(
     if (apiKey) {
       const ai = new GoogleGenAI({ apiKey });
       const resp = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-2.5-flash',
         contents: [
           {
             role: 'user',
@@ -294,13 +295,31 @@ export async function recognizeHandwritingFast(
 }
 
 /**
- * Làm sạch văn bản OCR trả về (bỏ dấu ngoặc kép, markdown thừa)
+ * Làm sạch văn bản OCR trả về (loại bỏ markdown, dấu ngoặc kép, và cú pháp giải thích ánh xạ như `\` -> 'C')
  */
-function cleanOcrResult(raw: string): string {
+export function cleanOcrResult(raw: string): string {
   if (!raw) return '';
   let s = raw.trim();
-  s = s.replace(/^```[a-z]*\s*/i, '').replace(/```$/g, '');
+
+  // 1. Gỡ bỏ khối mã markdown ```...```
+  s = s.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/g, '');
+
+  // 2. Nếu AI xuất cú pháp giải thích ánh xạ như: `\` -> 'C' hoặc a -> b hoặc nét -> "C"
+  // Lấy chính xác ký tự đích ở phía sau mũi tên
+  const arrowMatch = s.match(/(?:->|=>|→|thành|đọc là)\s*['"`]?([^'"`\n]+)['"`]?/i);
+  if (arrowMatch && arrowMatch[1] && arrowMatch[1].trim()) {
+    s = arrowMatch[1].trim();
+  } else if (s.includes('->')) {
+    const parts = s.split('->');
+    if (parts.length > 1 && parts[parts.length - 1].trim()) {
+      s = parts[parts.length - 1].trim();
+    }
+  }
+
+  // 3. Gỡ bỏ dấu nháy đơn, nháy kép, dấu huyền/backtick lạc bọc ngoài ký tự đơn
+  s = s.replace(/^[`\\'"]+/, '').replace(/[`\\'"]+$/, '');
   s = s.replace(/^["'“”«»]/, '').replace(/["'“”«»]$/, '');
   s = s.replace(/\s+/g, ' ').trim();
+
   return s;
 }

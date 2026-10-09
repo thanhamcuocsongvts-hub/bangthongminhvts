@@ -39,9 +39,11 @@ import {
   ArrowRight,
   Move,
   Sliders,
+  Feather,
 } from 'lucide-react';
 import { WhiteboardStroke, WhiteboardTool, StrokePoint } from '../types';
 import { isFunctionGraphTool, drawFunctionGraph, getGraphBounds } from '../utils/mathGraphRenderer';
+import { beautifyStroke, drawSmoothSpline } from '../utils/strokeSmoothing';
 
 interface TouchWhiteboardProps {
   id?: string;
@@ -835,84 +837,12 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
         ctx.fill();
         ctx.restore();
       } else {
-        // Professional Calligraphy Bezier Spline
-        // For 'pen' & 'calligraphy': render segments with smooth calligraphic tapering at start/end and pressure responsiveness
-        if (tool === 'pen' || tool === 'calligraphy') {
-          const n = points.length;
-          for (let i = 1; i < n - 1; i++) {
-            const pPrev = points[i - 1];
-            const pCurr = points[i];
-            const pNext = points[i + 1];
-
-            const mid1X = (pPrev.x + pCurr.x) / 2;
-            const mid1Y = (pPrev.y + pCurr.y) / 2;
-            const mid2X = (pCurr.x + pNext.x) / 2;
-            const mid2Y = (pCurr.y + pNext.y) / 2;
-
-            // Calligraphic weight taper at stroke ends
-            let taper = 1.0;
-            if (i === 1) taper = 0.70;
-            else if (i === 2) taper = 0.88;
-            else if (i === n - 3) taper = 0.88;
-            else if (i === n - 2) taper = 0.60;
-
-            const { width: dynW, alpha: dynA } = calculatePressureDynamics(size * taper, pCurr.pressure || DEFAULT_POINTER_PRESSURE, tool);
-
-            ctx.save();
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.globalAlpha = dynA;
-            ctx.lineWidth = dynW;
-
-            ctx.beginPath();
-            ctx.moveTo(mid1X, mid1Y);
-            ctx.quadraticCurveTo(pCurr.x, pCurr.y, mid2X, mid2Y);
-            ctx.stroke();
-            ctx.restore();
-          }
-
-          // Smooth connect to endpoints
-          const firstMid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-          const p0Pressure = points[0].pressure || DEFAULT_POINTER_PRESSURE;
-          const { width: wStart, alpha: aStart } = calculatePressureDynamics(size * 0.60, p0Pressure, tool);
-          ctx.save();
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.globalAlpha = aStart;
-          ctx.lineWidth = wStart;
-          ctx.beginPath();
-          ctx.moveTo(points[0].x, points[0].y);
-          ctx.lineTo(firstMid.x, firstMid.y);
-          ctx.stroke();
-          ctx.restore();
-
-          const lastMid = { x: (points[n - 2].x + points[n - 1].x) / 2, y: (points[n - 2].y + points[n - 1].y) / 2 };
-          const pEndPressure = points[n - 1].pressure || DEFAULT_POINTER_PRESSURE;
-          const { width: wEnd, alpha: aEnd } = calculatePressureDynamics(size * 0.55, pEndPressure, tool);
-          ctx.save();
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.globalAlpha = aEnd;
-          ctx.lineWidth = wEnd;
-          ctx.beginPath();
-          ctx.moveTo(lastMid.x, lastMid.y);
-          ctx.lineTo(points[n - 1].x, points[n - 1].y);
-          ctx.stroke();
-          ctx.restore();
-        } else {
-          // Highlighter or Eraser with continuous smooth Bezier curve
-          ctx.beginPath();
-          ctx.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i < points.length - 1; i++) {
-            const xc = (points[i].x + points[i + 1].x) / 2;
-            const yc = (points[i].y + points[i + 1].y) / 2;
-            ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-          }
-          const last = points[points.length - 1];
-          const prev = points[points.length - 2];
-          ctx.quadraticCurveTo(prev.x, prev.y, last.x, last.y);
-          ctx.stroke();
-        }
+        // High-Precision Calligraphy & Midpoint Bezier Spline Renderer
+        drawSmoothSpline(ctx, points, color, size, {
+          isHighlighter: tool === 'highlighter',
+          isEraser: tool === 'eraser',
+          isCalligraphy: tool === 'calligraphy',
+        });
       }
     }
 
@@ -1349,10 +1279,14 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
       return;
     }
 
+    const finalPoints = ['pen', 'calligraphy', 'highlighter', 'eraser'].includes(activeTool)
+      ? beautifyStroke(currentPointsRef.current, strokeSize, activeTool)
+      : currentPointsRef.current;
+
     const newStroke: WhiteboardStroke = {
       id: 'stroke_' + Date.now(),
       tool: activeTool,
-      points: currentPointsRef.current,
+      points: finalPoints,
       color: activeColor,
       size: strokeSize,
       opacity: activeTool === 'highlighter' ? 0.45 : 1,
@@ -2150,6 +2084,24 @@ export const TouchWhiteboard: React.FC<TouchWhiteboardProps> = ({
                   <PenLine className="w-2.5 h-2.5 absolute -top-0.5 -right-0.5 text-amber-300" />
                 </div>
                 <span className="text-[11px] font-bold">Phấn</span>
+              </button>
+
+              {/* 2b. Viết Chữ Đẹp / Calligraphy */}
+              <button
+                id="touch-tool-calligraphy-btn"
+                onClick={() => handleToolChange(activeTool === 'calligraphy' ? 'pen' : 'calligraphy')}
+                className={`p-2 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                  activeTool === 'calligraphy'
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-2 ring-purple-400'
+                    : 'hover:bg-white/10 text-slate-300'
+                }`}
+                title={activeTool === 'calligraphy' ? 'Tắt chế độ chữ đẹp (quay về phấn)' : 'Bút chữ đẹp nét thanh nét đậm thư pháp (Calligraphy)'}
+              >
+                <div className="relative w-4 h-4 flex items-center justify-center">
+                  <Feather className="w-3.5 h-3.5 text-purple-200" />
+                  <Sparkles className="w-2.5 h-2.5 absolute -top-1 -right-1 text-amber-300 animate-pulse" />
+                </div>
+                <span className="text-[11px] font-bold">Chữ Đẹp</span>
               </button>
 
               {/* 3. Bút Dạ Quang */}
