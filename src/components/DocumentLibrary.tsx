@@ -171,9 +171,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     if (!files || files.length === 0) return;
     const file = files[0];
 
-    // File size safety check: Allow up to 100MB
-    if (file.size > 100 * 1024 * 1024) {
-      setErrorMessage('Tệp quá lớn (> 100MB). Vui lòng chọn tệp nhỏ hơn để đảm bảo tốc độ.');
+    // File size safety check: Support high capacity up to 250MB with fast streaming
+    if (file.size > 250 * 1024 * 1024) {
+      setErrorMessage('Tệp quá lớn (> 250MB). Vui lòng chọn tệp dưới 250MB để đảm bảo hiệu suất truyền tải.');
       return;
     }
 

@@ -1439,7 +1439,36 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return;
     }
 
-    const targetStrokes = currPage.strokes.filter((s) => strokeIds.includes(s.id));
+    // Tự động gom thêm toàn bộ nét phụ, chữ cái liền kề cùng từ hoặc cùng dòng (không để sót nét như "Tuấn Ki" thiếu "ệt")
+    let targetStrokes = currPage.strokes.filter((s) => strokeIds.includes(s.id));
+    if (targetStrokes.length > 0) {
+      const clusterIds = new Set(targetStrokes.map((s) => s.id));
+      let added = true;
+      let rounds = 0;
+      while (added && rounds < 6) {
+        added = false;
+        rounds++;
+        for (const s of currPage.strokes) {
+          if (clusterIds.has(s.id)) continue;
+          const sBounds = getStrokeBounds(s);
+          if (!sBounds) continue;
+          const isNear = targetStrokes.some((c) => {
+            const cb = getStrokeBounds(c);
+            if (!cb) return false;
+            const dx = Math.max(0, Math.max(sBounds.minX - cb.maxX, cb.minX - sBounds.maxX));
+            const dy = Math.max(0, Math.max(sBounds.minY - cb.maxY, cb.minY - sBounds.maxY));
+            return (dy < 65 && dx < 120) || (dy < 80 && dx < 70);
+          });
+          if (isNear) {
+            targetStrokes.push(s);
+            clusterIds.add(s.id);
+            added = true;
+          }
+        }
+      }
+      strokeIds = targetStrokes.map((s) => s.id);
+    }
+
     if (targetStrokes.length === 0) {
       setCalligraphyStatusBanner('💡 Không tìm thấy nét vẽ nào trong vùng đã quét.');
       setTimeout(() => setCalligraphyStatusBanner(null), 3000);
@@ -1480,34 +1509,71 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     setCalligraphyStatusBanner('⚡ Đang chuyển thành chữ đẹp 1-click...');
 
     try {
-      // 1-Click Fast Recognition
+      // 1-Click Fast & Complete Recognition
       let text = '';
 
-      // Chỉ sử dụng recognizedTextPreview nếu hợp lệ và không bị dính lỗi '=' khi quét nhiều nét
-      if (recognizedTextPreview && recognizedTextPreview.trim().length > 0) {
-        const candidate = recognizedTextPreview.trim();
-        const isTrueEqual = analyzeStrokeGeometryLocally(targetStrokes) === '=';
-        if (candidate !== '=' || isTrueEqual) {
-          text = candidate;
-        }
+      // 1. Kiểm tra hình học cục bộ cho các ký hiệu đơn giản (=, +, -)
+      const localEqual = analyzeStrokeGeometryLocally(targetStrokes);
+      if (localEqual) {
+        text = localEqual;
       }
 
-      let oneClickResult = null;
-      if (!text) {
-        oneClickResult = await recognizeHandwritingOneClick(targetStrokes, sweptSelection ? sweptSelection.box : undefined);
-        if (oneClickResult && oneClickResult.text) {
-          text = oneClickResult.text;
-        }
-      }
-
+      // 2. Nhận diện chữ viết tay toàn diện: Không bao giờ tin tưởng preview nếu preview bị thiếu chữ/nuốt chữ
       if (!text) {
         const teacherName = activeTeacher?.name || '';
-        const contextHint = `Giáo viên: ${teacherName}, học sinh lớp học Việt Nam, nhận diện tên riêng tiếng Việt, bài giảng môn học Toán/Tiếng Việt/Văn`;
-        const recognized = await recognizeVietnameseHandwriting(crop.dataUrl, contextHint);
-        text = (recognized || '').trim();
+        const contextHint = `Lớp học Việt Nam, tên riêng tiếng Việt (ví dụ: Tuấn Kiệt, Nguyễn Văn A, Bảo Nam...), từ ngữ bài giảng. Bắt buộc đọc đầy đủ tất cả các từ, không được bỏ sót bất kỳ từ nào hay âm tiết nào.`;
+
+        // Khởi động nhận diện độ phân giải cao ngay lập tức trên ảnh trích xuất đầy đủ nét (crop.dataUrl)
+        const fullRecognitionPromise = recognizeVietnameseHandwriting(crop.dataUrl, contextHint);
+
+        const preview = (recognizedTextPreview || '').trim();
+        const previewWords = preview ? preview.split(/\s+/).filter(Boolean) : [];
+        const strokeW = crop.actualBounds?.width || crop.bounds.width;
+
+        // Nếu preview quá ngắn so với kích thước nét vẽ thực tế, không dùng preview vội
+        const isPreviewSuspiciouslyShort = preview.length > 0 && (
+          (strokeW > 140 && previewWords.length < 2) ||
+          (targetStrokes.length >= 6 && previewWords.length < 2) ||
+          preview.endsWith(' Ki') || preview.endsWith(' Tu') || preview.endsWith(' Ng') || preview.endsWith(' Th') ||
+          preview.length < 4
+        );
+
+        if (preview && !isPreviewSuspiciouslyShort && preview !== '=') {
+          // Preview đã có và đầy đủ (ít nhất 2 từ hoặc hợp lệ), chờ full tối đa 600ms
+          const fullResult = await Promise.race([
+            fullRecognitionPromise,
+            new Promise<string>((resolve) => setTimeout(() => resolve(preview), 600)),
+          ]);
+          text = (fullResult && fullResult.trim().length >= preview.length) ? fullResult.trim() : preview;
+        } else {
+          // Chờ nhận diện chính xác từ máy chủ / Gemini Vision (tối đa 3.5s)
+          const fullResultPromiseWithTimeout = Promise.race([
+            fullRecognitionPromise,
+            new Promise<string>((resolve) => setTimeout(() => resolve(''), 3500)),
+          ]);
+          const fullResult = (await fullResultPromiseWithTimeout).trim();
+
+          if (fullResult && fullResult.length > 0) {
+            if (preview && preview.length > fullResult.length && previewWords.length >= fullResult.split(/\s+/).length) {
+              text = preview;
+            } else {
+              text = fullResult;
+            }
+          } else if (preview && preview !== '=') {
+            text = preview;
+          }
+        }
       }
 
-      // Dự phòng bổ sung: Gọi trực tiếp Vision API nếu endpoint proxy tạm thời trễ
+      // 3. Dự phòng qua 1-click OCR nếu vẫn chưa có kết quả
+      if (!text) {
+        const oneClickResult = await recognizeHandwritingOneClick(targetStrokes, sweptSelection ? sweptSelection.box : undefined);
+        if (oneClickResult && oneClickResult.text) {
+          text = oneClickResult.text.trim();
+        }
+      }
+
+      // 4. Dự phòng qua direct client-side
       if (!text) {
         try {
           const directText = await directRecognizeHandwriting(crop.dataUrl);
@@ -2556,7 +2622,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 if (!cb) return false;
                 const dx = Math.max(0, Math.max(sBounds.minX - cb.maxX, cb.minX - sBounds.maxX));
                 const dy = Math.max(0, Math.max(sBounds.minY - cb.maxY, cb.minY - sBounds.maxY));
-                return dx < 48 && dy < 36;
+                // Cùng dòng chữ viết tay (dy < 65 && dx < 120), hoặc dấu thanh / dấu mũ / dấu nặng (dy < 80 && dx < 70)
+                return (dy < 65 && dx < 120) || (dy < 80 && dx < 70);
               });
               if (isNear) {
                 cluster.push(s);
@@ -2583,13 +2650,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         }
       } else {
         // Case B: Hand/Finger or Stylus Drag Sweep -> Generous finger tolerance
-        const margin = 28;
+        const margin = 38;
         const sweepLeft = minX - margin;
         const sweepRight = maxX + margin;
         const sweepTop = minY - margin;
         const sweepBottom = maxY + margin;
 
-        const matchedStrokes = curr.strokes.filter((s) => {
+        const initialMatchedStrokes = curr.strokes.filter((s) => {
           if (s.points && s.points.length > 0) {
             return s.points.some(
               (p) => p.x >= sweepLeft && p.x <= sweepRight && p.y >= sweepTop && p.y <= sweepBottom
@@ -2605,7 +2672,38 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           );
         });
 
-        matchedStrokeIds = matchedStrokes.map((s) => s.id);
+        // Smart Word-Clustering Expansion: Tự động gom các nét phụ (dấu mũ, dấu nặng, nét gạch, chữ cái cuối cùng)
+        // thuộc cùng một từ hoặc cụm từ liền kề trên cùng dòng (ngăn chặn triệt để mất chữ như trường hợp "Tuấn Ki" bị sót "ệt")
+        let finalMatchedStrokes = [...initialMatchedStrokes];
+        if (initialMatchedStrokes.length > 0) {
+          const clusterIds = new Set(initialMatchedStrokes.map((s) => s.id));
+          let added = true;
+          let rounds = 0;
+          while (added && rounds < 6) {
+            added = false;
+            rounds++;
+            for (const s of curr.strokes) {
+              if (clusterIds.has(s.id)) continue;
+              const sBounds = getStrokeBounds(s);
+              if (!sBounds) continue;
+              const isNear = finalMatchedStrokes.some((c) => {
+                const cb = getStrokeBounds(c);
+                if (!cb) return false;
+                const dx = Math.max(0, Math.max(sBounds.minX - cb.maxX, cb.minX - sBounds.maxX));
+                const dy = Math.max(0, Math.max(sBounds.minY - cb.maxY, cb.minY - sBounds.maxY));
+                // Cho phép khoảng cách ngang tới 120px (khoảng cách các từ như Tuấn và Kiệt) và dọc 80px (dấu thanh/mũ/nặng)
+                return (dy < 65 && dx < 120) || (dy < 80 && dx < 70);
+              });
+              if (isNear) {
+                finalMatchedStrokes.push(s);
+                clusterIds.add(s.id);
+                added = true;
+              }
+            }
+          }
+        }
+
+        matchedStrokeIds = finalMatchedStrokes.map((s) => s.id);
 
         matchedTextIds = (curr.texts || []).filter((t) => {
           const tRight = t.x + t.width;
@@ -2613,9 +2711,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           return t.x <= sweepRight && tRight >= sweepLeft && t.y <= sweepBottom && tBottom >= sweepTop;
         }).map((t) => t.id);
 
-        if (matchedStrokes.length > 0) {
-          let bMinX = minX, bMaxX = maxX, bMinY = minY, bMaxY = maxY;
-          matchedStrokes.forEach((s) => {
+        if (finalMatchedStrokes.length > 0) {
+          let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+          finalMatchedStrokes.forEach((s) => {
             const b = getStrokeBounds(s);
             if (b) {
               bMinX = Math.min(bMinX, b.minX);
@@ -2624,11 +2722,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               bMaxY = Math.max(bMaxY, b.maxY);
             }
           });
-          // Bám sát nét bút (tight bounding box)
-          selMinX = Math.max(0, bMinX - 8);
-          selMaxX = bMaxX + 8;
-          selMinY = Math.max(0, bMinY - 8);
-          selMaxY = bMaxY + 8;
+          // Bám sát trọn vẹn toàn bộ nét chữ với lề an toàn 16px
+          selMinX = Math.max(0, bMinX - 16);
+          selMaxX = bMaxX + 16;
+          selMinY = Math.max(0, bMinY - 16);
+          selMaxY = bMaxY + 16;
         }
       }
 

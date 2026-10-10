@@ -65,6 +65,27 @@ function isStraightSegment(points: StrokePoint[]): boolean {
 export function analyzeStrokeGeometryLocally(strokes: WhiteboardStroke[]): string | null {
   if (!strokes || strokes.length === 0) return null;
 
+  // 1. Single stroke detection: digit '1' or minus sign '-'
+  if (strokes.length === 1) {
+    const s = strokes[0].points;
+    if (s && s.length >= 2 && s.length <= 45) {
+      const b = getBoundsOfPoints(s);
+      const w = Math.max(1, b.maxX - b.minX);
+      const h = Math.max(1, b.maxY - b.minY);
+
+      // Single vertical or slanted straight line = '1'
+      if (h >= 18 && (h / w >= 2.2) && isStraightSegment(s)) {
+        return '1';
+      }
+
+      // Single flat horizontal straight line = '-'
+      if (w >= 18 && (w / h >= 2.8) && isStraightSegment(s)) {
+        return '-';
+      }
+    }
+    return null;
+  }
+
   // Handwriting with more than 2 strokes or many points must be read by AI OCR
   if (strokes.length > 2) return null;
 
@@ -192,26 +213,21 @@ export function renderStrokesToHighContrastB64(
 
   if (minX === Infinity) return null;
 
-  const rawW = Math.max(20, (maxX - minX) + padding * 2);
-  const rawH = Math.max(20, (maxY - minY) + padding * 2);
+  const pad = Math.max(24, padding);
+  const rawW = Math.max(30, (maxX - minX) + pad * 2);
+  const rawH = Math.max(30, (maxY - minY) + pad * 2);
 
-  // Constrain max size for sub-200ms transfer
-  const MAX_DIM = 400;
-  let targetW = rawW;
-  let targetH = rawH;
+  // Resolution optimized for Gemini Vision (max 1024x600, min height 120px)
+  const MAX_W = 1024;
+  const MAX_H = 600;
+  let scale = Math.min(MAX_W / rawW, MAX_H / rawH, 2.0);
 
-  if (targetW > MAX_DIM || targetH > MAX_DIM) {
-    const scale = Math.min(MAX_DIM / targetW, MAX_DIM / targetH);
-    targetW = Math.max(32, Math.round(targetW * scale));
-    targetH = Math.max(32, Math.round(targetH * scale));
-  } else if (targetW < 120 && targetH < 120) {
-    const scale = Math.min(2.5, 220 / Math.max(targetW, targetH));
-    targetW = Math.round(targetW * scale);
-    targetH = Math.round(targetH * scale);
+  if (rawH * scale < 120 && rawW * (120 / rawH) <= MAX_W) {
+    scale = Math.min(2.5, 120 / rawH);
   }
 
-  const scaleX = targetW / rawW;
-  const scaleY = targetH / rawH;
+  const targetW = Math.max(80, Math.round(rawW * scale));
+  const targetH = Math.max(60, Math.round(rawH * scale));
 
   try {
     const canvas = document.createElement('canvas');
@@ -224,25 +240,33 @@ export function renderStrokesToHighContrastB64(
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, targetW, targetH);
 
-    // Deep black ink
+    // Deep black ink with scale compensation
     ctx.save();
-    ctx.scale(scaleX, scaleY);
-    ctx.translate(-minX + padding, -minY + padding);
+    ctx.scale(scale, scale);
+    ctx.translate(-minX + pad, -minY + pad);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#000000';
     ctx.fillStyle = '#000000';
-    ctx.lineWidth = 4.5;
+    ctx.lineWidth = Math.max(3.8, 5.0 / Math.max(0.6, scale));
 
     for (const s of strokes) {
       const pts = s.points;
       if (!pts || pts.length === 0) continue;
 
-      if (pts.length === 1) {
+      const spanX = Math.max(...pts.map((p) => p.x)) - Math.min(...pts.map((p) => p.x));
+      const spanY = Math.max(...pts.map((p) => p.y)) - Math.min(...pts.map((p) => p.y));
+      const isTinyDot = pts.length <= 4 && spanX <= 6 && spanY <= 6;
+
+      if (pts.length === 1 || isTinyDot) {
         ctx.beginPath();
-        ctx.arc(pts[0].x, pts[0].y, 3, 0, Math.PI * 2);
+        ctx.arc(pts[0].x, pts[0].y, 4.8, 0, Math.PI * 2);
         ctx.fill();
       } else if (pts.length === 2) {
+        ctx.beginPath();
+        ctx.arc(pts[0].x, pts[0].y, 3.5, 0, Math.PI * 2);
+        ctx.arc(pts[1].x, pts[1].y, 3.5, 0, Math.PI * 2);
+        ctx.fill();
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         ctx.lineTo(pts[1].x, pts[1].y);
@@ -264,7 +288,7 @@ export function renderStrokesToHighContrastB64(
 
     ctx.restore();
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
 
     return {
@@ -312,23 +336,13 @@ export async function recognizeHandwritingOneClick(
   const actualHeight = Math.max(20, maxY - minY);
   const bounds = { minX, minY, maxX, maxY };
 
-  // 2. If cached preview exists and is valid, use immediately (<1ms)
-  // Guard against stale '=' cache: only trust '=' preview if local geometry strictly confirms it
-  if (cachedPreview && cachedPreview.trim().length > 0) {
-    const trimmed = cachedPreview.trim();
-    if (trimmed !== '=' || analyzeStrokeGeometryLocally(strokes) === '=') {
-      const text = cleanHandwritingText(trimmed);
-      return buildRecognitionResult(text, bounds, actualWidth, actualHeight);
-    }
-  }
-
-  // 3. Strict local geometry check (genuine =, +, etc.)
+  // 2. Strict local geometry check (genuine =, +, etc.)
   const localMatch = analyzeStrokeGeometryLocally(strokes);
   if (localMatch) {
     return buildRecognitionResult(localMatch, bounds, actualWidth, actualHeight);
   }
 
-  // 4. Render to high contrast B&W image
+  // 3. Render to high contrast B&W image
   const rendered = renderStrokesToHighContrastB64(strokes, bounds);
   if (!rendered) return null;
 
@@ -338,7 +352,7 @@ export async function recognizeHandwritingOneClick(
     return buildRecognitionResult(text, bounds, actualWidth, actualHeight);
   }
 
-  // 5. Fast Recognition via endpoint or direct Gemini Flash
+  // 4. Fast Recognition via endpoint or direct Gemini Flash
   try {
     const text = await executeFastOCR(rendered.base64);
     if (text) {
@@ -356,7 +370,7 @@ export async function recognizeHandwritingOneClick(
  * Perform rapid OCR (< 300ms)
  */
 async function executeFastOCR(base64Image: string): Promise<string> {
-  const prompt = 'Chỉ đọc chính xác chữ viết tay tiếng Việt, chữ số hoặc công thức toán học trong ảnh. Trả về văn bản thuần túy, không định dạng markdown, không lời giải thích.';
+  const prompt = 'Đọc chính xác và ĐẦY ĐỦ TOÀN BỘ chữ viết tay tiếng Việt từ trái sang phải, TUYỆT ĐỐI KHÔNG ĐƯỢC BỎ SÓT từ nào hay âm tiết nào (ví dụ: "Tuấn Kiệt" thì bắt buộc phải đọc cả hai từ "Tuấn Kiệt", không đọc thiếu thành "Tuấn Ki"). Tự động khôi phục từ ngữ có nghĩa kể cả chữ viết xấu, viết ẩu hoặc dính nét. Chỉ trả về đúng văn bản kết quả, không giải thích.';
 
   // Attempt 1: Server proxy route
   try {
@@ -386,34 +400,37 @@ async function executeFastOCR(base64Image: string): Promise<string> {
   // Attempt 2: Client-side Gemini Flash direct
   const apiKey = getGeminiApiKey();
   if (apiKey) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const resp = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: base64Image,
+    const clientModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+    for (const model of clientModels) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const resp = await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: 'image/jpeg',
+                    data: base64Image,
+                  },
                 },
-              },
-              { text: prompt },
-            ],
+                { text: prompt },
+              ],
+            },
+          ],
+          config: {
+            temperature: 0.1,
+            maxOutputTokens: 250,
           },
-        ],
-        config: {
-          temperature: 0.1,
-          maxOutputTokens: 64,
-        },
-      });
+        });
 
-      if (resp.text) {
-        return cleanHandwritingText(resp.text);
-      }
-    } catch (_) {}
+        if (resp.text) {
+          return cleanHandwritingText(resp.text);
+        }
+      } catch (_) {}
+    }
   }
 
   return '';
@@ -423,6 +440,14 @@ function cleanHandwritingText(raw: string): string {
   if (!raw) return '';
   let s = raw.trim();
   s = s.replace(/^```[a-z]*\s*/i, '').replace(/```$/g, '');
+  s = s.replace(/^["'“”«»]/, '').replace(/["'“”«»]$/, '');
+  // Clean 'Ảnh 1:', 'Hình 1:', 'Image 1:', 'Trong ảnh 1:' prefixes
+  s = s.replace(/^(ảnh|hình|image|picture)\s*\d*\s*[:\-–—]\s*/i, '');
+  s = s.replace(/^trong\s+(ảnh|hình|bức ảnh)\s*\d*\s*(là|hiển thị|chứa)?\s*[:\-–—]?\s*/i, '');
+  s = s.replace(/^(đây là|nội dung trong ảnh là|văn bản trong ảnh là|chữ trong ảnh là)\s*[:\-–—]?\s*/i, '');
+  if (s.toLowerCase().trim() === 'ảnh 1' || s.toLowerCase().trim() === 'hình 1') {
+    s = '1';
+  }
   s = s.replace(/^["'“”«»]/, '').replace(/["'“”«»]$/, '');
   s = s.replace(/\s+/g, ' ').trim();
   return s;

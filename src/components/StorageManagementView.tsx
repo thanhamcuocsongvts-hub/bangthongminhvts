@@ -13,7 +13,7 @@
  *    Tự động nhận diện nền tảng, hiển thị thẻ card link đẹp mắt kèm nút "Mở liên kết".
  */
 
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import {
   FolderOpen,
   UploadCloud,
@@ -46,6 +46,7 @@ import {
 import { LessonDoc, TeacherProfile } from '../types';
 import { exportOriginalLessonFile } from '../utils/exportUtils';
 import { useLectureRepository } from '../hooks/useLectureRepository';
+import { clearAllStorageFromCloud, addLessonToCloudWithBatch, syncLinksWithBatchedWrite } from '../utils/storageUtils';
 import { db } from '../lib/firebase';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { safeSetDoc } from '../utils/firebaseSafe';
@@ -59,40 +60,7 @@ export interface ExternalResourceLink {
   description?: string;
 }
 
-const DEFAULT_LINKS: ExternalResourceLink[] = [
-  {
-    id: 'link_drive_sample',
-    title: 'Google Drive - Kho Đề Thi & Giáo Án Chuyên Đề 2026',
-    url: 'https://drive.google.com',
-    category: 'Google Drive',
-    addedAt: 'Hôm nay',
-    description: 'Thư mục tài liệu ôn thi THPT Quốc Gia và đề kiểm tra định kỳ',
-  },
-  {
-    id: 'link_youtube_sample',
-    title: 'YouTube - Bài Giảng Minh Họa Hình Không Gian 3D',
-    url: 'https://youtube.com',
-    category: 'YouTube',
-    addedAt: 'Hôm nay',
-    description: 'Video trực quan chuyển động khối tròn xoay và mặt nón',
-  },
-  {
-    id: 'link_canva_sample',
-    title: 'Canva - Slide Bài Trình Chiếu Sư Phạm Sinh Động',
-    url: 'https://canva.com',
-    category: 'Canva',
-    addedAt: 'Hôm qua',
-    description: 'Bộ slide thiết kế bài giảng tương tác kích thước chuẩn 16:9',
-  },
-  {
-    id: 'link_quizizz_sample',
-    title: 'Quizizz - Trắc Nghiệm Đấu Trường Tri Thức Lớp Học',
-    url: 'https://quizizz.com',
-    category: 'Quizizz',
-    addedAt: 'Hôm qua',
-    description: 'Bộ câu hỏi thi đấu trắc nghiệm thời gian thực cho học sinh',
-  },
-];
+const DEFAULT_LINKS: ExternalResourceLink[] = [];
 
 interface StorageManagementViewProps {
   lessons: LessonDoc[];
@@ -102,6 +70,7 @@ interface StorageManagementViewProps {
   onAddLesson: (newDoc: LessonDoc) => void;
   onDeleteLesson: (id: string, title?: string) => Promise<void> | void;
   onCleanLibrary?: () => void;
+  onClearAllStorage?: () => Promise<void> | void;
   onSyncToCloud: () => Promise<void>;
   onPullFromCloud?: () => Promise<void>;
   isSyncing: boolean;
@@ -114,6 +83,7 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
   onAddLesson,
   onDeleteLesson,
   onCleanLibrary,
+  onClearAllStorage,
   onSyncToCloud,
   onPullFromCloud,
   isSyncing,
@@ -125,15 +95,19 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState<boolean>(false);
+  const [serverDocs, setServerDocs] = useState<LessonDoc[]>([]);
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [deletedNames, setDeletedNames] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Link Management State
+  // Link Management State (Preserves deletions so links never unexpectedly reappear)
   const [links, setLinks] = useState<ExternalResourceLink[]>(() => {
     try {
       const saved = localStorage.getItem('smartboard_cloud_links');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (_) {}
     return DEFAULT_LINKS;
@@ -145,7 +119,7 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
   const [newLinkCategory, setNewLinkCategory] = useState<'Google Drive' | 'YouTube' | 'Canva' | 'Quizizz' | 'Khác'>('Google Drive');
   const [newLinkDesc, setNewLinkDesc] = useState<string>('');
 
-  // Firebase Realtime Hook
+  // Firebase Realtime Hook with Batched Writes
   const {
     lectures: cloudLectures,
     uploadLectureFile,
@@ -153,7 +127,65 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
     isLoading: isRepoLoading,
   } = useLectureRepository();
 
-  // Sync links across devices via Firestore
+  // 1. Realtime Listener for Firestore Deletion Tombstones across all devices
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'global_store', 'smartboard_deletions'), (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.wipeVersion) {
+          // A full wipe was performed on another device
+          setServerDocs([]);
+          setLinks([]);
+        }
+        if (Array.isArray(d.deletedIds)) {
+          setDeletedIds(new Set(d.deletedIds));
+        }
+        const nameSet = new Set<string>();
+        if (Array.isArray(d.deletedFiles)) {
+          d.deletedFiles.forEach((f: string) => nameSet.add(f.toLowerCase()));
+        }
+        if (Array.isArray(d.deletedTitles)) {
+          d.deletedTitles.forEach((t: string) => nameSet.add(t.toLowerCase()));
+        }
+        setDeletedNames(nameSet);
+      }
+    }, () => {});
+    return () => unsub();
+  }, []);
+
+  // 2. Continuous Background Multi-Device Sync: Polls server overview & listens to window focus
+  const fetchOverview = useCallback(async () => {
+    try {
+      const res = await fetch('/api/storage/overview');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.documents && Array.isArray(data.documents)) {
+          setServerDocs(data.documents);
+        }
+        if (data.links && Array.isArray(data.links)) {
+          setLinks(data.links);
+          try {
+            localStorage.setItem('smartboard_cloud_links', JSON.stringify(data.links));
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    fetchOverview();
+    const interval = setInterval(fetchOverview, 3500);
+    const handleFocus = () => fetchOverview();
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
+  }, [fetchOverview]);
+
+  // 3. Sync links across devices via Firestore
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'global_store', 'smartboard_links'), (snap) => {
       if (snap.exists() && snap.data()?.links) {
@@ -171,15 +203,7 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
 
   const saveLinksState = async (newLinks: ExternalResourceLink[]) => {
     setLinks(newLinks);
-    try {
-      localStorage.setItem('smartboard_cloud_links', JSON.stringify(newLinks));
-    } catch (_) {}
-    try {
-      await safeSetDoc(doc(db, 'global_store', 'smartboard_links'), {
-        links: newLinks,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-    } catch (_) {}
+    await syncLinksWithBatchedWrite(newLinks);
   };
 
   // Detect category from URL automatically
@@ -229,15 +253,15 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
     await saveLinksState(next);
   };
 
-  // YÊU CẦU 2: CƠ CHẾ TẢI TỆP LÊN (UPLOAD) <= 25MB
+  // YÊU CẦU: CƠ CHẾ TẢI TỆP LÊN SIÊU TỐC VÀ ĐỒNG BỘ ĐA THIẾT BỊ HOÀN HẢO (≤ 250MB)
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const file = files[0];
 
-    // BẮT BUỘC: Giới hạn 25MB
-    const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
+    // Hỗ trợ dung lượng cao lên đến 250MB
+    const MAX_FILE_SIZE = 250 * 1024 * 1024; // 250 MB
     if (file.size > MAX_FILE_SIZE) {
-      setErrorMessage('Vui lòng chọn tệp dưới 25MB để đảm bảo tốc độ tải đa thiết bị');
+      setErrorMessage('Vui lòng chọn tệp dưới 250MB để đảm bảo hiệu suất truyền tải.');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -251,66 +275,239 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
       ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
       : `${Math.round(file.size / 1024)} KB`;
 
-    const localBlobUrl = URL.createObjectURL(file);
     const docId = 'doc_' + Date.now();
     const uploadTimestamp = new Date().toISOString();
 
-    const newDoc: LessonDoc = {
-      id: docId,
-      title: cleanTitle,
-      fileName: file.name,
-      fileType: ext as any,
-      fileSize: sizeFormatted,
-      fileUrl: localBlobUrl,
-      subject: activeTeacher?.subject || 'Toán học',
-      grade: 'Lớp 12',
-      author: activeTeacher?.name || 'Giáo viên',
-      lastModified: uploadTimestamp,
-      syncedToCloud: true,
-      rawText: `Tài liệu: ${file.name}\nDung lượng: ${sizeFormatted}\nThời gian tải: ${new Date().toLocaleString('vi-VN')}`,
-      quizzes: [],
-      slides: [
-        {
-          id: `s_${docId}`,
-          title: cleanTitle,
-          subtitle: `${file.name} • ${sizeFormatted}`,
-          content: `Tệp: ${file.name}\nĐịnh dạng: ${ext.toUpperCase()}\nDung lượng thực: ${sizeFormatted}\nTải lên: ${new Date().toLocaleString('vi-VN')}\nSẵn sàng đồng bộ đa thiết bị (máy ở lớp, máy ở nhà).`,
-        },
-      ],
-    };
-
-    onAddLesson(newDoc);
-    setSuccessMessage(`⚡ Tải lên thành công "${file.name}" (${sizeFormatted})! Đang đồng bộ đám mây...`);
-
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    // Async sync to Firebase Storage
     try {
-      await uploadLectureFile(file);
-      setSuccessMessage(`✅ Tệp "${file.name}" (${sizeFormatted}) đã được đồng bộ đám mây thành công!`);
-    } catch (uploadErr) {
-      console.warn('Firebase storage upload notice:', uploadErr);
+      setSuccessMessage(`⚡ Đang tải lên và đồng bộ "${file.name}" (${sizeFormatted}) sang mọi thiết bị...`);
+
+      // 1. Tải nhị phân siêu tốc lên Server để có đường dẫn file thật (/uploads/...) mở được trên điện thoại và PC
+      let finalFileUrl = '';
+      try {
+        const rawRes = await fetch(
+          `/api/documents/upload-raw?fileName=${encodeURIComponent(file.name)}&fileType=${encodeURIComponent(ext)}&teacherId=${encodeURIComponent(activeTeacher?.id || '')}&lessonId=${encodeURIComponent(docId)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            body: file,
+          }
+        );
+        if (rawRes.ok) {
+          const rawData = await rawRes.json();
+          if (rawData?.fileUrl) {
+            finalFileUrl = rawData.fileUrl;
+          }
+        }
+      } catch (err) {
+        console.warn('Raw upload warning:', err);
+      }
+
+      if (!finalFileUrl) {
+        finalFileUrl = URL.createObjectURL(file);
+      }
+
+      // 2. Tạo đối tượng LessonDoc chuẩn chỉnh
+      const newDoc: LessonDoc = {
+        id: docId,
+        title: cleanTitle,
+        fileName: file.name,
+        fileType: ext as any,
+        fileSize: sizeFormatted,
+        fileUrl: finalFileUrl,
+        subject: activeTeacher?.subject || 'Toán học',
+        grade: 'Lớp 12',
+        author: activeTeacher?.name || 'Giáo viên',
+        lastModified: uploadTimestamp,
+        syncedToCloud: true,
+        rawText: `Tài liệu: ${file.name}\nDung lượng: ${sizeFormatted}\nThời gian tải: ${new Date().toLocaleString('vi-VN')}`,
+        quizzes: [],
+        slides: [
+          {
+            id: `s_${docId}`,
+            title: cleanTitle,
+            subtitle: `${file.name} • ${sizeFormatted}`,
+            content: `Tệp: ${file.name}\nĐịnh dạng: ${ext.toUpperCase()}\nDung lượng thực: ${sizeFormatted}\nTải lên: ${new Date().toLocaleString('vi-VN')}\nSẵn sàng đồng bộ đa thiết bị (máy tính, điện thoại, màn hình tương tác 75 inch).`,
+          },
+        ],
+      };
+
+      // 3. Đưa vào kho lưu trữ bài giảng ứng dụng & Firestore bằng Atomic Batched Write (Real-time sync)
+      await addLessonToCloudWithBatch(newDoc);
+      onAddLesson(newDoc);
+
+      // 4. Phát tín hiệu thông báo đồng bộ thành công
+      window.dispatchEvent(new CustomEvent('lesson-cloud-synced', { detail: { lessonId: docId, fileUrl: finalFileUrl } }));
+
+      setSuccessMessage(`✅ Tệp "${file.name}" (${sizeFormatted}) đã được đồng bộ lên Cloud thành công! Điện thoại và máy tính khác đều đã nhận được.`);
+    } catch (uploadErr: any) {
+      console.error('Storage upload error:', uploadErr);
+      setErrorMessage(`Lỗi khi tải tệp lên: ${uploadErr?.message || 'Vui lòng thử lại'}`);
     } finally {
       setIsUploading(false);
       setTimeout(() => setSuccessMessage(null), 5000);
     }
   };
 
-  // Combine local and cloud documents
-  const allDocuments = useMemo(() => {
-    const list: LessonDoc[] = [...lessons];
-    const seenIds = new Set(lessons.map((l) => l.id));
-    const seenTitles = new Set(lessons.map((l) => l.title?.trim().toLowerCase()));
+  // Xóa tài liệu vĩnh viễn trên mọi thiết bị và máy chủ (Sử dụng Batched Writes & Realtime Tombstone)
+  const handleDeleteDocument = async (docToDelete: LessonDoc) => {
+    try {
+      const id = docToDelete.id;
+      const fName = (docToDelete.fileName || '').trim().toLowerCase();
+      const title = (docToDelete.title || '').trim().toLowerCase();
 
+      // 1. Phản hồi giao diện lập tức (0ms optimistic update)
+      setDeletedIds((prev) => new Set([...prev, id]));
+      setDeletedNames((prev) => {
+        const next = new Set(prev);
+        if (fName) next.add(fName);
+        if (title) next.add(title);
+        return next;
+      });
+      setServerDocs((prev) => prev.filter((d) => d.id !== id && d.fileName?.toLowerCase() !== fName));
+
+      // 2. Xóa khỏi danh sách lessons trong App.tsx & Firestore bằng Batched Write
+      await onDeleteLesson(docToDelete.id, docToDelete.title);
+
+      // 3. Xóa qua useLectureRepository nếu có
+      try {
+        await deleteLectureFile(docToDelete.id, docToDelete.storagePath, docToDelete.fileName || docToDelete.title);
+      } catch (_) {}
+
+      // 4. Xóa trực tiếp trên máy chủ Express
+      try {
+        const qName = encodeURIComponent(docToDelete.fileName || docToDelete.title || '');
+        fetch(`/api/documents/${encodeURIComponent(docToDelete.id)}?fileName=${qName}`, { method: 'DELETE' }).catch(() => {});
+        fetch(`/api/lessons/${encodeURIComponent(docToDelete.id)}?title=${qName}&fileName=${qName}`, { method: 'DELETE' }).catch(() => {});
+      } catch (_) {}
+
+      setSuccessMessage(`Đã xóa vĩnh viễn "${docToDelete.title}" khỏi kho lưu trữ và mọi thiết bị!`);
+      setTimeout(() => setSuccessMessage(null), 3500);
+    } catch (err) {
+      console.error('Delete document error:', err);
+    }
+  };
+
+  // Dọn dẹp sạch toàn bộ kho lưu trữ trên tất cả thiết bị
+  const handleClearAllStorage = async () => {
+    try {
+      setShowClearConfirmModal(false);
+      setServerDocs([]);
+      setLinks([]);
+      if (onClearAllStorage) {
+        await onClearAllStorage();
+      } else {
+        await clearAllStorageFromCloud();
+      }
+      setSuccessMessage('Đã dọn dẹp sạch toàn bộ kho lưu trữ trên tất cả các thiết bị!');
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (e: any) {
+      setErrorMessage('Lỗi khi dọn dẹp kho: ' + (e.message || String(e)));
+    }
+  };
+
+  // Tải tệp gốc về máy tính hoặc điện thoại với tên gốc và nhị phân chuẩn 100%
+  const handleDownloadDocument = async (docToDownload: LessonDoc) => {
+    try {
+      const fileName = docToDownload.fileName || `${docToDownload.title}.${docToDownload.fileType || 'bin'}`;
+      setSuccessMessage(`⚡ Đang tải tệp "${fileName}" về thiết bị của bạn...`);
+
+      // 1. Nếu là tệp trên máy chủ (/uploads/...) hoặc link đầy đủ chứa /uploads/
+      let uniqueName = '';
+      if (docToDownload.fileUrl) {
+        if (docToDownload.fileUrl.startsWith('/uploads/')) {
+          uniqueName = docToDownload.fileUrl.replace(/^\/uploads\//, '');
+        } else if (docToDownload.fileUrl.includes('/uploads/')) {
+          uniqueName = docToDownload.fileUrl.split('/uploads/')[1];
+        }
+      }
+
+      if (uniqueName) {
+        const downloadUrl = `/api/documents/download/${encodeURIComponent(uniqueName)}?name=${encodeURIComponent(fileName)}`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = fileName;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 100);
+        setTimeout(() => setSuccessMessage(null), 3000);
+        return;
+      }
+
+      // 2. Tải qua exportOriginalLessonFile hỗ trợ Firebase Storage & Blob
+      await exportOriginalLessonFile(docToDownload);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.warn('Download error:', err);
+    }
+  };
+
+  // Kết hợp và khử trùng lặp giữa local, server docs, và Firestore lectures
+  const allDocuments = useMemo(() => {
+    const map = new Map<string, LessonDoc>();
+
+    const isDocDeleted = (id: string, fileName?: string, title?: string) => {
+      if (id && deletedIds.has(id)) return true;
+      const fn = (fileName || '').trim().toLowerCase();
+      const tt = (title || '').trim().toLowerCase();
+      if (fn && deletedNames.has(fn)) return true;
+      if (tt && deletedNames.has(tt)) return true;
+      return false;
+    };
+
+    // 1. Tài liệu từ Server Documents API
+    serverDocs.forEach((sd: any) => {
+      if (!sd || !sd.id) return;
+      if (isDocDeleted(sd.id, sd.fileName, sd.fileName)) return;
+      const key = (sd.fileName || sd.id).trim().toLowerCase();
+      map.set(key, {
+        id: sd.id,
+        title: sd.fileName?.replace(/\.[^/.]+$/, '') || sd.fileName || 'Tài liệu',
+        fileName: sd.fileName,
+        fileType: sd.fileType,
+        fileSize: sd.fileSize,
+        fileUrl: sd.fileUrl,
+        subject: 'Khác',
+        grade: 'Lớp 12',
+        author: 'Đồng bộ Cloud',
+        lastModified: sd.uploadedAt || new Date().toISOString(),
+        syncedToCloud: true,
+        rawText: `Tài liệu: ${sd.fileName || 'Tài liệu'}`,
+        quizzes: [],
+        slides: [],
+      });
+    });
+
+    // 2. Tài liệu từ kho lessons của ứng dụng
+    lessons.forEach((l) => {
+      if (l && l.id && l.title && typeof l.title === 'string' && l.title.trim().length > 0) {
+        if (isDocDeleted(l.id, l.fileName, l.title)) return;
+        const key = (l.fileName || l.title).trim().toLowerCase();
+        if (map.has(key)) {
+          const ex = map.get(key)!;
+          map.set(key, { ...ex, ...l, fileUrl: l.fileUrl || ex.fileUrl });
+        } else {
+          map.set(key, l);
+        }
+      }
+    });
+
+    // 3. Tài liệu từ Firestore collection 'lectures'
     if (cloudLectures && cloudLectures.length > 0) {
       for (const cl of cloudLectures) {
+        if (isDocDeleted(cl.id, cl.fileName, cl.fileName)) continue;
         const title = cl.fileName || 'Tài liệu lưu trữ';
-        const key = title.trim().toLowerCase();
-        if (!seenIds.has(cl.id) && !seenTitles.has(key)) {
-          seenIds.add(cl.id);
-          seenTitles.add(key);
+        const key = (cl.fileName || title).trim().toLowerCase();
+        if (map.has(key)) {
+          const ex = map.get(key)!;
+          if (cl.downloadURL && !ex.fileUrl?.startsWith('http')) {
+            ex.fileUrl = cl.downloadURL;
+          }
+        } else {
           const ext = cl.fileType || cl.fileName?.split('.').pop() || 'doc';
-          list.push({
+          map.set(key, {
             id: cl.id,
             title,
             fileName: cl.fileName,
@@ -323,7 +520,7 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
             author: cl.authorName || 'Đồng bộ Cloud',
             lastModified: cl.uploadedAt?.toDate ? cl.uploadedAt.toDate().toISOString() : new Date().toISOString(),
             syncedToCloud: true,
-            rawText: title,
+            rawText: `Tài liệu: ${cl.fileName}`,
             quizzes: [],
             slides: [],
           });
@@ -331,8 +528,8 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
       }
     }
 
-    return list;
-  }, [lessons, cloudLectures]);
+    return Array.from(map.values());
+  }, [lessons, serverDocs, cloudLectures, deletedIds, deletedNames]);
 
   const filteredDocuments = allDocuments.filter((d) => {
     const term = searchTerm.toLowerCase();
@@ -419,10 +616,10 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
             className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-amber-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-            title="Tải lên tệp tài liệu giáo dục dung lượng ≤ 25MB"
+            title="Tải lên tệp tài liệu giáo dục dung lượng cao ≤ 250MB với tốc độ siêu tốc"
           >
             {isUploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
-            <span>Tải Tệp Lên (&le; 25MB)</span>
+            <span>Tải Tệp Lên Siêu Tốc (&le; 250MB)</span>
           </button>
 
           <button
@@ -432,6 +629,15 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
           >
             <Link2 className="w-4 h-4" />
             <span>Thêm Đường Link</span>
+          </button>
+
+          <button
+            onClick={() => setShowClearConfirmModal(true)}
+            className="px-3.5 py-2.5 rounded-2xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+            title="Dọn dẹp sạch toàn bộ kho lưu trữ trên tất cả các thiết bị"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Dọn Sạch Kho</span>
           </button>
 
           {onSyncToCloud && (
@@ -548,14 +754,14 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
                 <FolderOpen className="w-16 h-16 mx-auto text-amber-500/40" />
                 <h3 className="text-xl font-bold text-white">Chưa Có Tệp Tài Liệu Nào</h3>
                 <p className="text-xs text-slate-400">
-                  Thầy/Cô hãy bấm <b>"Tải Tệp Lên (≤ 25MB)"</b> để nạp bài giảng PDF, Word, PowerPoint hoặc Excel vào kho lưu trữ.
+                  Thầy/Cô hãy bấm <b>"Tải Tệp Lên Siêu Tốc (≤ 250MB)"</b> để nạp bài giảng PDF, Word, PowerPoint hoặc Excel vào kho lưu trữ đám mây.
                 </p>
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="px-5 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs inline-flex items-center gap-2 shadow-lg"
                 >
                   <UploadCloud className="w-4 h-4" />
-                  <span>Chọn Tệp Dưới 25MB</span>
+                  <span>Chọn Tệp Tải Lên (≤ 250MB)</span>
                 </button>
               </div>
             ) : (
@@ -626,17 +832,18 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
 
                         {doc.fileUrl && (
                           <button
-                            onClick={() => exportOriginalLessonFile(doc)}
-                            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
-                            title="Tải tệp gốc về máy"
+                            onClick={() => handleDownloadDocument(doc)}
+                            className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition-colors cursor-pointer flex items-center justify-center gap-1.5 text-xs font-bold active:scale-95"
+                            title="Tải tệp gốc về máy tính hoặc điện thoại"
                           >
-                            <Download className="w-3.5 h-3.5" />
+                            <Download className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Tải về</span>
                           </button>
                         )}
 
                         <button
-                          onClick={() => onDeleteLesson(doc.id, doc.title)}
-                          className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 transition-colors"
+                          onClick={() => handleDeleteDocument(doc)}
+                          className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 transition-colors cursor-pointer"
                           title="Xóa tệp khỏi kho lưu trữ"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -821,6 +1028,45 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Xác Nhận Dọn Dẹp / Xóa Toàn Bộ Kho Lưu Trữ */}
+      {showClearConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-rose-500/50 rounded-3xl max-w-md w-full p-6 shadow-2xl text-white space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center">
+                <Trash2 className="w-6 h-6 text-rose-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white">XÓA TOÀN BỘ KHO LƯU TRỮ?</h3>
+                <p className="text-xs text-rose-300/80">Hành động này sẽ đồng bộ xóa sạch trên mọi thiết bị</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
+              Toàn bộ <b>{allDocuments.length} tệp tài liệu</b> và dữ liệu liên quan sẽ bị xóa vĩnh viễn khỏi máy chủ Cloud, cơ sở dữ liệu Firestore và các thiết bị đang kết nối (máy tính, điện thoại, SmartBoard).
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirmModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAllStorage}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-lg shadow-rose-600/30 cursor-pointer flex items-center gap-2 active:scale-95 transition-all"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác Nhận Xóa Sạch</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

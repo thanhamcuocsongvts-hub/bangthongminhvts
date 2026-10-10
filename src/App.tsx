@@ -181,10 +181,33 @@ export default function App() {
     const handleOnline = () => setSyncStatus('synced');
     const handleOffline = () => setSyncStatus('offline');
     const handleSyncStatus = (e: any) => setSyncStatus(e.detail);
+    const handleLessonCloudSynced = (e: any) => {
+      const detail = e.detail;
+      if (detail && detail.lessonId && detail.fileUrl) {
+        setLessons((prev) => {
+          const next = prev.map((l) =>
+            l.id === detail.lessonId ? { ...l, fileUrl: detail.fileUrl, syncedToCloud: true } : l
+          );
+          try {
+            localStorage.setItem('smartboard_lessons', JSON.stringify(next));
+          } catch {}
+          saveLessonsToDB(next).catch(() => {});
+          return next;
+        });
+
+        setActiveOpenedLesson((curr) => {
+          if (curr && curr.id === detail.lessonId) {
+            return { ...curr, fileUrl: detail.fileUrl, syncedToCloud: true };
+          }
+          return curr;
+        });
+      }
+    };
     
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('sync-status', handleSyncStatus);
+    window.addEventListener('lesson-cloud-synced', handleLessonCloudSynced);
     
     if (!navigator.onLine) setSyncStatus('offline');
     // Subscribe to realtime updates
@@ -199,21 +222,83 @@ export default function App() {
        console.warn('[Smartboard] Data onSnapshot notice:', err?.message);
     });
 
+    // 1. Listen for real-time Deletion Tombstones across all devices (Mobile & Web)
+    let globalDeletedIds = new Set<string>();
+    let globalDeletedTitles = new Set<string>();
+    let globalDeletedFiles = new Set<string>();
+
+    const unsubDeletions = onSnapshot(doc(db, 'global_store', 'smartboard_deletions'), (docSnap) => {
+      if (docSnap.exists()) {
+        const d = docSnap.data();
+        if (d.wipeVersion) {
+          // Total wipe command across all devices
+          setLessons([]);
+          setActiveOpenedLesson(null);
+          setActiveLessonId('');
+          try {
+            localStorage.removeItem('smartboard_lessons');
+            localStorage.removeItem('smartboard_active_lesson');
+            localStorage.removeItem('smartboard_active_lesson_obj');
+          } catch {}
+          return;
+        }
+
+        const ids = Array.isArray(d.deletedIds) ? d.deletedIds : [];
+        const files = Array.isArray(d.deletedFiles) ? d.deletedFiles.map((f: string) => f.toLowerCase().trim()) : [];
+        const titles = Array.isArray(d.deletedTitles) ? d.deletedTitles.map((t: string) => t.toLowerCase().trim()) : [];
+
+        globalDeletedIds = new Set(ids);
+        globalDeletedFiles = new Set(files);
+        globalDeletedTitles = new Set(titles);
+
+        // Immediately purge tombstoned items from React state, LocalStorage and cache in 0ms!
+        setLessons((prev) => {
+          const filtered = prev.filter((l) => {
+            if (!l || !l.id) return false;
+            if (globalDeletedIds.has(l.id)) return false;
+            const t = l.title?.trim().toLowerCase();
+            if (t && globalDeletedTitles.has(t)) return false;
+            const f = l.fileName?.trim().toLowerCase();
+            if (f && globalDeletedFiles.has(f)) return false;
+            return true;
+          });
+          try {
+            localStorage.setItem('smartboard_lessons', JSON.stringify(filtered));
+          } catch {}
+          return filtered;
+        });
+      }
+    }, (err) => {
+      console.warn('[Smartboard] Deletions onSnapshot notice:', err?.message);
+    });
+
+    // 2. Listen for real-time Lessons Updates across all devices
     const unsubLessons = onSnapshot(doc(db, 'global_store', 'smartboard_lessons'), (docSnap) => {
        if (docSnap.exists() && docSnap.data().lessons) {
           const cloudLessons = docSnap.data().lessons;
           if (Array.isArray(cloudLessons)) {
-            // Read fresh set of deleted lessons to prevent resurrecting deleted documents
-            let delIds = new Set<string>();
-            let delTitles = new Set<string>();
+            // Read fresh set of local and global deleted lessons
+            let delIds = new Set<string>(globalDeletedIds);
+            let delTitles = new Set<string>(globalDeletedTitles);
+            let delFiles = new Set<string>(globalDeletedFiles);
             try {
               const savedDel = localStorage.getItem('smartboard_deleted_lessons');
               if (savedDel) {
                 const p = JSON.parse(savedDel);
-                delIds = new Set(p.ids || []);
-                delTitles = new Set(p.titles || []);
+                if (Array.isArray(p.ids)) p.ids.forEach((id: string) => delIds.add(id));
+                if (Array.isArray(p.titles)) p.titles.forEach((t: string) => delTitles.add(t.toLowerCase().trim()));
               }
             } catch {}
+
+            // If cloud has 0 lessons, and docSnap exists, the user cleared lessons on web -> sync to mobile!
+            if (cloudLessons.length === 0) {
+              setLessons([]);
+              try {
+                localStorage.setItem('smartboard_lessons', JSON.stringify([]));
+              } catch {}
+              setIsLessonsLoaded(true);
+              return;
+            }
 
             const nonDeletedCloud = cloudLessons.filter((c: any) => {
               if (!c || !c.id) return false;
@@ -221,7 +306,7 @@ export default function App() {
               const titleKey = c.title?.trim().toLowerCase();
               if (titleKey && delTitles.has(titleKey)) return false;
               const fileKey = c.fileName?.trim().toLowerCase();
-              if (fileKey && delTitles.has(fileKey)) return false;
+              if (fileKey && (delFiles.has(fileKey) || delTitles.has(fileKey))) return false;
               return true;
             });
 
@@ -245,20 +330,20 @@ export default function App() {
                 return cloudL;
               });
 
-              // 2. CRITICAL BUGFIX: Never drop local user-uploaded/opened lessons, unless explicitly deleted
+              // 2. Only preserve genuine local drafts that have not been tombstoned
               const localOnly = prev.filter(
                 (l) =>
+                  (l as any).isLocalDraft &&
                   !cloudIds.has(l.id) &&
                   !delIds.has(l.id) &&
                   (!l.title || !delTitles.has(l.title.trim().toLowerCase())) &&
-                  (!l.fileName || !delTitles.has(l.fileName.trim().toLowerCase()))
+                  (!l.fileName || !delFiles.has(l.fileName.trim().toLowerCase()))
               );
               const allLessons = [...localOnly, ...mergedCloud];
 
               try {
                 localStorage.setItem('smartboard_lessons', JSON.stringify(allLessons));
               } catch {}
-              // NOTE: Do not call saveLessonsToDB here to avoid infinite onSnapshot write loops
               return allLessons;
             });
           }
@@ -271,7 +356,12 @@ export default function App() {
 
     return () => {
       unsub();
+      unsubDeletions();
       unsubLessons();
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('sync-status', handleSyncStatus);
+      window.removeEventListener('lesson-cloud-synced', handleLessonCloudSynced);
     };
   }, []);
 

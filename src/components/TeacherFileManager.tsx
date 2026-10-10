@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, doc, Timestamp } from 'firebase/firestore';
+import { collection, query, getDocs, doc, Timestamp, writeBatch, serverTimestamp, arrayUnion } from 'firebase/firestore';
 import { safeAddDoc, safeDeleteDoc } from '../utils/firebaseSafe';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
@@ -214,15 +214,29 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
 
   const handleDelete = async (fileId: string, url: string) => {
     try {
+      const targetFile = files.find((f) => f.id === fileId);
+      const fName = (targetFile?.name || '').trim().toLowerCase();
+
       // 1. Delete from server API
       try {
         await fetch(`/api/documents/${fileId}`, { method: 'DELETE' });
       } catch {}
 
-      // 2. Delete from Firestore if exists
+      // 2. Delete from Firestore with atomic Batched Write and tombstone
       try {
-        await safeDeleteDoc(doc(db, 'TaiLieuGiaoVien', fileId));
-      } catch {}
+        const batch = writeBatch(db);
+        batch.delete(doc(db, 'TaiLieuGiaoVien', fileId));
+        batch.delete(doc(db, 'lectures', fileId));
+        const delPayload: any = {
+          deletedIds: arrayUnion(fileId),
+          lastDeletedAt: serverTimestamp(),
+        };
+        if (fName) delPayload.deletedFiles = arrayUnion(fName);
+        batch.set(doc(db, 'global_store', 'smartboard_deletions'), delPayload, { merge: true });
+        await batch.commit();
+      } catch (err) {
+        console.warn('TeacherFileManager Firestore delete note:', err);
+      }
 
       // 3. Delete from Firebase Storage if URL matches
       try {

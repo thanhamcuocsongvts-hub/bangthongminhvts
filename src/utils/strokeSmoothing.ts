@@ -450,13 +450,13 @@ export function cropStrokesToImage(
 
   try {
     // 1. Tạo OffscreenCanvas ẩn kích thước bám sát nét chữ + padding an toàn
-    const pad = Math.max(20, padding);
+    const pad = Math.max(28, padding);
     const rawW = strokeW + pad * 2;
     const rawH = strokeH + pad * 2;
 
     // Chuẩn hóa độ phân giải tối ưu cho OCR nhận diện chữ viết tay: bảo toàn 100% tỷ lệ khung hình không bị cắt mép
-    const maxDim = 800;
-    const minDim = 220;
+    const maxDim = 1024;
+    const minDim = 160;
     const maxRaw = Math.max(rawW, rawH);
     const minRaw = Math.min(rawW, rawH);
 
@@ -470,8 +470,8 @@ export function cropStrokesToImage(
       }
     }
 
-    const targetW = Math.max(120, Math.round(rawW * scale));
-    const targetH = Math.max(60, Math.round(rawH * scale));
+    const targetW = Math.max(160, Math.round(rawW * scale));
+    const targetH = Math.max(100, Math.round(rawH * scale));
 
     let offscreen: HTMLCanvasElement;
     if (typeof document !== 'undefined') {
@@ -497,19 +497,25 @@ export function cropStrokesToImage(
     offCtx.lineJoin = 'round';
     offCtx.strokeStyle = '#000000';
     offCtx.fillStyle = '#000000';
-    offCtx.lineWidth = Math.max(3.5, 4.8 / Math.max(0.6, scale)); // Nét mực đậm đà tỷ lệ chuẩn giúp AI nhận diện cực kỳ chính xác
+    offCtx.lineWidth = Math.max(3.8, 5.0 / Math.max(0.6, scale)); // Nét mực đậm đà tỷ lệ chuẩn giúp AI nhận diện cực kỳ chính xác
 
     for (const segment of strokeSegments) {
-      if (segment.length === 1) {
+      if (segment.length === 0) continue;
+      // Kiểm tra nếu là nét chấm đơn lẻ hoặc dấu nặng (khoảng cách giữa các điểm cực nhỏ)
+      const spanX = Math.max(...segment.map((p) => p.x)) - Math.min(...segment.map((p) => p.x));
+      const spanY = Math.max(...segment.map((p) => p.y)) - Math.min(...segment.map((p) => p.y));
+      const isTinyDot = segment.length <= 4 && spanX <= 6 && spanY <= 6;
+
+      if (segment.length === 1 || isTinyDot) {
         // Nét chấm đơn lẻ (dấu chấm chữ i/j, dấu nặng, dấu chấm câu)
         offCtx.beginPath();
-        offCtx.arc(segment[0].x, segment[0].y, 4.5, 0, Math.PI * 2);
+        offCtx.arc(segment[0].x, segment[0].y, 5.0, 0, Math.PI * 2);
         offCtx.fill();
       } else if (segment.length === 2) {
         // Nét gạch cực ngắn (dấu sắc, dấu huyền, dấu mũ)
         offCtx.beginPath();
-        offCtx.arc(segment[0].x, segment[0].y, 3.2, 0, Math.PI * 2);
-        offCtx.arc(segment[1].x, segment[1].y, 3.2, 0, Math.PI * 2);
+        offCtx.arc(segment[0].x, segment[0].y, 3.6, 0, Math.PI * 2);
+        offCtx.arc(segment[1].x, segment[1].y, 3.6, 0, Math.PI * 2);
         offCtx.fill();
 
         offCtx.beginPath();
@@ -752,7 +758,13 @@ export async function recognizeVietnameseHandwriting(
       if (contentType.includes('application/json')) {
         const data = await response.json();
         if (data.success && data.text) {
-          return (data.text || '').trim();
+          let cleaned = (data.text || '').trim();
+          cleaned = cleaned.replace(/^(ảnh|hình|image|picture)\s*\d*\s*[:\-–—]\s*/i, '');
+          cleaned = cleaned.replace(/^trong\s+(ảnh|hình|bức ảnh)\s*\d*\s*(là|hiển thị|chứa)?\s*[:\-–—]?\s*/i, '');
+          if (cleaned.toLowerCase().trim() === 'ảnh 1' || cleaned.toLowerCase().trim() === 'hình 1') {
+            cleaned = '1';
+          }
+          return cleaned.trim();
         }
       }
     }

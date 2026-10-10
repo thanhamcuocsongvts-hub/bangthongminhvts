@@ -443,34 +443,55 @@ export async function exportOriginalLessonFile(lesson: LessonDoc): Promise<void>
     filename = `${filename}.${ext}`;
   }
 
-  // 2. If lesson has fileUrl (Data URL, Blob URL, Firebase Storage URL)
+  // 2. If lesson has fileUrl (Data URL, Blob URL, Server URL, or Firebase Storage URL)
   if (lesson.fileUrl) {
     try {
-      // If it's a data URL or blob URL:
-      if (lesson.fileUrl.startsWith('data:') || lesson.fileUrl.startsWith('blob:')) {
-        const response = await fetch(lesson.fileUrl);
-        const blob = await response.blob();
-        saveAs(blob, filename);
-        return;
+      // 2a. If it's a server /uploads/ file (relative or absolute), prefer direct download endpoint with attachment header
+      let uploadFilename = '';
+      if (lesson.fileUrl.startsWith('/uploads/')) {
+        uploadFilename = lesson.fileUrl.replace(/^\/uploads\//, '');
+      } else if (lesson.fileUrl.includes('/uploads/')) {
+        uploadFilename = lesson.fileUrl.split('/uploads/')[1];
       }
 
-      // If it's a remote URL (Firebase Storage or external server):
-      const res = await fetch(lesson.fileUrl);
-      if (res.ok) {
-        const blob = await res.blob();
+      if (uploadFilename) {
+        const downloadApiUrl = `/api/documents/download/${encodeURIComponent(uploadFilename)}?name=${encodeURIComponent(filename)}`;
+        try {
+          const res = await fetch(downloadApiUrl);
+          if (res.ok) {
+            const blob = await res.blob();
+            saveAs(blob, filename);
+            return;
+          }
+        } catch (_) {}
+      }
+
+      // 2b. If it's a data URL, blob URL, or direct URL:
+      const response = await fetch(lesson.fileUrl);
+      if (response.ok) {
+        const blob = await response.blob();
         saveAs(blob, filename);
         return;
       }
     } catch (err) {
       console.warn('Direct blob fetch failed, falling back to anchor download:', err);
+    }
+
+    // Anchor tag fallback (native browser download trigger)
+    try {
       const link = document.createElement('a');
-      link.href = lesson.fileUrl;
+      const href = lesson.fileUrl.startsWith('/uploads/')
+        ? `/api/documents/download/${encodeURIComponent(lesson.fileUrl.replace(/^\/uploads\//, ''))}?name=${encodeURIComponent(filename)}`
+        : lesson.fileUrl;
+      link.href = href;
       link.download = filename;
       link.target = '_blank';
       document.body.appendChild(link);
       link.click();
-      link.remove();
+      setTimeout(() => link.remove(), 100);
       return;
+    } catch (linkErr) {
+      console.warn('Anchor download fallback note:', linkErr);
     }
   }
 

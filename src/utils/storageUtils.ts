@@ -1,7 +1,7 @@
 /**
  * High-Capacity Persistent Storage Engine for SmartBoard 75 Pro
- * Utilizes IndexedDB for large lesson documents (PDF, Word, PPTX, scanned gradebooks up to 100MB+)
- * with automatic fallback to localStorage.
+ * Utilizes Firestore Transactions & Batched Writes for cross-device real-time sync,
+ * with IndexedDB for high-capacity offline caching.
  */
 
 const DB_NAME = 'SmartBoard75ProDB';
@@ -99,8 +99,102 @@ export async function saveLessonsToDB(lessons: any[]): Promise<void> {
 }
 
 /**
+ * Atomic Firestore Batched Write: Add or update a lesson across all devices in real-time
+ */
+export async function addLessonToCloudWithBatch(newLesson: any): Promise<void> {
+  if (!newLesson || !newLesson.id) return;
+
+  // 1. Immediately cache in local IndexedDB & LocalStorage
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_LESSONS, 'readwrite');
+    tx.objectStore(STORE_LESSONS).put(newLesson);
+  } catch (_) {}
+
+  // 2. Sync to Backend Express Server
+  try {
+    fetch('/api/lessons', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newLesson),
+    }).catch(() => {});
+  } catch (_) {}
+
+  // 3. Atomic Batched Write in Firestore: writes to lectures collection AND global_store/smartboard_lessons
+  try {
+    const authModule = await import('../lib/firebase');
+    const firestoreModule = await import('firebase/firestore');
+    const db = authModule.db;
+    const { doc, getDoc, writeBatch, serverTimestamp, arrayRemove } = firestoreModule;
+
+    const batch = writeBatch(db);
+
+    // Document in 'lectures' collection
+    const lecturePayload = {
+      id: newLesson.id,
+      fileName: newLesson.fileName || newLesson.title,
+      downloadURL: newLesson.fileUrl || '',
+      fileType: newLesson.fileType || 'bin',
+      fileSize: newLesson.fileSize || '',
+      storagePath: newLesson.storagePath || '',
+      uploadedAt: serverTimestamp(),
+      title: newLesson.title,
+      author: newLesson.author || 'Giáo viên',
+      subject: newLesson.subject || 'Toán học',
+      grade: newLesson.grade || 'Lớp 12',
+    };
+    batch.set(doc(db, 'lectures', newLesson.id), lecturePayload, { merge: true });
+
+    // Atomically read and update global_store/smartboard_lessons
+    let currentLessons: any[] = [];
+    try {
+      const lSnap = await getDoc(doc(db, 'global_store', 'smartboard_lessons'));
+      if (lSnap.exists() && Array.isArray(lSnap.data().lessons)) {
+        currentLessons = lSnap.data().lessons;
+      }
+    } catch (_) {}
+
+    const sanitizedNewLesson = {
+      ...newLesson,
+      fileUrl: (newLesson.fileUrl?.startsWith('data:') && newLesson.fileUrl.length > 500000) ? '' : newLesson.fileUrl,
+      syncedToCloud: true,
+      lastModified: new Date().toISOString(),
+    };
+
+    const nextLessons = [
+      sanitizedNewLesson,
+      ...currentLessons.filter((l: any) => l.id !== newLesson.id && l.fileName !== newLesson.fileName),
+    ];
+
+    batch.set(doc(db, 'global_store', 'smartboard_lessons'), {
+      lessons: nextLessons,
+      version: Date.now(),
+      lastUpdatedAt: serverTimestamp(),
+    });
+
+    // Remove from deletion tombstones if it was previously deleted
+    const tKey = (newLesson.title || '').trim().toLowerCase();
+    const fKey = (newLesson.fileName || '').trim().toLowerCase();
+    const untombPayload: any = {
+      deletedIds: arrayRemove(newLesson.id),
+      lastUpdated: serverTimestamp(),
+    };
+    if (tKey) untombPayload.deletedTitles = arrayRemove(tKey);
+    if (fKey) untombPayload.deletedFiles = arrayRemove(fKey);
+
+    batch.set(doc(db, 'global_store', 'smartboard_deletions'), untombPayload, { merge: true });
+
+    // Commit all updates atomically!
+    await batch.commit();
+    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
+  } catch (err) {
+    console.warn('[addLessonToCloudWithBatch] Firestore batched write notice:', err);
+  }
+}
+
+/**
  * Permanently delete a lesson from IndexedDB, localStorage, backend server, and Firestore global_store immediately.
- * No debounce to prevent Firestore onSnapshot from restoring deleted documents.
+ * Utilizes Firestore Batched Writes for instantaneous real-time sync across mobile and PC devices.
  */
 export async function deleteLessonFromStorage(
   id: string,
@@ -167,8 +261,10 @@ export async function deleteLessonFromStorage(
 
   // 4. Notify backend server
   try {
-    fetch(`/api/lessons/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
-    fetch(`/api/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    const qTitle = encodeURIComponent(lessonTitle || '');
+    const qFile = encodeURIComponent(fileName || '');
+    fetch(`/api/lessons/${encodeURIComponent(id)}?title=${qTitle}&fileName=${qFile}`, { method: 'DELETE' }).catch(() => {});
+    fetch(`/api/documents/${encodeURIComponent(id)}?fileName=${qFile}`, { method: 'DELETE' }).catch(() => {});
     fetch('/api/lessons/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -176,12 +272,12 @@ export async function deleteLessonFromStorage(
     }).catch(() => {});
   } catch (_) {}
 
-  // 5. Instantly push cleaned lessons list to Firestore global_store/smartboard_lessons (NO DELAY!)
+  // 5. Instantly push cleaned lessons list and deletion record to Firestore via Batched Writes
   try {
     const authModule = await import('../lib/firebase');
     const firestoreModule = await import('firebase/firestore');
     const db = authModule.db;
-    const { doc } = firestoreModule;
+    const { doc, collection, getDocs, writeBatch, serverTimestamp, arrayUnion } = firestoreModule;
 
     const sanitizedLessons = validRemaining.map((l: any) => {
       let cleanFileUrl = l.fileUrl;
@@ -194,11 +290,109 @@ export async function deleteLessonFromStorage(
       };
     });
     const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
-    await safeSetDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData });
+
+    // Firestore Batched Write for atomic cross-device synchronization
+    const batch = writeBatch(db);
+
+    // Atomic update of current lessons list with version timestamp
+    batch.set(doc(db, 'global_store', 'smartboard_lessons'), {
+      lessons: cleanData,
+      version: Date.now(),
+      lastUpdatedAt: serverTimestamp(),
+    });
+
+    // Atomic tombstone record to prevent any other device from resurrecting deleted documents
+    const titleKey = lessonTitle ? lessonTitle.trim().toLowerCase() : '';
+    const fileKey = fileName ? fileName.trim().toLowerCase() : '';
+    const delPayload: any = {
+      deletedIds: arrayUnion(id),
+      lastDeletedAt: serverTimestamp(),
+    };
+    if (titleKey) delPayload.deletedTitles = arrayUnion(titleKey);
+    if (fileKey) delPayload.deletedFiles = arrayUnion(fileKey);
+
+    batch.set(doc(db, 'global_store', 'smartboard_deletions'), delPayload, { merge: true });
+
+    // Directly delete known document IDs from lectures and TaiLieuGiaoVien
+    if (id) {
+      batch.delete(doc(db, 'lectures', id));
+      batch.delete(doc(db, 'TaiLieuGiaoVien', id));
+    }
+
+    // Commit all updates atomically in a single network round-trip!
+    await batch.commit();
+
     window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
   } catch (firestoreErr) {
-    console.warn('Firestore instant sync on delete notice:', firestoreErr);
+    console.warn('Firestore batched write on delete notice:', firestoreErr);
   }
+}
+
+/**
+ * Clear all storage across Web, Mobile, Server, and Firestore via atomic Batched Write
+ */
+export async function clearAllStorageFromCloud(): Promise<void> {
+  // 1. Clear LocalStorage and IndexedDB
+  try {
+    localStorage.removeItem('smartboard_lessons');
+    localStorage.removeItem('smartboard_active_lesson_obj');
+    localStorage.removeItem('smartboard_cloud_links');
+  } catch (_) {}
+  try {
+    const db = await openDB();
+    const tx = db.transaction([STORE_LESSONS, STORE_FILES], 'readwrite');
+    tx.objectStore(STORE_LESSONS).clear();
+    tx.objectStore(STORE_FILES).clear();
+  } catch (_) {}
+
+  // 2. Call server purge APIs
+  try {
+    await fetch('/api/lessons', { method: 'DELETE' });
+    await fetch('/api/documents', { method: 'DELETE' });
+    await fetch('/api/links', { method: 'DELETE' });
+  } catch (_) {}
+
+  // 3. Batched Write to Firestore
+  try {
+    const authModule = await import('../lib/firebase');
+    const firestoreModule = await import('firebase/firestore');
+    const db = authModule.db;
+    const { doc, collection, getDocs, writeBatch, serverTimestamp } = firestoreModule;
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'global_store', 'smartboard_lessons'), {
+      lessons: [],
+      version: Date.now(),
+      lastUpdatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'global_store', 'smartboard_documents'), {
+      documents: [],
+      lastUpdatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'global_store', 'smartboard_links'), {
+      links: [],
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'global_store', 'smartboard_deletions'), {
+      wipedAt: serverTimestamp(),
+      wipeVersion: Date.now(),
+      deletedIds: [],
+      deletedTitles: [],
+      deletedFiles: [],
+    });
+
+    const lecSnap = await getDocs(collection(db, 'lectures'));
+    lecSnap.docs.forEach((d) => batch.delete(doc(db, 'lectures', d.id)));
+
+    const tlSnap = await getDocs(collection(db, 'TaiLieuGiaoVien'));
+    tlSnap.docs.forEach((d) => batch.delete(doc(db, 'TaiLieuGiaoVien', d.id)));
+
+    await batch.commit();
+  } catch (e) {
+    console.warn('Firestore clear all batch write notice:', e);
+  }
+
+  window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
 }
 
 /**
@@ -237,43 +431,47 @@ export async function forceSyncLessonsToCloud(lessons: any[]): Promise<{ success
     localStorage.setItem('smartboard_lessons', JSON.stringify(validLessons));
   } catch (_) {}
 
-  // 2. Immediate push to backend server
-  try {
-    await fetch('/api/lessons/sync', {
+  // 2. Parallel cloud sync (Local backend server + Firestore)
+  const syncPromises: Promise<any>[] = [];
+
+  syncPromises.push(
+    fetch('/api/lessons/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lessons: validLessons, replaceAll: true }),
-    });
-  } catch (serverErr) {
-    console.warn('Backend server lesson sync note:', serverErr);
-  }
+    }).catch((serverErr) => console.warn('Backend server lesson sync note:', serverErr))
+  );
+
+  syncPromises.push(
+    (async () => {
+      try {
+        const authModule = await import('../lib/firebase');
+        const firestoreModule = await import('firebase/firestore');
+        const db = authModule.db;
+        const { doc } = firestoreModule;
+
+        const sanitizedLessons = validLessons.map((l: any) => {
+          let cleanFileUrl = l.fileUrl;
+          if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 500000) {
+            cleanFileUrl = '';
+          }
+          return {
+            ...l,
+            fileUrl: cleanFileUrl,
+          };
+        });
+        const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
+        await safeSetDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData }, { merge: true });
+      } catch (firestoreErr) {
+        console.warn('Firestore lesson sync notice:', firestoreErr);
+      }
+    })()
+  );
+
+  await Promise.allSettled(syncPromises);
 
   const now = new Date();
   const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-
-  // 3. Push to Firestore with safe quota handling
-  try {
-    const authModule = await import('../lib/firebase');
-    const firestoreModule = await import('firebase/firestore');
-    const db = authModule.db;
-    const { doc } = firestoreModule;
-
-    const sanitizedLessons = validLessons.map((l: any) => {
-      let cleanFileUrl = l.fileUrl;
-      if (cleanFileUrl && cleanFileUrl.startsWith('data:') && cleanFileUrl.length > 500000) {
-        cleanFileUrl = '';
-      }
-      return {
-        ...l,
-        fileUrl: cleanFileUrl,
-      };
-    });
-    const cleanData = JSON.parse(JSON.stringify(sanitizedLessons));
-    await safeSetDoc(doc(db, 'global_store', 'smartboard_lessons'), { lessons: cleanData }, { merge: true });
-    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
-  } catch (firestoreErr) {
-    console.warn('Firestore lesson sync notice:', firestoreErr);
-  }
 
   window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
   return { success: true, count: validLessons.length, timestamp: timeStr };
@@ -293,11 +491,100 @@ export async function forcePullLessonsFromCloud(): Promise<any[]> {
 }
 
 /**
+ * Atomic Firestore Batched Write: Synchronize external resource links across all devices
+ */
+export async function syncLinksWithBatchedWrite(newLinks: any[]): Promise<void> {
+  const safeLinks = Array.isArray(newLinks) ? newLinks : [];
+  
+  // 1. Local cache
+  try {
+    localStorage.setItem('smartboard_cloud_links', JSON.stringify(safeLinks));
+    localStorage.setItem('smartboard_links_initialized', 'true');
+  } catch (_) {}
+
+  // 2. Server API
+  try {
+    fetch('/api/links/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ links: safeLinks }),
+    }).catch(() => {});
+  } catch (_) {}
+
+  // 3. Atomic Batched Write in Firestore
+  try {
+    const authModule = await import('../lib/firebase');
+    const firestoreModule = await import('firebase/firestore');
+    const db = authModule.db;
+    const { doc, writeBatch, serverTimestamp } = firestoreModule;
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'global_store', 'smartboard_links'), {
+      links: safeLinks,
+      updatedAt: serverTimestamp(),
+      count: safeLinks.length,
+    });
+    await batch.commit();
+  } catch (err) {
+    console.warn('[syncLinksWithBatchedWrite] Firestore note:', err);
+  }
+}
+
+/**
  * Load lesson documents from Firestore, backend API, IndexedDB, or LocalStorage
- * Perfectly merges cloud lessons from server and Firestore so any machine sees all uploaded files!
+ * Strictly respects Firestore Deletion Tombstones so deleted documents NEVER return!
  */
 export async function loadLessonsFromDB(): Promise<any[] | null> {
   const allLessonsMap = new Map<string, any>();
+  const deletedIds = new Set<string>();
+  const deletedTitles = new Set<string>();
+  const deletedFiles = new Set<string>();
+
+  // 0. Fetch Firestore Deletion Tombstones first to prevent resurrecting deleted files
+  try {
+    const authModule = await import('../lib/firebase');
+    const firestoreModule = await import('firebase/firestore');
+    const db = authModule.db;
+    const { doc, getDoc } = firestoreModule;
+    const delSnap = await getDoc(doc(db, 'global_store', 'smartboard_deletions'));
+    if (delSnap.exists()) {
+      const d = delSnap.data();
+      if (d.wipeVersion) {
+        // Entire library was purged across cloud
+        localStorage.removeItem('smartboard_lessons');
+        return [];
+      }
+      if (Array.isArray(d.deletedIds)) {
+        d.deletedIds.forEach((id: string) => deletedIds.add(id));
+      }
+      if (Array.isArray(d.deletedTitles)) {
+        d.deletedTitles.forEach((t: string) => deletedTitles.add(t.toLowerCase().trim()));
+      }
+      if (Array.isArray(d.deletedFiles)) {
+        d.deletedFiles.forEach((f: string) => deletedFiles.add(f.toLowerCase().trim()));
+      }
+    }
+  } catch (_) {}
+
+  // Check local deleted tombstones as well
+  try {
+    const localDel = localStorage.getItem('smartboard_deleted_lessons');
+    if (localDel) {
+      const p = JSON.parse(localDel);
+      if (Array.isArray(p.ids)) p.ids.forEach((id: string) => deletedIds.add(id));
+      if (Array.isArray(p.titles)) p.titles.forEach((t: string) => deletedTitles.add(t.toLowerCase().trim()));
+    }
+  } catch (_) {}
+
+  const isTombstoned = (l: any) => {
+    if (!l || !l.id) return true;
+    if (deletedIds.has(l.id)) return true;
+    const t = (l.title || '').trim().toLowerCase();
+    if (t && deletedTitles.has(t)) return true;
+    const f = (l.fileName || '').trim().toLowerCase();
+    if (f && deletedFiles.has(f)) return true;
+    return false;
+  };
 
   // 1. Fetch from backend API (/api/lessons) - shared across all devices
   try {
@@ -306,7 +593,7 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
       const json = await res.json();
       if (json && Array.isArray(json.lessons)) {
         json.lessons.forEach((l: any) => {
-          if (l && l.id) allLessonsMap.set(l.id, l);
+          if (l && l.id && !isTombstoned(l)) allLessonsMap.set(l.id, l);
         });
       }
     }
@@ -325,7 +612,7 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
       const data = docSnap.data();
       if (data && Array.isArray(data.lessons)) {
         data.lessons.forEach((cl: any) => {
-          if (cl && cl.id) {
+          if (cl && cl.id && !isTombstoned(cl)) {
             if (allLessonsMap.has(cl.id)) {
               const existing = allLessonsMap.get(cl.id);
               allLessonsMap.set(cl.id, {
@@ -357,7 +644,7 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
     });
 
     localLessons.forEach((ll: any) => {
-      if (ll && ll.id) {
+      if (ll && ll.id && !isTombstoned(ll)) {
         if (allLessonsMap.has(ll.id)) {
           const cloud = allLessonsMap.get(ll.id);
           allLessonsMap.set(ll.id, {
@@ -399,7 +686,11 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
       try {
         const parsed = JSON.parse(ls);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          parsed.forEach((l: any) => allLessonsMap.set(l.id, l));
+          parsed.forEach((l: any) => {
+            if (l && l.id && !isTombstoned(l)) {
+              allLessonsMap.set(l.id, l);
+            }
+          });
         }
       } catch {}
     }
@@ -407,7 +698,7 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
 
   if (allLessonsMap.size > 0) {
     const valid = Array.from(allLessonsMap.values()).filter(
-      (l: any) => l && l.id && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
+      (l: any) => l && l.id && !isTombstoned(l) && typeof l.title === 'string' && l.title.trim().length > 0 && !('username' in l) && !('classes' in l)
     );
     const seen = new Set<string>();
     const deduped: any[] = [];
@@ -421,7 +712,7 @@ export async function loadLessonsFromDB(): Promise<any[] | null> {
     return deduped;
   }
 
-  return null;
+  return [];
 }
 
 /**

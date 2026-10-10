@@ -123,83 +123,88 @@ export async function parseUploadedFileToLesson(
   authorName?: string,
   teacherId?: string
 ): Promise<LessonDoc> {
+  const lessonId = 'lesson_' + Date.now();
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
   const title = file.name.replace(/\.[^/.]+$/, '');
   const sizeFormatted = file.size > 1024 * 1024
     ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
     : `${Math.round(file.size / 1024)} KB`;
   
-  // Read file as persistent Base64 Data URL or Blob URL for large files (> 20MB)
-  const readAsDataUrl = (): Promise<string> => {
-    if (file.size > 20 * 1024 * 1024) {
-      return Promise.resolve(URL.createObjectURL(file));
-    }
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string) || '');
-      reader.onerror = () => resolve(URL.createObjectURL(file));
-      reader.readAsDataURL(file);
-    });
-  };
+  // 1. Instant zero-latency Blob URL for immediate presentation & preview (0.001s)
+  const localBlobUrl = URL.createObjectURL(file);
+  let effectiveFileUrl = localBlobUrl;
 
-  const fileDataUrl = await readAsDataUrl();
-
-  // Cross-device Cloud Persistence:
-  // 1. First upload directly to server storage (/api/documents/upload)
+  // 2. High-speed parallel cloud upload via raw binary streaming (NO BASE64 OVERHEAD)
+  // Non-blocking so user never waits 10-20 seconds to see their presentation!
   let serverFileUrl = '';
-  try {
-    const uploadRes = await fetch('/api/documents/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fileName: file.name,
-        fileType: ext,
-        base64Data: fileDataUrl,
-        fileSize: sizeFormatted,
-        teacherId: teacherId || 'current_teacher',
-      }),
-    });
-    if (uploadRes.ok) {
-      const uploadJson = await uploadRes.json();
-      if (uploadJson.fileUrl) {
-        serverFileUrl = uploadJson.fileUrl;
+  const rawUploadPromise = (async () => {
+    try {
+      const uploadRes = await fetch(
+        `/api/documents/upload-raw?fileName=${encodeURIComponent(file.name)}&fileType=${encodeURIComponent(ext)}&teacherId=${encodeURIComponent(teacherId || 'current_teacher')}&lessonId=${encodeURIComponent(lessonId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file, // Native browser streaming binary
+        }
+      );
+      if (uploadRes.ok) {
+        const uploadJson = await uploadRes.json();
+        if (uploadJson.fileUrl) {
+          serverFileUrl = uploadJson.fileUrl;
+          effectiveFileUrl = uploadJson.fileUrl;
+          window.dispatchEvent(
+            new CustomEvent('lesson-cloud-synced', {
+              detail: { lessonId, fileUrl: uploadJson.fileUrl, fileName: file.name },
+            })
+          );
+        }
       }
+    } catch (apiErr) {
+      console.warn('Local fast raw document upload notice:', apiErr);
     }
-  } catch (apiErr) {
-    console.warn('Local server document upload notice:', apiErr);
-  }
 
-  // 2. Also sync to Firebase Storage & Firestore TaiLieuGiaoVien collection for cross-device access
-  try {
-    let currentUser = auth.currentUser;
-    if (!currentUser) {
-      try {
-        const userCred = await signInAnonymously(auth);
-        currentUser = userCred.user;
-      } catch (authErr) {
-        console.warn('Anonymous auth sign-in notice:', authErr);
+    // Parallel sync to Firebase Storage & Firestore TaiLieuGiaoVien collection for cross-device access
+    try {
+      let currentUser = auth.currentUser;
+      if (!currentUser) {
+        try {
+          const userCred = await signInAnonymously(auth);
+          currentUser = userCred.user;
+        } catch (_) {}
       }
-    }
-    if (currentUser) {
-      const storageRef = ref(storage, `TaiLieuGiaoVien/${currentUser.uid}/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const fbUrl = await getDownloadURL(storageRef);
-      if (!serverFileUrl) serverFileUrl = fbUrl;
+      if (currentUser) {
+        const storageRef = ref(storage, `TaiLieuGiaoVien/${currentUser.uid}/${Date.now()}_${file.name}`);
+        await uploadBytes(storageRef, file);
+        const fbUrl = await getDownloadURL(storageRef);
+        if (!serverFileUrl) {
+          serverFileUrl = fbUrl;
+          effectiveFileUrl = fbUrl;
+          window.dispatchEvent(
+            new CustomEvent('lesson-cloud-synced', {
+              detail: { lessonId, fileUrl: fbUrl, fileName: file.name },
+            })
+          );
+        }
 
-      await safeAddDoc(collection(db, 'TaiLieuGiaoVien'), {
-        uid: currentUser.uid,
-        name: file.name,
-        url: fbUrl || serverFileUrl,
-        size: file.size,
-        type: ext,
-        createdAt: Timestamp.now(),
-      });
+        await safeAddDoc(collection(db, 'TaiLieuGiaoVien'), {
+          uid: currentUser.uid,
+          name: file.name,
+          url: fbUrl || serverFileUrl,
+          size: file.size,
+          type: ext,
+          createdAt: Timestamp.now(),
+        });
+      }
+    } catch (fbErr) {
+      console.warn('Firebase document sync notice:', fbErr);
     }
-  } catch (fbErr) {
-    console.warn('Firebase document sync notice:', fbErr);
-  }
+  })();
 
-  let effectiveFileUrl = serverFileUrl || fileDataUrl;
+  // Race fast upload for up to 100ms: if already finished, use permanent server fileUrl immediately
+  await Promise.race([
+    rawUploadPromise,
+    new Promise((resolve) => setTimeout(resolve, 100)),
+  ]);
 
   // Microsoft Office Web Viewer requires a public URL, but tmpfiles is unreliable.
   // We will now rely on our robust internal DocumentViewer for all offline rendering.
@@ -445,7 +450,7 @@ export async function parseUploadedFileToLesson(
   }
 
   const newLessonDoc: LessonDoc = {
-    id: 'lesson_' + Date.now(),
+    id: lessonId,
     title,
     subject: detectedSubject,
     grade: detectedGrade,

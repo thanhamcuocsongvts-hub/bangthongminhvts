@@ -84,29 +84,23 @@ export function cropCanvasRegion(
     }
   }
 
-  const rawW = Math.max(16, (sMaxX - sMinX) + padding * 2);
-  const rawH = Math.max(16, (sMaxY - sMinY) + padding * 2);
+  const pad = Math.max(24, padding);
+  const rawW = Math.max(30, (sMaxX - sMinX) + pad * 2);
+  const rawH = Math.max(30, (sMaxY - sMinY) + pad * 2);
 
-  // Giới hạn max width/height = 400px để nén siêu nhẹ
-  const MAX_DIM = 400;
-  let targetW = rawW;
-  let targetH = rawH;
+  // Chuẩn hóa độ phân giải tối ưu cho Gemini Vision (max 1024x600, min height 120px)
+  // Bảo toàn 100% tỷ lệ khung hình, chữ viết tay không bao giờ bị nén méo hoặc mờ nét
+  const MAX_W = 1024;
+  const MAX_H = 600;
+  let scale = Math.min(MAX_W / rawW, MAX_H / rawH, 2.0);
 
-  if (targetW > MAX_DIM || targetH > MAX_DIM) {
-    const scale = Math.min(MAX_DIM / targetW, MAX_DIM / targetH);
-    targetW = Math.max(32, Math.round(targetW * scale));
-    targetH = Math.max(32, Math.round(targetH * scale));
-  } else {
-    // Nếu quá nhỏ, phóng nhẹ để dễ đọc nét
-    if (targetW < 120 && targetH < 120) {
-      const scale = Math.min(2.5, 200 / Math.max(targetW, targetH));
-      targetW = Math.round(targetW * scale);
-      targetH = Math.round(targetH * scale);
-    }
+  // Nếu chữ quá nhỏ, phóng to tối thiểu 120px chiều cao để các dấu thanh và phụ âm rõ ràng
+  if (rawH * scale < 120 && rawW * (120 / rawH) <= MAX_W) {
+    scale = Math.min(2.5, 120 / rawH);
   }
 
-  const scaleX = targetW / rawW;
-  const scaleY = targetH / rawH;
+  const targetW = Math.max(80, Math.round(rawW * scale));
+  const targetH = Math.max(60, Math.round(rawH * scale));
 
   try {
     let offscreen: HTMLCanvasElement;
@@ -125,26 +119,31 @@ export function cropCanvasRegion(
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, targetW, targetH);
 
-    // 2. Vẽ nét chữ đen (#000000) tương phản tuyệt đối
+    // 2. Vẽ nét chữ đen (#000000) tương phản tuyệt đối, nét đậm chuẩn tỷ lệ
     ctx.save();
-    ctx.scale(scaleX, scaleY);
-    ctx.translate(-sMinX + padding, -sMinY + padding);
+    ctx.scale(scale, scale);
+    ctx.translate(-sMinX + pad, -sMinY + pad);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#000000';
     ctx.fillStyle = '#000000';
-    ctx.lineWidth = 4.5;
+    ctx.lineWidth = Math.max(3.8, 5.0 / Math.max(0.6, scale));
 
     if (strokeSegments.length > 0) {
       for (const segment of strokeSegments) {
-        if (segment.length === 1) {
+        if (segment.length === 0) continue;
+        const spanX = Math.max(...segment.map((p) => p.x)) - Math.min(...segment.map((p) => p.x));
+        const spanY = Math.max(...segment.map((p) => p.y)) - Math.min(...segment.map((p) => p.y));
+        const isTinyDot = segment.length <= 4 && spanX <= 6 && spanY <= 6;
+
+        if (segment.length === 1 || isTinyDot) {
           ctx.beginPath();
-          ctx.arc(segment[0].x, segment[0].y, 3.5, 0, Math.PI * 2);
+          ctx.arc(segment[0].x, segment[0].y, 4.8, 0, Math.PI * 2);
           ctx.fill();
         } else if (segment.length === 2) {
           ctx.beginPath();
-          ctx.arc(segment[0].x, segment[0].y, 2.5, 0, Math.PI * 2);
-          ctx.arc(segment[1].x, segment[1].y, 2.5, 0, Math.PI * 2);
+          ctx.arc(segment[0].x, segment[0].y, 3.5, 0, Math.PI * 2);
+          ctx.arc(segment[1].x, segment[1].y, 3.5, 0, Math.PI * 2);
           ctx.fill();
           ctx.beginPath();
           ctx.moveTo(segment[0].x, segment[0].y);
@@ -183,8 +182,8 @@ export function cropCanvasRegion(
 
     ctx.restore();
 
-    // 3. Xuất ảnh JPEG nén nhẹ (payload < 20KB)
-    const dataUrl = offscreen.toDataURL('image/jpeg', 0.85);
+    // 3. Xuất ảnh JPEG chất lượng cao (payload ~30KB)
+    const dataUrl = offscreen.toDataURL('image/jpeg', 0.90);
 
     return {
       dataUrl,
@@ -219,7 +218,7 @@ export async function recognizeHandwritingFast(
   const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
 
   const fastPrompt =
-    'Chỉ đọc chính xác chữ/số/ký tự/công thức có trong ảnh nét vẽ bảng. Trả về đúng ký tự hoặc từ ngữ nhận diện (ví dụ: "C", "A", "Toán", "12"). TUYỆT ĐỐI KHÔNG xuất cú pháp ánh xạ như "->", "=>", không giải thích, không bọc nháy kép.';
+    'Đọc chính xác và ĐẦY ĐỦ TOÀN BỘ chữ viết tay tiếng Việt từ trái sang phải, TUYỆT ĐỐI KHÔNG BỎ SÓT từ nào hay âm tiết nào (ví dụ: "Tuấn Kiệt" thì bắt buộc phải đọc cả hai từ "Tuấn Kiệt", không đọc thiếu thành "Tuấn Ki"). Tự động khôi phục từ ngữ có nghĩa kể cả chữ viết xấu, viết ẩu hoặc dính nét. Chỉ trả về đúng văn bản kết quả, không giải thích.';
 
   // 1. Thử gửi server endpoint với timeout 6s
   try {
@@ -257,34 +256,39 @@ export async function recognizeHandwritingFast(
     const apiKey = getGeminiApiKey();
     if (apiKey) {
       const ai = new GoogleGenAI({ apiKey });
-      const resp = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
+      const clientModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+      for (const m of clientModels) {
+        try {
+          const resp = await ai.models.generateContent({
+            model: m,
+            contents: [
               {
-                inlineData: {
-                  mimeType,
-                  data: cleanBase64,
-                },
-              },
-              {
-                text: fastPrompt,
+                role: 'user',
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType,
+                      data: cleanBase64,
+                    },
+                  },
+                  {
+                    text: fastPrompt,
+                  },
+                ],
               },
             ],
-          },
-        ],
-        config: {
-          temperature: 0.1,
-          maxOutputTokens: 60,
-        },
-      });
+            config: {
+              temperature: 0.1,
+              maxOutputTokens: 250,
+            },
+          });
 
-      const text = resp.text ? cleanOcrResult(resp.text) : '';
-      if (text) {
-        ocrCache.set(cacheKey, text);
-        return text;
+          const text = resp.text ? cleanOcrResult(resp.text) : '';
+          if (text) {
+            ocrCache.set(cacheKey, text);
+            return text;
+          }
+        } catch (_) {}
       }
     }
   } catch (directErr) {

@@ -83,6 +83,7 @@ try {
 const TEACHERS_FILE = path.join(DATA_DIR, "teachers.json");
 const LESSONS_FILE = path.join(DATA_DIR, "cloud_lessons.json");
 const DOCUMENTS_FILE = path.join(DATA_DIR, "cloud_documents.json");
+const LINKS_FILE = path.join(DATA_DIR, "cloud_links.json");
 
 function readJsonFileSync<T>(filePath: string, fallback: T): T {
   try {
@@ -174,11 +175,8 @@ async function generateWithGemini(ai: any, params: any) {
 // Ultra-low latency vision caller specifically for live classroom handwriting recognition
 async function generateFastVisionWithGemini(ai: any, params: any) {
   const modelsToTry = [
-    "gemini-2.5-flash",       // Ultra-fast official multimodal vision
-    "gemini-2.0-flash",       // Fast fallback
-    "gemini-1.5-flash",       // Stable legacy fallback
-    "gemini-3.8-flash",       // Developer platform model
-    "gemini-flash-latest",    // Alias fallback
+    "gemini-3.8-flash",       // Primary model in this project
+    "gemini-flash-latest",    // Fast alias
     "gemini-3.1-flash-lite",  // Fast lite fallback
   ];
   let lastError: any = null;
@@ -187,7 +185,7 @@ async function generateFastVisionWithGemini(ai: any, params: any) {
     for (const model of modelsToTry) {
       try {
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Timeout after 4.5s for ${model}`)), 4500)
+          setTimeout(() => reject(new Error(`Timeout after 8s for ${model}`)), 8000)
         );
         const callPromise = ai.models.generateContent({
           ...params,
@@ -199,12 +197,12 @@ async function generateFastVisionWithGemini(ai: any, params: any) {
         const msg = err?.message || String(err);
         console.warn(`[AI Notice] Fast vision model ${model} (attempt ${attempt + 1}) unavailable: ${msg.slice(0, 90)}, trying next candidate...`);
         if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("429")) {
-          await new Promise((r) => setTimeout(r, 200));
+          await new Promise((r) => setTimeout(r, 150));
         }
       }
     }
     if (attempt === 0) {
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 200));
     }
   }
   throw lastError;
@@ -287,9 +285,10 @@ if (!teachersStore.some((t) => t.id === 'teacher_admin_root' || t.username === '
   writeJsonFileSync(TEACHERS_FILE, teachersStore);
 }
 
-// Persistent Cloud Storage for Documents & Lessons across PC, TV 75", Mobile
+// Persistent Cloud Storage for Documents & Lessons & Links across PC, TV 75", Mobile
 let cloudLessonsStore: any[] = readJsonFileSync(LESSONS_FILE, []);
 let cloudDocumentsStore: any[] = readJsonFileSync(DOCUMENTS_FILE, []);
+let cloudLinksStore: any[] = readJsonFileSync(LINKS_FILE, []);
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -298,6 +297,7 @@ app.get("/api/health", (req, res) => {
     timestamp: new Date().toISOString(),
     cloudLessonsCount: cloudLessonsStore.length,
     cloudDocumentsCount: cloudDocumentsStore.length,
+    cloudLinksCount: cloudLinksStore.length,
   });
 });
 
@@ -478,9 +478,104 @@ app.delete("/api/teachers/:id", (req, res) => {
 // ============================================================================
 // CLOUD DOCUMENT STORAGE & CROSS-DEVICE REPOSITORY (HIGH CAPACITY UP TO 100MB)
 // ============================================================================
+// 1. High-Speed Raw Binary Document Upload (Supports files up to 250MB with async stream writing)
+// ============================================================================
+app.post("/api/documents/upload-raw", express.raw({ type: "*/*", limit: "250mb" }), async (req, res) => {
+  try {
+    const rawFileName = (req.query.fileName as string) || (req.headers["x-filename"] as string) || `doc_${Date.now()}.bin`;
+    const fileName = decodeURIComponent(rawFileName);
+    const fileType = (req.query.fileType as string) || path.extname(fileName).replace('.', '') || 'bin';
+    const teacherId = (req.query.teacherId as string) || null;
+    const lessonId = (req.query.lessonId as string) || null;
 
-// 1. Upload high-capacity document (PDF, Word, Excel, PPTX, Image)
-app.post("/api/documents/upload", (req, res) => {
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
+    if (!buffer || buffer.length === 0) {
+      return res.status(400).json({ error: "Thiếu dữ liệu tệp nhị phân" });
+    }
+
+    const ext = path.extname(fileName) || `.${fileType}`;
+    const baseName = path.basename(fileName, ext).replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF-]/g, '_');
+    const uniqueFileName = `${Date.now()}_${baseName}${ext}`;
+    const filePath = path.join(UPLOADS_DIR, uniqueFileName);
+    const backupFilePath = path.join(BACKUP_UPLOADS_DIR, uniqueFileName);
+
+    // Fast asynchronous disk write
+    await Promise.allSettled([
+      fs.promises.writeFile(filePath, buffer),
+      fs.promises.writeFile(backupFilePath, buffer),
+    ]);
+
+    const sizeFormatted = buffer.length > 1024 * 1024
+      ? `${(buffer.length / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.round(buffer.length / 1024)} KB`;
+
+    const docId = lessonId || `doc_${Date.now()}`;
+    const docRecord = {
+      id: docId,
+      fileName,
+      uniqueFileName,
+      fileType: fileType.replace('.', ''),
+      fileSize: sizeFormatted,
+      fileUrl: `/uploads/${uniqueFileName}`,
+      uploadedAt: new Date().toISOString(),
+      teacherId,
+      lessonId: docId,
+    };
+
+    cloudDocumentsStore.unshift(docRecord);
+    try {
+      await fs.promises.writeFile(DOCUMENTS_FILE, JSON.stringify(cloudDocumentsStore, null, 2), "utf8");
+    } catch (_) {}
+
+    // Synchronize to cloudLessonsStore so both /api/documents and /api/lessons share the file
+    const cleanTitle = fileName.replace(/\.[^/.]+$/, '').trim();
+    const lessonRecord = {
+      id: docId,
+      title: cleanTitle,
+      fileName,
+      fileType: fileType.replace('.', ''),
+      fileSize: sizeFormatted,
+      fileUrl: `/uploads/${uniqueFileName}`,
+      subject: 'Khác',
+      grade: 'Lớp 12',
+      author: 'Giáo viên',
+      lastModified: docRecord.uploadedAt,
+      syncedToCloud: true,
+      rawText: `Tài liệu: ${fileName}\nDung lượng: ${sizeFormatted}\nThời gian: ${new Date().toLocaleString('vi-VN')}`,
+      quizzes: [],
+      slides: [
+        {
+          id: `s_${docId}`,
+          title: cleanTitle,
+          subtitle: `${fileName} • ${sizeFormatted}`,
+          content: `Tệp: ${fileName}\nĐịnh dạng: ${fileType.toUpperCase()}\nDung lượng: ${sizeFormatted}\nTải lên: ${new Date().toLocaleString('vi-VN')}`,
+        },
+      ],
+    };
+    const lIdx = cloudLessonsStore.findIndex((l) => l.id === docId || l.fileName === fileName);
+    if (lIdx >= 0) {
+      cloudLessonsStore[lIdx] = lessonRecord;
+    } else {
+      cloudLessonsStore.unshift(lessonRecord);
+    }
+    writeJsonFileSync(LESSONS_FILE, cloudLessonsStore);
+
+    console.log(`[Cloud Document Upload Fast] Stream saved: ${fileName} (${sizeFormatted}) -> /uploads/${uniqueFileName}`);
+
+    res.json({
+      success: true,
+      fileUrl: `/uploads/${uniqueFileName}`,
+      document: docRecord,
+      message: "Đồng bộ đám mây siêu tốc thành công!",
+    });
+  } catch (err: any) {
+    console.error("[Cloud Document Upload-Raw Error]:", err);
+    res.status(500).json({ error: "Lỗi đồng bộ tệp lên Cloud: " + (err.message || String(err)) });
+  }
+});
+
+// 1b. Upload document via JSON Base64 (Backward compatibility with async write)
+app.post("/api/documents/upload", async (req, res) => {
   try {
     const { fileName, fileType, base64Data, fileSize, teacherId, lessonId } = req.body;
     if (!base64Data || !fileName) {
@@ -496,8 +591,10 @@ app.post("/api/documents/upload", (req, res) => {
     const filePath = path.join(UPLOADS_DIR, uniqueFileName);
     const backupFilePath = path.join(BACKUP_UPLOADS_DIR, uniqueFileName);
 
-    fs.writeFileSync(filePath, buffer);
-    try { fs.writeFileSync(backupFilePath, buffer); } catch (_) {}
+    await Promise.allSettled([
+      fs.promises.writeFile(filePath, buffer),
+      fs.promises.writeFile(backupFilePath, buffer),
+    ]);
 
     const docRecord = {
       id: `doc_${Date.now()}`,
@@ -512,7 +609,9 @@ app.post("/api/documents/upload", (req, res) => {
     };
 
     cloudDocumentsStore.unshift(docRecord);
-    writeJsonFileSync(DOCUMENTS_FILE, cloudDocumentsStore);
+    try {
+      await fs.promises.writeFile(DOCUMENTS_FILE, JSON.stringify(cloudDocumentsStore, null, 2), "utf8");
+    } catch (_) {}
 
     console.log(`[Cloud Document Upload] Saved: ${fileName} (${docRecord.fileSize}) -> /uploads/${uniqueFileName}`);
 
@@ -567,23 +666,165 @@ app.get("/api/documents", (req, res) => {
   res.json({ success: true, documents: cloudDocumentsStore });
 });
 
-// 3. Delete cloud document
+// 2b. Direct file download route with original filename headers (Guarantees authentic downloads across PC and mobile)
+app.get("/api/documents/download/:filename", (req, res) => {
+  const { filename } = req.params;
+  const safeName = path.basename(filename);
+  let targetPath = path.join(UPLOADS_DIR, safeName);
+  if (!fs.existsSync(targetPath)) {
+    targetPath = path.join(BACKUP_UPLOADS_DIR, safeName);
+  }
+  if (!fs.existsSync(targetPath)) {
+    try {
+      const files = fs.readdirSync(UPLOADS_DIR);
+      const match = files.find(
+        (f) => f === safeName || f.endsWith('_' + safeName) || f.toLowerCase() === safeName.toLowerCase()
+      );
+      if (match) {
+        targetPath = path.join(UPLOADS_DIR, match);
+      }
+    } catch (_) {}
+  }
+
+  if (fs.existsSync(targetPath)) {
+    const rawReqName = (req.query.name as string) || '';
+    const originalName = rawReqName ? decodeURIComponent(rawReqName) : safeName.replace(/^\d+_/, '') || safeName;
+    res.download(targetPath, originalName, (err) => {
+      if (err && !res.headersSent) {
+        res.status(500).json({ error: "Lỗi tải tệp: " + (err.message || String(err)) });
+      }
+    });
+  } else {
+    res.status(404).json({ error: "Không tìm thấy tệp để tải về" });
+  }
+});
+
+// 3. Delete cloud document (with physical disk cleanup & dual-store synchronization)
 app.delete("/api/documents/:id", (req, res) => {
   const { id } = req.params;
-  const doc = cloudDocumentsStore.find((d) => d.id === id || d.uniqueFileName === id);
-  if (doc) {
-    const fullPath = path.join(UPLOADS_DIR, doc.uniqueFileName);
-    const backupPath = path.join(BACKUP_UPLOADS_DIR, doc.uniqueFileName);
-    if (fs.existsSync(fullPath)) {
-      try { fs.unlinkSync(fullPath); } catch (e) {}
+  const fileName = (req.query.fileName as string || '').trim().toLowerCase();
+
+  const toDelete = cloudDocumentsStore.filter(
+    (d) =>
+      d.id === id ||
+      d.uniqueFileName === id ||
+      (fileName && (d.fileName?.toLowerCase() === fileName || d.fileName?.trim().toLowerCase() === fileName))
+  );
+
+  for (const doc of toDelete) {
+    if (doc.uniqueFileName) {
+      try { fs.unlinkSync(path.join(UPLOADS_DIR, doc.uniqueFileName)); } catch (_) {}
+      try { fs.unlinkSync(path.join(BACKUP_UPLOADS_DIR, doc.uniqueFileName)); } catch (_) {}
     }
-    if (fs.existsSync(backupPath)) {
-      try { fs.unlinkSync(backupPath); } catch (e) {}
-    }
-    cloudDocumentsStore = cloudDocumentsStore.filter((d) => d.id !== id && d.uniqueFileName !== id);
-    writeJsonFileSync(DOCUMENTS_FILE, cloudDocumentsStore);
   }
-  res.json({ success: true, documents: cloudDocumentsStore });
+
+  cloudDocumentsStore = cloudDocumentsStore.filter(
+    (d) =>
+      d.id !== id &&
+      d.uniqueFileName !== id &&
+      (!fileName || (d.fileName?.toLowerCase() !== fileName && d.fileName?.trim().toLowerCase() !== fileName))
+  );
+  writeJsonFileSync(DOCUMENTS_FILE, cloudDocumentsStore);
+
+  // Synchronize deletion with cloudLessonsStore
+  cloudLessonsStore = cloudLessonsStore.filter(
+    (l) =>
+      l.id !== id &&
+      (!fileName || (l.fileName?.toLowerCase() !== fileName && l.fileName?.trim().toLowerCase() !== fileName))
+  );
+  writeJsonFileSync(LESSONS_FILE, cloudLessonsStore);
+
+  res.json({ success: true, documents: cloudDocumentsStore, lessons: cloudLessonsStore });
+});
+
+// 3b. Bulk Delete All Cloud Documents
+app.delete("/api/documents", (req, res) => {
+  cloudDocumentsStore = [];
+  cloudLessonsStore = [];
+  writeJsonFileSync(DOCUMENTS_FILE, []);
+  writeJsonFileSync(LESSONS_FILE, []);
+
+  // Clean physical files
+  try {
+    const files = fs.readdirSync(UPLOADS_DIR);
+    for (const f of files) {
+      try { fs.unlinkSync(path.join(UPLOADS_DIR, f)); } catch (_) {}
+    }
+  } catch (_) {}
+  try {
+    const files = fs.readdirSync(BACKUP_UPLOADS_DIR);
+    for (const f of files) {
+      try { fs.unlinkSync(path.join(BACKUP_UPLOADS_DIR, f)); } catch (_) {}
+    }
+  } catch (_) {}
+
+  res.json({ success: true, message: "Đã dọn dẹp sạch toàn bộ kho tài liệu máy chủ!" });
+});
+
+// 3c. Cloud Links Endpoints for External Resource Storage (Google Drive, YouTube, Canva, Quizizz)
+app.get("/api/links", (req, res) => {
+  cloudLinksStore = readJsonFileSync(LINKS_FILE, cloudLinksStore);
+  res.json({ success: true, links: cloudLinksStore });
+});
+
+app.post("/api/links", (req, res) => {
+  const newLink = req.body;
+  if (!newLink || !newLink.url) {
+    return res.status(400).json({ error: "Thiếu dữ liệu đường link" });
+  }
+  const linkObj = {
+    id: newLink.id || `link_${Date.now()}`,
+    title: newLink.title || 'Liên kết bài giảng',
+    url: newLink.url,
+    category: newLink.category || 'Khác',
+    addedAt: newLink.addedAt || new Date().toLocaleDateString('vi-VN'),
+    description: newLink.description || '',
+    updatedAt: new Date().toISOString(),
+  };
+  const idx = cloudLinksStore.findIndex((l) => l.id === linkObj.id || l.url === linkObj.url);
+  if (idx >= 0) {
+    cloudLinksStore[idx] = linkObj;
+  } else {
+    cloudLinksStore.unshift(linkObj);
+  }
+  writeJsonFileSync(LINKS_FILE, cloudLinksStore);
+  res.json({ success: true, link: linkObj, links: cloudLinksStore });
+});
+
+app.post("/api/links/sync", (req, res) => {
+  const { links } = req.body;
+  if (Array.isArray(links)) {
+    cloudLinksStore = links;
+    writeJsonFileSync(LINKS_FILE, cloudLinksStore);
+  }
+  res.json({ success: true, links: cloudLinksStore });
+});
+
+app.delete("/api/links/:id", (req, res) => {
+  const { id } = req.params;
+  cloudLinksStore = cloudLinksStore.filter((l) => l.id !== id);
+  writeJsonFileSync(LINKS_FILE, cloudLinksStore);
+  res.json({ success: true, links: cloudLinksStore });
+});
+
+app.delete("/api/links", (req, res) => {
+  cloudLinksStore = [];
+  writeJsonFileSync(LINKS_FILE, cloudLinksStore);
+  res.json({ success: true, links: [] });
+});
+
+// 3d. Comprehensive Storage Overview for Multi-Device Auto-Sync
+app.get("/api/storage/overview", (req, res) => {
+  cloudDocumentsStore = readJsonFileSync(DOCUMENTS_FILE, cloudDocumentsStore);
+  cloudLessonsStore = readJsonFileSync(LESSONS_FILE, cloudLessonsStore);
+  cloudLinksStore = readJsonFileSync(LINKS_FILE, cloudLinksStore);
+  res.json({
+    success: true,
+    documents: cloudDocumentsStore,
+    lessons: cloudLessonsStore,
+    links: cloudLinksStore,
+    timestamp: Date.now(),
+  });
 });
 
 // 4. Get all cloud lessons (only valid lessons with real content, no ghosts or corrupt items)
@@ -659,12 +900,52 @@ app.post("/api/lessons/sync", (req, res) => {
   res.json({ success: true, lessons: cloudLessonsStore });
 });
 
-// 7. Delete Lesson from Cloud
+// 7. Delete Lesson from Cloud (with physical disk cleanup)
 app.delete("/api/lessons/:id", (req, res) => {
   const { id } = req.params;
-  cloudLessonsStore = cloudLessonsStore.filter((l) => l.id !== id);
+  const title = (req.query.title as string || '').trim().toLowerCase();
+  const fileName = (req.query.fileName as string || '').trim().toLowerCase();
+
+  const toDelete = cloudLessonsStore.filter(
+    (l) =>
+      l.id === id ||
+      (title && (l.title?.toLowerCase() === title || l.title?.trim().toLowerCase() === title)) ||
+      (fileName && (l.fileName?.toLowerCase() === fileName || l.fileName?.trim().toLowerCase() === fileName))
+  );
+
+  for (const item of toDelete) {
+    if (item.fileUrl && typeof item.fileUrl === 'string' && item.fileUrl.startsWith('/uploads/')) {
+      const fn = path.basename(item.fileUrl);
+      try { fs.unlinkSync(path.join(UPLOADS_DIR, fn)); } catch (_) {}
+      try { fs.unlinkSync(path.join(BACKUP_UPLOADS_DIR, fn)); } catch (_) {}
+    }
+  }
+
+  cloudLessonsStore = cloudLessonsStore.filter(
+    (l) =>
+      l.id !== id &&
+      (!title || (l.title?.toLowerCase() !== title && l.title?.trim().toLowerCase() !== title)) &&
+      (!fileName || (l.fileName?.toLowerCase() !== fileName && l.fileName?.trim().toLowerCase() !== fileName))
+  );
   writeJsonFileSync(LESSONS_FILE, cloudLessonsStore);
-  res.json({ success: true, lessons: cloudLessonsStore });
+
+  // Synchronize deletion with cloudDocumentsStore
+  cloudDocumentsStore = cloudDocumentsStore.filter(
+    (d) =>
+      d.id !== id &&
+      (!title || (d.fileName?.toLowerCase() !== title && d.fileName?.trim().toLowerCase() !== title)) &&
+      (!fileName || (d.fileName?.toLowerCase() !== fileName && d.fileName?.trim().toLowerCase() !== fileName))
+  );
+  writeJsonFileSync(DOCUMENTS_FILE, cloudDocumentsStore);
+
+  res.json({ success: true, lessons: cloudLessonsStore, documents: cloudDocumentsStore });
+});
+
+// 7b. Bulk Delete All Lessons from Cloud
+app.delete("/api/lessons", (req, res) => {
+  cloudLessonsStore = [];
+  writeJsonFileSync(LESSONS_FILE, cloudLessonsStore);
+  res.json({ success: true, lessons: [] });
 });
 
 // AI Blackboard Handwriting Recognition Endpoint (Vietnamese Handwriting to Beautiful Text) - High Speed
@@ -678,6 +959,20 @@ app.post("/api/ai/recognize-handwriting", async (req, res) => {
     const ai = getGeminiClient();
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
+    const ocrInstruction = `[NHIỆM VỤ NHẬN DIỆN CHỮ VIẾT TAY TIẾNG VIỆT & TOÁN HỌC - KHÔNG ĐƯỢC MẤT CHỮ]:
+Bạn là chuyên gia nhận diện chữ viết tay trên bảng lớp học tại Việt Nam.
+Nhiệm vụ: Đọc chính xác toàn bộ chữ viết tay tiếng Việt (kể cả chữ viết xấu, viết ẩu, viết liền nét, nghệch ngoạc), tên riêng học sinh/giáo viên, chữ số, hoặc công thức toán.
+
+QUY TẮC BẮT BUỘC ĐỂ KHÔNG BỊ MẤT CHỮ / THIẾU TỪ:
+1. ĐỌC ĐẦY ĐỦ TẤT CẢ CÁC TỪ: Đọc lần lượt từ trái sang phải, TUYỆT ĐỐI KHÔNG ĐƯỢC BỎ SÓT từ nào hay âm tiết nào. Nếu có cụm 2 từ trở lên (Ví dụ: "Tuấn Kiệt", "Nguyễn Văn A", "Bài Tập 1") thì bắt buộc phải đọc đủ tất cả các từ, tuyệt đối không được chỉ đọc một nửa hay bỏ sót từ cuối như "Tuấn Ki"!
+2. XỬ LÝ CHỮ VIẾT XẤU / NGHỆCH NGOẠC: Dựa vào ngữ cảnh tên riêng phổ biến của người Việt (Tuấn Kiệt, Minh Khang, Bảo Nam, Thùy Linh...) và từ vựng tiếng Việt có nghĩa để đọc đúng và đầy đủ chữ cái, dấu mũ (â, ă, ê, ô, ơ, ư), dấu thanh (sắc, huyền, hỏi, ngã, nặng) và phụ âm cuối (t, c, n, ng, m, p).
+3. ĐỐI VỚI CÔNG THỨC TOÁN: Bao quanh công thức bằng dấu $ (ví dụ: $x^2 + 2x = 0$, $y = f(x)$).
+4. CHỈ TRẢ VỀ DUY NHẤT VĂN BẢN KẾT QUẢ: Không giải thích, không thêm lời chào, không mở đầu bằng 'Ảnh 1:', 'Hình 1:', 'Image 1:'.`;
+
+    const combinedPrompt = context && context.trim().length > 0
+      ? `${context}\n\n${ocrInstruction}`
+      : ocrInstruction;
+
     const response = await generateFastVisionWithGemini(ai, {
       contents: [
         {
@@ -690,22 +985,26 @@ app.post("/api/ai/recognize-handwriting", async (req, res) => {
               },
             },
             {
-              text: context && context.includes('Chỉ đọc')
-                ? context
-                : `Chỉ đọc các chữ/số/công thức có trong ảnh nét vẽ bảng học sinh/giáo viên. Trả về text thuần tiếng Việt hoặc số/công thức chính xác (ví dụ: "1 2 3 4", "x = 2", "Tuấn Kiệt"). Tuyệt đối không giải thích, không thêm dấu ngoặc kép hay lời chào.`,
+              text: combinedPrompt,
             },
           ],
         },
       ],
       config: {
         temperature: 0.1,
-        maxOutputTokens: 200,
+        maxOutputTokens: 300,
       },
     });
 
     let recognizedText = (response.text || "").trim();
-    // Clean potential markdown code blocks or quotes
+    // Clean potential markdown code blocks, quotes, and 'Ảnh 1' / 'Hình 1' / 'Image 1' prefixes
     recognizedText = recognizedText.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '');
+    recognizedText = recognizedText.replace(/^(ảnh|hình|image|picture)\s*\d*\s*[:\-–—]\s*/i, '');
+    recognizedText = recognizedText.replace(/^trong\s+(ảnh|hình|bức ảnh)\s*\d*\s*(là|hiển thị|chứa)?\s*[:\-–—]?\s*/i, '');
+    recognizedText = recognizedText.replace(/^(đây là|nội dung trong ảnh là|văn bản trong ảnh là|chữ trong ảnh là)\s*[:\-–—]?\s*/i, '');
+    if (recognizedText.toLowerCase().trim() === 'ảnh 1' || recognizedText.toLowerCase().trim() === 'hình 1') {
+      recognizedText = '1';
+    }
     if ((recognizedText.startsWith('"') && recognizedText.endsWith('"')) ||
         (recognizedText.startsWith('“') && recognizedText.endsWith('”'))) {
       recognizedText = recognizedText.slice(1, -1).trim();
