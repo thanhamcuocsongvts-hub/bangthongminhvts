@@ -1,175 +1,546 @@
 import React from 'react';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
-import { ArrowUpRight, ArrowDownRight, ArrowRight, Zap, Activity } from 'lucide-react';
+import {
+  ArrowUpRight,
+  ArrowDownRight,
+  Zap,
+  Activity,
+  BarChart2,
+  Table,
+} from 'lucide-react';
 
 export interface QuizDiagramData {
   // Variation table for math (Bảng biến thiên)
-  x?: string[];
-  yPrime?: string[];
-  yArrows?: Array<{ start: string; end: string; dir: 'up' | 'down' }>;
-  // Function graph
-  graphType?: 'cubic' | 'quadratic' | 'rational' | 'sine' | 'linear';
   title?: string;
+  x?: string[];
+  yPrime?: string[]; // +, -, 0, ||
+  yArrows?: Array<{
+    start: string;
+    end: string;
+    dir: 'up' | 'down';
+    startPos?: 'top' | 'bottom' | 'mid';
+    endPos?: 'top' | 'bottom' | 'mid';
+    hasAsymptote?: boolean;
+  }>;
+  yValues?: Array<{
+    label: string;
+    level: 'top' | 'bottom' | 'mid';
+    isAsymptote?: boolean; // vạch đôi ||
+  }>;
+  // Sign table for math (Bảng xét dấu)
+  rows?: Array<{
+    label: string; // f(x), f'(x), (x-1)...
+    signs: string[]; // +, -, 0, ||
+  }>;
+  // Function graph
+  graphType?: 'cubic' | 'quadratic' | 'rational' | 'biquadratic' | 'rational_21' | 'sine' | 'linear';
+  equation?: string;
+  extrema?: Array<{ x: number; y: number; label?: string }>;
+  asymptotes?: {
+    vertical?: number[];
+    horizontal?: number[];
+    slant?: { a: number; b: number };
+  };
   // Spatial Geometry
   shape?: 'pyramid' | 'prism' | 'cone' | 'cylinder' | 'cube';
   // Physics Circuit
   circuitType?: 'rlc_series' | 'parallel' | 'pendulum';
-  // Chemistry
-  equation?: string;
   conditions?: string;
   // Data table
   headers?: string[];
-  rows?: string[][];
+  tableRows?: string[][];
   [key: string]: any;
 }
 
 interface QuizRichContentRendererProps {
   content: string;
-  diagramType?: 'variation_table' | 'function_graph' | 'geometry' | 'physics_circuit' | 'chemistry_diagram' | 'data_table' | string;
+  diagramType?:
+    | 'variation_table'
+    | 'sign_table'
+    | 'function_graph'
+    | 'geometry'
+    | 'physics_circuit'
+    | 'chemistry_diagram'
+    | 'data_table'
+    | string;
   diagramData?: QuizDiagramData;
   className?: string;
   textClassName?: string;
 }
 
+/**
+ * Tự động phân tích nội dung câu hỏi để trích xuất bảng biến thiên / bảng xét dấu
+ * nếu câu hỏi chứa dạng bảng markdown hoặc text SGK
+ */
+function parseEmbeddedDiagram(content: string): {
+  cleanContent: string;
+  detectedType?: 'variation_table' | 'sign_table' | 'function_graph';
+  detectedData?: QuizDiagramData;
+} {
+  if (!content) return { cleanContent: content };
+
+  // 1. Nhận diện Bảng xét dấu dạng markdown hoặc text
+  // Ví dụ: | x | -∞ | 1 | 3 | +∞ |
+  //        | f'(x) | + | 0 | - | 0 | + |
+  const signTableMatch = content.match(/\|?\s*x\s*\|([^\n]+)\n\s*\|?\s*(?:f'\(x\)|y'|f\(x\)|y)\s*\|([^\n]+)/i);
+  if (signTableMatch) {
+    const rawX = signTableMatch[1].split('|').map((s) => s.trim()).filter(Boolean);
+    const rawSigns = signTableMatch[2].split('|').map((s) => s.trim()).filter(Boolean);
+
+    if (rawX.length > 0 && rawSigns.length > 0) {
+      const clean = content.replace(signTableMatch[0], '').trim();
+      return {
+        cleanContent: clean,
+        detectedType: 'sign_table',
+        detectedData: {
+          title: 'Bảng xét dấu',
+          x: rawX,
+          rows: [
+            {
+              label: "f'(x)",
+              signs: rawSigns,
+            },
+          ],
+        },
+      };
+    }
+  }
+
+  // 2. Nhận diện Bảng biến thiên có mũi tên hoặc chiều biến thiên
+  if (
+    content.includes('Bảng biến thiên') ||
+    content.includes('bảng biến thiên') ||
+    content.includes('BBT')
+  ) {
+    // Nếu trong câu hỏi có đề cập bảng biến thiên hàm bậc 3 hoặc phân thức
+    if (content.includes('cực đại') || content.includes('đồng biến') || content.includes('nghịch biến')) {
+      // Giữ nguyên content, tạo mẫu đồ họa BBT chuẩn nếu chưa có
+    }
+  }
+
+  return { cleanContent: content };
+}
+
 export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = ({
   content,
-  diagramType,
-  diagramData,
+  diagramType: initialType,
+  diagramData: initialData,
   className = '',
   textClassName = '',
 }) => {
+  const parsed = parseEmbeddedDiagram(content);
+  const displayContent = initialType ? content : parsed.cleanContent;
+  const diagramType = initialType || parsed.detectedType;
+  const diagramData = initialData || parsed.detectedData;
+
   return (
-    <div className={`space-y-3 ${className}`}>
-      {/* Primary Question Text with full LaTeX rendering */}
+    <div className={`space-y-3.5 ${className}`}>
+      {/* Primary Question Text with LaTeX KaTeX */}
       <div className={`leading-relaxed ${textClassName}`}>
-        <MathFormulaRenderer content={content} className={textClassName} />
+        <MathFormulaRenderer content={displayContent} className={textClassName} />
       </div>
 
-      {/* Render diagram according to Vietnamese standard SGK (Kết nối tri thức, v.v.) */}
+      {/* Render diagram theo chuẩn Sách Giáo Khoa Toán Việt Nam */}
       {diagramType && diagramData && (
-        <div className="my-3 p-3 bg-slate-50/90 rounded-xl border border-slate-200/80 shadow-xs flex flex-col items-center justify-center overflow-x-auto">
-          {/* BẢNG BIẾN THIÊN HÀM SỐ (Toán học) */}
-          {diagramType === 'variation_table' && diagramData.x && (
-            <div className="w-full max-w-lg bg-white rounded-lg border border-slate-300 p-2 shadow-xs text-xs font-mono">
-              <div className="text-[11px] font-sans font-bold text-slate-600 mb-1 text-center">
-                {diagramData.title || 'Bảng biến thiên của hàm số'}
+        <div className="my-3 p-3.5 bg-gradient-to-b from-slate-50 to-slate-100/80 rounded-2xl border border-slate-200/90 shadow-sm flex flex-col items-center justify-center overflow-x-auto select-none">
+          {/* ========================================================= */}
+          {/* 1. BẢNG BIẾN THIÊN HÀM SỐ CHUẨN SGK TOÁN 12 VIỆT NAM      */}
+          {/* ========================================================= */}
+          {diagramType === 'variation_table' && (
+            <div className="w-full max-w-xl bg-white rounded-xl border-2 border-slate-700 shadow-md p-3.5 font-serif text-xs">
+              <div className="text-xs font-sans font-extrabold text-slate-800 mb-2.5 text-center flex items-center justify-center gap-1.5 uppercase tracking-wide">
+                <Table className="w-4 h-4 text-indigo-600" />
+                <span>{diagramData.title || 'Bảng biến thiên của hàm số'}</span>
               </div>
-              <table className="w-full border-collapse border border-slate-300 text-center">
-                <tbody>
-                  {/* Row x */}
-                  <tr className="border-b border-slate-300">
-                    <td className="w-16 p-1.5 font-bold bg-slate-100 border-r border-slate-300">x</td>
-                    {diagramData.x.map((val, i) => (
-                      <td key={i} className="p-1.5 font-semibold">
-                        <MathFormulaRenderer content={val.startsWith('$') ? val : `$${val}$`} />
+
+              {/* Bảng viền kép chuẩn mực SGK Toán KNTT & Cánh Diều */}
+              <div className="border border-slate-800 rounded overflow-hidden">
+                <table className="w-full border-collapse border-slate-800 text-center font-sans">
+                  <tbody>
+                    {/* HÀNG 1: DÒNG BIẾN SỐ x */}
+                    <tr className="border-b-2 border-slate-800 bg-slate-100/90">
+                      <td className="w-16 py-2 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-200/80">
+                        x
                       </td>
-                    ))}
-                  </tr>
-                  {/* Row y' (Đạo hàm) */}
-                  {diagramData.yPrime && (
-                    <tr className="border-b border-slate-300">
-                      <td className="w-16 p-1.5 font-bold bg-slate-100 border-r border-slate-300">y'</td>
-                      {diagramData.yPrime.map((sign, i) => (
-                        <td
-                          key={i}
-                          className={`p-1.5 font-bold text-sm ${
-                            sign.trim() === '+'
-                              ? 'text-rose-600'
-                              : sign.trim() === '-'
-                              ? 'text-blue-600'
-                              : 'text-slate-700'
-                          }`}
-                        >
-                          {sign}
+                      {(diagramData.x || ['-\\infty', '-1', '1', '+\\infty']).map((val, i) => (
+                        <td key={i} className="py-2 px-3 font-semibold text-slate-900 border-r border-slate-300 last:border-r-0">
+                          <MathFormulaRenderer content={val.startsWith('$') ? val : `$${val}$`} />
                         </td>
                       ))}
                     </tr>
-                  )}
-                  {/* Row y (Chiều biến thiên) */}
-                  <tr>
-                    <td className="w-16 p-3 font-bold bg-slate-100 border-r border-slate-300 align-middle">y</td>
-                    <td colSpan={diagramData.x.length} className="p-2">
-                      <div className="flex items-center justify-around gap-2 px-3 py-1">
-                        {(diagramData.yArrows || [
-                          { start: '-\\infty', end: '4', dir: 'up' },
-                          { start: '4', end: '-3', dir: 'down' },
-                          { start: '-3', end: '+\\infty', dir: 'up' },
-                        ]).map((arr, i) => (
-                          <div key={i} className="flex items-center gap-1 text-slate-700">
-                            <span className="text-[11px] text-slate-500">
-                              <MathFormulaRenderer content={arr.start.startsWith('$') ? arr.start : `$${arr.start}$`} />
-                            </span>
-                            {arr.dir === 'up' ? (
-                              <ArrowUpRight className="w-4 h-4 text-rose-500 stroke-[2.5]" />
-                            ) : (
-                              <ArrowDownRight className="w-4 h-4 text-blue-500 stroke-[2.5]" />
-                            )}
-                            <span className="text-[11px] font-bold text-slate-800">
-                              <MathFormulaRenderer content={arr.end.startsWith('$') ? arr.end : `$${arr.end}$`} />
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+
+                    {/* HÀNG 2: DÒNG ĐẠO HÀM y' HOẶC f'(x) */}
+                    <tr className="border-b-2 border-slate-800 bg-white">
+                      <td className="w-16 py-2 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-100/80">
+                        y'
+                      </td>
+                      {(diagramData.yPrime || ['+', '0', '-', '0', '+']).map((sign, i) => {
+                        const trimmed = sign.trim();
+                        const isPlus = trimmed === '+';
+                        const isMinus = trimmed === '-';
+                        const isZero = trimmed === '0';
+                        const isAsymptote = trimmed === '||' || trimmed === '|';
+
+                        return (
+                          <td
+                            key={i}
+                            className={`py-2 px-3 font-bold text-sm border-r border-slate-300 last:border-r-0 ${
+                              isPlus
+                                ? 'text-rose-600'
+                                : isMinus
+                                ? 'text-blue-600'
+                                : isZero
+                                ? 'text-slate-900'
+                                : isAsymptote
+                                ? 'text-slate-800 font-black font-mono tracking-tighter'
+                                : 'text-slate-700'
+                            }`}
+                          >
+                            {isAsymptote ? '||' : trimmed}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* HÀNG 3: DÒNG HÀM SỐ y VỚI MŨI TÊN BIẾN THIÊN CHUẨN */}
+                    <tr className="bg-white">
+                      <td className="w-16 py-4 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-100/80 align-middle">
+                        y
+                      </td>
+                      <td colSpan={(diagramData.x || ['-\\infty', '-1', '1', '+\\infty']).length} className="p-3">
+                        <div className="flex items-center justify-around gap-1.5 px-2 py-1 min-h-[56px]">
+                          {(
+                            diagramData.yArrows || [
+                              { start: '-\\infty', end: '4', dir: 'up' },
+                              { start: '4', end: '-2', dir: 'down' },
+                              { start: '-2', end: '+\\infty', dir: 'up' },
+                            ]
+                          ).map((arr, i) => {
+                            const isUp = arr.dir === 'up';
+
+                            return (
+                              <div
+                                key={i}
+                                className="flex items-center gap-1.5 bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-200/90 shadow-2xs"
+                              >
+                                <span className="text-[11px] font-semibold text-slate-700">
+                                  <MathFormulaRenderer
+                                    content={arr.start.startsWith('$') ? arr.start : `$${arr.start}$`}
+                                  />
+                                </span>
+
+                                {isUp ? (
+                                  <div className="flex items-center text-rose-600">
+                                    <ArrowUpRight className="w-5 h-5 stroke-[2.5]" />
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center text-blue-600">
+                                    <ArrowDownRight className="w-5 h-5 stroke-[2.5]" />
+                                  </div>
+                                )}
+
+                                <span className="text-[11px] font-bold text-slate-900">
+                                  <MathFormulaRenderer
+                                    content={arr.end.startsWith('$') ? arr.end : `$${arr.end}$`}
+                                  />
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
-          {/* ĐỒ THỊ HÀM SỐ (SVG Cartesian Coordinate Grid) */}
+          {/* ========================================================= */}
+          {/* 2. BẢNG XÉT DẤU CHUẨN SGK (Toán 10, 11 & 12)               */}
+          {/* ========================================================= */}
+          {diagramType === 'sign_table' && (
+            <div className="w-full max-w-xl bg-white rounded-xl border-2 border-slate-700 shadow-md p-3.5 text-xs">
+              <div className="text-xs font-sans font-extrabold text-slate-800 mb-2.5 text-center flex items-center justify-center gap-1.5 uppercase tracking-wide">
+                <BarChart2 className="w-4 h-4 text-emerald-600" />
+                <span>{diagramData.title || 'Bảng xét dấu'}</span>
+              </div>
+
+              <div className="border border-slate-800 rounded overflow-hidden">
+                <table className="w-full border-collapse border-slate-800 text-center font-sans">
+                  <tbody>
+                    {/* Hàng x */}
+                    <tr className="border-b-2 border-slate-800 bg-slate-100/90">
+                      <td className="w-20 py-2 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-200/80">
+                        x
+                      </td>
+                      {(diagramData.x || ['-\\infty', '-2', '3', '+\\infty']).map((val, i) => (
+                        <td key={i} className="py-2 px-3 font-semibold text-slate-900 border-r border-slate-300 last:border-r-0">
+                          <MathFormulaRenderer content={val.startsWith('$') ? val : `$${val}$`} />
+                        </td>
+                      ))}
+                    </tr>
+
+                    {/* Các hàng xét dấu: f'(x), f(x), v.v. */}
+                    {(
+                      diagramData.rows || [
+                        {
+                          label: "f'(x)",
+                          signs: ['+', '0', '-', '0', '+'],
+                        },
+                      ]
+                    ).map((row, rIdx) => (
+                      <tr key={rIdx} className="border-b border-slate-300 last:border-b-0 bg-white">
+                        <td className="w-20 py-2 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-100/80">
+                          {row.label}
+                        </td>
+                        {row.signs.map((sign, sIdx) => {
+                          const trimmed = sign.trim();
+                          const isPlus = trimmed === '+';
+                          const isMinus = trimmed === '-';
+                          const isZero = trimmed === '0';
+                          const isAsymptote = trimmed === '||' || trimmed === '|';
+
+                          return (
+                            <td
+                              key={sIdx}
+                              className={`py-2 px-3 font-bold text-sm border-r border-slate-300 last:border-r-0 ${
+                                isPlus
+                                  ? 'text-rose-600 bg-rose-50/30'
+                                  : isMinus
+                                  ? 'text-blue-600 bg-blue-50/30'
+                                  : isZero
+                                  ? 'text-slate-900'
+                                  : isAsymptote
+                                  ? 'text-slate-800 font-mono tracking-tighter'
+                                  : 'text-slate-700'
+                              }`}
+                            >
+                              {isAsymptote ? '||' : trimmed}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================= */}
+          {/* 3. ĐỒ THỊ HÀM SỐ OXY CHUẨN SÁCH GIÁO KHOA TOÁN VIỆT NAM   */}
+          {/* ========================================================= */}
           {diagramType === 'function_graph' && (
             <div className="flex flex-col items-center">
-              <div className="text-xs font-bold text-slate-700 mb-1">
-                {diagramData.title || 'Đồ thị tọa độ Oxy'}
+              <div className="text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+                <span>{diagramData.title || 'Đồ thị hàm số trên mặt phẳng tọa độ Oxy'}</span>
               </div>
-              <svg width="260" height="180" viewBox="0 0 260 180" className="bg-white rounded-lg border border-slate-300 shadow-xs">
-                {/* Grid lines */}
-                <line x1="20" y1="90" x2="240" y2="90" stroke="#94a3b8" strokeWidth="1.5" markerEnd="url(#arrow)" />
-                <line x1="130" y1="165" x2="130" y2="15" stroke="#94a3b8" strokeWidth="1.5" markerEnd="url(#arrow)" />
-                <text x="245" y="94" fontSize="11" fontWeight="bold" fill="#475569">x</text>
-                <text x="135" y="15" fontSize="11" fontWeight="bold" fill="#475569">y</text>
-                <text x="122" y="102" fontSize="10" fill="#64748b">O</text>
 
-                {/* Graph Curves */}
-                {diagramData.graphType === 'cubic' ? (
-                  // Bậc 3: uốn lượn 2 cực trị
-                  <path d="M 40 160 C 90 20, 110 30, 130 90 C 150 150, 170 160, 220 20" fill="none" stroke="#4f46e5" strokeWidth="2.5" />
-                ) : diagramData.graphType === 'rational' ? (
-                  // Nhất biến y = (ax+b)/(cx+d)
-                  <>
-                    <line x1="100" y1="10" x2="100" y2="170" stroke="#f59e0b" strokeWidth="1" strokeDasharray="3 3" />
-                    <line x1="20" y1="60" x2="240" y2="60" stroke="#f59e0b" strokeWidth="1" strokeDasharray="3 3" />
-                    <path d="M 30 50 Q 85 45 90 15" fill="none" stroke="#e11d48" strokeWidth="2.5" />
-                    <path d="M 110 165 Q 115 75 230 70" fill="none" stroke="#e11d48" strokeWidth="2.5" />
-                  </>
-                ) : diagramData.graphType === 'sine' ? (
-                  // Hình sin dao động điều hòa (Lý/Toán)
-                  <path d="M 30 90 Q 65 30 100 90 T 170 90 T 240 90" fill="none" stroke="#059669" strokeWidth="2.5" />
-                ) : (
-                  // Parabol bậc 2
-                  <path d="M 50 25 Q 130 160 210 25" fill="none" stroke="#2563eb" strokeWidth="2.5" />
-                )}
-              </svg>
+              <div className="relative bg-white rounded-2xl border-2 border-slate-300 shadow-md p-2 overflow-hidden">
+                <svg
+                  width="300"
+                  height="220"
+                  viewBox="0 0 300 220"
+                  className="rounded-xl"
+                >
+                  <defs>
+                    <marker
+                      id="arrow-axis"
+                      viewBox="0 0 10 10"
+                      refX="6"
+                      refY="5"
+                      markerWidth="6"
+                      markerHeight="6"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M 0 1 L 10 5 L 0 9 z" fill="#334155" />
+                    </marker>
+
+                    {/* Subtle Grid Pattern (Ô ly chuẩn vở học sinh) */}
+                    <pattern id="grid-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
+                      <line x1="0" y1="0" x2="20" y2="0" stroke="#f1f5f9" strokeWidth="1" />
+                      <line x1="0" y1="0" x2="0" y2="20" stroke="#f1f5f9" strokeWidth="1" />
+                    </pattern>
+                  </defs>
+
+                  {/* Lưới ô vuông mờ */}
+                  <rect width="300" height="220" fill="url(#grid-pattern)" />
+
+                  {/* Trục hoành Ox */}
+                  <line
+                    x1="20"
+                    y1="110"
+                    x2="285"
+                    y2="110"
+                    stroke="#334155"
+                    strokeWidth="1.8"
+                    markerEnd="url(#arrow-axis)"
+                  />
+                  {/* Trục tung Oy */}
+                  <line
+                    x1="150"
+                    y1="205"
+                    x2="150"
+                    y2="15"
+                    stroke="#334155"
+                    strokeWidth="1.8"
+                    markerEnd="url(#arrow-axis)"
+                  />
+
+                  {/* Nhãn trục x, y, gốc O */}
+                  <text x="288" y="114" fontSize="12" fontWeight="bold" fontStyle="italic" fill="#0f172a">
+                    x
+                  </text>
+                  <text x="156" y="16" fontSize="12" fontWeight="bold" fontStyle="italic" fill="#0f172a">
+                    y
+                  </text>
+                  <text x="138" y="125" fontSize="11" fontWeight="bold" fill="#475569">
+                    O
+                  </text>
+
+                  {/* Vạch chia đơn vị (ticks) trên trục Ox */}
+                  {[-2, -1, 1, 2].map((val) => {
+                    const posX = 150 + val * 45;
+                    return (
+                      <g key={`tick-x-${val}`}>
+                        <line x1={posX} y1="107" x2={posX} y2="113" stroke="#475569" strokeWidth="1.2" />
+                        <text x={posX - 4} y="125" fontSize="9" fontWeight="bold" fill="#64748b">
+                          {val}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* Vạch chia đơn vị (ticks) trên trục Oy */}
+                  {[-1, 1, 2].map((val) => {
+                    const posY = 110 - val * 40;
+                    return (
+                      <g key={`tick-y-${val}`}>
+                        <line x1="147" y1={posY} x2="153" y2={posY} stroke="#475569" strokeWidth="1.2" />
+                        <text x="133" y={posY + 3} fontSize="9" fontWeight="bold" fill="#64748b">
+                          {val}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* 1. Hàm số bậc 3: y = ax^3 + bx^2 + cx + d */}
+                  {(!diagramData.graphType || diagramData.graphType === 'cubic') && (
+                    <>
+                      {/* Đường dóng nét đứt tọa độ cực đại & cực tiểu */}
+                      <line x1="105" y1="110" x2="105" y2="40" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
+                      <line x1="105" y1="40" x2="150" y2="40" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
+                      <line x1="195" y1="110" x2="195" y2="160" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
+                      <line x1="150" y1="160" x2="195" y2="160" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
+
+                      {/* Đường cong hàm bậc 3 mượt mà */}
+                      <path
+                        d="M 50 195 C 90 30, 110 35, 150 100 C 185 165, 210 170, 250 25"
+                        fill="none"
+                        stroke="#4f46e5"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                      />
+
+                      {/* Điểm cực đại & cực tiểu */}
+                      <circle cx="105" cy="40" r="3.5" fill="#e11d48" />
+                      <circle cx="195" cy="160" r="3.5" fill="#2563eb" />
+                    </>
+                  )}
+
+                  {/* 2. Hàm phân thức hữu tỉ bậc nhất / bậc nhất y = (ax+b)/(cx+d) */}
+                  {diagramData.graphType === 'rational' && (
+                    <>
+                      {/* Tiệm cận đứng x = 1 (nét đứt màu cam) */}
+                      <line x1="195" y1="10" x2="195" y2="210" stroke="#ea580c" strokeWidth="1.4" strokeDasharray="4 3" />
+                      {/* Tiệm cận ngang y = 1 (nét đứt màu cam) */}
+                      <line x1="15" y1="70" x2="285" y2="70" stroke="#ea580c" strokeWidth="1.4" strokeDasharray="4 3" />
+
+                      {/* Nhánh 1 (bên trái tiệm cận đứng) */}
+                      <path
+                        d="M 25 60 Q 180 50 185 15"
+                        fill="none"
+                        stroke="#dc2626"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                      />
+                      {/* Nhánh 2 (bên phải tiệm cận đứng) */}
+                      <path
+                        d="M 205 205 Q 210 80 275 75"
+                        fill="none"
+                        stroke="#dc2626"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                      />
+                    </>
+                  )}
+
+                  {/* 3. Hàm bậc 4 trùng phương: y = ax^4 + bx^2 + c (chữ W) */}
+                  {diagramData.graphType === 'biquadratic' && (
+                    <>
+                      {/* Đường cong hình chữ W với 3 cực trị */}
+                      <path
+                        d="M 55 25 C 75 160, 95 160, 110 160 C 130 160, 140 70, 150 70 C 160 70, 170 160, 190 160 C 205 160, 225 160, 245 25"
+                        fill="none"
+                        stroke="#7c3aed"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                      />
+                      <circle cx="110" cy="160" r="3" fill="#2563eb" />
+                      <circle cx="150" cy="70" r="3" fill="#e11d48" />
+                      <circle cx="190" cy="160" r="3" fill="#2563eb" />
+                    </>
+                  )}
+
+                  {/* 4. Hàm parabol bậc 2: y = ax^2 + bx + c */}
+                  {diagramData.graphType === 'quadratic' && (
+                    <>
+                      <line x1="150" y1="10" x2="150" y2="200" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
+                      <path
+                        d="M 70 30 Q 150 190 230 30"
+                        fill="none"
+                        stroke="#0284c7"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                      />
+                      <circle cx="150" cy="190" r="3.5" fill="#e11d48" />
+                    </>
+                  )}
+
+                  {/* 5. Hàm lượng giác hình sin: y = sin(x) */}
+                  {diagramData.graphType === 'sine' && (
+                    <path
+                      d="M 30 110 Q 75 40 120 110 T 210 110 T 280 110"
+                      fill="none"
+                      stroke="#059669"
+                      strokeWidth="2.8"
+                      strokeLinecap="round"
+                    />
+                  )}
+                </svg>
+              </div>
             </div>
           )}
 
-          {/* HÌNH HỌC KHÔNG GIAN (Toán 11 & 12) */}
+          {/* ========================================================= */}
+          {/* 4. HÌNH HỌC KHÔNG GIAN (Toán 11 & 12)                      */}
+          {/* ========================================================= */}
           {diagramType === 'geometry' && (
             <div className="flex flex-col items-center">
-              <div className="text-xs font-bold text-slate-700 mb-1">
+              <div className="text-xs font-bold text-slate-800 mb-1">
                 {diagramData.title || 'Hình học không gian chuẩn SGK'}
               </div>
-              <svg width="220" height="180" viewBox="0 0 220 180" className="bg-white rounded-lg border border-slate-300 shadow-xs">
-                {/* Pyramid S.ABCD */}
+              <svg width="230" height="185" viewBox="0 0 230 185" className="bg-white rounded-xl border border-slate-300 shadow-xs">
                 {diagramData.shape === 'prism' ? (
                   // Lăng trụ tam giác ABC.A'B'C'
                   <>
-                    <polygon points="50,140 140,160 180,135" fill="none" stroke="#334155" strokeWidth="1.5" />
-                    <polygon points="50,50 140,70 180,45" fill="none" stroke="#334155" strokeWidth="1.5" />
-                    <line x1="50" y1="50" x2="50" y2="140" stroke="#334155" strokeWidth="1.5" />
-                    <line x1="140" y1="70" x2="140" y2="160" stroke="#334155" strokeWidth="1.5" />
-                    <line x1="180" y1="45" x2="180" y2="135" stroke="#334155" strokeWidth="1.5" />
+                    <polygon points="50,140 140,160 180,135" fill="none" stroke="#334155" strokeWidth="1.6" />
+                    <polygon points="50,50 140,70 180,45" fill="none" stroke="#334155" strokeWidth="1.6" />
+                    <line x1="50" y1="50" x2="50" y2="140" stroke="#334155" strokeWidth="1.6" />
+                    <line x1="140" y1="70" x2="140" y2="160" stroke="#334155" strokeWidth="1.6" />
+                    <line x1="180" y1="45" x2="180" y2="135" stroke="#334155" strokeWidth="1.6" />
                     <text x="35" y="45" fontSize="10" fontWeight="bold">A'</text>
                     <text x="145" y="70" fontSize="10" fontWeight="bold">B'</text>
                     <text x="185" y="45" fontSize="10" fontWeight="bold">C'</text>
@@ -180,18 +551,15 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                 ) : (
                   // Hình chóp S.ABCD
                   <>
-                    {/* Base ABCD with AC dashed */}
-                    <line x1="40" y1="130" x2="140" y2="155" stroke="#334155" strokeWidth="1.5" />
-                    <line x1="140" y1="155" x2="190" y2="120" stroke="#334155" strokeWidth="1.5" />
-                    <line x1="40" y1="130" x2="90" y2="105" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" />
-                    <line x1="90" y1="105" x2="190" y2="120" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" />
-                    {/* Apex S */}
-                    <line x1="110" y1="20" x2="40" y2="130" stroke="#334155" strokeWidth="1.5" />
-                    <line x1="110" y1="20" x2="140" y2="155" stroke="#334155" strokeWidth="1.5" />
-                    <line x1="110" y1="20" x2="190" y2="120" stroke="#334155" strokeWidth="1.5" />
-                    <line x1="110" y1="20" x2="90" y2="105" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" />
-                    {/* Labels */}
-                    <text x="108" y="15" fontSize="10" fontWeight="bold" fill="#4338ca">S</text>
+                    <line x1="40" y1="130" x2="140" y2="155" stroke="#334155" strokeWidth="1.6" />
+                    <line x1="140" y1="155" x2="190" y2="120" stroke="#334155" strokeWidth="1.6" />
+                    <line x1="40" y1="130" x2="90" y2="105" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <line x1="90" y1="105" x2="190" y2="120" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <line x1="110" y1="20" x2="40" y2="130" stroke="#334155" strokeWidth="1.6" />
+                    <line x1="110" y1="20" x2="140" y2="155" stroke="#334155" strokeWidth="1.6" />
+                    <line x1="110" y1="20" x2="190" y2="120" stroke="#334155" strokeWidth="1.6" />
+                    <line x1="110" y1="20" x2="90" y2="105" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <text x="108" y="15" fontSize="11" fontWeight="bold" fill="#4338ca">S</text>
                     <text x="25" y="135" fontSize="10" fontWeight="bold">A</text>
                     <text x="140" y="170" fontSize="10" fontWeight="bold">B</text>
                     <text x="195" y="125" fontSize="10" fontWeight="bold">C</text>
@@ -202,61 +570,62 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
             </div>
           )}
 
-          {/* SƠ ĐỒ MẠCH ĐIỆN VẬT LÝ (Physics R-L-C) */}
+          {/* ========================================================= */}
+          {/* 5. MẠCH ĐIỆN VẬT LÝ                                        */}
+          {/* ========================================================= */}
           {diagramType === 'physics_circuit' && (
             <div className="flex flex-col items-center">
-              <div className="text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <div className="text-xs font-bold text-slate-800 mb-1 flex items-center gap-1.5">
                 <Zap className="w-3.5 h-3.5 text-amber-500" />
                 <span>{diagramData.title || 'Mạch điện RLC mắc nối tiếp'}</span>
               </div>
-              <svg width="240" height="90" viewBox="0 0 240 90" className="bg-white rounded-lg border border-slate-300 p-2 shadow-xs">
-                {/* Main wire */}
+              <svg width="250" height="95" viewBox="0 0 250 95" className="bg-white rounded-xl border border-slate-300 p-2 shadow-xs">
                 <line x1="20" y1="45" x2="50" y2="45" stroke="#334155" strokeWidth="2" />
-                {/* Resistor R */}
                 <rect x="50" y="37" width="35" height="16" fill="#f8fafc" stroke="#334155" strokeWidth="2" />
                 <text x="63" y="49" fontSize="10" fontWeight="bold" fill="#4338ca">R</text>
                 <line x1="85" y1="45" x2="105" y2="45" stroke="#334155" strokeWidth="2" />
-                {/* Inductor L (Cuộn cảm) */}
                 <path d="M 105 45 C 108 30, 115 30, 118 45 C 121 30, 128 30, 131 45 C 134 30, 141 30, 144 45" fill="none" stroke="#334155" strokeWidth="2" />
                 <text x="122" y="27" fontSize="10" fontWeight="bold" fill="#059669">L</text>
                 <line x1="144" y1="45" x2="165" y2="45" stroke="#334155" strokeWidth="2" />
-                {/* Capacitor C (Tụ điện) */}
                 <line x1="165" y1="35" x2="165" y2="55" stroke="#334155" strokeWidth="2" />
                 <line x1="173" y1="35" x2="173" y2="55" stroke="#334155" strokeWidth="2" />
                 <text x="166" y="27" fontSize="10" fontWeight="bold" fill="#dc2626">C</text>
-                <line x1="173" y1="45" x2="220" y2="45" stroke="#334155" strokeWidth="2" />
-                {/* Terminal dots */}
+                <line x1="173" y1="45" x2="225" y2="45" stroke="#334155" strokeWidth="2" />
                 <circle cx="20" cy="45" r="3" fill="#334155" />
-                <circle cx="220" cy="45" r="3" fill="#334155" />
+                <circle cx="225" cy="45" r="3" fill="#334155" />
                 <text x="15" y="65" fontSize="10" fontWeight="bold">A</text>
-                <text x="215" y="65" fontSize="10" fontWeight="bold">B</text>
+                <text x="220" y="65" fontSize="10" fontWeight="bold">B</text>
               </svg>
             </div>
           )}
 
-          {/* PHẢN ỨNG HÓA HỌC / CÔNG THỨC HÓA HỌC */}
+          {/* ========================================================= */}
+          {/* 6. HÓA HỌC / PHƯƠNG TRÌNH PHẢN ỨNG                       */}
+          {/* ========================================================= */}
           {diagramType === 'chemistry_diagram' && diagramData.equation && (
-            <div className="w-full max-w-md bg-white rounded-lg border border-amber-200 p-3 shadow-xs text-center">
-              <div className="text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-center gap-1.5">
+            <div className="w-full max-w-md bg-white rounded-xl border border-amber-300 p-3 shadow-xs text-center">
+              <div className="text-xs font-bold text-slate-800 mb-1.5 flex items-center justify-center gap-1.5">
                 <Activity className="w-3.5 h-3.5 text-rose-500" />
-                <span>Phương trình hóa học</span>
+                <span>Phương trình phản ứng hóa học</span>
               </div>
-              <div className="font-mono text-sm py-1 bg-amber-50/50 rounded border border-amber-200/60 font-semibold text-slate-900">
+              <div className="font-mono text-sm py-1.5 px-3 bg-amber-50/60 rounded-lg border border-amber-200 font-semibold text-slate-900">
                 <MathFormulaRenderer content={diagramData.equation} isBlock />
               </div>
               {diagramData.conditions && (
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Điều kiện: <span className="font-semibold">{diagramData.conditions}</span>
+                <div className="text-[11px] text-slate-600 mt-1">
+                  Điều kiện phản ứng: <span className="font-semibold text-slate-800">{diagramData.conditions}</span>
                 </div>
               )}
             </div>
           )}
 
-          {/* BẢNG SỐ LIỆU THỐNG KÊ (Địa lý, Lịch sử, Sinh học, Kinh tế - Pháp luật) */}
-          {diagramType === 'data_table' && diagramData.headers && diagramData.rows && (
-            <div className="w-full max-w-lg bg-white rounded-lg border border-slate-300 p-2 shadow-xs text-xs">
+          {/* ========================================================= */}
+          {/* 7. BẢNG SỐ LIỆU THỐNG KÊ (Địa lý, Lịch sử, Sinh học)     */}
+          {/* ========================================================= */}
+          {diagramType === 'data_table' && diagramData.headers && (diagramData.tableRows || diagramData.rows) && (
+            <div className="w-full max-w-lg bg-white rounded-xl border border-slate-300 p-2.5 shadow-xs text-xs">
               {diagramData.title && (
-                <div className="text-[11px] font-bold text-slate-700 mb-1.5 text-center">
+                <div className="text-xs font-bold text-slate-800 mb-2 text-center">
                   {diagramData.title}
                 </div>
               )}
@@ -264,14 +633,14 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                 <thead>
                   <tr className="bg-slate-100 border-b border-slate-300">
                     {diagramData.headers.map((h, i) => (
-                      <th key={i} className="p-1.5 border-r border-slate-300 font-bold text-slate-700">
+                      <th key={i} className="p-2 border-r border-slate-300 font-bold text-slate-700">
                         <MathFormulaRenderer content={h} />
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {diagramData.rows.map((row, rIdx) => (
+                  {(diagramData.tableRows || diagramData.rows || []).map((row: string[], rIdx: number) => (
                     <tr key={rIdx} className="border-b border-slate-200 hover:bg-slate-50">
                       {row.map((cell, cIdx) => (
                         <td key={cIdx} className="p-1.5 border-r border-slate-200 text-slate-800">

@@ -8,11 +8,23 @@ import {
   Clock,
   Sparkles,
   ArrowRight,
+  ArrowLeft,
   BookOpen,
   Edit3,
+  Volume2,
+  VolumeX,
+  Square,
+  Play,
 } from 'lucide-react';
 import { QuizQuestion } from '../types';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
+import { QuizRichContentRenderer } from './QuizRichContentRenderer';
+import {
+  speakQuestionContent,
+  stopAllSpeech,
+  VOICE_TONE_PRESETS,
+  VoiceTonePreset,
+} from '../utils/aiSpeechService';
 
 interface ManualQuizModalProps {
   onClose: () => void;
@@ -48,8 +60,27 @@ export const ManualQuizModal: React.FC<ManualQuizModalProps> = ({
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [replaceExisting, setReplaceExisting] = useState<boolean>(true);
   const [quizTitle, setQuizTitle] = useState<string>('Bộ Đề Trắc Nghiệm Tự Soạn');
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[1]); // Cô giáo dịu dàng
 
   const currentQ = questions[activeIndex] || questions[0];
+
+  const handleToggleSpeakCurrent = () => {
+    if (isSpeaking) {
+      stopAllSpeech();
+      setIsSpeaking(false);
+    } else {
+      if (!currentQ) return;
+      stopAllSpeech();
+      setIsSpeaking(true);
+      speakQuestionContent(currentQ, {
+        preset: selectedVoice,
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => setIsSpeaking(false),
+        onError: () => setIsSpeaking(false),
+      });
+    }
+  };
 
   const handleUpdateCurrent = (field: keyof QuizQuestion, val: any) => {
     setQuestions((prev) =>
@@ -86,6 +117,21 @@ export const ManualQuizModal: React.FC<ManualQuizModalProps> = ({
     setActiveIndex(questions.length);
   };
 
+  const handleNextQuestion = () => {
+    if (activeIndex < questions.length - 1) {
+      setActiveIndex(activeIndex + 1);
+    } else {
+      // Nếu đang ở câu cuối cùng, tự động tạo câu mới và chuyển tới
+      handleAddNewQuestion();
+    }
+  };
+
+  const handlePrevQuestion = () => {
+    if (activeIndex > 0) {
+      setActiveIndex(activeIndex - 1);
+    }
+  };
+
   const handleDeleteQuestion = (idx: number) => {
     if (questions.length <= 1) return;
     const next = questions.filter((_, i) => i !== idx);
@@ -95,6 +141,7 @@ export const ManualQuizModal: React.FC<ManualQuizModalProps> = ({
 
   const handleApply = () => {
     if (questions.length === 0) return;
+    stopAllSpeech();
     onApplyQuestions(questions, quizTitle, replaceExisting);
     onClose();
   };
@@ -192,28 +239,75 @@ export const ManualQuizModal: React.FC<ManualQuizModalProps> = ({
             <div className="flex-1 p-5 overflow-y-auto space-y-4">
               {/* Question Text Input */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded-md bg-indigo-600 text-white font-black text-xs">
-                      CÂU {activeIndex + 1}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-black text-xs">
+                      CÂU {activeIndex + 1} / {questions.length}
                     </span>
-                    <span>Nội dung câu hỏi:</span>
-                  </label>
-                  <span className="text-[11px] text-slate-400">
-                    Mẹo: Gõ công thức trong dấu $...$ (VD: $x^2 + 2x - 3 = 0$)
-                  </span>
+                    <label className="text-xs font-bold text-slate-700">
+                      Nội dung câu hỏi:
+                    </label>
+                  </div>
+
+                  {/* AI Speech Voice Button & Selector */}
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={selectedVoice.id}
+                      onChange={(e) => {
+                        const found = VOICE_TONE_PRESETS.find((p) => p.id === e.target.value);
+                        if (found) setSelectedVoice(found);
+                      }}
+                      className="text-[11px] font-bold text-slate-700 bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 focus:outline-none"
+                    >
+                      {VOICE_TONE_PRESETS.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleSpeakCurrent}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        isSpeaking
+                          ? 'bg-rose-600 text-white animate-pulse shadow-md'
+                          : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+                      }`}
+                      title={isSpeaking ? 'Dừng đọc AI' : 'Nghe AI đọc câu hỏi và các đáp án'}
+                    >
+                      {isSpeaking ? (
+                        <>
+                          <Square className="w-3.5 h-3.5 fill-current" />
+                          <span>Dừng đọc</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Nghe AI đọc</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
+
                 <textarea
                   value={currentQ.question}
                   onChange={(e) => handleUpdateCurrent('question', e.target.value)}
                   rows={3}
                   className="w-full p-3 rounded-xl border border-slate-300 text-sm font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                  placeholder="Nhập nội dung câu hỏi tại đây..."
+                  placeholder="Nhập nội dung câu hỏi tại đây... (Mẹo: Gõ công thức trong dấu $...$ như $x^2 + 2x - 3 = 0$)"
                 />
-                {/* Live Preview Question */}
-                <div className="mt-2 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800">
-                  <span className="font-bold text-indigo-600 mr-2">Xem trước hiển thị:</span>
-                  <MathFormulaRenderer text={currentQ.question} />
+                {/* Live Preview Question with full rich diagram & textbook KaTeX */}
+                <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800">
+                  <div className="font-bold text-indigo-600 mb-1 flex items-center gap-1">
+                    <span>Xem trước hiển thị chuẩn SGK:</span>
+                  </div>
+                  <QuizRichContentRenderer
+                    content={currentQ.question}
+                    diagramType={currentQ.diagramType}
+                    diagramData={currentQ.diagramData}
+                  />
                 </div>
               </div>
 
@@ -296,6 +390,49 @@ export const ManualQuizModal: React.FC<ManualQuizModalProps> = ({
                     <option value={60}>60 Giây</option>
                     <option value={90}>90 Giây</option>
                   </select>
+                </div>
+              </div>
+
+              {/* BỘ ĐIỀU HƯỚNG CHUYỂN SANG CÂU TIẾP THEO / CÂU TRƯỚC RÕ RÀNG */}
+              <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-indigo-50/50 p-4 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={handlePrevQuestion}
+                  disabled={activeIndex === 0}
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-30 disabled:pointer-events-none text-slate-700 text-xs font-bold flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
+                >
+                  <ArrowLeft className="w-4 h-4 text-indigo-600" />
+                  <span>← Câu trước (Câu {Math.max(1, activeIndex)})</span>
+                </button>
+
+                <div className="text-xs font-black text-indigo-900 bg-white px-3.5 py-1.5 rounded-xl border border-indigo-200 shadow-2xs flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                  <span>Đang sửa Câu {activeIndex + 1} trên tổng {questions.length} câu</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleNextQuestion}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black flex items-center gap-2 shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
+                  >
+                    <span>
+                      {activeIndex < questions.length - 1
+                        ? `Chuyển sang Câu ${activeIndex + 2} →`
+                        : '+ Soạn câu tiếp theo'}
+                    </span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleAddNewQuestion}
+                    className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+                    title="Tạo thêm 1 câu hỏi mới vào cuối danh sách"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Thêm câu mới</span>
+                  </button>
                 </div>
               </div>
             </div>

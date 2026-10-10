@@ -781,3 +781,113 @@ export async function speakWithGeminiAudio(
     return speakText(text, { preset, onStart, onEnd });
   }
 }
+
+/**
+ * Đọc toàn bộ nội dung câu hỏi trắc nghiệm kèm 4 đáp án A, B, C, D bằng giọng đọc AI tiếng Việt chuẩn mực
+ */
+export function speakQuestionContent(
+  question: {
+    question: string;
+    options: Array<{ key: string; text: string }>;
+    explanation?: string;
+  },
+  options: SpeakOptions = {}
+): boolean {
+  if (!question || !question.question) return false;
+
+  const parts: string[] = [];
+  parts.push(`Câu hỏi: ${question.question}.`);
+
+  if (Array.isArray(question.options) && question.options.length > 0) {
+    question.options.forEach((opt) => {
+      const key = opt.key || '';
+      const text = opt.text || '';
+      if (text.trim()) {
+        parts.push(`Phương án ${key}: ${text}.`);
+      }
+    });
+  }
+
+  const script = parts.join(' ');
+  return speakText(script, options);
+}
+
+/**
+ * Gọi tên học sinh hoặc nhóm học sinh bằng giọng đọc AI đầy cảm hứng, chuẩn sư phạm
+ */
+export function speakStudentCalling(
+  studentName: string,
+  mode: 'call' | 'congratulate' | 'group' = 'call',
+  otherNames: string[] = [],
+  options: SpeakOptions = {}
+): boolean {
+  if (!studentName && otherNames.length === 0) return false;
+
+  let text = '';
+  if (mode === 'group' && otherNames.length > 0) {
+    const allNames = [studentName, ...otherNames].filter(Boolean);
+    text = `Xin mời nhóm các em: ${allNames.join(', ')} cùng lên bảng tham gia hoạt động!`;
+  } else if (mode === 'congratulate') {
+    text = `Nhiệt liệt chúc mừng em ${studentName} đã xuất sắc hoàn thành thử thách!`;
+  } else {
+    // Phổ biến ngẫu nhiên lời gọi tên tự nhiên
+    const phrases = [
+      `Xin mời em ${studentName} lên bảng trả lời câu hỏi!`,
+      `Thầy cô xin mời bạn ${studentName} đứng lên phát biểu bài nào!`,
+      `Chúc mừng em ${studentName} đã được chọn! Mời em chuẩn bị trả lời!`,
+      `Xin mời bạn ${studentName} tiếp tục phần thử thách của lớp nhé!`,
+    ];
+    const picked = phrases[Math.floor(Math.random() * phrases.length)];
+    text = picked;
+  }
+
+  return speakText(text, options);
+}
+
+/**
+ * AI MC / Giọng dẫn chương trình cho trò chơi học tập
+ */
+export function speakGameVoiceEvent(
+  eventType: 'game_start' | 'correct' | 'wrong' | 'timeout' | 'winner' | 'question',
+  customText?: string,
+  options: SpeakOptions = {}
+): boolean {
+  let text = '';
+
+  switch (eventType) {
+    case 'game_start':
+      text = customText || 'Trò chơi bắt đầu! Chúc các em tập trung cao độ và giành chiến thắng rực rỡ!';
+      break;
+    case 'correct': {
+      const praises = [
+        'Chính xác! Xuất sắc lắm!',
+        'Tuyệt vời! Câu trả lời hoàn toàn chính xác!',
+        'Đúng rồi! Bạn nhận được điểm thưởng!',
+        'Xuất sắc! Bạn trả lời rất nhanh và chính xác!',
+      ];
+      text = customText || praises[Math.floor(Math.random() * praises.length)];
+      break;
+    }
+    case 'wrong': {
+      const encourages = [
+        'Rất tiếc, câu trả lời chưa chính xác rồi!',
+        'Chưa chính xác! Hãy cố gắng hơn ở câu hỏi tiếp theo nhé!',
+        'Tiếc quá, chưa đúng rồi! Đừng nản lòng nhé!',
+      ];
+      text = customText || encourages[Math.floor(Math.random() * encourages.length)];
+      break;
+    }
+    case 'timeout':
+      text = customText || 'Đã hết thời gian suy nghĩ! Hãy cùng xem đáp án chính xác nhé!';
+      break;
+    case 'winner':
+      text = customText || 'Nhiệt liệt chúc mừng quán quân đã giành chiến thắng chung cuộc xuất sắc ngày hôm nay!';
+      break;
+    case 'question':
+      text = customText || '';
+      break;
+  }
+
+  if (!text) return false;
+  return speakText(text, options);
+}

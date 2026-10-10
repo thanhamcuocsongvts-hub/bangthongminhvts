@@ -13,6 +13,7 @@ import {
   Save,
   Layers,
   ArrowRight,
+  ArrowLeft,
   ListOrdered,
   Clock,
   Award,
@@ -22,12 +23,23 @@ import {
   FileCode,
   PenTool,
   CheckSquare,
+  Volume2,
+  VolumeX,
+  Square,
+  Play,
+  RotateCcw,
 } from 'lucide-react';
 import { QuizQuestion, LessonDoc } from '../types';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { parseQuizFromFile } from '../utils/quizFileParser';
 import { directGenerateQuiz } from '../utils/geminiClient';
+import {
+  speakQuestionContent,
+  stopAllSpeech,
+  VOICE_TONE_PRESETS,
+  VoiceTonePreset,
+} from '../utils/aiSpeechService';
 
 interface AIQuizCreatorModalProps {
   currentLesson?: LessonDoc | null;
@@ -59,7 +71,12 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Manual Creation state
+  // AI Speech Audio State
+  const [readingQuestionId, setReadingQuestionId] = useState<string | null>(null);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[1]); // Cô giáo dịu dàng
+
+  // Manual Creation Stepper & Form State
+  const [activeManualIndex, setActiveManualIndex] = useState<number>(0);
   const [manualQuestion, setManualQuestion] = useState<string>('');
   const [manualOptA, setManualOptA] = useState<string>('');
   const [manualOptB, setManualOptB] = useState<string>('');
@@ -69,6 +86,52 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
   const [manualExplanation, setManualExplanation] = useState<string>('');
   const [manualTime, setManualTime] = useState<number>(30);
   const [manualDiff, setManualDiff] = useState<'Cơ bản' | 'Thông hiểu' | 'Vận dụng' | 'Vận dụng cao'>('Thông hiểu');
+
+  // Load a question into manual form if index changes
+  const loadQuestionIntoManualForm = (q: QuizQuestion) => {
+    setManualQuestion(q.question);
+    setManualOptA(q.options?.find((o) => o.key === 'A')?.text || '');
+    setManualOptB(q.options?.find((o) => o.key === 'B')?.text || '');
+    setManualOptC(q.options?.find((o) => o.key === 'C')?.text || '');
+    setManualOptD(q.options?.find((o) => o.key === 'D')?.text || '');
+    setManualCorrect((q.correctAnswer as any) || 'A');
+    setManualExplanation(q.explanation || '');
+    setManualTime(q.timeLimit || 30);
+    setManualDiff((q.difficulty as any) || 'Thông hiểu');
+  };
+
+  const handleToggleSpeakQuestion = (q: QuizQuestion) => {
+    if (readingQuestionId === q.id) {
+      stopAllSpeech();
+      setReadingQuestionId(null);
+    } else {
+      stopAllSpeech();
+      setReadingQuestionId(q.id);
+      speakQuestionContent(q, {
+        preset: selectedVoice,
+        onStart: () => setReadingQuestionId(q.id),
+        onEnd: () => setReadingQuestionId(null),
+        onError: () => setReadingQuestionId(null),
+      });
+    }
+  };
+
+  const handleToggleSpeakDraft = () => {
+    const draftQ: QuizQuestion = {
+      id: 'draft',
+      question: manualQuestion || 'Nội dung câu hỏi',
+      options: [
+        { key: 'A', text: manualOptA || 'Đáp án A' },
+        { key: 'B', text: manualOptB || 'Đáp án B' },
+        { key: 'C', text: manualOptC || 'Đáp án C' },
+        { key: 'D', text: manualOptD || 'Đáp án D' },
+      ],
+      correctAnswer: manualCorrect,
+      explanation: manualExplanation,
+      timeLimit: manualTime,
+    };
+    handleToggleSpeakQuestion(draftQ);
+  };
 
   // File Upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -146,9 +209,8 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
     }
   };
 
-  // Add manual question from form
-  const handleAddManualSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  // Add/Update manual question from form with smart Next navigation
+  const handleSaveManualAndNext = (advanceToNext: boolean = true) => {
     if (!manualQuestion.trim()) {
       setErrorMessage('Vui lòng nhập nội dung câu hỏi.');
       return;
@@ -158,8 +220,13 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
       return;
     }
 
+    const currentId =
+      activeManualIndex < generatedQuestions.length
+        ? generatedQuestions[activeManualIndex].id
+        : `manual_q_${Date.now()}`;
+
     const newQ: QuizQuestion = {
-      id: `manual_q_${Date.now()}`,
+      id: currentId,
       question: manualQuestion.trim(),
       options: [
         { key: 'A', text: manualOptA.trim() },
@@ -173,15 +240,57 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
       difficulty: manualDiff,
     };
 
-    setGeneratedQuestions((prev) => [...prev, newQ]);
-    setManualQuestion('');
-    setManualOptA('');
-    setManualOptB('');
-    setManualOptC('');
-    setManualOptD('');
-    setManualExplanation('');
+    if (activeManualIndex < generatedQuestions.length) {
+      setGeneratedQuestions((prev) =>
+        prev.map((item, i) => (i === activeManualIndex ? newQ : item))
+      );
+      setSuccessMessage(`Đã cập nhật xong Câu ${activeManualIndex + 1}!`);
+    } else {
+      setGeneratedQuestions((prev) => [...prev, newQ]);
+      setSuccessMessage(`Đã thêm Câu ${generatedQuestions.length + 1} vào danh sách!`);
+    }
+
     setErrorMessage(null);
-    setSuccessMessage('Đã thêm 1 câu hỏi vào danh sách!');
+
+    if (advanceToNext) {
+      const nextIdx = activeManualIndex + 1;
+      setActiveManualIndex(nextIdx);
+      if (nextIdx < generatedQuestions.length) {
+        loadQuestionIntoManualForm(generatedQuestions[nextIdx]);
+      } else {
+        // Clear form for next fresh question
+        setManualQuestion('');
+        setManualOptA('');
+        setManualOptB('');
+        setManualOptC('');
+        setManualOptD('');
+        setManualExplanation('');
+      }
+    }
+  };
+
+  const handleManualGoPrev = () => {
+    if (activeManualIndex > 0) {
+      const prevIdx = activeManualIndex - 1;
+      setActiveManualIndex(prevIdx);
+      if (prevIdx < generatedQuestions.length) {
+        loadQuestionIntoManualForm(generatedQuestions[prevIdx]);
+      }
+    }
+  };
+
+  const handleManualSelectTab = (idx: number) => {
+    setActiveManualIndex(idx);
+    if (idx < generatedQuestions.length) {
+      loadQuestionIntoManualForm(generatedQuestions[idx]);
+    } else {
+      setManualQuestion('');
+      setManualOptA('');
+      setManualOptB('');
+      setManualOptC('');
+      setManualOptD('');
+      setManualExplanation('');
+    }
   };
 
   // Process uploaded file
@@ -439,11 +548,92 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
           {/* 2. Manual Entry Panel */}
           {creationMode === 'manual' && (
             <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-4">
+              {/* Stepper Tabs Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200">
+                <div className="flex items-center gap-1.5 overflow-x-auto py-1 max-w-full">
+                  {generatedQuestions.map((_, qIdx) => (
+                    <button
+                      key={qIdx}
+                      type="button"
+                      onClick={() => handleManualSelectTab(qIdx)}
+                      className={`px-3 py-1.5 rounded-xl font-black text-xs transition-all cursor-pointer shrink-0 ${
+                        activeManualIndex === qIdx
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-300'
+                      }`}
+                    >
+                      Câu {qIdx + 1}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => handleManualSelectTab(generatedQuestions.length)}
+                    className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1 transition-all cursor-pointer shrink-0 ${
+                      activeManualIndex === generatedQuestions.length
+                        ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
+                        : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300'
+                    }`}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Soạn câu mới ({generatedQuestions.length + 1})</span>
+                  </button>
+                </div>
+
+                {/* AI Voice Preset & Playback */}
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedVoice.id}
+                    onChange={(e) => {
+                      const found = VOICE_TONE_PRESETS.find((p) => p.id === e.target.value);
+                      if (found) setSelectedVoice(found);
+                    }}
+                    className="text-[11px] font-bold text-slate-700 bg-white border border-slate-300 rounded-lg px-2 py-1 focus:outline-none"
+                  >
+                    {VOICE_TONE_PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={handleToggleSpeakDraft}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      readingQuestionId === 'draft'
+                        ? 'bg-rose-600 text-white animate-pulse shadow-md'
+                        : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+                    }`}
+                    title="Nghe giọng AI đọc câu hỏi và các phương án đang soạn"
+                  >
+                    {readingQuestionId === 'draft' ? (
+                      <>
+                        <Square className="w-3.5 h-3.5 fill-current" />
+                        <span>Dừng đọc</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Nghe AI đọc thử</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Question Text */}
               <div className="space-y-1.5">
-                <label className="text-xs font-black uppercase text-slate-700 flex items-center gap-1.5">
-                  <HelpCircle className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Nội Dung Câu Hỏi (Hỗ trợ công thức $...$)</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black uppercase text-slate-700 flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded-md bg-indigo-600 text-white font-black text-xs">
+                      CÂU {activeManualIndex + 1}
+                    </span>
+                    <span>Nội Dung Câu Hỏi (Hỗ trợ công thức $...$)</span>
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    Mẹo: Gõ công thức trong dấu $...$ (VD: $y = x^3 - 3x^2 + 2$)
+                  </span>
+                </div>
                 <textarea
                   value={manualQuestion}
                   onChange={(e) => setManualQuestion(e.target.value)}
@@ -451,6 +641,12 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
                   className="w-full p-3 rounded-xl bg-white border border-slate-300 text-slate-900 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   rows={2}
                 />
+                {manualQuestion.trim() && (
+                  <div className="p-2.5 rounded-xl bg-white border border-slate-200 text-xs text-slate-800">
+                    <span className="font-bold text-indigo-600 mr-2 text-[11px]">Xem trước chuẩn SGK:</span>
+                    <QuizRichContentRenderer content={manualQuestion} />
+                  </div>
+                )}
               </div>
 
               {/* 4 Options */}
@@ -504,14 +700,57 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
                     className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
-                <div className="flex items-end">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-600">Thời gian làm bài</label>
+                  <select
+                    value={manualTime}
+                    onChange={(e) => setManualTime(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value={15}>15 giây</option>
+                    <option value={20}>20 giây</option>
+                    <option value={30}>30 giây (Chuẩn)</option>
+                    <option value={45}>45 giây</option>
+                    <option value={60}>60 giây</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* CHUYỂN SANG CÂU TIẾP THEO / CÂU TRƯỚC RÕ RÀNG */}
+              <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-xl">
+                <button
+                  type="button"
+                  onClick={handleManualGoPrev}
+                  disabled={activeManualIndex === 0}
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-30 disabled:pointer-events-none text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <ArrowLeft className="w-4 h-4 text-indigo-600" />
+                  <span>← Quay lại Câu {Math.max(1, activeManualIndex)}</span>
+                </button>
+
+                <div className="text-xs font-bold text-indigo-900 bg-indigo-50 px-3 py-1.5 rounded-lg">
+                  {activeManualIndex < generatedQuestions.length
+                    ? `Đang xem/sửa Câu ${activeManualIndex + 1}`
+                    : `Đang soạn Câu mới (${activeManualIndex + 1})`}
+                </div>
+
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={handleAddManualSubmit}
-                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
+                    onClick={() => handleSaveManualAndNext(false)}
+                    className="px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-800 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Thêm Câu Này Vào Đề</span>
+                    <Save className="w-4 h-4 text-slate-600" />
+                    <span>Lưu câu này</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSaveManualAndNext(true)}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
+                  >
+                    <span>Lưu & Soạn câu tiếp theo</span>
+                    <ArrowRight className="w-4 h-4 text-amber-300" />
                   </button>
                 </div>
               </div>
@@ -622,7 +861,31 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
+                          {/* AI Voice Audio Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSpeakQuestion(q)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                              readingQuestionId === q.id
+                                ? 'bg-rose-600 text-white animate-pulse shadow-xs'
+                                : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600'
+                            }`}
+                            title={readingQuestionId === q.id ? 'Dừng đọc AI' : 'Nghe AI đọc câu hỏi và các phương án'}
+                          >
+                            {readingQuestionId === q.id ? (
+                              <>
+                                <Square className="w-3.5 h-3.5 fill-current" />
+                                <span className="text-[11px]">Dừng</span>
+                              </>
+                            ) : (
+                              <>
+                                <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
+                                <span className="text-[11px]">Nghe AI</span>
+                              </>
+                            )}
+                          </button>
+
                           <button
                             onClick={() => setEditingIndex(isEditing ? null : idx)}
                             className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
@@ -749,6 +1012,54 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
                               <MathFormulaRenderer content={q.explanation} />
                             </span>
                           )}
+                        </div>
+                      )}
+
+                      {/* Navigation bar while editing question in list */}
+                      {isEditing && (
+                        <div className="mt-3.5 pt-3 border-t border-indigo-200/70 flex flex-wrap items-center justify-between gap-2 bg-indigo-50/60 p-2.5 rounded-xl">
+                          <button
+                            type="button"
+                            onClick={() => setEditingIndex(Math.max(0, idx - 1))}
+                            disabled={idx === 0}
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-30 disabled:pointer-events-none text-xs font-bold text-slate-700 flex items-center gap-1 cursor-pointer"
+                          >
+                            <ArrowLeft className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>← Câu trước ({idx})</span>
+                          </button>
+
+                          <span className="text-[11px] font-black text-indigo-900 bg-white px-2.5 py-1 rounded-md border border-indigo-200">
+                            Đang sửa Câu {idx + 1} / {generatedQuestions.length}
+                          </span>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (idx < generatedQuestions.length - 1) {
+                                  setEditingIndex(idx + 1);
+                                } else {
+                                  handleAddManualQuestion();
+                                }
+                              }}
+                              className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                            >
+                              <span>
+                                {idx < generatedQuestions.length - 1
+                                  ? `Sang Câu ${idx + 2} →`
+                                  : '+ Thêm câu tiếp theo'}
+                              </span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setEditingIndex(null)}
+                              className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
+                            >
+                              Xong
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
