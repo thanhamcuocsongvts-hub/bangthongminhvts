@@ -66,6 +66,7 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({
       subject,
       school: school.trim() || 'Trường THPT',
       avatar: subject === 'Toán học' || subject === 'Vật lý' ? '👨‍🏫' : '👩‍🏫',
+      status: 'pending',
       classes: [
         {
           id: 'class_new_1',
@@ -84,12 +85,11 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({
     };
 
     onAddNewTeacher(newTeacher);
-    onSelectTeacher(newTeacher);
-    setSuccessToast(`Đã tạo tài khoản giáo viên ${newTeacher.name} thành công!`);
+    setSuccessToast(`Đã gửi đăng ký tài khoản cho ${newTeacher.name}! Vui lòng chờ Admin phê duyệt kích hoạt.`);
     setTimeout(() => {
       setSuccessToast(null);
-      onClose();
-    }, 1200);
+      setAuthView('profiles');
+    }, 2200);
   };
 
   // Handle Google Sign-In
@@ -323,6 +323,16 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({
                     <div
                       key={teacher.id}
                       onClick={() => {
+                        if (teacher.role !== 'admin' && teacher.status === 'pending') {
+                          setSuccessToast('Tài khoản này đang chờ Admin phê duyệt kích hoạt!');
+                          setTimeout(() => setSuccessToast(null), 3000);
+                          return;
+                        }
+                        if (teacher.role !== 'admin' && teacher.status === 'locked') {
+                          setSuccessToast('Tài khoản này đang bị tạm khóa. Vui lòng liên hệ Admin!');
+                          setTimeout(() => setSuccessToast(null), 3000);
+                          return;
+                        }
                         onSelectTeacher(teacher);
                         onClose();
                       }}

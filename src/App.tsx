@@ -1006,27 +1006,9 @@ export default function App() {
             return next;
           });
           
-          setActiveTeacherId(newT.id);
-          localStorage.setItem('smartboard_active_teacher', newT.id);
-          setActiveTab('whiteboard');
+          // Newly registered teachers must wait for Admin approval before login
         }}
         onLogout={handleLogout}
-        onGuestLogin={() => {
-          setIsGuestMode(true);
-          setGuestTeacherData({
-            id: 'guest',
-            name: 'Khách (Dùng thử)',
-            username: 'guest',
-            email: 'guest@smartboard.local',
-            phone: '',
-            subject: 'Khác',
-            school: '',
-            avatar: '👤',
-            classes: [],
-            createdAt: new Date().toISOString(),
-          });
-          setActiveTab('whiteboard');
-        }}
       />
     );
   }
@@ -1195,30 +1177,6 @@ export default function App() {
               >
                 <ShieldCheck className="w-4 h-4" />
                 <span>Đăng Nhập Quản Trị Viên (Admin) Để Phê Duyệt Ngay</span>
-              </button>
-
-              {/* Button 4: Dùng thử Guest */}
-              <button
-                type="button"
-                onClick={() => {
-                  setIsGuestMode(true);
-                  setGuestTeacherData({
-                    id: 'guest',
-                    name: 'Khách (Dùng thử)',
-                    username: 'guest',
-                    email: 'guest@smartboard.local',
-                    phone: '',
-                    subject: 'Khác',
-                    school: '',
-                    avatar: '👤',
-                    classes: [],
-                    createdAt: new Date().toISOString(),
-                  });
-                  setActiveTab('whiteboard');
-                }}
-                className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-              >
-                <span>Dùng Thử Bảng Thông Minh Ngay (Chế độ Khách)</span>
               </button>
             </div>
           </div>
@@ -1400,23 +1358,11 @@ export default function App() {
                 }}
                 onSwitchToPresentation={() => setActiveTab('whiteboard')}
                 onSwitchToReader={() => setActiveTab('reader')}
-                onSwitchToFastWhiteboard={() => setActiveTab('fast-whiteboard')}
                 onOpenRandomPicker={() => {
                   setPickerClassroom(activeTeacher?.classes?.[0] || null);
                   setShowRandomPickerModal(true);
                 }}
               />
-            )}
-
-            {/* Tab: Fast Whiteboard (4K 120Hz Zero Latency Interactive Surface) */}
-            {activeTab === 'fast-whiteboard' && (
-              <div className="w-full h-full relative">
-                <FastWhiteboard
-                  theme="chalkboard"
-                  className="rounded-2xl shadow-xl border border-slate-700/50"
-                  onBack={() => setActiveTab('whiteboard')}
-                />
-              </div>
             )}
 
             {/* Tab 4: Live Quiz Hub & Classroom Submission (with embedded Analytics) */}
@@ -1426,6 +1372,8 @@ export default function App() {
                 textScale={textScale}
                 onRefreshRoom={() => fetchRoom(roomState?.pin || '758899')}
                 onOpenExportModal={() => setShowExportModal(true)}
+                classroom={activeTeacher?.classes?.[0]}
+                teacher={activeTeacher}
                 onControlRoom={async (idx, isLive) => {
                   await fetch(`/api/rooms/${roomState?.pin || '758899'}/control`, {
                     method: 'POST',

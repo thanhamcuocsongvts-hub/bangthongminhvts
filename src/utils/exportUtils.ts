@@ -8,6 +8,31 @@ import { LessonDoc, RoomState, QuizQuestion, ClassRoom, TeacherProfile } from '.
 import { fetchFileFromCloudStore } from './storageUtils';
 
 /**
+ * Universal safe blob saver working seamlessly on Desktop browsers, iOS Safari, Android Chrome, and WebViews
+ */
+export function saveBlobSafely(blob: Blob, filename: string) {
+  try {
+    saveAs(blob, filename);
+  } catch (_) {
+    try {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (_) {}
+        URL.revokeObjectURL(url);
+      }, 3500);
+    } catch (e) {
+      console.error('Download error:', e);
+    }
+  }
+}
+
+/**
  * 1. Export Gradebook to Excel (.xlsx) with Semester 1 (HK1), Semester 2 (HK2), and Full Year (Cả Năm) sheets
  */
 export function exportGradebookToExcel(classroom: ClassRoom, teacher: TeacherProfile) {
@@ -451,7 +476,7 @@ export async function exportOriginalLessonFile(lesson: LessonDoc): Promise<void>
     try {
       const cloudRes = await fetchFileFromCloudStore(lId);
       if (cloudRes?.blob && cloudRes.blob.size > 0) {
-        saveAs(cloudRes.blob, filename);
+        saveBlobSafely(cloudRes.blob, filename);
         return;
       }
     } catch (_) {}
@@ -483,7 +508,7 @@ export async function exportOriginalLessonFile(lesson: LessonDoc): Promise<void>
         if (!contentType.includes('application/json')) {
           const blob = await res.blob();
           if (blob.size > 0) {
-            saveAs(blob, filename);
+            saveBlobSafely(blob, filename);
             return;
           }
         }
@@ -498,7 +523,7 @@ export async function exportOriginalLessonFile(lesson: LessonDoc): Promise<void>
       if (response.ok) {
         const blob = await response.blob();
         if (blob.size > 0 && !blob.type.includes('json')) {
-          saveAs(blob, filename);
+          saveBlobSafely(blob, filename);
           return;
         }
       }
@@ -530,7 +555,7 @@ export async function exportOriginalLessonFile(lesson: LessonDoc): Promise<void>
     }
     const wbout = XLSX.write(wb, { bookType: isXls ? 'biff8' : 'xlsx', type: 'array' });
     const blob = new Blob([wbout], { type: isXls ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, filename);
+    saveBlobSafely(blob, filename);
     return;
   }
 

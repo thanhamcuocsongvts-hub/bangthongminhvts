@@ -89,14 +89,18 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
     );
 
     if (matched) {
-      onSelectTeacher(matched);
       if (matched.role !== 'admin' && matched.status === 'pending') {
-        showToast('Tài khoản đang chờ Quản trị viên duyệt kích hoạt.', 'error');
-      } else if (matched.role !== 'admin' && matched.status === 'locked') {
-        showToast('Tài khoản đang trong trạng thái tạm khóa.', 'error');
-      } else {
-        showToast('Đăng nhập thành công!');
+        setLoginError('Tài khoản của Thầy/Cô đang chờ Admin/Ban Giám Hiệu phê duyệt. Giáo viên phải đăng ký và được Admin duyệt xong mới có thể đăng nhập vào ứng dụng.');
+        showToast('Tài khoản đang chờ Admin phê duyệt!', 'error');
+        return;
       }
+      if (matched.role !== 'admin' && matched.status === 'locked') {
+        setLoginError('Tài khoản đang trong trạng thái tạm khóa. Vui lòng liên hệ Quản trị viên để mở khóa.');
+        showToast('Tài khoản đang trong trạng thái tạm khóa.', 'error');
+        return;
+      }
+      onSelectTeacher(matched);
+      showToast('Đăng nhập thành công!');
       if (onClose) setTimeout(onClose, 600);
     } else {
       setLoginError('Tên đăng nhập hoặc mật khẩu không chính xác.');
@@ -405,16 +409,6 @@ export const EducationalAuthScreen: React.FC<EducationalAuthScreenProps> = ({
                 <span>ĐĂNG NHẬP HỆ THỐNG</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={() => onGuestLogin?.()}
-                  className="w-full py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex items-center justify-center gap-2 active:scale-98 transition-all border border-slate-200"
-                >
-                  <User className="w-4 h-4" />
-                  Dùng Thử Nhanh (Guest Login)
-                </button>
-              </div>
             </form>
           )}
 

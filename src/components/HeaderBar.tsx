@@ -90,10 +90,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     };
   }, []);
 
-  // 8 Main Navigation Tabs - Chuẩn tên gọi ngắn gọn sư phạm, dàn trải 1 dòng duy nhất
+  // 7 Main Navigation Tabs - Chuẩn tên gọi ngắn gọn sư phạm, dàn trải 1 dòng duy nhất
   const tabs: Array<{ id: ActiveTab; label: string; shortLabel: string; icon: React.ReactNode; desc: string }> = [
     { id: 'whiteboard', label: 'Bảng Xanh', shortLabel: 'Bảng Xanh', icon: <Sprout className="w-4 h-4 text-emerald-400" />, desc: 'Bảng xanh sư phạm 75", ô kẻ chuẩn, chữ đẹp AI, hình học' },
-    { id: 'fast-whiteboard', label: 'Bảng Nhanh', shortLabel: 'Bảng Nhanh', icon: <Zap className="w-4 h-4 text-amber-400" />, desc: 'Bảng siêu tốc 120Hz 4K không độ trễ' },
     { id: 'gradebook', label: 'Lớp Học', shortLabel: 'Lớp Học', icon: <Users className="w-4 h-4 text-blue-400" />, desc: 'Danh sách học sinh, điểm số, chuyên cần' },
     { id: 'documents', label: 'Lưu Trữ', shortLabel: 'Lưu Trữ', icon: <FolderOpen className="w-4 h-4 text-amber-400" />, desc: 'Kho Lưu Trữ & Đồng Bộ Cloud (PDF, Word, PPTX, Excel ≤ 25MB)' },
     { id: 'reader', label: 'Tài Liệu', shortLabel: 'Tài Liệu', icon: <BookOpen className="w-4 h-4 text-sky-400" />, desc: 'Đọc tài liệu gốc & trích xuất kiến thức AI' },

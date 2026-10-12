@@ -134,7 +134,6 @@ interface ClassroomBlackboardViewProps {
   onDeleteLesson?: (id: string) => void;
   onSwitchToPresentation?: () => void;
   onSwitchToReader?: () => void;
-  onSwitchToFastWhiteboard?: () => void;
   onOpenRandomPicker?: () => void;
   isInitialFullScreen?: boolean;
 }
@@ -153,7 +152,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   onDeleteLesson,
   onSwitchToPresentation,
   onSwitchToReader,
-  onSwitchToFastWhiteboard,
   onOpenRandomPicker,
   isInitialFullScreen = false,
 }) => {
@@ -346,6 +344,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     centerX: number;
     centerY: number;
     origRotation: number;
+    origGraphCenterX?: number;
+    origGraphCenterY?: number;
   } | null>(null);
 
   // Dedicated movement speed and continuous hold-to-move timer for drawn shapes & graphs
@@ -2115,16 +2115,17 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         if (!bounds) return false;
         if (s.tool === 'circle') {
           const dist = Math.hypot(x - bounds.centerX, y - bounds.centerY);
-          return dist <= (bounds.radius || bounds.width / 2) + 20;
+          return dist <= (bounds.radius || bounds.width / 2) + 25;
         }
         if (s.tool === 'ellipse') {
-          const rx = (bounds.rx || bounds.width / 2) + 15;
-          const ry = (bounds.ry || bounds.height / 2) + 15;
+          const rx = (bounds.rx || bounds.width / 2) + 20;
+          const ry = (bounds.ry || bounds.height / 2) + 20;
           const normX = (x - bounds.centerX) / rx;
           const normY = (y - bounds.centerY) / ry;
           return normX * normX + normY * normY <= 1.0;
         }
-        return x >= bounds.minX - 10 && x <= bounds.maxX + 10 && y >= bounds.minY - 10 && y <= bounds.maxY + 10;
+        const hitTol = isFunctionGraphTool(s.tool) ? 32 : 28;
+        return x >= bounds.minX - hitTol && x <= bounds.maxX + hitTol && y >= bounds.minY - hitTol && y <= bounds.maxY + hitTol;
       });
 
       if (hitStroke) {
@@ -2142,6 +2143,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           centerX: bounds?.centerX ?? 0,
           centerY: bounds?.centerY ?? 0,
           origRotation: hitStroke.rotation || 0,
+          origGraphCenterX: hitStroke.graphCenterX,
+          origGraphCenterY: hitStroke.graphCenterY,
         };
         try {
           (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -2317,6 +2320,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       const origVerts = dragStrokeStartRef.current.origVertices;
       const origCenterX = dragStrokeStartRef.current.centerX ?? 0;
       const origCenterY = dragStrokeStartRef.current.centerY ?? 0;
+      const origGraphCenterX = dragStrokeStartRef.current.origGraphCenterX;
+      const origGraphCenterY = dragStrokeStartRef.current.origGraphCenterY;
 
       if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
       strokeRafRef.current = requestAnimationFrame(() => {
@@ -2346,8 +2351,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 customVertices: movedVertices,
                 centerX: newCenterX,
                 centerY: newCenterY,
-                graphCenterX: s.graphCenterX !== undefined ? s.graphCenterX + deltaX : undefined,
-                graphCenterY: s.graphCenterY !== undefined ? s.graphCenterY + deltaY : undefined,
+                graphCenterX: origGraphCenterX !== undefined ? origGraphCenterX + deltaX : undefined,
+                graphCenterY: origGraphCenterY !== undefined ? origGraphCenterY + deltaY : undefined,
               };
             }
             return s;
@@ -3467,18 +3472,6 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               </button>
             )}
 
-            {/* Quick Switch to Fast Whiteboard 120Hz */}
-            {onSwitchToFastWhiteboard && (
-              <button
-                onClick={onSwitchToFastWhiteboard}
-                className="px-2.5 py-1.5 rounded-2xl text-xs font-black flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 border border-amber-300 shadow-md transition-all active:scale-95 cursor-pointer"
-                title="Chuyển sang Bảng Siêu Tốc 120Hz 4K Zero-Latency"
-              >
-                <Zap className="w-3.5 h-3.5 fill-current" />
-                <span className="hidden sm:inline">Bảng Siêu Tốc 120Hz</span>
-              </button>
-            )}
-
             {/* Background switcher */}
             <div className="bg-slate-950/80 backdrop-blur-md p-1 rounded-2xl border border-white/20 text-white flex items-center gap-1 shadow-lg hidden md:flex">
               <button
@@ -4508,6 +4501,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                     centerX: bounds?.centerX ?? 0,
                     centerY: bounds?.centerY ?? 0,
                     origRotation: selectedStroke.rotation || 0,
+                    origGraphCenterX: selectedStroke.graphCenterX,
+                    origGraphCenterY: selectedStroke.graphCenterY,
                   };
                 }}
                 onPointerMove={(e) => {
@@ -4521,6 +4516,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                   const origVerts = startData.origVertices;
                   const origCenterX = startData.centerX ?? 0;
                   const origCenterY = startData.centerY ?? 0;
+                  const origGraphCenterX = startData.origGraphCenterX;
+                  const origGraphCenterY = startData.origGraphCenterY;
 
                   if (strokeRafRef.current) cancelAnimationFrame(strokeRafRef.current);
                   strokeRafRef.current = requestAnimationFrame(() => {
@@ -4548,6 +4545,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                             customVertices: movedVertices,
                             centerX: origCenterX + deltaX,
                             centerY: origCenterY + deltaY,
+                            graphCenterX: origGraphCenterX !== undefined ? origGraphCenterX + deltaX : undefined,
+                            graphCenterY: origGraphCenterY !== undefined ? origGraphCenterY + deltaY : undefined,
                           };
                         }
                         return s;

@@ -43,6 +43,11 @@ import {
   Volume2,
   VolumeX,
   Square,
+  Tv,
+  Dice5,
+  PartyPopper,
+  Trophy,
+  ChevronLeft,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
@@ -54,10 +59,13 @@ import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { directFastMatrixQuiz, getGeminiApiKey, saveGeminiApiKey, isGeminiConfigured } from '../utils/geminiClient';
 import {
   speakQuestionContent,
+  speakStudentCalling,
+  speakText,
   stopAllSpeech,
   VOICE_TONE_PRESETS,
   VoiceTonePreset,
 } from '../utils/aiSpeechService';
+import { gameSounds } from '../utils/gameSoundEffects';
 import { db } from '../lib/firebase';
 import { doc } from 'firebase/firestore';
 import { safeSetDoc } from '../utils/firebaseSafe';
@@ -74,6 +82,8 @@ interface LiveQuizHubProps {
   currentLesson?: any;
   onApplyQuestions?: (questions: QuizQuestion[], quizTitle?: string) => Promise<void> | void;
   onOpenExportModal?: () => void;
+  classroom?: any;
+  teacher?: any;
 }
 
 interface UploadedMatrixFile {
@@ -98,9 +108,20 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   currentLesson,
   onApplyQuestions,
   onOpenExportModal,
+  classroom,
+  teacher,
 }) => {
-  // Mode: Default to 'creator' or switch to 'live', 'exam', or 'analytics' (Biểu đồ phân tích)
-  const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'exam' | 'analytics'>('creator');
+  // Mode: Default to 'creator' or switch to 'live', 'presentation', 'exam', or 'analytics' (Biểu đồ phân tích)
+  const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'presentation' | 'exam' | 'analytics'>('creator');
+
+  // Presentation Mode & Gọi học sinh lên bảng State
+  const [boardSelectedStudent, setBoardSelectedStudent] = useState<string>('');
+  const [boardSelectedOption, setBoardSelectedOption] = useState<string | null>(null);
+  const [boardAnswerResult, setBoardAnswerResult] = useState<'correct' | 'wrong' | null>(null);
+  const [showCallStudentModal, setShowCallStudentModal] = useState<boolean>(false);
+  const [studentCallManualInput, setStudentCallManualInput] = useState<string>('');
+  const [congratsMessage, setCongratsMessage] = useState<string>('');
+  const [isReadingBoardQuestion, setIsReadingBoardQuestion] = useState<boolean>(false);
 
   // Exam Room Mode state (Chế độ phòng thi)
   const [examDurationMinutes, setExamDurationMinutes] = useState<number>(45);
@@ -655,13 +676,122 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const handleNextQuestion = () => {
     if (activeIndex < questions.length - 1) {
       onControlRoom(activeIndex + 1, true);
+      setBoardSelectedOption(null);
+      setBoardAnswerResult(null);
+      setCongratsMessage('');
     }
   };
 
   const handlePrevQuestion = () => {
     if (activeIndex > 0) {
       onControlRoom(activeIndex - 1, true);
+      setBoardSelectedOption(null);
+      setBoardAnswerResult(null);
+      setCongratsMessage('');
     }
+  };
+
+  // Trình Chiếu & Gọi Học Sinh Lên Bảng Handlers
+  const handleBoardOptionClick = (key: string) => {
+    if (!currentQ) return;
+    if (boardAnswerResult !== null) return; // Đã trả lời, tránh bấm liên tục
+
+    const cleanKey = key.trim().toUpperCase();
+    setBoardSelectedOption(cleanKey);
+    const correctKey = (currentQ.correctAnswer || '').trim().toUpperCase();
+    const isCorrect = cleanKey === correctKey;
+
+    if (isCorrect) {
+      setBoardAnswerResult('correct');
+      gameSounds.playCorrectChime();
+      setTimeout(() => gameSounds.playVictoryFanfare(), 250);
+
+      // Bắn pháo hoa ăn mừng rực rỡ trên màn hình Tivi 75 inch
+      confetti({
+        particleCount: 160,
+        spread: 90,
+        origin: { y: 0.55 },
+        colors: ['#10b981', '#3b82f6', '#f59e0b', '#ec4899', '#8b5cf6'],
+      });
+      setTimeout(() => {
+        confetti({
+          particleCount: 110,
+          angle: 60,
+          spread: 75,
+          origin: { x: 0 },
+        });
+        confetti({
+          particleCount: 110,
+          angle: 120,
+          spread: 75,
+          origin: { x: 1 },
+        });
+      }, 300);
+
+      const studentDisplayName = boardSelectedStudent ? `em ${boardSelectedStudent}` : 'em';
+      const praises = [
+        `Nhiệt liệt chúc mừng ${studentDisplayName} đã trả lời rất chính xác! Thầy cô khen ngợi em và tặng em một điểm cộng!`,
+        `Xuất sắc! Câu trả lời của ${studentDisplayName} hoàn toàn chính xác! Cả lớp hãy cho một tràng pháo tay thật lớn nào!`,
+        `Chính xác! ${studentDisplayName} nắm kiến thức bài học rất vững và tư duy rất nhanh! Thầy cô rất tự hào về em!`,
+        `Tuyệt vời! Phương án ${cleanKey} là đáp án hoàn toàn chính xác! Chúc mừng ${studentDisplayName} đã xuất sắc ghi điểm!`,
+      ];
+      const picked = praises[Math.floor(Math.random() * praises.length)];
+      setCongratsMessage(picked);
+      speakText(picked, { preset: selectedVoice });
+    } else {
+      setBoardAnswerResult('wrong');
+      gameSounds.playWrongBuzz();
+
+      const studentDisplayName = boardSelectedStudent ? `em ${boardSelectedStudent}` : 'em';
+      const consolations = [
+        `Rất tiếc câu trả lời chưa chính xác rồi ${studentDisplayName} nhé! Đừng buồn, em hãy chú ý lắng nghe thầy cô chữa bài để làm tốt hơn ở lần sau nhé!`,
+        `Tiếc quá, chưa đúng rồi! Đừng nản lòng nhé ${studentDisplayName}, cố gắng ở câu hỏi tiếp theo chắc chắn em sẽ làm đúng!`,
+        `Chưa chính xác rồi ${studentDisplayName} nhé! Thầy cô ghi nhận tinh thần rất tích cực của em, lần sau chú ý hơn sẽ làm rất tốt!`,
+      ];
+      const picked = consolations[Math.floor(Math.random() * consolations.length)];
+      setCongratsMessage(picked);
+      speakText(picked, { preset: selectedVoice });
+    }
+  };
+
+  const handleCallRandomStudent = () => {
+    let candidateList: string[] = [];
+    if (classroom?.students && Array.isArray(classroom.students) && classroom.students.length > 0) {
+      candidateList = classroom.students.map((s: any) => s.name || s);
+    } else if (roomState?.activeStudents && roomState.activeStudents.length > 0) {
+      candidateList = roomState.activeStudents.map((s) => s.name);
+    } else {
+      candidateList = [
+        'Nguyễn Văn An', 'Trần Thị Bình', 'Lê Hoàng Cường', 'Phạm Thu Dung',
+        'Vũ Quốc Bảo', 'Đỗ Gia Hân', 'Hoàng Đức Anh', 'Bùi Ngọc Ánh',
+        'Đặng Khánh Linh', 'Trịnh Tuấn Kiệt', 'Lê Mỹ Duyên', 'Nguyễn Tiến Đạt'
+      ];
+    }
+
+    const picked = candidateList[Math.floor(Math.random() * candidateList.length)];
+    setBoardSelectedStudent(picked);
+    setBoardSelectedOption(null);
+    setBoardAnswerResult(null);
+    setCongratsMessage('');
+    setShowCallStudentModal(false);
+
+    // AI đọc câu gọi học sinh lên bảng bằng tiếng Việt chuẩn
+    speakStudentCalling(picked, 'call', [], { preset: selectedVoice });
+  };
+
+  const handleReadBoardQuestion = () => {
+    if (!currentQ) return;
+    if (isReadingBoardQuestion) {
+      stopAllSpeech();
+      setIsReadingBoardQuestion(false);
+      return;
+    }
+    setIsReadingBoardQuestion(true);
+    speakQuestionContent(currentQ, {
+      preset: selectedVoice,
+      onEnd: () => setIsReadingBoardQuestion(false),
+      onError: () => setIsReadingBoardQuestion(false),
+    });
   };
 
   // Statistics
@@ -796,6 +926,25 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   {questions.length} câu
                 </span>
               )}
+            </button>
+
+            <button
+              id="presentation-mode-nav-btn"
+              onClick={() => {
+                setActiveMode('presentation');
+                setBoardSelectedOption(null);
+                setBoardAnswerResult(null);
+                setCongratsMessage('');
+              }}
+              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                activeMode === 'presentation'
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+              }`}
+              title="Trình chiếu câu hỏi lên màn hình 75 inch và gọi học sinh lên bảng làm bài ngay"
+            >
+              <Tv className="w-4 h-4 text-amber-300" />
+              <span>Trình Chiếu & Lên Bảng</span>
             </button>
 
             <button
@@ -1751,6 +1900,490 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* VIEW: TRÌNH CHIẾU CÂU HỎI & GỌI HỌC SINH LÊN BẢNG LÀM BÀI TRỰC TIẾP TRÊN TIVI 75 INCH */}
+      {activeMode === 'presentation' && (
+        <div className="flex-1 flex flex-col overflow-hidden bg-slate-900 text-white">
+          {/* Top Status & Controls Bar */}
+          <div className="flex flex-wrap items-center justify-between px-6 py-3.5 bg-slate-950 border-b border-slate-800 z-20 shrink-0 gap-3">
+            {/* Left: Question Indicator & Called Student Badge */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="px-4 py-2 rounded-2xl bg-amber-500/20 border border-amber-400 text-amber-300 font-mono text-base font-black flex items-center gap-2">
+                <span className="text-amber-400">CÂU</span>
+                <span className="text-2xl text-amber-300">{activeIndex + 1}/{questions.length}</span>
+              </div>
+
+              {boardSelectedStudent ? (
+                <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-indigo-950/90 border border-indigo-500 text-indigo-200 font-bold text-sm shadow-md animate-fade-in">
+                  <span className="text-xl">🎒</span>
+                  <span>Học sinh lên bảng:</span>
+                  <span className="text-amber-300 font-black text-base underline decoration-amber-400 decoration-2">
+                    {boardSelectedStudent}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setBoardSelectedStudent('');
+                      setBoardSelectedOption(null);
+                      setBoardAnswerResult(null);
+                      setCongratsMessage('');
+                    }}
+                    className="ml-1 p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
+                    title="Bỏ chọn học sinh"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold bg-slate-800/80 px-3.5 py-2 rounded-2xl border border-slate-700">
+                  <span>💡 Chưa gọi học sinh. Bấm "Gọi Lên Bảng" để chọn ngẫu nhiên!</span>
+                </div>
+              )}
+            </div>
+
+            {/* Right: Quick Action Controls */}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                onClick={handleCallRandomStudent}
+                className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
+                title="Gọi ngẫu nhiên học sinh trong lớp lên bảng trả lời"
+              >
+                <Dice5 className="w-4 h-4 fill-slate-950" />
+                <span>Gọi Lên Bảng (Ngẫu Nhiên)</span>
+              </button>
+
+              <button
+                onClick={() => setShowCallStudentModal(true)}
+                className="px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Chọn học sinh cụ thể từ danh sách lớp"
+              >
+                <Users className="w-4 h-4 text-blue-400" />
+                <span className="hidden sm:inline">Danh Sách Lớp</span>
+              </button>
+
+              <button
+                onClick={handleReadBoardQuestion}
+                className={`px-3.5 py-2.5 rounded-2xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  isReadingBoardQuestion
+                    ? 'bg-rose-950 border-rose-500 text-rose-300 animate-pulse'
+                    : 'bg-indigo-950 hover:bg-indigo-900 border-indigo-700 text-indigo-300'
+                }`}
+                title="AI đọc nội dung câu hỏi và các phương án bằng tiếng Việt"
+              >
+                {isReadingBoardQuestion ? (
+                  <>
+                    <VolumeX className="w-4 h-4 text-rose-400" />
+                    <span>Dừng đọc</span>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="w-4 h-4 text-indigo-400" />
+                    <span>Đọc Đề AI 🔊</span>
+                  </>
+                )}
+              </button>
+
+              {(boardSelectedOption !== null || boardAnswerResult !== null) && (
+                <button
+                  onClick={() => {
+                    setBoardSelectedOption(null);
+                    setBoardAnswerResult(null);
+                    setCongratsMessage('');
+                  }}
+                  className="px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Xóa lựa chọn để học sinh thử lại"
+                >
+                  <RotateCcw className="w-4 h-4 text-amber-400" />
+                  <span>Làm Lại</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Main Content Area */}
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col justify-between max-w-7xl mx-auto w-full space-y-6">
+            {!currentQ ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-slate-400">
+                <BookOpen className="w-16 h-16 text-slate-600 mb-4" />
+                <h3 className="text-xl font-bold text-white mb-2">Chưa có câu hỏi nào để trình chiếu</h3>
+                <p className="text-sm max-w-md">Vui lòng chuyển sang tab "Soạn Đề AI & Ma Trận" để tạo đề hoặc nạp câu hỏi trắc nghiệm.</p>
+                <button
+                  onClick={() => setActiveMode('creator')}
+                  className="mt-6 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm"
+                >
+                  Tạo Đề Trắc Nghiệm Ngay
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* 1. Giant Question Card */}
+                <div className="p-6 md:p-8 rounded-3xl bg-slate-800/90 border-2 border-slate-700/80 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-700/60">
+                    <div className="flex items-center gap-3">
+                      <span className="px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 font-black text-xs uppercase tracking-wider border border-amber-400/40">
+                        {(currentQ as any).subject || selectedSubject} • {(currentQ as any).grade || selectedGrade}
+                      </span>
+                      {currentQ.difficulty && (
+                        <span className="px-3 py-1 rounded-xl bg-slate-700/80 text-slate-300 text-xs font-bold">
+                          {currentQ.difficulty}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-xs text-slate-400 font-semibold hidden sm:flex items-center gap-1.5">
+                      <span>Màn hình Tivi 75 inch</span>
+                      <span>•</span>
+                      <span>Chạm đáp án trực tiếp</span>
+                    </div>
+                  </div>
+
+                  {/* Question Content & Formulas */}
+                  <div className="text-2xl md:text-3xl lg:text-4xl font-black text-white leading-relaxed tracking-normal">
+                    <QuizRichContentRenderer
+                      content={currentQ.question}
+                      diagramType={currentQ.diagramType}
+                      diagramData={currentQ.diagramData}
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Interactive Options (A, B, C, D) - Touch Direct on Board */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 flex-1">
+                  {currentQ.options.map((opt) => {
+                    const isSelected = boardSelectedOption === opt.key;
+                    const isCorrect = opt.key === currentQ.correctAnswer;
+                    const hasAnswered = boardAnswerResult !== null;
+
+                    let cardClass = 'bg-slate-800/80 border-slate-700 text-white hover:bg-slate-750 hover:border-amber-400 shadow-md hover:scale-[1.01]';
+                    let badgeClass = 'bg-slate-700 text-amber-300 border-slate-600';
+
+                    if (hasAnswered) {
+                      if (isSelected) {
+                        if (isCorrect) {
+                          cardClass = 'bg-emerald-950/90 border-4 border-emerald-400 text-emerald-100 ring-4 ring-emerald-500/30 shadow-2xl scale-[1.02]';
+                          badgeClass = 'bg-emerald-500 text-slate-950 font-black';
+                        } else {
+                          cardClass = 'bg-rose-950/90 border-4 border-rose-500 text-rose-100 ring-4 ring-rose-500/30 shadow-xl';
+                          badgeClass = 'bg-rose-500 text-white font-black';
+                        }
+                      } else if (isCorrect) {
+                        // Reveal correct answer if student picked wrong
+                        cardClass = 'bg-emerald-950/60 border-2 border-emerald-400 border-dashed text-emerald-200';
+                        badgeClass = 'bg-emerald-600 text-white font-black';
+                      } else {
+                        cardClass = 'bg-slate-850/40 border-slate-800 text-slate-500 opacity-60';
+                        badgeClass = 'bg-slate-800 text-slate-500 border-slate-700';
+                      }
+                    }
+
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => handleBoardOptionClick(opt.key)}
+                        disabled={hasAnswered}
+                        className={`p-6 md:p-8 rounded-3xl border-2 transition-all flex items-start gap-5 text-left cursor-pointer active:scale-98 select-none relative group ${cardClass}`}
+                      >
+                        <div
+                          className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl flex items-center justify-center font-black text-2xl md:text-3xl shrink-0 border transition-all shadow-md ${badgeClass}`}
+                        >
+                          {opt.key}
+                        </div>
+                        <div className="flex-1 pt-2 text-xl md:text-2xl lg:text-3xl font-bold leading-normal">
+                          <MathFormulaRenderer content={opt.text} />
+                        </div>
+
+                        {hasAnswered && isSelected && isCorrect && (
+                          <div className="absolute top-4 right-4 p-2 rounded-xl bg-emerald-500 text-slate-950 font-black flex items-center gap-1 shadow-md text-xs">
+                            <CheckCircle2 className="w-5 h-5" />
+                            <span>ĐÚNG</span>
+                          </div>
+                        )}
+
+                        {hasAnswered && isSelected && !isCorrect && (
+                          <div className="absolute top-4 right-4 p-2 rounded-xl bg-rose-500 text-white font-black flex items-center gap-1 shadow-md text-xs">
+                            <X className="w-5 h-5" />
+                            <span>CHƯA ĐÚNG</span>
+                          </div>
+                        )}
+
+                        {hasAnswered && !isSelected && isCorrect && (
+                          <div className="absolute top-4 right-4 p-2 rounded-xl bg-emerald-600 text-white font-black flex items-center gap-1 shadow-md text-xs">
+                            <CheckCircle2 className="w-5 h-5" />
+                            <span>ĐÁP ÁN ĐÚNG</span>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 3. Celebration / Encouragement Feedback Card */}
+                {boardAnswerResult === 'correct' && (
+                  <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-green-700 text-white shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-2 border-emerald-400 animate-fade-in">
+                    <div className="flex items-center gap-5">
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-3xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-4xl shadow-inner shrink-0">
+                        🎉
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-2xl md:text-3xl lg:text-4xl font-black text-white tracking-wide">
+                            CHÍNH XÁC! XUẤT SẮC!
+                          </h3>
+                          <Award className="w-8 h-8 text-amber-300" />
+                        </div>
+                        <p className="text-emerald-100 text-lg md:text-xl font-bold mt-2 leading-relaxed">
+                          {congratsMessage}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0 flex-wrap">
+                      <button
+                        onClick={() => {
+                          confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+                          gameSounds.playVictoryFanfare();
+                        }}
+                        className="px-5 py-3 rounded-2xl bg-white/20 hover:bg-white/30 text-white font-black text-sm flex items-center gap-2 transition-all cursor-pointer shadow-md"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-300" />
+                        <span>Bắn Pháo Hoa Thưởng ⭐</span>
+                      </button>
+
+                      <button
+                        onClick={handleNextQuestion}
+                        disabled={activeIndex >= questions.length - 1}
+                        className="px-7 py-3.5 rounded-2xl bg-white text-emerald-900 hover:bg-emerald-50 font-black text-base flex items-center gap-2 shadow-xl transition-all cursor-pointer active:scale-95 disabled:opacity-40"
+                      >
+                        <span>Câu Kế Tiếp</span>
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {boardAnswerResult === 'wrong' && (
+                  <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-r from-amber-600 via-orange-600 to-rose-700 text-white shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-2 border-amber-400 animate-fade-in">
+                    <div className="flex items-center gap-5">
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-3xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-4xl shadow-inner shrink-0">
+                        💡
+                      </div>
+                      <div>
+                        <h3 className="text-2xl md:text-3xl lg:text-4xl font-black text-white tracking-wide">
+                          CHƯA CHÍNH XÁC RỒI! CỐ GẮNG LẦN SAU NHÉ!
+                        </h3>
+                        <p className="text-amber-100 text-lg md:text-xl font-bold mt-2 leading-relaxed">
+                          {congratsMessage}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0 flex-wrap">
+                      <button
+                        onClick={() => {
+                          setBoardSelectedOption(null);
+                          setBoardAnswerResult(null);
+                          setCongratsMessage('');
+                        }}
+                        className="px-5 py-3 rounded-2xl bg-white/20 hover:bg-white/30 text-white font-black text-sm flex items-center gap-2 transition-all cursor-pointer shadow-md"
+                      >
+                        <RotateCcw className="w-4 h-4 text-amber-300" />
+                        <span>Thử Lại Câu Này</span>
+                      </button>
+
+                      <button
+                        onClick={handleNextQuestion}
+                        disabled={activeIndex >= questions.length - 1}
+                        className="px-7 py-3.5 rounded-2xl bg-white text-rose-900 hover:bg-rose-50 font-black text-base flex items-center gap-2 shadow-xl transition-all cursor-pointer active:scale-95 disabled:opacity-40"
+                      >
+                        <span>Câu Kế Tiếp</span>
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Detailed Explanation Card when Answered */}
+                {boardAnswerResult !== null && currentQ.explanation && (
+                  <div className="p-6 md:p-8 rounded-3xl bg-slate-800/95 border-2 border-indigo-500/40 text-slate-100 shadow-xl animate-fade-in">
+                    <div className="flex items-center gap-3 pb-3 mb-3 border-b border-slate-700">
+                      <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                      <h4 className="text-sm font-black uppercase tracking-wider text-indigo-300">
+                        HƯỚNG DẪN GIẢI CHI TIẾT & BÀI HỌC KINH NGHIỆM:
+                      </h4>
+                    </div>
+                    <div className="text-xl md:text-2xl font-medium leading-relaxed text-slate-200">
+                      <MathFormulaRenderer content={currentQ.explanation} />
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. Bottom Navigation & Question Picker */}
+                <div className="flex flex-wrap items-center justify-between pt-4 border-t border-slate-800 gap-4">
+                  {/* Prev Button */}
+                  <button
+                    onClick={handlePrevQuestion}
+                    disabled={activeIndex <= 0}
+                    className="px-6 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm flex items-center gap-2 border border-slate-700 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                    <span>Câu Trước</span>
+                  </button>
+
+                  {/* Question Index Pills */}
+                  <div className="flex items-center gap-2 flex-wrap justify-center">
+                    {questions.map((q, idx) => (
+                      <button
+                        key={q.id || idx}
+                        onClick={() => {
+                          onControlRoom(idx, true);
+                          setBoardSelectedOption(null);
+                          setBoardAnswerResult(null);
+                          setCongratsMessage('');
+                        }}
+                        className={`w-10 h-10 md:w-11 md:h-11 rounded-2xl font-black text-sm transition-all cursor-pointer flex items-center justify-center border ${
+                          activeIndex === idx
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg scale-110 ring-2 ring-amber-400/50'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'
+                        }`}
+                      >
+                        {idx + 1}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Next Button */}
+                  <button
+                    onClick={handleNextQuestion}
+                    disabled={activeIndex >= questions.length - 1}
+                    className="px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                  >
+                    <span>Câu Kế Tiếp</span>
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Chọn Học Sinh Lên Bảng */}
+      {showCallStudentModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 max-w-lg w-full text-white shadow-2xl space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-2xl">
+                  🎒
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white">Gọi Học Sinh Lên Bảng</h3>
+                  <p className="text-xs text-slate-400">Chọn hoặc nhập tên học sinh lên bảng giải bài</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowCallStudentModal(false)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Random Button */}
+            <button
+              onClick={handleCallRandomStudent}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
+            >
+              <Dice5 className="w-5 h-5 fill-slate-950" />
+              <span>🎲 Quay Ngẫu Nhiên 1 Học Sinh Bất Kỳ</span>
+            </button>
+
+            {/* Manual input */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-400">Hoặc nhập trực tiếp tên học sinh:</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Ví dụ: Nguyễn Văn An..."
+                  value={studentCallManualInput}
+                  onChange={(e) => setStudentCallManualInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && studentCallManualInput.trim()) {
+                      const name = studentCallManualInput.trim();
+                      setBoardSelectedStudent(name);
+                      setBoardSelectedOption(null);
+                      setBoardAnswerResult(null);
+                      setCongratsMessage('');
+                      setShowCallStudentModal(false);
+                      setStudentCallManualInput('');
+                      speakStudentCalling(name, 'call', [], { preset: selectedVoice });
+                    }
+                  }}
+                  className="flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:border-amber-400 outline-hidden font-bold"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (studentCallManualInput.trim()) {
+                      const name = studentCallManualInput.trim();
+                      setBoardSelectedStudent(name);
+                      setBoardSelectedOption(null);
+                      setBoardAnswerResult(null);
+                      setCongratsMessage('');
+                      setShowCallStudentModal(false);
+                      setStudentCallManualInput('');
+                      speakStudentCalling(name, 'call', [], { preset: selectedVoice });
+                    }
+                  }}
+                  disabled={!studentCallManualInput.trim()}
+                  className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-40"
+                >
+                  Gọi Em Này
+                </button>
+              </div>
+            </div>
+
+            {/* Student list from class */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-400">Danh sách học sinh lớp học:</label>
+              <div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-2 p-1">
+                {(classroom?.students && Array.isArray(classroom.students) && classroom.students.length > 0
+                  ? classroom.students
+                  : [
+                      { id: '1', name: 'Nguyễn Văn An' },
+                      { id: '2', name: 'Trần Thị Bình' },
+                      { id: '3', name: 'Lê Hoàng Cường' },
+                      { id: '4', name: 'Phạm Thu Dung' },
+                      { id: '5', name: 'Vũ Quốc Bảo' },
+                      { id: '6', name: 'Đỗ Gia Hân' },
+                      { id: '7', name: 'Hoàng Đức Anh' },
+                      { id: '8', name: 'Bùi Ngọc Ánh' },
+                      { id: '9', name: 'Đặng Khánh Linh' },
+                      { id: '10', name: 'Trịnh Tuấn Kiệt' },
+                    ]
+                ).map((st: any) => (
+                  <button
+                    key={st.id || st.name}
+                    type="button"
+                    onClick={() => {
+                      const name = st.name || st;
+                      setBoardSelectedStudent(name);
+                      setBoardSelectedOption(null);
+                      setBoardAnswerResult(null);
+                      setCongratsMessage('');
+                      setShowCallStudentModal(false);
+                      speakStudentCalling(name, 'call', [], { preset: selectedVoice });
+                    }}
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 hover:border-amber-400 border border-slate-700 text-left text-xs font-bold text-slate-200 truncate transition-all cursor-pointer"
+                  >
+                    🎒 {st.name || st}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

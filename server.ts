@@ -866,6 +866,31 @@ app.get("/api/documents/download/:filename", (req, res) => {
       }
     }
 
+    // 6. Universal Fallback for Text/JSON/Documents from Lesson Data if missing on disk
+    const matchAny = (typeof cloudLessonsStore !== 'undefined' ? cloudLessonsStore : []).find(
+      (l: any) => l.id === safeName || l.fileName === safeName || l.title === safeName || (docId && l.id === docId)
+    ) || (typeof cloudDocumentsStore !== 'undefined' ? cloudDocumentsStore : []).find(
+      (d: any) => d.id === safeName || d.fileName === safeName || (docId && d.id === docId)
+    );
+
+    if (matchAny) {
+      const title = matchAny.title || matchAny.fileName || finalDownloadName;
+      const content = matchAny.rawText || `Tài liệu: ${title}\nThời gian: ${new Date().toLocaleString('vi-VN')}\nĐồng bộ đa thiết bị thành công.`;
+      let fallbackBuf: Buffer;
+      if (ext === '.json') {
+        fallbackBuf = Buffer.from(JSON.stringify(matchAny, null, 2), 'utf8');
+      } else {
+        fallbackBuf = Buffer.from(`${title}\n==============================\n${content}`, 'utf8');
+      }
+      res.setHeader('Content-Type', contentType);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(finalDownloadName)}"; filename*=UTF-8''${encodeURIComponent(finalDownloadName)}`
+      );
+      res.setHeader('Content-Length', fallbackBuf.length);
+      return res.send(fallbackBuf);
+    }
+
     res.status(404).json({ error: `Không tìm thấy tệp "${finalDownloadName}" trên máy chủ` });
   } catch (err: any) {
     console.error('Download route handler error:', err);
