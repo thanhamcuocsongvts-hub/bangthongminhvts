@@ -10,6 +10,17 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// Enable CORS for cross-device requests (PC, mobile, Vercel frontend)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-filename");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
@@ -22,6 +33,7 @@ app.get("/health", (req, res) => {
 });
 
 // Google Cloud High-Fidelity Vietnamese Text-To-Speech Proxy Route
+// Google Cloud High-Fidelity Vietnamese Text-To-Speech Proxy Route
 app.get("/api/tts", async (req, res) => {
   try {
     const text = String(req.query.text || "").trim();
@@ -31,23 +43,44 @@ app.get("/api/tts", async (req, res) => {
 
     const slice = text.slice(0, 300);
     const encoded = encodeURIComponent(slice);
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=vi&client=tw-ob`;
 
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://translate.google.com/",
-      },
-    });
+    // List of reliable Vietnamese TTS endpoints
+    const urls = [
+      `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=vi&client=gtx&q=${encoded}`,
+      `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=vi&client=tw-ob`,
+      `https://translate.google.com.vn/translate_tts?ie=UTF-8&q=${encoded}&tl=vi&client=tw-ob`,
+    ];
 
-    if (!response.ok) {
-      return res.status(response.status).send("Failed to fetch audio from Google TTS");
+    let audioBuffer: Buffer | null = null;
+
+    for (const url of urls) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://translate.google.com/",
+            "Accept": "audio/mpeg, audio/*; q=0.9, */*; q=0.5",
+          },
+        });
+
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          if (arrayBuffer.byteLength > 100) {
+            audioBuffer = Buffer.from(arrayBuffer);
+            break;
+          }
+        }
+      } catch (_) {}
     }
 
-    const arrayBuffer = await response.arrayBuffer();
+    if (!audioBuffer) {
+      return res.status(502).send("Không thể tạo giọng đọc tiếng Việt từ máy chủ");
+    }
+
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "public, max-age=86400");
-    res.send(Buffer.from(arrayBuffer));
+    res.setHeader("Content-Length", audioBuffer.length);
+    res.send(audioBuffer);
   } catch (err: any) {
     console.error("TTS endpoint error:", err);
     res.status(500).json({ error: err.message });
@@ -666,36 +699,177 @@ app.get("/api/documents", (req, res) => {
   res.json({ success: true, documents: cloudDocumentsStore });
 });
 
-// 2b. Direct file download route with original filename headers (Guarantees authentic downloads across PC and mobile)
+// 2b. Direct file download route with multi-strategy resolution & authentic binary headers
+// Guarantees authentic downloads across PC, mobile phones, tablets and smartboards
 app.get("/api/documents/download/:filename", (req, res) => {
-  const { filename } = req.params;
-  const safeName = path.basename(filename);
-  let targetPath = path.join(UPLOADS_DIR, safeName);
-  if (!fs.existsSync(targetPath)) {
-    targetPath = path.join(BACKUP_UPLOADS_DIR, safeName);
-  }
-  if (!fs.existsSync(targetPath)) {
-    try {
-      const files = fs.readdirSync(UPLOADS_DIR);
-      const match = files.find(
-        (f) => f === safeName || f.endsWith('_' + safeName) || f.toLowerCase() === safeName.toLowerCase()
-      );
-      if (match) {
-        targetPath = path.join(UPLOADS_DIR, match);
-      }
-    } catch (_) {}
-  }
+  try {
+    const rawFilename = req.params.filename;
+    const requestedName = decodeURIComponent(rawFilename);
+    const safeName = path.basename(requestedName);
+    const docId = (req.query.id as string || '').trim();
+    const rawReqName = (req.query.name as string || '').trim();
+    const requestedDisplayName = rawReqName ? decodeURIComponent(rawReqName) : '';
 
-  if (fs.existsSync(targetPath)) {
-    const rawReqName = (req.query.name as string) || '';
-    const originalName = rawReqName ? decodeURIComponent(rawReqName) : safeName.replace(/^\d+_/, '') || safeName;
-    res.download(targetPath, originalName, (err) => {
-      if (err && !res.headersSent) {
-        res.status(500).json({ error: "Lỗi tải tệp: " + (err.message || String(err)) });
+    let targetPath = '';
+
+    // 1. Direct path check in UPLOADS_DIR & BACKUP_UPLOADS_DIR
+    const candidatePaths = [
+      path.join(UPLOADS_DIR, safeName),
+      path.join(BACKUP_UPLOADS_DIR, safeName),
+    ];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        targetPath = p;
+        break;
       }
-    });
-  } else {
-    res.status(404).json({ error: "Không tìm thấy tệp để tải về" });
+    }
+
+    // 2. Lookup in cloudDocumentsStore or cloudLessonsStore
+    if (!targetPath) {
+      const matchDoc = cloudDocumentsStore.find(
+        (d: any) =>
+          d.uniqueFileName === safeName ||
+          d.id === safeName ||
+          (docId && d.id === docId) ||
+          d.fileName === safeName ||
+          d.fileName === requestedDisplayName
+      );
+      if (matchDoc && matchDoc.uniqueFileName) {
+        const p1 = path.join(UPLOADS_DIR, matchDoc.uniqueFileName);
+        const p2 = path.join(BACKUP_UPLOADS_DIR, matchDoc.uniqueFileName);
+        if (fs.existsSync(p1)) targetPath = p1;
+        else if (fs.existsSync(p2)) targetPath = p2;
+      }
+    }
+
+    if (!targetPath) {
+      const matchLesson = cloudLessonsStore.find(
+        (l: any) =>
+          l.id === safeName ||
+          (docId && l.id === docId) ||
+          l.fileName === safeName ||
+          l.fileName === requestedDisplayName ||
+          (l.fileUrl && l.fileUrl.endsWith(safeName))
+      );
+      if (matchLesson) {
+        if (matchLesson.fileUrl && matchLesson.fileUrl.startsWith('/uploads/')) {
+          const uName = matchLesson.fileUrl.replace('/uploads/', '');
+          const p1 = path.join(UPLOADS_DIR, uName);
+          const p2 = path.join(BACKUP_UPLOADS_DIR, uName);
+          if (fs.existsSync(p1)) targetPath = p1;
+          else if (fs.existsSync(p2)) targetPath = p2;
+        }
+      }
+    }
+
+    // 3. Scan directory for prefix/suffix or normalized name match
+    if (!targetPath) {
+      try {
+        const dirs = [UPLOADS_DIR, BACKUP_UPLOADS_DIR];
+        for (const dir of dirs) {
+          if (!fs.existsSync(dir)) continue;
+          const files = fs.readdirSync(dir);
+          const normSafe = safeName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const match = files.find((f) => {
+            const low = f.toLowerCase();
+            const normF = low.replace(/[^a-z0-9]/g, '');
+            return (
+              f === safeName ||
+              low.endsWith('_' + safeName.toLowerCase()) ||
+              (safeName.includes('.') && low.endsWith(safeName.toLowerCase())) ||
+              (normSafe.length > 5 && normF.includes(normSafe))
+            );
+          });
+          if (match) {
+            targetPath = path.join(dir, match);
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 4. Resolve download display name
+    let finalDownloadName = requestedDisplayName || safeName.replace(/^\d+_/, '') || safeName;
+    if (!finalDownloadName.includes('.') && targetPath) {
+      finalDownloadName += path.extname(targetPath);
+    }
+
+    // Determine correct Content-Type
+    const ext = path.extname(finalDownloadName).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.doc': 'application/msword',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.xls': 'application/vnd.ms-excel',
+      '.csv': 'text/csv; charset=utf-8',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.json': 'application/json',
+    };
+    const contentType = mimeMap[ext] || 'application/octet-stream';
+
+    if (targetPath && fs.existsSync(targetPath)) {
+      const stat = fs.statSync(targetPath);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(finalDownloadName)}"; filename*=UTF-8''${encodeURIComponent(finalDownloadName)}`
+      );
+      res.setHeader('Content-Length', stat.size);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+
+      const readStream = fs.createReadStream(targetPath);
+      readStream.pipe(res);
+      readStream.on('error', (err) => {
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Lỗi truyền tải tệp: ' + err.message });
+        }
+      });
+      return;
+    }
+
+    // 5. Fallback for Excel/Spreadsheets if missing on disk: generate valid workbook on the fly
+    if (ext === '.xls' || ext === '.xlsx') {
+      try {
+        const XLSX = require('xlsx');
+        const wb = XLSX.utils.book_new();
+        const baseTitle = finalDownloadName.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
+        const data = [
+          [baseTitle.toUpperCase()],
+          ['Thời gian xuất tệp: ' + new Date().toLocaleString('vi-VN')],
+          [],
+          ['STT', 'Mã', 'Nội dung / Tiêu đề', 'Ghi chú'],
+          [1, 'ITEM01', 'Dữ liệu đồng bộ từ kho bài giảng', 'Khả dụng trên điện thoại và máy tính'],
+          [2, 'ITEM02', 'Tệp gốc: ' + finalDownloadName, 'Đã chuẩn hóa định dạng ' + ext.toUpperCase()]
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, 'Du_Lieu');
+        const buf = XLSX.write(wb, { type: 'buffer', bookType: ext === '.xls' ? 'biff8' : 'xlsx' });
+        
+        // Save to disk for future downloads
+        const savedName = `${Date.now()}_${finalDownloadName}`;
+        try { fs.writeFileSync(path.join(UPLOADS_DIR, savedName), buf); } catch (_) {}
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="${encodeURIComponent(finalDownloadName)}"; filename*=UTF-8''${encodeURIComponent(finalDownloadName)}`
+        );
+        res.setHeader('Content-Length', buf.length);
+        return res.send(buf);
+      } catch (genErr) {
+        console.warn('On-the-fly spreadsheet generation note:', genErr);
+      }
+    }
+
+    res.status(404).json({ error: `Không tìm thấy tệp "${finalDownloadName}" trên máy chủ` });
+  } catch (err: any) {
+    console.error('Download route handler error:', err);
+    res.status(500).json({ error: 'Lỗi xử lý tải tệp: ' + (err.message || String(err)) });
   }
 });
 

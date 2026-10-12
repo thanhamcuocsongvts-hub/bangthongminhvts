@@ -20,7 +20,10 @@ service cloud.firestore {
     match /TaiLieuGiaoVien/{docId} {
       allow read, write: if true;
     }
-    match /files/{fileId} {
+    match /files/{fileId}/{document=**} {
+      allow read, write: if true;
+    }
+    match /file_chunks/{chunkId} {
       allow read, write: if true;
     }
     match /lectures/{lectureId} {

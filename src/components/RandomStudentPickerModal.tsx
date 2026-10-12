@@ -31,6 +31,12 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ClassRoom, ClassStudent } from '../types';
+import {
+  speakStudentCalling,
+  stopAllSpeech,
+  VOICE_TONE_PRESETS,
+  VoiceTonePreset,
+} from '../utils/aiSpeechService';
 
 interface RandomStudentPickerModalProps {
   isOpen: boolean;
@@ -106,6 +112,8 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   const [mode, setMode] = useState<'single' | 'group'>('single');
   const [groupSize, setGroupSize] = useState<number>(3);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[1]); // Cô giáo dịu dàng
   const [excludeCalled, setExcludeCalled] = useState<boolean>(false);
 
   // Results State
@@ -115,6 +123,18 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     type: 'plus' | 'minus' | 'ten' | 'zero';
     message: string;
   } | null>(null);
+
+  // Automatic AI Voice Calling when student/group is selected
+  useEffect(() => {
+    if (soundEnabled && voiceEnabled) {
+      if (mode === 'single' && selectedStudent) {
+        speakStudentCalling(selectedStudent.name, 'call', [], { preset: selectedVoice });
+      } else if (mode === 'group' && selectedGroup.length > 0) {
+        const names = selectedGroup.map((s) => s.name);
+        speakStudentCalling(names[0], 'group', names.slice(1), { preset: selectedVoice });
+      }
+    }
+  }, [selectedStudent?.id, selectedGroup.map((s) => s.id).join(',')]);
 
   // Sync selectedStudent when classroom updates
   useEffect(() => {
@@ -952,15 +972,43 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                           : 'Chưa chấm'}
                       </strong>
                     </span>
+
+                    {/* AI Calling Replay Button */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        speakStudentCalling(selectedStudent.name, 'call', [], { preset: selectedVoice })
+                      }
+                      className="text-[11px] font-black px-2.5 py-0.5 rounded-lg bg-white text-rose-700 hover:bg-rose-50 flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+                      title="Bấm để AI gọi tên học sinh to rõ bằng tiếng Việt"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>Gọi tên bằng AI 🔊</span>
+                    </button>
                   </div>
                 </>
               ) : (
-                <div className="text-base md:text-lg font-bold text-white flex flex-wrap gap-2 mt-1">
-                  {selectedGroup.map((s, idx) => (
-                    <span key={s.id} className="px-3 py-1 rounded-xl bg-white/20 backdrop-blur-md text-xs md:text-sm font-black border border-white/20">
-                      {idx + 1}. {s.name}
-                    </span>
-                  ))}
+                <div className="flex flex-col gap-1.5 mt-1">
+                  <div className="text-base md:text-lg font-bold text-white flex flex-wrap gap-2">
+                    {selectedGroup.map((s, idx) => (
+                      <span key={s.id} className="px-3 py-1 rounded-xl bg-white/20 backdrop-blur-md text-xs md:text-sm font-black border border-white/20">
+                        {idx + 1}. {s.name}
+                      </span>
+                    ))}
+                  </div>
+                  {selectedGroup.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const names = selectedGroup.map((s) => s.name);
+                        speakStudentCalling(names[0], 'group', names.slice(1), { preset: selectedVoice });
+                      }}
+                      className="self-start text-[11px] font-black px-2.5 py-1 rounded-lg bg-white text-rose-700 hover:bg-rose-50 flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer mt-1"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>Gọi nhóm bằng AI 🔊</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1119,15 +1167,55 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
           </div>
 
           <div className="flex items-center gap-2">
+            {/* AI Voice Preset Selector */}
+            <select
+              value={selectedVoice.id}
+              onChange={(e) => {
+                const found = VOICE_TONE_PRESETS.find((p) => p.id === e.target.value);
+                if (found) setSelectedVoice(found);
+              }}
+              className="text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 focus:outline-none hidden sm:block"
+              title="Chọn phong cách giọng đọc AI"
+            >
+              {VOICE_TONE_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+
+            {/* AI Voice Toggle */}
+            <button
+              onClick={() => {
+                setVoiceEnabled((prev) => {
+                  const next = !prev;
+                  if (!next) stopAllSpeech();
+                  return next;
+                });
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                voiceEnabled
+                  ? 'bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 shadow-2xs'
+                  : 'bg-slate-100 text-slate-400 border border-slate-200'
+              }`}
+              title={voiceEnabled ? 'Giọng đọc AI: Đang BẬT' : 'Giọng đọc AI: Đang TẮT'}
+            >
+              <Volume2 className={`w-4 h-4 ${voiceEnabled ? 'text-rose-600' : 'text-slate-400'}`} />
+              <span className="hidden md:inline">{voiceEnabled ? 'Giọng AI: BẬT' : 'Giọng AI: TẮT'}</span>
+            </button>
+
             <button
               onClick={() => setSoundEnabled((prev) => !prev)}
               className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-200/60 transition-all cursor-pointer"
-              title={soundEnabled ? 'Tắt âm thanh' : 'Bật âm thanh'}
+              title={soundEnabled ? 'Tắt hiệu ứng âm thanh' : 'Bật hiệu ứng âm thanh'}
             >
               {soundEnabled ? <Volume2 className="w-5 h-5 text-indigo-600" /> : <VolumeX className="w-5 h-5 text-slate-400" />}
             </button>
             <button
-              onClick={onClose}
+              onClick={() => {
+                stopAllSpeech();
+                onClose();
+              }}
               className="p-2.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-all cursor-pointer"
             >
               <X className="w-5 h-5" />

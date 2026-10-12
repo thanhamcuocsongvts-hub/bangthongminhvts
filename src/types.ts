@@ -87,9 +87,10 @@ export interface LessonDoc {
   rawText: string;
   slides: SlideItem[];
   quizzes: QuizQuestion[];
-  fileUrl?: string; // Blob or Data URL to view original PDF / Doc / Image / Media
+  fileUrl?: string; // Persistent URL to view/download file across devices
+  localBlobUrl?: string; // In-memory session blob URL for zero-latency local presentation preview
   source?: 'cloud' | 'local';
-  fileType?: 'pdf' | 'docx' | 'image' | 'xlsx' | 'pptx' | 'ppt' | 'text' | 'other';
+  fileType?: 'pdf' | 'docx' | 'image' | 'xlsx' | 'xls' | 'pptx' | 'ppt' | 'text' | 'other';
   fileName?: string;
   fileSize?: string;
   extractedSummary?: ExtractedDocSummary;

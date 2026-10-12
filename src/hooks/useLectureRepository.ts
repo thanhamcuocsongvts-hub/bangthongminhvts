@@ -21,6 +21,7 @@ import {
 } from 'firebase/storage';
 import { db, storage, auth } from '../lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
+import { saveFileToCloudStore } from '../utils/storageUtils';
 
 export interface LectureItem {
   id: string;
@@ -235,6 +236,8 @@ export function useLectureRepository(): UseLectureRepositoryResult {
       };
 
       const docId = `lec_${Date.now()}`;
+      // Asynchronously mirror binary chunks to Firestore files collection
+      saveFileToCloudStore(file, docId).catch(() => {});
       try {
         const batch = writeBatch(db);
         batch.set(doc(db, 'lectures', docId), docData);

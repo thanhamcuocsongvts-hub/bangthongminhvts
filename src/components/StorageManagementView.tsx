@@ -46,7 +46,12 @@ import {
 import { LessonDoc, TeacherProfile } from '../types';
 import { exportOriginalLessonFile } from '../utils/exportUtils';
 import { useLectureRepository } from '../hooks/useLectureRepository';
-import { clearAllStorageFromCloud, addLessonToCloudWithBatch, syncLinksWithBatchedWrite } from '../utils/storageUtils';
+import {
+  clearAllStorageFromCloud,
+  addLessonToCloudWithBatch,
+  syncLinksWithBatchedWrite,
+  saveFileToCloudStore,
+} from '../utils/storageUtils';
 import { db } from '../lib/firebase';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { safeSetDoc } from '../utils/firebaseSafe';
@@ -283,30 +288,10 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
     try {
       setSuccessMessage(`⚡ Đang tải lên và đồng bộ "${file.name}" (${sizeFormatted}) sang mọi thiết bị...`);
 
-      // 1. Tải nhị phân siêu tốc lên Server để có đường dẫn file thật (/uploads/...) mở được trên điện thoại và PC
-      let finalFileUrl = '';
-      try {
-        const rawRes = await fetch(
-          `/api/documents/upload-raw?fileName=${encodeURIComponent(file.name)}&fileType=${encodeURIComponent(ext)}&teacherId=${encodeURIComponent(activeTeacher?.id || '')}&lessonId=${encodeURIComponent(docId)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': file.type || 'application/octet-stream' },
-            body: file,
-          }
-        );
-        if (rawRes.ok) {
-          const rawData = await rawRes.json();
-          if (rawData?.fileUrl) {
-            finalFileUrl = rawData.fileUrl;
-          }
-        }
-      } catch (err) {
-        console.warn('Raw upload warning:', err);
-      }
-
-      if (!finalFileUrl) {
-        finalFileUrl = URL.createObjectURL(file);
-      }
+      // 1. Tải nhị phân lên Universal Cloud Store (Firestore Base64 Chunks & IndexedDB & Backend Server)
+      // Đảm bảo mọi thiết bị (máy tính, điện thoại trên Vercel/Cloud Run) đều tải về được nguyên vẹn 100% dung lượng
+      const cloudRes = await saveFileToCloudStore(file, docId);
+      const finalFileUrl = cloudRes.fileUrl || `firestore://files/${docId}`;
 
       // 2. Tạo đối tượng LessonDoc chuẩn chỉnh
       const newDoc: LessonDoc = {
@@ -412,35 +397,13 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
     try {
       const fileName = docToDownload.fileName || `${docToDownload.title}.${docToDownload.fileType || 'bin'}`;
       setSuccessMessage(`⚡ Đang tải tệp "${fileName}" về thiết bị của bạn...`);
-
-      // 1. Nếu là tệp trên máy chủ (/uploads/...) hoặc link đầy đủ chứa /uploads/
-      let uniqueName = '';
-      if (docToDownload.fileUrl) {
-        if (docToDownload.fileUrl.startsWith('/uploads/')) {
-          uniqueName = docToDownload.fileUrl.replace(/^\/uploads\//, '');
-        } else if (docToDownload.fileUrl.includes('/uploads/')) {
-          uniqueName = docToDownload.fileUrl.split('/uploads/')[1];
-        }
-      }
-
-      if (uniqueName) {
-        const downloadUrl = `/api/documents/download/${encodeURIComponent(uniqueName)}?name=${encodeURIComponent(fileName)}`;
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = fileName;
-        a.target = '_blank';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => a.remove(), 100);
-        setTimeout(() => setSuccessMessage(null), 3000);
-        return;
-      }
-
-      // 2. Tải qua exportOriginalLessonFile hỗ trợ Firebase Storage & Blob
       await exportOriginalLessonFile(docToDownload);
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
+      setSuccessMessage(`✅ Đã tải tệp "${fileName}" về thiết bị thành công!`);
+      setTimeout(() => setSuccessMessage(null), 3500);
+    } catch (err: any) {
       console.warn('Download error:', err);
+      setErrorMessage('Lỗi khi tải tệp về: ' + (err?.message || String(err)));
+      setTimeout(() => setErrorMessage(null), 4000);
     }
   };
 

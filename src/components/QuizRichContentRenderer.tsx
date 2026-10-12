@@ -640,7 +640,7 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                   </tr>
                 </thead>
                 <tbody>
-                  {(diagramData.tableRows || diagramData.rows || []).map((row: string[], rIdx: number) => (
+                  {(diagramData.tableRows || []).map((row: string[], rIdx: number) => (
                     <tr key={rIdx} className="border-b border-slate-200 hover:bg-slate-50">
                       {row.map((cell, cIdx) => (
                         <td key={cIdx} className="p-1.5 border-r border-slate-200 text-slate-800">

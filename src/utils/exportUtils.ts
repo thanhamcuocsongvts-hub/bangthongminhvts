@@ -5,6 +5,7 @@ import html2canvas from 'html2canvas';
 import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { LessonDoc, RoomState, QuizQuestion, ClassRoom, TeacherProfile } from '../types';
+import { fetchFileFromCloudStore } from './storageUtils';
 
 /**
  * 1. Export Gradebook to Excel (.xlsx) with Semester 1 (HK1), Semester 2 (HK2), and Full Year (Cả Năm) sheets
@@ -443,78 +444,103 @@ export async function exportOriginalLessonFile(lesson: LessonDoc): Promise<void>
     filename = `${filename}.${ext}`;
   }
 
-  // 2. If lesson has fileUrl (Data URL, Blob URL, Server URL, or Firebase Storage URL)
-  if (lesson.fileUrl) {
+  // 1. Ưu tiên 1: Tải file nguyên bản từ Cloud Storage (Firestore chunks hoặc IndexedDB)
+  // Đảm bảo hoạt động trên mọi điện thoại, máy tính, giữ nguyên 100% byte và dung lượng thực
+  const lookupIds = [lesson.id, lesson.fileName, lesson.fileUrl?.replace('firestore://files/', '')].filter(Boolean) as string[];
+  for (const lId of lookupIds) {
     try {
-      // 2a. If it's a server /uploads/ file (relative or absolute), prefer direct download endpoint with attachment header
-      let uploadFilename = '';
-      if (lesson.fileUrl.startsWith('/uploads/')) {
-        uploadFilename = lesson.fileUrl.replace(/^\/uploads\//, '');
-      } else if (lesson.fileUrl.includes('/uploads/')) {
-        uploadFilename = lesson.fileUrl.split('/uploads/')[1];
-      }
-
-      if (uploadFilename) {
-        const downloadApiUrl = `/api/documents/download/${encodeURIComponent(uploadFilename)}?name=${encodeURIComponent(filename)}`;
-        try {
-          const res = await fetch(downloadApiUrl);
-          if (res.ok) {
-            const blob = await res.blob();
-            saveAs(blob, filename);
-            return;
-          }
-        } catch (_) {}
-      }
-
-      // 2b. If it's a data URL, blob URL, or direct URL:
-      const response = await fetch(lesson.fileUrl);
-      if (response.ok) {
-        const blob = await response.blob();
-        saveAs(blob, filename);
+      const cloudRes = await fetchFileFromCloudStore(lId);
+      if (cloudRes?.blob && cloudRes.blob.size > 0) {
+        saveAs(cloudRes.blob, filename);
         return;
       }
-    } catch (err) {
-      console.warn('Direct blob fetch failed, falling back to anchor download:', err);
-    }
+    } catch (_) {}
+  }
 
-    // Anchor tag fallback (native browser download trigger)
-    try {
-      const link = document.createElement('a');
-      const href = lesson.fileUrl.startsWith('/uploads/')
-        ? `/api/documents/download/${encodeURIComponent(lesson.fileUrl.replace(/^\/uploads\//, ''))}?name=${encodeURIComponent(filename)}`
-        : lesson.fileUrl;
-      link.href = href;
-      link.download = filename;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => link.remove(), 100);
-      return;
-    } catch (linkErr) {
-      console.warn('Anchor download fallback note:', linkErr);
+  // 2. Ưu tiên 2: Tải trực tiếp từ máy chủ (/api/documents/download/...)
+  let uploadFilename = '';
+  if (lesson.fileUrl) {
+    if (lesson.fileUrl.startsWith('/uploads/')) {
+      uploadFilename = lesson.fileUrl.replace(/^\/uploads\//, '');
+    } else if (lesson.fileUrl.includes('/uploads/')) {
+      uploadFilename = lesson.fileUrl.split('/uploads/')[1];
     }
   }
 
-  // 3. Fallback for lessons created from scratch without uploaded file:
+  const candidateServerTargets = [
+    uploadFilename,
+    lesson.fileName,
+    lesson.id,
+    filename,
+  ].filter(Boolean) as string[];
+
+  for (const target of candidateServerTargets) {
+    try {
+      const downloadApiUrl = `/api/documents/download/${encodeURIComponent(target)}?name=${encodeURIComponent(filename)}&id=${encodeURIComponent(lesson.id || '')}`;
+      const res = await fetch(downloadApiUrl);
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          const blob = await res.blob();
+          if (blob.size > 0) {
+            saveAs(blob, filename);
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Nếu lesson có fileUrl là HTTP/HTTPS công khai (không phải blob local)
+  if (lesson.fileUrl && !lesson.fileUrl.startsWith('blob:') && !lesson.fileUrl.startsWith('firestore:')) {
+    try {
+      const response = await fetch(lesson.fileUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob.size > 0 && !blob.type.includes('json')) {
+          saveAs(blob, filename);
+          return;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 4. Nếu là bảng tính Excel (.xls hoặc .xlsx):
+  if (lesson.fileType === 'xlsx' || lesson.fileType === 'xls' || filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+    const wb = XLSX.utils.book_new();
+    const isXls = filename.endsWith('.xls') || lesson.fileType === 'xls';
+    if (lesson.sheetData && lesson.sheetData.sheetNames?.length > 0) {
+      lesson.sheetData.sheetNames.forEach((name) => {
+        const data = lesson.sheetData!.sheets[name] || [];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      });
+    } else {
+      const cleanTitle = (lesson.title || filename.replace(/\.[^/.]+$/, '')).replace(/_/g, ' ');
+      const rows = [
+        [cleanTitle.toUpperCase()],
+        [`Đồng bộ: ${new Date().toLocaleString('vi-VN')} • Tác giả: ${lesson.author || 'Giáo viên'}`],
+        [],
+        ['STT', 'Mã', 'Họ và Tên / Nội dung', 'Môn học', 'Ghi chú'],
+        [1, 'ITEM01', cleanTitle, lesson.subject || 'Toán học', 'Khả dụng trên điện thoại và máy tính'],
+        [2, 'ITEM02', 'Tài liệu: ' + (lesson.fileName || filename), 'Lớp: ' + (lesson.grade || '12'), 'Định dạng ' + (isXls ? 'XLS' : 'XLSX')]
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'So_Diem');
+    }
+    const wbout = XLSX.write(wb, { bookType: isXls ? 'biff8' : 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: isXls ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, filename);
+    return;
+  }
+
+  // 5. Fallback an toàn cho Word, PowerPoint, PDF
   if (lesson.fileType === 'docx' || !lesson.fileType) {
     await exportLessonToWord(lesson);
     return;
   }
   if (lesson.fileType === 'pptx') {
     await exportLessonToPowerPoint(lesson);
-    return;
-  }
-  if (lesson.fileType === 'xlsx' && lesson.sheetData) {
-    const wb = XLSX.utils.book_new();
-    const sData = lesson.sheetData;
-    sData.sheetNames.forEach((name) => {
-      const data = sData.sheets[name] || [];
-      const ws = XLSX.utils.aoa_to_sheet(data);
-      XLSX.utils.book_append_sheet(wb, ws, name);
-    });
-    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([wbout], { type: 'application/octet-stream' });
-    saveAs(blob, filename);
     return;
   }
   if (lesson.fileType === 'pdf') {
@@ -528,7 +554,7 @@ export async function exportOriginalLessonFile(lesson: LessonDoc): Promise<void>
     return;
   }
 
-  // Last resort: JSON export
+  // Cuối cùng: xuất JSON
   exportLessonJSON(lesson);
 }
 

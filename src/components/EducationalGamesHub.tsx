@@ -44,6 +44,13 @@ import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { gameSounds } from '../utils/gameSoundEffects';
 import { directGenerateQuiz } from '../utils/geminiClient';
+import {
+  speakQuestionContent,
+  speakGameVoiceEvent,
+  stopAllSpeech,
+  VOICE_TONE_PRESETS,
+  VoiceTonePreset,
+} from '../utils/aiSpeechService';
 
 interface EducationalGamesHubProps {
   classroom?: ClassroomGroup | null;
@@ -193,6 +200,43 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 }) => {
   const [activeGame, setActiveGame] = useState<ActiveGame>('race');
   const [localQuestions, setLocalQuestions] = useState<QuizQuestion[] | null>(null);
+
+  // AI Game Voice Host state
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[1]); // Cô giáo dịu dàng
+  const [readingQId, setReadingQId] = useState<string | null>(null);
+
+  const handleSpeakQuestion = (q: QuizQuestion) => {
+    if (readingQId === q.id) {
+      stopAllSpeech();
+      setReadingQId(null);
+    } else {
+      stopAllSpeech();
+      setReadingQId(q.id);
+      speakQuestionContent(q, {
+        preset: selectedVoice,
+        onStart: () => setReadingQId(q.id),
+        onEnd: () => setReadingQId(null),
+        onError: () => setReadingQId(null),
+      });
+    }
+  };
+
+  const handleCheerAnswer = (isCorrect: boolean) => {
+    if (voiceEnabled) {
+      speakGameVoiceEvent(isCorrect ? 'correct' : 'wrong', undefined, { preset: selectedVoice });
+    }
+  };
+
+  const handleAnnounceWinner = (winnerName?: string) => {
+    if (voiceEnabled) {
+      speakGameVoiceEvent(
+        'winner',
+        winnerName ? `Nhiệt liệt chúc mừng ${winnerName} đã giành chiến thắng chung cuộc xuất sắc!` : undefined,
+        { preset: selectedVoice }
+      );
+    }
+  };
 
   // In-Game AI Generation Modal state
   const [showAIMakerModal, setShowAIMakerModal] = useState<boolean>(false);
@@ -374,8 +418,45 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
           </button>
         </div>
 
-        {/* Action Buttons: Question Inspector & AI Quiz Maker */}
+        {/* Action Buttons: Voice Controls, Question Inspector & AI Quiz Maker */}
         <div className="flex items-center gap-2">
+          {/* AI Voice Preset Selector */}
+          <select
+            value={selectedVoice.id}
+            onChange={(e) => {
+              const found = VOICE_TONE_PRESETS.find((p) => p.id === e.target.value);
+              if (found) setSelectedVoice(found);
+            }}
+            className="text-xs font-bold text-slate-200 bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-2 focus:outline-none hidden xl:block"
+            title="Chọn phong cách giọng đọc AI cho trò chơi"
+          >
+            {VOICE_TONE_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+
+          {/* AI Voice Toggle Button */}
+          <button
+            onClick={() => {
+              setVoiceEnabled((prev) => {
+                const next = !prev;
+                if (!next) stopAllSpeech();
+                return next;
+              });
+            }}
+            className={`px-3 py-2 rounded-2xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+              voiceEnabled
+                ? 'bg-rose-500/20 border border-rose-500/50 text-rose-300 hover:bg-rose-500/30 shadow-xs'
+                : 'bg-slate-800 text-slate-400 border border-slate-700'
+            }`}
+            title={voiceEnabled ? 'Giọng đọc AI: Đang BẬT' : 'Giọng đọc AI: Đang TẮT'}
+          >
+            <Volume2 className={`w-4 h-4 ${voiceEnabled ? 'text-rose-400 animate-pulse' : 'text-slate-500'}`} />
+            <span className="hidden md:inline">{voiceEnabled ? 'Giọng AI: BẬT' : 'Giọng AI: TẮT'}</span>
+          </button>
+
           <button
             onClick={() => setShowQuestionsListModal(true)}
             className="px-3 py-2 rounded-2xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
@@ -423,16 +504,45 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
       {/* Main Game Arena */}
       <div className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-radial from-slate-900 to-slate-950 flex flex-col custom-scrollbar">
         {activeGame === 'race' && (
-          <GrandPrixRacingGame questions={activeQuestions} />
+          <GrandPrixRacingGame
+            questions={activeQuestions}
+            voiceEnabled={voiceEnabled}
+            readingQId={readingQId}
+            onSpeakQuestion={handleSpeakQuestion}
+            onCheerAnswer={handleCheerAnswer}
+            onAnnounceWinner={handleAnnounceWinner}
+          />
         )}
         {activeGame === 'wheel' && (
-          <LuckyWheelGame classroom={classroom} questions={activeQuestions} />
+          <LuckyWheelGame
+            classroom={classroom}
+            questions={activeQuestions}
+            voiceEnabled={voiceEnabled}
+            readingQId={readingQId}
+            onSpeakQuestion={handleSpeakQuestion}
+            onCheerAnswer={handleCheerAnswer}
+            onAnnounceWinner={handleAnnounceWinner}
+          />
         )}
         {activeGame === 'puzzle' && (
-          <MysteryPuzzleGame questions={activeQuestions} />
+          <MysteryPuzzleGame
+            questions={activeQuestions}
+            voiceEnabled={voiceEnabled}
+            readingQId={readingQId}
+            onSpeakQuestion={handleSpeakQuestion}
+            onCheerAnswer={handleCheerAnswer}
+            onAnnounceWinner={handleAnnounceWinner}
+          />
         )}
         {activeGame === 'millionaire' && (
-          <MillionaireGame questions={activeQuestions} />
+          <MillionaireGame
+            questions={activeQuestions}
+            voiceEnabled={voiceEnabled}
+            readingQId={readingQId}
+            onSpeakQuestion={handleSpeakQuestion}
+            onCheerAnswer={handleCheerAnswer}
+            onAnnounceWinner={handleAnnounceWinner}
+          />
         )}
       </div>
 
@@ -808,6 +918,11 @@ const QuickPointAdjuster: React.FC<QuickPointAdjusterProps> = ({ onAdjust, title
 /* ========================================================================= */
 interface GrandPrixRacingGameProps {
   questions: QuizQuestion[];
+  voiceEnabled?: boolean;
+  readingQId?: string | null;
+  onSpeakQuestion?: (q: QuizQuestion) => void;
+  onCheerAnswer?: (isCorrect: boolean) => void;
+  onAnnounceWinner?: (winnerName?: string) => void;
 }
 
 const TEAMS = [
@@ -817,7 +932,14 @@ const TEAMS = [
   { id: 'team_green', name: 'Đội Lục (Ngựa Thần)', color: '#10b981', emoji: '🚗' },
 ];
 
-const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) => {
+const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({
+  questions,
+  voiceEnabled = true,
+  readingQId,
+  onSpeakQuestion,
+  onCheerAnswer,
+  onAnnounceWinner,
+}) => {
   const [teamScores, setTeamScores] = useState<Record<string, number>>({
     team_red: 0,
     team_blue: 0,
@@ -844,6 +966,8 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
       if (next >= targetGoal && !winnerTeam) {
         setWinnerTeam(teamId);
         gameSounds.playVictoryFanfare();
+        const teamName = TEAMS.find((t) => t.id === teamId)?.name || 'Quán quân';
+        onAnnounceWinner?.(teamName);
         confetti({
           particleCount: 180,
           spread: 110,
@@ -861,9 +985,11 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
     const isCorrect = optKey === currentQ.correctAnswer;
     if (isCorrect) {
       gameSounds.playCorrectChime();
+      onCheerAnswer?.(true);
       handleAdjustTeamScore(selectedTeam, 1);
     } else {
       gameSounds.playWrongBuzz();
+      onCheerAnswer?.(false);
     }
   };
 
@@ -1060,6 +1186,25 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
               <span className="text-xs font-bold text-amber-300">
                 Lượt của: {TEAMS.find((t) => t.id === selectedTeam)?.name}
               </span>
+
+              {/* AI Voice Read Question Button */}
+              {onSpeakQuestion && (
+                <button
+                  type="button"
+                  onClick={() => onSpeakQuestion(currentQ)}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    readingQId === currentQ.id
+                      ? 'bg-rose-600 text-white animate-pulse shadow-md'
+                      : 'bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-400/30'
+                  }`}
+                  title="Nghe giọng AI đọc câu hỏi và các phương án"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span className="text-[11px] font-bold">
+                    {readingQId === currentQ.id ? 'Dừng đọc' : 'Đọc câu hỏi'}
+                  </span>
+                </button>
+              )}
             </div>
 
             {revealed && (
@@ -1134,6 +1279,11 @@ const GrandPrixRacingGame: React.FC<GrandPrixRacingGameProps> = ({ questions }) 
 interface LuckyWheelGameProps {
   classroom?: ClassroomGroup | null;
   questions: QuizQuestion[];
+  voiceEnabled?: boolean;
+  readingQId?: string | null;
+  onSpeakQuestion?: (q: QuizQuestion) => void;
+  onCheerAnswer?: (isCorrect: boolean) => void;
+  onAnnounceWinner?: (winnerName?: string) => void;
 }
 
 const DEFAULT_SLICES = [
@@ -1147,7 +1297,15 @@ const DEFAULT_SLICES = [
   '🏆 500 Điểm',
 ];
 
-const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions }) => {
+const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({
+  classroom,
+  questions,
+  voiceEnabled = true,
+  readingQId,
+  onSpeakQuestion,
+  onCheerAnswer,
+  onAnnounceWinner,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isSpinning, setIsSpinning] = useState<boolean>(false);
   const [wheelMode, setWheelMode] = useState<'students' | 'questions' | 'rewards'>('students');
@@ -1386,6 +1544,9 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
           if (groupSelectionMode === 1) {
             setWinnerStudent(winner);
             setWinnerGroup([winner]);
+            if (voiceEnabled) {
+              onAnnounceWinner?.(winner);
+            }
           } else {
             const others = studentNames.filter((n) => n !== winner);
             const shuffled = [...others].sort(() => 0.5 - Math.random());
@@ -1393,6 +1554,9 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
             const team = [winner, ...shuffled.slice(0, targetCount)];
             setWinnerStudent(team.join(' • '));
             setWinnerGroup(team);
+            if (voiceEnabled) {
+              onAnnounceWinner?.(`Nhóm ${winner} và các bạn`);
+            }
           }
           // Set timer for active question
           setTimerSeconds(currentQ?.timeLimit || 30);
@@ -1424,6 +1588,7 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
     setIsTimerRunning(false);
     if (currentQ && key === currentQ.correctAnswer) {
       gameSounds.playCorrectChime();
+      onCheerAnswer?.(true);
       confetti({
         particleCount: 120,
         spread: 90,
@@ -1431,6 +1596,7 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
       });
     } else {
       gameSounds.playWrongBuzz();
+      onCheerAnswer?.(false);
     }
   };
 
@@ -1639,6 +1805,23 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
                       <span>{winnerStudent}</span>
                     </span>
                   )}
+
+                  {/* AI Voice Read Question Button */}
+                  {onSpeakQuestion && (
+                    <button
+                      type="button"
+                      onClick={() => onSpeakQuestion(currentQ)}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        readingQId === currentQ.id
+                          ? 'bg-rose-600 text-white animate-pulse shadow-md'
+                          : 'bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-400/30'
+                      }`}
+                      title="Nghe giọng AI đọc câu hỏi và các phương án"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>{readingQId === currentQ.id ? 'Dừng đọc' : 'Đọc câu hỏi'}</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Timer & Switch Question */}
@@ -1806,9 +1989,21 @@ const LuckyWheelGame: React.FC<LuckyWheelGameProps> = ({ classroom, questions })
 /* ========================================================================= */
 interface MysteryPuzzleGameProps {
   questions: QuizQuestion[];
+  voiceEnabled?: boolean;
+  readingQId?: string | null;
+  onSpeakQuestion?: (q: QuizQuestion) => void;
+  onCheerAnswer?: (isCorrect: boolean) => void;
+  onAnnounceWinner?: (winnerName?: string) => void;
 }
 
-const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
+const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({
+  questions,
+  voiceEnabled = true,
+  readingQId,
+  onSpeakQuestion,
+  onCheerAnswer,
+  onAnnounceWinner,
+}) => {
   const [totalTiles, setTotalTiles] = useState<number>(12); // Default to 12 tiles for longer, richer game
   const [flippedTiles, setFlippedTiles] = useState<number[]>([]);
   const [selectedTile, setSelectedTile] = useState<number | null>(null);
@@ -1829,6 +2024,7 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
     if (tileIdx === 2 && !flippedTiles.includes(2)) {
       setFlippedTiles((prev) => [...prev, 2]);
       gameSounds.playCorrectChime();
+      onCheerAnswer?.(true);
       confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
       return;
     }
@@ -1844,11 +2040,13 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
     if (isCorrect) {
       setFeedback('correct');
       gameSounds.playCorrectChime();
+      onCheerAnswer?.(true);
       if (selectedTile !== null && !flippedTiles.includes(selectedTile)) {
         const next = [...flippedTiles, selectedTile];
         setFlippedTiles(next);
         if (next.length === totalTiles) {
           gameSounds.playVictoryFanfare();
+          onAnnounceWinner?.('Toàn lớp đã giải mã thành công bức tranh bí mật!');
           confetti({
             particleCount: 160,
             spread: 100,
@@ -1865,6 +2063,7 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
     } else {
       setFeedback('wrong');
       gameSounds.playWrongBuzz();
+      onCheerAnswer?.(false);
     }
   };
 
@@ -2043,9 +2242,27 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
         ) : (
           <div className="space-y-4 animate-fade-in">
             <div className="flex items-center justify-between">
-              <span className="px-3 py-1 rounded-xl bg-amber-500 text-slate-950 font-black text-xs font-mono">
-                THỬ THÁCH MẢNH GHÉP #{selectedTile + 1}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-xl bg-amber-500 text-slate-950 font-black text-xs font-mono">
+                  THỬ THÁCH MẢNH GHÉP #{selectedTile + 1}
+                </span>
+
+                {onSpeakQuestion && (
+                  <button
+                    type="button"
+                    onClick={() => onSpeakQuestion(currentQ)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      readingQId === currentQ.id
+                        ? 'bg-rose-600 text-white animate-pulse shadow-md'
+                        : 'bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-400/30'
+                    }`}
+                    title="Nghe giọng AI đọc câu hỏi và các phương án"
+                  >
+                    <Volume2 className="w-3.5 h-3.5" />
+                    <span>{readingQId === currentQ.id ? 'Dừng đọc' : 'Đọc câu hỏi'}</span>
+                  </button>
+                )}
+              </div>
               {feedback === 'correct' && (
                 <span className="text-xs font-black text-emerald-400 flex items-center gap-1">
                   <CheckCircle2 className="w-4 h-4" />
@@ -2112,6 +2329,11 @@ const MysteryPuzzleGame: React.FC<MysteryPuzzleGameProps> = ({ questions }) => {
 /* ========================================================================= */
 interface MillionaireGameProps {
   questions: QuizQuestion[];
+  voiceEnabled?: boolean;
+  readingQId?: string | null;
+  onSpeakQuestion?: (q: QuizQuestion) => void;
+  onCheerAnswer?: (isCorrect: boolean) => void;
+  onAnnounceWinner?: (winnerName?: string) => void;
 }
 
 const LADDER = [
@@ -2122,7 +2344,14 @@ const LADDER = [
   { level: 1, reward: '5.000 Điểm', safe: false },
 ];
 
-const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
+const MillionaireGame: React.FC<MillionaireGameProps> = ({
+  questions,
+  voiceEnabled = true,
+  readingQId,
+  onSpeakQuestion,
+  onCheerAnswer,
+  onAnnounceWinner,
+}) => {
   const [level, setLevel] = useState<number>(1);
   const [used5050, setUsed5050] = useState<boolean>(false);
   const [usedAudience, setUsedAudience] = useState<boolean>(false);
@@ -2159,8 +2388,10 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
     if (optKey === currentQ.correctAnswer) {
       setAnsweredState('correct');
       gameSounds.playCorrectChime();
+      onCheerAnswer?.(true);
       if (level === 5 || level === 10 || level === 15) {
         gameSounds.playVictoryFanfare();
+        onAnnounceWinner?.('Người chơi đã xuất sắc chinh phục đỉnh cao Tri Thức 100.000 điểm!');
       }
       confetti({
         particleCount: 90,
@@ -2170,6 +2401,7 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
     } else {
       setAnsweredState('wrong');
       gameSounds.playWrongBuzz();
+      onCheerAnswer?.(false);
     }
   };
 
@@ -2243,8 +2475,26 @@ const MillionaireGame: React.FC<MillionaireGameProps> = ({ questions }) => {
 
         {/* Question Prompt - Phóng to lên text-2xl - text-3xl in đậm */}
         <div className="space-y-3">
-          <div className="text-sm font-mono font-black text-amber-400 tracking-wider">
-            CÂU HỎI MỐC SỐ {level} • {LADDER.find((l) => l.level === level)?.reward}
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-mono font-black text-amber-400 tracking-wider">
+              CÂU HỎI MỐC SỐ {level} • {LADDER.find((l) => l.level === level)?.reward}
+            </div>
+
+            {onSpeakQuestion && (
+              <button
+                type="button"
+                onClick={() => onSpeakQuestion(currentQ)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  readingQId === currentQ.id
+                    ? 'bg-rose-600 text-white animate-pulse shadow-md'
+                    : 'bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-400/30'
+                }`}
+                title="Nghe giọng AI đọc câu hỏi và các phương án"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>{readingQId === currentQ.id ? 'Dừng đọc' : 'Đọc câu hỏi 🔊'}</span>
+              </button>
+            )}
           </div>
           <div className="text-2xl md:text-3xl font-black text-white leading-relaxed p-6 bg-slate-950/70 rounded-3xl border border-slate-800/80 shadow-inner">
             <QuizRichContentRenderer

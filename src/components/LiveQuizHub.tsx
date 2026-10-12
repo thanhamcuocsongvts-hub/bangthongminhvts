@@ -40,6 +40,9 @@ import {
   CheckCircle,
   Smartphone,
   BarChart3,
+  Volume2,
+  VolumeX,
+  Square,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
@@ -49,6 +52,12 @@ import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { directFastMatrixQuiz, getGeminiApiKey, saveGeminiApiKey, isGeminiConfigured } from '../utils/geminiClient';
+import {
+  speakQuestionContent,
+  stopAllSpeech,
+  VOICE_TONE_PRESETS,
+  VoiceTonePreset,
+} from '../utils/aiSpeechService';
 import { db } from '../lib/firebase';
 import { doc } from 'firebase/firestore';
 import { safeSetDoc } from '../utils/firebaseSafe';
@@ -126,6 +135,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
   const timerRef = useRef<any>(null);
 
+  // AI Voice State for Live Quiz Hub
+  const [readingQuestionId, setReadingQuestionId] = useState<string | null>(null);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[1]); // Cô giáo dịu dàng
+
   // State chung lưu trữ câu hỏi phòng thi trực tiếp (ưu tiên từ roomState, sau đó localStorage, hoặc currentLesson)
   const [liveExamQuestions, setLiveExamQuestions] = useState<QuizQuestion[]>(() => {
     if (roomState?.questions && roomState.questions.length > 0) return roomState.questions;
@@ -190,12 +203,29 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
   // Reset timer whenever question changes in Live mode
   useEffect(() => {
+    stopAllSpeech();
+    setReadingQuestionId(null);
     if (currentQ && activeMode === 'live') {
       setTimeLeft(currentQ.timeLimit || 30);
       setIsRevealed(false);
       setIsTimerRunning(true);
     }
-  }, [activeIndex, currentQ, activeMode]);
+  }, [activeIndex, currentQ?.id, activeMode]);
+
+  const handleToggleSpeakCurrentQuestion = (q?: QuizQuestion) => {
+    const targetQ = q || currentQ;
+    if (!targetQ) return;
+    if (readingQuestionId === targetQ.id) {
+      stopAllSpeech();
+      setReadingQuestionId(null);
+    } else {
+      setReadingQuestionId(targetQ.id);
+      speakQuestionContent(targetQ, {
+        preset: selectedVoice,
+        onEnd: () => setReadingQuestionId(null),
+      });
+    }
+  };
 
   // Timer countdown
   useEffect(() => {
@@ -1424,14 +1454,57 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               <div className="flex-1 flex flex-col justify-between space-y-6">
                 {/* Question Prompt Card */}
                 <div className="p-8 rounded-3xl bg-slate-50 border-2 border-indigo-200/90 shadow-sm">
-                  <div className="text-xs uppercase font-extrabold tracking-widest text-indigo-600 mb-3 flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
-                    <span>ĐỀ BÀI TRẮC NGHIỆM</span>
-                    {currentQ.difficulty && (
-                      <span className="ml-auto px-2.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 font-medium">
-                        Độ khó: {currentQ.difficulty}
-                      </span>
-                    )}
+                  <div className="text-xs uppercase font-extrabold tracking-widest text-indigo-600 mb-3 flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
+                      <span>ĐỀ BÀI TRẮC NGHIỆM</span>
+                      {currentQ.difficulty && (
+                        <span className="px-2.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 font-medium">
+                          Độ khó: {currentQ.difficulty}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* AI Speech Voice Control */}
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedVoice.id}
+                        onChange={(e) => {
+                          const found = VOICE_TONE_PRESETS.find((p) => p.id === e.target.value);
+                          if (found) setSelectedVoice(found);
+                        }}
+                        className="text-[11px] font-bold text-slate-700 bg-white border border-slate-300 rounded-lg px-2 py-1 focus:outline-none"
+                      >
+                        {VOICE_TONE_PRESETS.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSpeakCurrentQuestion()}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                          readingQuestionId === currentQ.id
+                            ? 'bg-rose-600 text-white animate-pulse shadow-md'
+                            : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                        }`}
+                        title="Nghe giọng AI đọc câu hỏi và 4 phương án cho cả lớp"
+                      >
+                        {readingQuestionId === currentQ.id ? (
+                          <>
+                            <Square className="w-3.5 h-3.5 fill-current" />
+                            <span>Dừng đọc AI</span>
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Nghe AI đọc câu hỏi 🔊</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div className={`${scale.questionText} text-slate-900`}>
                     <QuizRichContentRenderer

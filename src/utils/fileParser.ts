@@ -10,6 +10,7 @@ import { collection, Timestamp } from 'firebase/firestore';
 import { safeAddDoc } from './firebaseSafe';
 import { signInAnonymously } from 'firebase/auth';
 import { extractCleanPdfText } from './pdfTextExtractor';
+import { saveFileToCloudStore } from './storageUtils';
 
 if (typeof window !== 'undefined' && 'Worker' in window) {
   try {
@@ -130,37 +131,30 @@ export async function parseUploadedFileToLesson(
     ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
     : `${Math.round(file.size / 1024)} KB`;
   
-  // 1. Instant zero-latency Blob URL for immediate presentation & preview (0.001s)
+  // 1. Instant zero-latency Blob URL for immediate local preview
   const localBlobUrl = URL.createObjectURL(file);
-  let effectiveFileUrl = localBlobUrl;
+  const safeBaseName = file.name
+    .replace(/\.[^/.]+$/, '')
+    .replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF-]/g, '_');
+  const expectedServerUrl = `/uploads/${lessonId}_${safeBaseName}.${ext}`;
+  let effectiveFileUrl = expectedServerUrl;
 
-  // 2. High-speed parallel cloud upload via raw binary streaming (NO BASE64 OVERHEAD)
-  // Non-blocking so user never waits 10-20 seconds to see their presentation!
+  // 2. High-speed parallel cloud upload via Universal Cloud Store (Firestore Base64 Chunks & Server)
   let serverFileUrl = '';
   const rawUploadPromise = (async () => {
     try {
-      const uploadRes = await fetch(
-        `/api/documents/upload-raw?fileName=${encodeURIComponent(file.name)}&fileType=${encodeURIComponent(ext)}&teacherId=${encodeURIComponent(teacherId || 'current_teacher')}&lessonId=${encodeURIComponent(lessonId)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-          body: file, // Native browser streaming binary
-        }
-      );
-      if (uploadRes.ok) {
-        const uploadJson = await uploadRes.json();
-        if (uploadJson.fileUrl) {
-          serverFileUrl = uploadJson.fileUrl;
-          effectiveFileUrl = uploadJson.fileUrl;
-          window.dispatchEvent(
-            new CustomEvent('lesson-cloud-synced', {
-              detail: { lessonId, fileUrl: uploadJson.fileUrl, fileName: file.name },
-            })
-          );
-        }
+      const cloudRes = await saveFileToCloudStore(file, lessonId);
+      if (cloudRes?.fileUrl && !cloudRes.fileUrl.startsWith('blob:')) {
+        serverFileUrl = cloudRes.fileUrl;
+        effectiveFileUrl = cloudRes.fileUrl;
+        window.dispatchEvent(
+          new CustomEvent('lesson-cloud-synced', {
+            detail: { lessonId, fileUrl: cloudRes.fileUrl, fileName: file.name },
+          })
+        );
       }
     } catch (apiErr) {
-      console.warn('Local fast raw document upload notice:', apiErr);
+      console.warn('Universal Cloud Store upload notice:', apiErr);
     }
 
     // Parallel sync to Firebase Storage & Firestore TaiLieuGiaoVien collection for cross-device access
@@ -176,7 +170,7 @@ export async function parseUploadedFileToLesson(
         const storageRef = ref(storage, `TaiLieuGiaoVien/${currentUser.uid}/${Date.now()}_${file.name}`);
         await uploadBytes(storageRef, file);
         const fbUrl = await getDownloadURL(storageRef);
-        if (!serverFileUrl) {
+        if (fbUrl) {
           serverFileUrl = fbUrl;
           effectiveFileUrl = fbUrl;
           window.dispatchEvent(
@@ -189,7 +183,7 @@ export async function parseUploadedFileToLesson(
         await safeAddDoc(collection(db, 'TaiLieuGiaoVien'), {
           uid: currentUser.uid,
           name: file.name,
-          url: fbUrl || serverFileUrl,
+          url: fbUrl || serverFileUrl || expectedServerUrl,
           size: file.size,
           type: ext,
           createdAt: Timestamp.now(),
@@ -200,10 +194,10 @@ export async function parseUploadedFileToLesson(
     }
   })();
 
-  // Race fast upload for up to 100ms: if already finished, use permanent server fileUrl immediately
+  // Race fast upload for up to 2500ms so cross-device sync gets the authentic cloud URL
   await Promise.race([
     rawUploadPromise,
-    new Promise((resolve) => setTimeout(resolve, 100)),
+    new Promise((resolve) => setTimeout(resolve, 2500)),
   ]);
 
   // Microsoft Office Web Viewer requires a public URL, but tmpfiles is unreliable.
@@ -461,6 +455,7 @@ export async function parseUploadedFileToLesson(
     slides,
     quizzes,
     fileUrl: effectiveFileUrl,
+    localBlobUrl,
     fileType,
     fileName: file.name,
     fileSize: sizeFormatted,

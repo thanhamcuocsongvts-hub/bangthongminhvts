@@ -27,6 +27,7 @@ import { LessonDoc, SubjectType, TeacherProfile } from '../types';
 import { exportOriginalLessonFile, exportLessonJSON } from '../utils/exportUtils';
 import { parseUploadedFileToLesson, cleanDocumentText } from '../utils/fileParser';
 import { useLectureRepository } from '../hooks/useLectureRepository';
+import { saveFileToCloudStore } from '../utils/storageUtils';
 
 interface DocumentLibraryProps {
   lessons: LessonDoc[];
@@ -206,9 +207,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       ? 'Tiếng Anh'
       : (activeTeacher?.subject || 'Toán học');
 
-    // Create instant local URL for fast preview
-    const localBlobUrl = URL.createObjectURL(file);
     const docId = 'doc_' + Date.now();
+    const cloudFileUrl = `firestore://files/${docId}`;
 
     // 2. Create Intact LessonDoc immediately (0.05s) - NO heavy blocking parsing
     const newDoc: LessonDoc = {
@@ -217,7 +217,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       fileName: file.name,
       fileType: ext as any,
       fileSize: sizeFormatted,
-      fileUrl: localBlobUrl,
+      fileUrl: cloudFileUrl,
       subject: guessedSubject,
       grade: 'Lớp 12',
       author: activeTeacher?.name || 'Giáo viên',
@@ -245,17 +245,16 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       fileInputRef.current.value = '';
     }
 
-    // 3. Background asynchronous sync to Firebase Storage & Firestore (non-blocking)
+    // 3. Background asynchronous sync to Universal Cloud Store (Firestore Base64 Chunks & IndexedDB & Server)
     (async () => {
       try {
-        const uploadedItem = await uploadLectureFile(file);
-        if (uploadedItem?.downloadURL) {
-          newDoc.fileUrl = uploadedItem.downloadURL;
-          newDoc.storagePath = uploadedItem.storagePath;
+        const cloudRes = await saveFileToCloudStore(file, docId);
+        if (cloudRes?.fileUrl) {
+          newDoc.fileUrl = cloudRes.fileUrl;
           onAddLesson(newDoc); // update with persistent cloud URL
-          if (onSyncToCloud) {
-            onSyncToCloud().catch(() => {});
-          }
+        }
+        if (onSyncToCloud) {
+          onSyncToCloud().catch(() => {});
         }
       } catch (cloudErr) {
         console.warn('[Storage] Background cloud sync notice:', cloudErr);

@@ -744,3 +744,245 @@ export async function getLargeFileCache(fileId: string): Promise<string | null> 
     return null;
   }
 }
+
+/**
+ * Convert File or Blob to Base64 string
+ */
+export function fileToBase64(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
+      resolve(base64);
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Convert Base64 string to native Blob
+ */
+export function base64ToBlob(base64: string, mimeType: string = 'application/octet-stream'): Blob {
+  const cleanBase64 = base64.replace(/\s+/g, '');
+  const byteCharacters = atob(cleanBase64);
+  const byteNumbers = new Uint8Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  return new Blob([byteNumbers], { type: mimeType });
+}
+
+/**
+ * Universal Cloud Storage: Save complete file binary to Firestore and local IndexedDB
+ * Works across ALL platforms (PC, phone, tablet, Vercel, cloud run)
+ */
+export async function saveFileToCloudStore(
+  file: File,
+  docId: string
+): Promise<{ fileUrl: string; fileSizeFormatted: string }> {
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  const sizeFormatted =
+    file.size > 1024 * 1024
+      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.round(file.size / 1024)} KB`;
+
+  // 1. Lưu vào IndexedDB cục bộ của máy hiện tại để truy xuất tức thì (<5ms)
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_FILES, 'readwrite');
+    tx.objectStore(STORE_FILES).put({
+      id: docId,
+      blob: file,
+      fileName: file.name,
+      fileSize: sizeFormatted,
+      mimeType: file.type || 'application/octet-stream',
+      savedAt: Date.now(),
+    });
+  } catch (idbErr) {
+    console.warn('[saveFileToCloudStore] IndexedDB note:', idbErr);
+  }
+
+  // 2. Tải lên máy chủ lưu trữ siêu tốc (/api/documents/upload-raw)
+  let cloudFileUrl = `/uploads/${docId}_${file.name.replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF-]/g, '_')}.${ext}`;
+  const serverUploadPromise = (async () => {
+    try {
+      const rawRes = await fetch(
+        `/api/documents/upload-raw?fileName=${encodeURIComponent(file.name)}&fileType=${encodeURIComponent(ext)}&lessonId=${encodeURIComponent(docId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file,
+        }
+      );
+      if (rawRes.ok) {
+        const data = await rawRes.json();
+        if (data?.fileUrl) {
+          cloudFileUrl = data.fileUrl;
+        }
+      }
+    } catch (_) {}
+  })();
+
+  // 3. Đồng thời ghi nhị phân lên Firestore collection 'files' (hỗ trợ phân mảnh chunk) để các thiết bị khác (điện thoại, máy tính khác) luôn tải được
+  const firestoreUploadPromise = (async () => {
+    try {
+      const base64Data = await fileToBase64(file);
+      const authModule = await import('../lib/firebase');
+      const firestoreModule = await import('firebase/firestore');
+      const firestoreDb = authModule.db;
+      const { doc, setDoc, serverTimestamp, writeBatch } = firestoreModule;
+
+      const CHUNK_SIZE = 450000; // ~450KB per chunk để an toàn dưới giới hạn 1MB Firestore
+      if (base64Data.length <= CHUNK_SIZE) {
+        await setDoc(doc(firestoreDb, 'files', docId), {
+          id: docId,
+          fileName: file.name,
+          fileType: ext,
+          fileSize: sizeFormatted,
+          rawSizeBytes: file.size,
+          mimeType: file.type || 'application/octet-stream',
+          dataBase64: base64Data,
+          isChunked: false,
+          chunkCount: 1,
+          uploadedAt: serverTimestamp(),
+        });
+      } else {
+        const totalChunks = Math.ceil(base64Data.length / CHUNK_SIZE);
+        await setDoc(doc(firestoreDb, 'files', docId), {
+          id: docId,
+          fileName: file.name,
+          fileType: ext,
+          fileSize: sizeFormatted,
+          rawSizeBytes: file.size,
+          mimeType: file.type || 'application/octet-stream',
+          isChunked: true,
+          chunkCount: totalChunks,
+          uploadedAt: serverTimestamp(),
+        });
+
+        for (let i = 0; i < totalChunks; i += 10) {
+          const batch = writeBatch(firestoreDb);
+          const end = Math.min(i + 10, totalChunks);
+          for (let j = i; j < end; j++) {
+            const chunkStr = base64Data.slice(j * CHUNK_SIZE, (j + 1) * CHUNK_SIZE);
+            batch.set(doc(firestoreDb, 'files', docId, 'chunks', String(j)), {
+              chunkIndex: j,
+              data: chunkStr,
+            });
+          }
+          await batch.commit();
+        }
+      }
+    } catch (fsErr) {
+      console.warn('[saveFileToCloudStore] Firestore save notice:', fsErr);
+    }
+  })();
+
+  // Đợi máy chủ upload hoàn tất (thường < 150ms)
+  await Promise.race([
+    serverUploadPromise,
+    new Promise((resolve) => setTimeout(resolve, 2000)),
+  ]);
+
+  // Tiếp tục chạy Firestore trong background nếu chưa xong
+  firestoreUploadPromise.catch(() => {});
+
+  return { fileUrl: cloudFileUrl, fileSizeFormatted: sizeFormatted };
+}
+
+/**
+ * Universal Cloud Storage: Lấy file nguyên bản từ local IndexedDB hoặc Firestore Cloud
+ * Tái tạo chính xác 100% dung lượng và định dạng gốc trên bất kỳ điện thoại hay máy tính nào
+ */
+export async function fetchFileFromCloudStore(
+  docId: string
+): Promise<{ blob: Blob; fileName: string; mimeType: string } | null> {
+  if (!docId) return null;
+
+  // 1. Kiểm tra bộ nhớ cục bộ IndexedDB trước
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_FILES, 'readonly');
+    const item: any = await new Promise((resolve) => {
+      const req = tx.objectStore(STORE_FILES).get(docId);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    });
+    if (item?.blob instanceof Blob) {
+      return { blob: item.blob, fileName: item.fileName || 'tai-lieu', mimeType: item.mimeType || item.blob.type };
+    }
+    if (typeof item?.dataUrl === 'string' && item.dataUrl.startsWith('data:')) {
+      const parts = item.dataUrl.split(',');
+      const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/octet-stream';
+      const blob = base64ToBlob(parts[1], mime);
+      return { blob, fileName: item.fileName || 'tai-lieu', mimeType: mime };
+    }
+  } catch (_) {}
+
+  // 2. Tải về từ Firestore collection 'files' (dành cho điện thoại hoặc máy tính khác)
+  try {
+    const authModule = await import('../lib/firebase');
+    const firestoreModule = await import('firebase/firestore');
+    const firestoreDb = authModule.db;
+    const { doc, getDoc, getDocs, collection, query, orderBy, where, limit } = firestoreModule;
+
+    let fileDocSnap = await getDoc(doc(firestoreDb, 'files', docId));
+    let targetDocId = docId;
+
+    if (!fileDocSnap.exists()) {
+      // Thử tìm theo fileName
+      const filesCol = collection(firestoreDb, 'files');
+      const qSnap = await getDocs(query(filesCol, where('fileName', '==', docId), limit(1)));
+      if (!qSnap.empty) {
+        fileDocSnap = qSnap.docs[0];
+        targetDocId = fileDocSnap.id;
+      }
+    }
+
+    if (!fileDocSnap.exists()) return null;
+
+    const data = fileDocSnap.data();
+    const fileName = data.fileName || 'tai-lieu';
+    const mimeType = data.mimeType || 'application/octet-stream';
+
+    if (!data.isChunked && data.dataBase64) {
+      const blob = base64ToBlob(data.dataBase64, mimeType);
+      try {
+        const idb = await openDB();
+        const tx = idb.transaction(STORE_FILES, 'readwrite');
+        tx.objectStore(STORE_FILES).put({ id: docId, blob, fileName, mimeType, savedAt: Date.now() });
+      } catch (_) {}
+      return { blob, fileName, mimeType };
+    }
+
+    if (data.isChunked && data.chunkCount > 0) {
+      const chunksCol = collection(firestoreDb, 'files', targetDocId, 'chunks');
+      const q = query(chunksCol, orderBy('chunkIndex', 'asc'));
+      const chunkSnaps = await getDocs(q);
+
+      const chunkList: { index: number; data: string }[] = [];
+      chunkSnaps.forEach((s) => {
+        const cData = s.data();
+        chunkList.push({ index: cData.chunkIndex, data: cData.data || '' });
+      });
+      chunkList.sort((a, b) => a.index - b.index);
+
+      const fullBase64 = chunkList.map((c) => c.data).join('');
+      if (fullBase64) {
+        const blob = base64ToBlob(fullBase64, mimeType);
+        try {
+          const idb = await openDB();
+          const tx = idb.transaction(STORE_FILES, 'readwrite');
+          tx.objectStore(STORE_FILES).put({ id: docId, blob, fileName, mimeType, savedAt: Date.now() });
+        } catch (_) {}
+        return { blob, fileName, mimeType };
+      }
+    }
+  } catch (err) {
+    console.warn('[fetchFileFromCloudStore] Error fetching from Firestore:', err);
+  }
+
+  return null;
+}

@@ -4,9 +4,10 @@ import { safeAddDoc, safeDeleteDoc } from '../utils/firebaseSafe';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { auth, db, storage } from '../lib/firebase';
-import { File, Upload, Trash2, Loader2, Play, CloudCheck, RefreshCw, X } from 'lucide-react';
+import { File, Upload, Trash2, Loader2, Play, CloudCheck, RefreshCw, X, Download } from 'lucide-react';
 import { LessonDoc } from '../types';
 import { parseUploadedFileToLesson } from '../utils/fileParser';
+import { exportOriginalLessonFile } from '../utils/exportUtils';
 
 export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) => void }> = ({ onSelectFile }) => {
   const [files, setFiles] = useState<any[]>([]);
@@ -212,6 +213,31 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
     }
   };
 
+  const handleDownloadFile = async (f: any) => {
+    try {
+      const ext = f.name?.split('.').pop()?.toLowerCase() || f.type || 'bin';
+      const dummyDoc: LessonDoc = {
+        id: f.id,
+        title: f.name?.replace(/\.[^/.]+$/, '') || f.name,
+        fileName: f.name,
+        fileUrl: f.url,
+        fileType: ext === 'pdf' ? 'pdf' : ['ppt', 'pptx'].includes(ext) ? 'pptx' : ['doc', 'docx'].includes(ext) ? 'docx' : ['xls', 'xlsx'].includes(ext) ? 'xlsx' : 'other',
+        fileSize: f.sizeFormatted || `${(f.size / 1024 / 1024).toFixed(2)} MB`,
+        author: 'Giáo viên',
+        subject: 'Toán học',
+        grade: 'Lớp 12',
+        lastModified: new Date().toISOString(),
+        slides: [],
+        quizzes: [],
+        syncedToCloud: true,
+        rawText: `Tài liệu: ${f.name}`,
+      };
+      await exportOriginalLessonFile(dummyDoc);
+    } catch (err) {
+      console.warn('TeacherFileManager download note:', err);
+    }
+  };
+
   const handleDelete = async (fileId: string, url: string) => {
     try {
       const targetFile = files.find((f) => f.id === fileId);
@@ -337,6 +363,14 @@ export const TeacherFileManager: React.FC<{ onSelectFile?: (lesson: LessonDoc) =
                     <span>{openingId === f.id ? 'Đang mở...' : 'Trình Chiếu'}</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => handleDownloadFile(f)}
+                  className="p-2 rounded-xl bg-slate-700/80 hover:bg-slate-700 text-amber-300 hover:text-white transition-colors cursor-pointer"
+                  title={`Tải tệp "${f.name}" về thiết bị`}
+                >
+                  <Download className="w-4 h-4" />
+                </button>
                 <button
                   type="button"
                   onClick={() => setFileToDelete(f)}
