@@ -11,7 +11,6 @@ import { useDeviceDetection } from '../hooks/useDeviceDetection';
 
 export type ActiveTab =
   | 'whiteboard'
-  | 'fast-whiteboard'
   | 'gradebook'
   | 'documents'
   | 'reader'

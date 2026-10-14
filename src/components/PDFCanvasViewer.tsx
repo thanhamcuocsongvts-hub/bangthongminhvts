@@ -39,6 +39,7 @@ if (typeof window !== 'undefined' && 'Worker' in window) {
 interface PDFCanvasViewerProps {
   fileUrl: string;
   title: string;
+  lessonId?: string;
   zoom?: number;
   rotation?: number;
   compact?: boolean;
@@ -50,6 +51,7 @@ interface PDFCanvasViewerProps {
 export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   fileUrl,
   title = 'Tài liệu PDF',
+  lessonId,
   zoom = 100,
   rotation = 0,
   compact = false,
@@ -197,20 +199,45 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
     const loadDoc = async () => {
       try {
         let loadingTask: any;
-        if (fileUrl.startsWith('data:application/pdf;base64,')) {
-          const base64 = fileUrl.replace('data:application/pdf;base64,', '');
-          const binaryStr = window.atob(base64);
-          const len = binaryStr.length;
-          const bytes = new Uint8Array(len);
-          for (let i = 0; i < len; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
+        let doc: any = null;
+        try {
+          if (fileUrl.startsWith('data:application/pdf;base64,')) {
+            const base64 = fileUrl.replace('data:application/pdf;base64,', '');
+            const binaryStr = window.atob(base64);
+            const len = binaryStr.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              bytes[i] = binaryStr.charCodeAt(i);
+            }
+            loadingTask = pdfjsLib.getDocument({ data: bytes });
+          } else {
+            loadingTask = pdfjsLib.getDocument(fileUrl);
           }
-          loadingTask = pdfjsLib.getDocument({ data: bytes });
-        } else {
-          loadingTask = pdfjsLib.getDocument(fileUrl);
+          doc = await loadingTask.promise;
+        } catch (firstErr) {
+          // Fallback: Check local IndexedDB or Firestore if URL failed
+          const targetId = lessonId || (() => {
+            const docIdMatch = fileUrl.match(/\/uploads\/(lesson_\d+)_/) || fileUrl.match(/(lesson_\d+)/);
+            return docIdMatch ? docIdMatch[1] : '';
+          })();
+
+          if (targetId) {
+            try {
+              const { fetchFileFromCloudStore } = await import('../utils/storageUtils');
+              const fileData = await fetchFileFromCloudStore(targetId);
+              if (fileData?.blob) {
+                const arrayBuffer = await fileData.blob.arrayBuffer();
+                const bytes = new Uint8Array(arrayBuffer);
+                loadingTask = pdfjsLib.getDocument({ data: bytes });
+                doc = await loadingTask.promise;
+              }
+            } catch (_) {}
+          }
+          if (!doc) {
+            throw firstErr;
+          }
         }
 
-        const doc = await loadingTask.promise;
         if (!isMounted) return;
         setPdfDoc(doc);
         setNumPages(doc.numPages);

@@ -53,8 +53,8 @@ export function cleanPdfVietnameseText(rawText: string): string {
   // Khôi phục lại ranh giới từ
   text = text.replace(/___WORD_GAP___/g, ' ');
 
-  // 3. Loại bỏ toàn bộ ký tự điều khiển, ký tự Unicode rác ngoài bảng chữ cái tiếng Việt, số và dấu câu
-  text = text.replace(/[^\p{L}\p{N}\p{P}\s]/gu, ' ');
+  // 3. Loại bỏ ký tự điều khiển, ký tự Unicode rác ngoài bảng chữ cái tiếng Việt, số, dấu câu và ký hiệu toán học (\p{S})
+  text = text.replace(/[^\p{L}\p{N}\p{P}\p{S}\s]/gu, ' ');
 
   // 4. Chuẩn hóa các dấu câu và khoảng trắng thừa
   text = text.replace(/\s+/g, ' ').trim();

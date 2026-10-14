@@ -35,8 +35,10 @@ import {
   PhoneCall,
   Vote,
   Gift,
-  Shield,
   Radio,
+  FolderOpen,
+  Save,
+  Search,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QuizQuestion, Student, ClassroomGroup } from '../types';
@@ -51,6 +53,12 @@ import {
   VOICE_TONE_PRESETS,
   VoiceTonePreset,
 } from '../utils/aiSpeechService';
+import {
+  getSavedEducationalItems,
+  saveEducationalItem,
+  deleteEducationalItem,
+  SavedEducationalItem,
+} from '../utils/savedQuizzesService';
 
 interface EducationalGamesHubProps {
   classroom?: ClassroomGroup | null;
@@ -241,6 +249,18 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   // In-Game AI Generation Modal state
   const [showAIMakerModal, setShowAIMakerModal] = useState<boolean>(false);
   const [showQuestionsListModal, setShowQuestionsListModal] = useState<boolean>(false);
+
+  // Lưu & Mở Game Đã Lưu
+  const [savedGamesList, setSavedGamesList] = useState<SavedEducationalItem[]>(() =>
+    getSavedEducationalItems().filter((x) => x.type === 'game')
+  );
+  const [showSavedGamesModal, setShowSavedGamesModal] = useState<boolean>(false);
+  const [showSaveGameModal, setShowSaveGameModal] = useState<boolean>(false);
+  const [saveGameTitle, setSaveGameTitle] = useState<string>('');
+  const [saveGameNotes, setSaveGameNotes] = useState<string>('');
+  const [savedGameSearch, setSavedGameSearch] = useState<string>('');
+  const [gameToast, setGameToast] = useState<string | null>(null);
+
   const [gameTopic, setGameTopic] = useState<string>(lessonTitle || '');
   const [gameSubject, setGameSubject] = useState<string>(lessonSubject || 'Toán học');
   const [gameGrade, setGameGrade] = useState<string>('Lớp 12');
@@ -343,6 +363,53 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
     if (updated.length > 0) {
       setLocalQuestions(updated);
       onUpdateQuestions?.(updated);
+    }
+  };
+
+  const handleSaveGameSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!saveGameTitle.trim()) return;
+
+    const gameItem = saveEducationalItem({
+      title: saveGameTitle.trim(),
+      type: 'game',
+      gameType: activeGame,
+      subject: gameSubject,
+      grade: gameGrade,
+      questionCount: activeQuestions.length,
+      questions: activeQuestions,
+      notes: saveGameNotes.trim() || undefined,
+    });
+
+    const updated = getSavedEducationalItems().filter((x) => x.type === 'game');
+    setSavedGamesList(updated);
+    setShowSaveGameModal(false);
+    setSaveGameTitle('');
+    setSaveGameNotes('');
+    setGameToast(`Đã lưu game "${gameItem.title}" thành công! Khi đến trường, Thầy/Cô chỉ cần mở "Game Đã Lưu" để bật chơi ngay.`);
+    gameSounds.playVictoryFanfare();
+    setTimeout(() => setGameToast(null), 4500);
+  };
+
+  const handleLaunchSavedGame = (item: SavedEducationalItem) => {
+    if (item.gameType) {
+      setActiveGame(item.gameType);
+    }
+    const formatted = normalizeGameQuestions(item.questions);
+    setLocalQuestions(formatted);
+    onUpdateQuestions?.(formatted);
+    setShowSavedGamesModal(false);
+    gameSounds.playCorrectChime();
+    setGameToast(`Đã tải game "${item.title}" (${formatted.length} câu). Bắt đầu trò chơi ngay!`);
+    setTimeout(() => setGameToast(null), 3500);
+  };
+
+  const handleDeleteSavedGame = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm('Thầy/Cô có chắc chắn muốn xóa game này không?')) {
+      deleteEducationalItem(id);
+      const updated = getSavedEducationalItems().filter((x) => x.type === 'game');
+      setSavedGamesList(updated);
     }
   };
 
@@ -455,6 +522,27 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
           >
             <Volume2 className={`w-4 h-4 ${voiceEnabled ? 'text-rose-400 animate-pulse' : 'text-slate-500'}`} />
             <span className="hidden md:inline">{voiceEnabled ? 'Giọng AI: BẬT' : 'Giọng AI: TẮT'}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setSaveGameTitle(gameTopic || `${activeGame === 'race' ? 'Đua Xe' : activeGame === 'wheel' ? 'Vòng Quay' : activeGame === 'puzzle' ? 'Mảnh Ghép' : 'Triệu Phú'} - ${gameSubject}`);
+              setShowSaveGameModal(true);
+            }}
+            className="px-3 py-2 rounded-2xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            title="Lưu trò chơi này vào kho để mở lại bất cứ lúc nào"
+          >
+            <Save className="w-4 h-4 text-amber-400" />
+            <span>Lưu Game</span>
+          </button>
+
+          <button
+            onClick={() => setShowSavedGamesModal(true)}
+            className="px-3 py-2 rounded-2xl font-bold text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            title="Mở kho game đã lưu để học sinh chơi ngay"
+          >
+            <FolderOpen className="w-4 h-4 text-amber-400" />
+            <span>Game Đã Lưu ({savedGamesList.length})</span>
           </button>
 
           <button
@@ -821,6 +909,274 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Modal 3: Lưu Trò Chơi Giáo Dục Hiện Tại */}
+      {showSaveGameModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-fade-in">
+          <div className="bg-slate-900 rounded-3xl w-full max-w-lg flex flex-col shadow-2xl border border-slate-700 overflow-hidden text-white">
+            <div className="px-6 py-4 bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
+                  <Save className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-black tracking-tight">
+                    Lưu Trò Chơi Vào Kho Sư Phạm
+                  </h3>
+                  <p className="text-xs text-amber-200">
+                    Lưu sẵn tại nhà, khi đến trường Thầy/Cô chỉ cần mở ra cho học sinh chơi ngay
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSaveGameModal(false)}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveGameSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                  Tên Game / Bài Tập Trò Chơi: <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={saveGameTitle}
+                  onChange={(e) => setSaveGameTitle(e.target.value)}
+                  placeholder="Ví dụ: Vòng Quay May Mắn: Khảo Sát Hàm Số 12"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 text-sm text-white placeholder-slate-500 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                    Môn Học:
+                  </label>
+                  <select
+                    value={gameSubject}
+                    onChange={(e) => setGameSubject(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white outline-none"
+                  >
+                    <option value="Toán học">Toán học</option>
+                    <option value="Vật lý">Vật lý</option>
+                    <option value="Hóa học">Hóa học</option>
+                    <option value="Sinh học">Sinh học</option>
+                    <option value="Tiếng Anh">Tiếng Anh</option>
+                    <option value="Lịch sử">Lịch sử</option>
+                    <option value="Địa lý">Địa lý</option>
+                    <option value="Ngữ văn">Ngữ văn</option>
+                    <option value="Tin học">Tin học</option>
+                    <option value="Công nghệ">Công nghệ</option>
+                    <option value="GDCD">GDCD</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                    Khối Lớp:
+                  </label>
+                  <select
+                    value={gameGrade}
+                    onChange={(e) => setGameGrade(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white outline-none"
+                  >
+                    <option value="Lớp 10">Lớp 10</option>
+                    <option value="Lớp 11">Lớp 11</option>
+                    <option value="Lớp 12">Lớp 12</option>
+                    <option value="Lớp 9">Lớp 9</option>
+                    <option value="Lớp 8">Lớp 8</option>
+                    <option value="Lớp 7">Lớp 7</option>
+                    <option value="Lớp 6">Lớp 6</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs text-slate-300">
+                <span>Thể loại: <strong className="text-amber-400 capitalize">{activeGame === 'race' ? '🏎️ Đua xe tri thức' : activeGame === 'wheel' ? '🎡 Vòng quay may mắn' : activeGame === 'puzzle' ? '🧩 Mảnh ghép bí ẩn' : '👑 Ai là triệu phú'}</strong></span>
+                <span>Số lượng: <strong className="text-emerald-400">{activeQuestions.length} câu hỏi</strong></span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                  Ghi Chú Sư Phạm (Tùy chọn):
+                </label>
+                <input
+                  type="text"
+                  value={saveGameNotes}
+                  onChange={(e) => setSaveGameNotes(e.target.value)}
+                  placeholder="Ghi chú mục đích, tiết dạy, dặn dò..."
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 outline-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowSaveGameModal(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Xác Nhận Lưu Game</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 4: Kho Trò Chơi Đã Lưu (1-Click Play) */}
+      {showSavedGamesModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-fade-in">
+          <div className="bg-slate-900 rounded-3xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl border border-slate-700 overflow-hidden text-white">
+            <div className="px-6 py-4 bg-gradient-to-r from-amber-700 via-orange-700 to-amber-800 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
+                  <FolderOpen className="w-6 h-6 text-amber-300" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-black tracking-tight">
+                    Kho Trò Chơi Giáo Dục Đã Lưu ({savedGamesList.length} game)
+                  </h3>
+                  <p className="text-xs text-amber-200">
+                    Bấm &quot;Bật Chơi Ngay&quot; để nạp câu hỏi và bắt đầu trò chơi cho học sinh lập tức
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSavedGamesModal(false)}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Search */}
+            <div className="p-4 bg-slate-950/60 border-b border-slate-800">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={savedGameSearch}
+                  onChange={(e) => setSavedGameSearch(e.target.value)}
+                  placeholder="Tìm kiếm trò chơi đã lưu theo tên, môn học..."
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3">
+              {savedGamesList.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                  <FolderOpen className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                  <p className="text-sm font-bold text-slate-300">Chưa có trò chơi nào được lưu trong kho</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Thầy/Cô hãy bấm nút &quot;Lưu Game&quot; ở thanh điều khiển trên để lưu bộ câu hỏi lại nhé!
+                  </p>
+                </div>
+              ) : (
+                savedGamesList
+                  .filter((g) => {
+                    if (!savedGameSearch.trim()) return true;
+                    const q = savedGameSearch.toLowerCase();
+                    return (
+                      g.title.toLowerCase().includes(q) ||
+                      (g.subject || '').toLowerCase().includes(q) ||
+                      (g.grade || '').toLowerCase().includes(q)
+                    );
+                  })
+                  .map((item) => {
+                    const gameEmoji =
+                      item.gameType === 'race'
+                        ? '🏎️'
+                        : item.gameType === 'wheel'
+                        ? '🎡'
+                        : item.gameType === 'puzzle'
+                        ? '🧩'
+                        : '👑';
+                    const gameLabel =
+                      item.gameType === 'race'
+                        ? 'Đua Xe Tri Thức'
+                        : item.gameType === 'wheel'
+                        ? 'Vòng Quay May Mắn'
+                        : item.gameType === 'puzzle'
+                        ? 'Mảnh Ghép Bí Ẩn'
+                        : 'Ai Là Triệu Phú';
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all group"
+                      >
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-2xl shrink-0">
+                            {gameEmoji}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-black text-[10px] uppercase border border-amber-500/30">
+                                {gameLabel}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-bold text-[10px]">
+                                {item.subject} • {item.grade}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold text-[10px]">
+                                {item.questionCount || item.questions.length} câu hỏi
+                              </span>
+                            </div>
+                            <h4 className="text-sm md:text-base font-black text-white truncate">
+                              {item.title}
+                            </h4>
+                            {item.notes && (
+                              <p className="text-xs text-slate-400 mt-0.5 truncate">
+                                {item.notes}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                          <button
+                            onClick={(e) => handleDeleteSavedGame(item.id, e)}
+                            className="p-2.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+                            title="Xóa game này"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleLaunchSavedGame(item)}
+                            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-900/30 active:scale-95 transition-all cursor-pointer"
+                          >
+                            <Play className="w-4 h-4 fill-white" />
+                            <span>Bật Chơi Ngay!</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Game Toast Notification */}
+      {gameToast && (
+        <div className="absolute bottom-6 right-6 z-50 px-5 py-3.5 rounded-2xl bg-emerald-600 text-white font-bold text-xs md:text-sm shadow-2xl flex items-center gap-2.5 border border-emerald-400 animate-bounce">
+          <CheckCircle2 className="w-5 h-5 text-amber-300 shrink-0" />
+          <span>{gameToast}</span>
         </div>
       )}
     </div>

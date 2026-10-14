@@ -13,6 +13,7 @@ import { PPTXViewer } from './PPTXViewer';
 import { DocxViewer } from './DocxViewer';
 import { TouchWhiteboard } from './TouchWhiteboard';
 import { exportOriginalLessonFile } from '../utils/exportUtils';
+import { fetchFileFromCloudStore } from '../utils/storageUtils';
 
 interface UniversalDocumentViewerProps {
   lesson: LessonDoc;
@@ -42,9 +43,91 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   const [isPinching, setIsPinching] = useState<boolean>(false);
   const [rotation, setRotation] = useState<number>(0);
   const [invertColors, setInvertColors] = useState<boolean>(false);
+  const [activeFileUrl, setActiveFileUrl] = useState<string>(
+    lesson.fileUrl || (lesson as any).localBlobUrl || ''
+  );
+
+  // Synchronize and verify file accessibility, falling back to local IndexedDB/Firestore
+  React.useEffect(() => {
+    let isMounted = true;
+    const initial = lesson.fileUrl || (lesson as any).localBlobUrl || '';
+    if (initial) {
+      setActiveFileUrl(initial);
+    }
+
+    async function ensureAccessibleFile() {
+      // If no file URL or it's a server URL that might not be on disk yet, check IndexedDB
+      if (!initial || initial.startsWith('/uploads/')) {
+        try {
+          const cloudData = await fetchFileFromCloudStore(lesson.id);
+          if (cloudData?.blob && isMounted) {
+            const blobUrl = URL.createObjectURL(cloudData.blob);
+            setActiveFileUrl(blobUrl);
+          }
+        } catch (_) {}
+      }
+    }
+    ensureAccessibleFile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [lesson.id, lesson.fileUrl, (lesson as any).localBlobUrl]);
+
+  const [dynamicSheetData, setDynamicSheetData] = useState<{
+    sheetNames: string[];
+    sheets: Record<string, any[][]>;
+  } | null>(lesson.sheetData || null);
+
   const [selectedSheet, setSelectedSheet] = useState<string>(() => {
     return lesson.sheetData?.sheetNames?.[0] || 'Sheet1';
   });
+
+  // If Excel and missing sheetData (e.g. from localStorage restoration), dynamically parse with XLSX
+  React.useEffect(() => {
+    const isExcel = fileType === 'xlsx' || ext === 'xlsx' || ext === 'xls' || ext === 'csv';
+    if (isExcel && (!dynamicSheetData || !dynamicSheetData.sheets)) {
+      let cancelled = false;
+      async function parseExcelBuffer() {
+        try {
+          let buf: ArrayBuffer | null = null;
+          const url = activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl;
+          if (url) {
+            try {
+              const res = await fetch(url);
+              if (res.ok) buf = await res.arrayBuffer();
+            } catch (_) {}
+          }
+          if (!buf && lesson.id) {
+            const fileData = await fetchFileFromCloudStore(lesson.id);
+            if (fileData?.blob) {
+              buf = await fileData.blob.arrayBuffer();
+            }
+          }
+          if (buf && !cancelled) {
+            const XLSX = await import('xlsx');
+            const wb = XLSX.read(buf, { type: 'array' });
+            const sNames = wb.SheetNames || ['Sheet1'];
+            const sObj: Record<string, any[][]> = {};
+            sNames.forEach((sn) => {
+              const ws = wb.Sheets[sn];
+              if (ws) {
+                sObj[sn] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+              }
+            });
+            setDynamicSheetData({ sheetNames: sNames, sheets: sObj });
+            if (sNames.length > 0) {
+              setSelectedSheet(sNames[0]);
+            }
+          }
+        } catch (xErr) {
+          console.warn('Dynamic Excel parse notice:', xErr);
+        }
+      }
+      parseExcelBuffer();
+      return () => { cancelled = true; };
+    }
+  }, [fileType, ext, activeFileUrl, lesson.fileUrl, lesson.id, dynamicSheetData]);
   const [tableSearch, setTableSearch] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg' | 'xl'>('md');
@@ -101,7 +184,8 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
 
   // Excel Sheet processing
   const currentSheetRows = useMemo(() => {
-    if (!lesson.sheetData?.sheets) {
+    const sheetSource = dynamicSheetData || lesson.sheetData;
+    if (!sheetSource?.sheets) {
       // Fallback: parse rawText as lines
       if (fileType === 'xlsx' && lesson.rawText) {
         return lesson.rawText
@@ -111,7 +195,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
       }
       return [];
     }
-    const rows = lesson.sheetData.sheets[selectedSheet] || [];
+    const rows = sheetSource.sheets[selectedSheet] || [];
     if (!tableSearch.trim()) return rows;
 
     const term = tableSearch?.toLowerCase();
@@ -119,7 +203,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
       if (idx === 0) return true; // Keep header
       return row.some((cell) => String(cell || '').toLowerCase().includes(term));
     });
-  }, [lesson.sheetData, lesson.rawText, selectedSheet, tableSearch, fileType]);
+  }, [dynamicSheetData, lesson.sheetData, lesson.rawText, selectedSheet, tableSearch, fileType]);
 
   const handleCopyText = () => {
     navigator.clipboard.writeText(lesson.rawText || '');
@@ -143,7 +227,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   if (isDocx) {
     return (
       <DocxViewer
-        fileUrl={lesson.fileUrl}
+        fileUrl={activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl}
         lesson={lesson}
         title={lesson.title}
         isAnnotating={effectiveAnnotating}
@@ -159,7 +243,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   if (isPptx) {
     return (
       <PPTXViewer
-        url={lesson.fileUrl}
+        url={activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl}
         lesson={lesson}
         title={lesson.title}
         onFullscreen={onFullscreenRequest}
@@ -550,7 +634,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
 
         
         {/* FALLBACK FOR MISSING FILE URL */}
-        {!lesson.fileUrl && (
+        {!(activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) && (
           <div className="flex-1 w-full h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-slate-900/40">
             <div className="w-20 h-20 bg-rose-500/20 text-rose-400 rounded-full flex items-center justify-center mb-6">
               <FileText className="w-10 h-10" />
@@ -568,7 +652,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         {/* ========================================================= */}
         {/* 2. IMAGE VIEWER (JPG, PNG, WEBP, SVG)                     */}
         {/* ========================================================= */}
-        {fileType === 'image' && lesson.fileUrl && (
+        {fileType === 'image' && (activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) && (
           <div className="flex-1 w-full h-full flex items-center justify-center p-4 overflow-auto">
             <div
               style={{
@@ -580,8 +664,18 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
               className="max-w-full max-h-full flex items-center justify-center"
             >
               <img
-                src={lesson.fileUrl}
+                src={activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl}
                 alt={lesson.title}
+                onError={async (e) => {
+                  try {
+                    const cloudData = await fetchFileFromCloudStore(lesson.id);
+                    if (cloudData?.blob) {
+                      const bUrl = URL.createObjectURL(cloudData.blob);
+                      setActiveFileUrl(bUrl);
+                      (e.currentTarget as HTMLImageElement).src = bUrl;
+                    }
+                  } catch (_) {}
+                }}
                 className="max-h-[80vh] max-w-full object-contain rounded-xl shadow-2xl border border-white/10"
               />
             </div>
@@ -591,10 +685,11 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         {/* ========================================================= */}
         {/* 3. PDF VIEWER (.PDF) - HIGH FIDELITY CANVAS RENDERING      */}
         {/* ========================================================= */}
-        {fileType === 'pdf' && lesson.fileUrl && (
+        {fileType === 'pdf' && (activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) && (
           <PDFCanvasViewer
-            fileUrl={lesson.fileUrl}
+            fileUrl={activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl}
             title={lesson.title}
+            lessonId={lesson.id}
             zoom={zoom}
             rotation={rotation}
             compact={compact}

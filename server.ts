@@ -32,8 +32,69 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-// Google Cloud High-Fidelity Vietnamese Text-To-Speech Proxy Route
-// Google Cloud High-Fidelity Vietnamese Text-To-Speech Proxy Route
+// In-memory cache for high-frequency TTS audio buffers (0ms instantaneous response)
+const ttsAudioCache = new Map<string, Buffer>();
+
+// Natural text chunker for Google TTS (splits into natural sub-sentences <= 140 chars)
+function chunkTextForTTS(text: string, maxLen = 140): string[] {
+  if (text.length <= maxLen) return [text];
+  const chunks: string[] = [];
+  const sentences = text.split(/(?<=[.,!?:;\n])\s+/);
+  let cur = "";
+  for (const s of sentences) {
+    if (!s.trim()) continue;
+    if (s.length > maxLen) {
+      const words = s.split(/\s+/);
+      for (const w of words) {
+        if (!w.trim()) continue;
+        if (cur && (cur.length + w.length + 1) > maxLen) {
+          chunks.push(cur.trim());
+          cur = w;
+        } else {
+          cur = cur ? `${cur} ${w}` : w;
+        }
+      }
+    } else {
+      if (cur && (cur.length + s.length + 1) > maxLen) {
+        chunks.push(cur.trim());
+        cur = s;
+      } else {
+        cur = cur ? `${cur} ${s}` : s;
+      }
+    }
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks.length > 0 ? chunks : [text.slice(0, maxLen)];
+}
+
+async function fetchSingleTtsAudio(chunk: string, lang: string): Promise<Buffer | null> {
+  const encoded = encodeURIComponent(chunk);
+  const urls = [
+    `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=${lang}&client=gtx&q=${encoded}`,
+    `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=${lang}&client=tw-ob`,
+    `https://translate.google.com.vn/translate_tts?ie=UTF-8&q=${encoded}&tl=${lang}&client=tw-ob`,
+  ];
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Referer": "https://translate.google.com/",
+          "Accept": "audio/mpeg, audio/*; q=0.9, */*; q=0.5",
+        },
+      });
+      if (response.ok) {
+        const arrayBuf = await response.arrayBuffer();
+        if (arrayBuf.byteLength > 100) {
+          return Buffer.from(arrayBuf);
+        }
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+// Google Cloud High-Fidelity Vietnamese Text-To-Speech Proxy Route with Chunk Concatenation
 app.get("/api/tts", async (req, res) => {
   try {
     const text = String(req.query.text || "").trim();
@@ -41,46 +102,46 @@ app.get("/api/tts", async (req, res) => {
       return res.status(400).send("Text is required");
     }
 
-    const slice = text.slice(0, 300);
-    const encoded = encodeURIComponent(slice);
+    const requestedLang = (req.query.lang as string) || "vi";
+    const lang = requestedLang.toLowerCase().startsWith("en") ? "en" : "vi";
+    const cacheKey = `${lang}:${text}`;
 
-    // List of reliable Vietnamese TTS endpoints
-    const urls = [
-      `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=vi&client=gtx&q=${encoded}`,
-      `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=vi&client=tw-ob`,
-      `https://translate.google.com.vn/translate_tts?ie=UTF-8&q=${encoded}&tl=vi&client=tw-ob`,
-    ];
-
-    let audioBuffer: Buffer | null = null;
-
-    for (const url of urls) {
-      try {
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://translate.google.com/",
-            "Accept": "audio/mpeg, audio/*; q=0.9, */*; q=0.5",
-          },
-        });
-
-        if (response.ok) {
-          const arrayBuffer = await response.arrayBuffer();
-          if (arrayBuffer.byteLength > 100) {
-            audioBuffer = Buffer.from(arrayBuffer);
-            break;
-          }
-        }
-      } catch (_) {}
+    if (ttsAudioCache.has(cacheKey)) {
+      const cached = ttsAudioCache.get(cacheKey)!;
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Content-Length", cached.length);
+      return res.send(cached);
     }
 
-    if (!audioBuffer) {
+    // Split text into safe chunk sizes so Google Translate never returns 404/400
+    const chunks = chunkTextForTTS(text, 140);
+    const audioBuffers: Buffer[] = [];
+
+    for (const chunk of chunks) {
+      const buf = await fetchSingleTtsAudio(chunk, lang);
+      if (buf) {
+        audioBuffers.push(buf);
+      }
+    }
+
+    if (audioBuffers.length === 0) {
       return res.status(502).send("Không thể tạo giọng đọc tiếng Việt từ máy chủ");
     }
 
+    const combinedBuffer = Buffer.concat(audioBuffers);
+
+    // Keep cache bounded
+    if (ttsAudioCache.size > 200) {
+      const firstKey = ttsAudioCache.keys().next().value;
+      if (firstKey) ttsAudioCache.delete(firstKey);
+    }
+    ttsAudioCache.set(cacheKey, combinedBuffer);
+
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "public, max-age=86400");
-    res.setHeader("Content-Length", audioBuffer.length);
-    res.send(audioBuffer);
+    res.setHeader("Content-Length", combinedBuffer.length);
+    res.send(combinedBuffer);
   } catch (err: any) {
     console.error("TTS endpoint error:", err);
     res.status(500).json({ error: err.message });
@@ -528,15 +589,21 @@ app.post("/api/documents/upload-raw", express.raw({ type: "*/*", limit: "250mb" 
 
     const ext = path.extname(fileName) || `.${fileType}`;
     const baseName = path.basename(fileName, ext).replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF-]/g, '_');
-    const uniqueFileName = `${Date.now()}_${baseName}${ext}`;
+    const uniqueFileName = lessonId ? `${lessonId}_${baseName}${ext}` : `${Date.now()}_${baseName}${ext}`;
     const filePath = path.join(UPLOADS_DIR, uniqueFileName);
     const backupFilePath = path.join(BACKUP_UPLOADS_DIR, uniqueFileName);
 
-    // Fast asynchronous disk write
-    await Promise.allSettled([
+    // Fast asynchronous disk write for primary name
+    const writeTasks = [
       fs.promises.writeFile(filePath, buffer),
       fs.promises.writeFile(backupFilePath, buffer),
-    ]);
+    ];
+    if (lessonId) {
+      // Also write legacy timestamped fallback if needed
+      const legacyName = `${Date.now()}_${baseName}${ext}`;
+      writeTasks.push(fs.promises.writeFile(path.join(UPLOADS_DIR, legacyName), buffer));
+    }
+    await Promise.allSettled(writeTasks);
 
     const sizeFormatted = buffer.length > 1024 * 1024
       ? `${(buffer.length / (1024 * 1024)).toFixed(1)} MB`

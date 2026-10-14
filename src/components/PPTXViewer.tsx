@@ -168,7 +168,7 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
 
       try {
         let arrayBuffer: ArrayBuffer | null = null;
-        const targetUrl = url || lesson?.fileUrl;
+        const targetUrl = url || lesson?.fileUrl || (lesson as any)?.localBlobUrl;
 
         if (!targetUrl) {
           if (lesson?.slides && lesson.slides.length > 0) {
@@ -181,13 +181,39 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
           throw new Error('Chưa có đường dẫn tệp hoặc nội dung bài giảng.');
         }
 
-        // Fetch ArrayBuffer
+        // Fetch ArrayBuffer with multi-tier fallback
         setLoadingStatus('Đang tải tệp trình chiếu...');
-        const response = await fetch(targetUrl);
-        if (!response.ok) {
-          throw new Error(`Không thể nạp tệp từ máy chủ (Mã lỗi HTTP: ${response.status})`);
+        try {
+          const response = await fetch(targetUrl);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          arrayBuffer = await response.arrayBuffer();
+        } catch (fetchErr) {
+          // Tier 2: Try localBlobUrl
+          const blobUrl = (lesson as any)?.localBlobUrl;
+          if (blobUrl && blobUrl !== targetUrl) {
+            try {
+              const resBlob = await fetch(blobUrl);
+              if (resBlob.ok) {
+                arrayBuffer = await resBlob.arrayBuffer();
+              }
+            } catch (_) {}
+          }
+          // Tier 3: Try IndexedDB / Cloud
+          if (!arrayBuffer && lesson?.id) {
+            try {
+              const { fetchFileFromCloudStore } = await import('../utils/storageUtils');
+              const fileData = await fetchFileFromCloudStore(lesson.id);
+              if (fileData?.blob) {
+                arrayBuffer = await fileData.blob.arrayBuffer();
+              }
+            } catch (_) {}
+          }
+          if (!arrayBuffer) {
+            throw new Error(`Không thể nạp tệp từ máy chủ (${fetchErr instanceof Error ? fetchErr.message : 'Lỗi kết nối'})`);
+          }
         }
-        arrayBuffer = await response.arrayBuffer();
 
         if (isCancelled) return;
 

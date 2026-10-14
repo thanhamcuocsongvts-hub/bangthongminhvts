@@ -48,6 +48,9 @@ import {
   PartyPopper,
   Trophy,
   ChevronLeft,
+  Save,
+  FolderOpen,
+  Search,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
@@ -69,6 +72,12 @@ import { gameSounds } from '../utils/gameSoundEffects';
 import { db } from '../lib/firebase';
 import { doc } from 'firebase/firestore';
 import { safeSetDoc } from '../utils/firebaseSafe';
+import {
+  getSavedEducationalItems,
+  saveEducationalItem,
+  deleteEducationalItem,
+  SavedEducationalItem,
+} from '../utils/savedQuizzesService';
 
 interface LiveQuizHubProps {
   roomState: RoomState | null;
@@ -159,6 +168,19 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   // AI Voice State for Live Quiz Hub
   const [readingQuestionId, setReadingQuestionId] = useState<string | null>(null);
   const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[1]); // Cô giáo dịu dàng
+
+  // Lưu & Mở Đề Trắc Nghiệm / Bài Tập Đã Lưu
+  const [savedQuizzesList, setSavedQuizzesList] = useState<SavedEducationalItem[]>(() =>
+    getSavedEducationalItems().filter((x) => x.type === 'quiz')
+  );
+  const [showSavedQuizzesModal, setShowSavedQuizzesModal] = useState<boolean>(false);
+  const [showSaveQuizModal, setShowSaveQuizModal] = useState<boolean>(false);
+  const [saveQuizTitle, setSaveQuizTitle] = useState<string>('');
+  const [saveQuizSubject, setSaveQuizSubject] = useState<string>('Toán học');
+  const [saveQuizGrade, setSaveQuizGrade] = useState<string>('Lớp 12');
+  const [saveQuizNotes, setSaveQuizNotes] = useState<string>('');
+  const [savedQuizSearch, setSavedQuizSearch] = useState<string>('');
+  const [quizToast, setQuizToast] = useState<string | null>(null);
 
   // State chung lưu trữ câu hỏi phòng thi trực tiếp (ưu tiên từ roomState, sau đó localStorage, hoặc currentLesson)
   const [liveExamQuestions, setLiveExamQuestions] = useState<QuizQuestion[]>(() => {
@@ -794,6 +816,97 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     });
   };
 
+  // Handlers cho tính năng Lưu và Mở bài tập trắc nghiệm
+  const handleSaveQuizSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!saveQuizTitle.trim()) return;
+
+    const targetQuestions = generatedQuestions.length > 0 ? generatedQuestions : questions;
+    if (targetQuestions.length === 0) {
+      setQuizToast('Chưa có câu hỏi nào để lưu!');
+      setTimeout(() => setQuizToast(null), 3000);
+      return;
+    }
+
+    const savedItem = saveEducationalItem({
+      title: saveQuizTitle.trim(),
+      type: 'quiz',
+      subject: saveQuizSubject,
+      grade: saveQuizGrade,
+      questionCount: targetQuestions.length,
+      questions: targetQuestions,
+      notes: saveQuizNotes.trim() || undefined,
+    });
+
+    const updated = getSavedEducationalItems().filter((x) => x.type === 'quiz');
+    setSavedQuizzesList(updated);
+    setShowSaveQuizModal(false);
+    setSaveQuizTitle('');
+    setSaveQuizNotes('');
+    setQuizToast(`Đã lưu bài tập "${savedItem.title}" (${targetQuestions.length} câu) thành công! Khi đến trường, Thầy/Cô chỉ cần mở "Kho Đề Đã Lưu" để trình chiếu cho học sinh.`);
+    gameSounds.playVictoryFanfare();
+    setTimeout(() => setQuizToast(null), 4500);
+  };
+
+  const handleLaunchSavedQuizPresentation = (item: SavedEducationalItem) => {
+    setLiveExamQuestions(item.questions);
+    try {
+      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
+    } catch (_) {}
+    onControlRoom(0, true);
+    setActiveMode('presentation');
+    setBoardSelectedOption(null);
+    setBoardAnswerResult(null);
+    setCongratsMessage('');
+    setShowSavedQuizzesModal(false);
+    gameSounds.playCorrectChime();
+    setQuizToast(`Đã nạp bài tập "${item.title}" (${item.questions.length} câu) vào chế độ Trình Chiếu Lên Bảng!`);
+    setTimeout(() => setQuizToast(null), 3500);
+  };
+
+  const handleLaunchSavedQuizLive = (item: SavedEducationalItem) => {
+    setLiveExamQuestions(item.questions);
+    try {
+      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
+    } catch (_) {}
+    onControlRoom(0, true);
+    setActiveMode('live');
+    setShowSavedQuizzesModal(false);
+    gameSounds.playCorrectChime();
+    setQuizToast(`Đã phát bài tập "${item.title}" (${item.questions.length} câu) vào phòng thi trực tiếp!`);
+    setTimeout(() => setQuizToast(null), 3500);
+  };
+
+  const handleLaunchSavedQuizExam = (item: SavedEducationalItem) => {
+    setLiveExamQuestions(item.questions);
+    try {
+      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
+    } catch (_) {}
+    onControlRoom(0, true);
+    setActiveMode('exam');
+    setShowSavedQuizzesModal(false);
+    gameSounds.playCorrectChime();
+    setQuizToast(`Đã nạp bài tập "${item.title}" vào chế độ Phòng Thi Khóa Màn Hình!`);
+    setTimeout(() => setQuizToast(null), 3500);
+  };
+
+  const handleLaunchSavedQuizCreator = (item: SavedEducationalItem) => {
+    setGeneratedQuestions(item.questions);
+    setActiveMode('creator');
+    setShowSavedQuizzesModal(false);
+    setQuizToast(`Đã nạp bài tập "${item.title}" vào mục Soạn Đề AI để chỉnh sửa!`);
+    setTimeout(() => setQuizToast(null), 3500);
+  };
+
+  const handleDeleteSavedQuiz = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm('Thầy/Cô có chắc chắn muốn xóa bài tập trắc nghiệm này không?')) {
+      deleteEducationalItem(id);
+      const updated = getSavedEducationalItems().filter((x) => x.type === 'quiz');
+      setSavedQuizzesList(updated);
+    }
+  };
+
   // Statistics
   const totalSubs = currentSubmissions.length;
   const correctSubs = currentSubmissions.filter((s) => s.isCorrect).length;
@@ -991,7 +1104,34 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         </div>
 
         {/* Right: Quick Action Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Nút Kho Đề Đã Lưu luôn hiển thị để mở nhanh */}
+          <button
+            onClick={() => setShowSavedQuizzesModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
+            title="Mở kho bài tập trắc nghiệm đã tạo sẵn ở nhà để trình chiếu hoặc phát cho học sinh"
+          >
+            <FolderOpen className="w-4 h-4 text-amber-400" />
+            <span>Kho Đề Đã Lưu ({savedQuizzesList.length})</span>
+          </button>
+
+          {/* Nút Lưu Bài Tập */}
+          {(generatedQuestions.length > 0 || questions.length > 0) && (
+            <button
+              onClick={() => {
+                setSaveQuizTitle(promptTopic || currentLesson?.title || `Bài tập trắc nghiệm ${selectedSubject} - ${new Date().toLocaleDateString('vi-VN')}`);
+                setSaveQuizSubject(selectedSubject);
+                setSaveQuizGrade(selectedGrade);
+                setShowSaveQuizModal(true);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              title="Lưu bộ câu hỏi trắc nghiệm này để dùng lại ở lớp"
+            >
+              <Save className="w-4 h-4 text-amber-400" />
+              <span>Lưu Bài Tập ({generatedQuestions.length > 0 ? generatedQuestions.length : questions.length} câu)</span>
+            </button>
+          )}
+
           {activeMode === 'creator' && generatedQuestions.length > 0 && (
             <button
               onClick={handleDeployToStudents}
@@ -1655,17 +1795,27 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       </button>
                     </div>
                   </div>
-                  <div className={`${scale.questionText} text-slate-900`}>
+                  <div className={`${scale.questionText} text-slate-900 font-bold`}>
                     <QuizRichContentRenderer
-                      content={currentQ.question}
+                      content={
+                        currentQ.question ||
+                        (currentQ as any).prompt ||
+                        (currentQ as any).content ||
+                        (currentQ as any).text ||
+                        (currentQ as any).questionText ||
+                        (currentQ as any).stem ||
+                        (currentQ as any).title ||
+                        'Chưa có nội dung đề bài.'
+                      }
                       diagramType={currentQ.diagramType}
                       diagramData={currentQ.diagramData}
+                      textClassName="text-slate-900 font-bold text-lg md:text-xl lg:text-2xl"
                     />
                   </div>
                 </div>
 
-                {/* 4 Large Options (A, B, C, D) */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+                {/* 4 Compact Streamlined Options (A, B, C, D) - Nhỏ gọn, vừa vặn không choán màn hình */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-3.5 shrink-0">
                   {currentQ.options.map((opt) => {
                     const isCorrect = opt.key === currentQ.correctAnswer;
                     const count = optionCounts[opt.key] || 0;
@@ -1684,11 +1834,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     return (
                       <div
                         key={opt.key}
-                        className={`relative p-6 rounded-2xl border-2 transition-all flex flex-col justify-between min-h-[110px] ${cardStyle}`}
+                        className={`relative p-3.5 md:p-4 rounded-xl border-2 transition-all flex flex-col justify-between min-h-[58px] md:min-h-[64px] ${cardStyle}`}
                       >
-                        <div className="flex items-start gap-4">
+                        <div className="flex items-center gap-3">
                           <div
-                            className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-2xl shrink-0 ${
+                            className={`w-9 h-9 md:w-10 md:h-10 rounded-lg flex items-center justify-center font-black text-base md:text-lg shrink-0 ${
                               isRevealed && isCorrect
                                 ? 'bg-emerald-600 text-white'
                                 : 'bg-indigo-50 border border-indigo-200 text-indigo-700'
@@ -1696,7 +1846,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                           >
                             {opt.key}
                           </div>
-                          <div className={`flex-1 ${scale.optionText} pt-1.5 text-slate-800 font-bold`}>
+                          <div className={`flex-1 text-sm md:text-base text-slate-800 font-bold leading-snug`}>
                             <MathFormulaRenderer content={opt.text} />
                           </div>
                         </div>
@@ -2017,54 +2167,74 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               </div>
             ) : (
               <>
-                {/* 1. Giant Question Card */}
-                <div className="p-6 md:p-8 rounded-3xl bg-slate-800/90 border-2 border-slate-700/80 shadow-2xl relative overflow-hidden">
-                  <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-700/60">
-                    <div className="flex items-center gap-3">
-                      <span className="px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 font-black text-xs uppercase tracking-wider border border-amber-400/40">
-                        {(currentQ as any).subject || selectedSubject} • {(currentQ as any).grade || selectedGrade}
-                      </span>
-                      {currentQ.difficulty && (
-                        <span className="px-3 py-1 rounded-xl bg-slate-700/80 text-slate-300 text-xs font-bold">
-                          {currentQ.difficulty}
-                        </span>
-                      )}
+                {/* 1. Clear & Prominent Question Card (ĐỀ BÀI) */}
+                {(() => {
+                  const presentationQuestionText =
+                    currentQ.question ||
+                    (currentQ as any).prompt ||
+                    (currentQ as any).content ||
+                    (currentQ as any).text ||
+                    (currentQ as any).questionText ||
+                    (currentQ as any).title ||
+                    (currentQ as any).stem ||
+                    '';
+
+                  return (
+                    <div className="p-5 md:p-6 rounded-3xl bg-slate-800/95 border-2 border-slate-700 shadow-2xl relative overflow-hidden shrink-0">
+                      <div className="flex items-center justify-between pb-3 mb-3.5 border-b border-slate-700/60 flex-wrap gap-2">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <span className="px-3 py-1 rounded-xl bg-amber-500 text-slate-950 font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-1.5 shadow-sm">
+                            <FileText className="w-4 h-4 text-slate-950" />
+                            <span>ĐỀ BÀI CÂU {activeIndex + 1}/{questions.length}</span>
+                          </span>
+                          <span className="px-3 py-1 rounded-xl bg-indigo-950/80 text-indigo-300 font-bold text-xs border border-indigo-700/60">
+                            {(currentQ as any).subject || selectedSubject} • {(currentQ as any).grade || selectedGrade}
+                          </span>
+                          {currentQ.difficulty && (
+                            <span className="px-3 py-1 rounded-xl bg-slate-700/80 text-slate-300 text-xs font-bold">
+                              Độ khó: {currentQ.difficulty}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-xs text-slate-400 font-semibold hidden sm:flex items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-amber-300">
+                            📺 Trình Chiếu 75"
+                          </span>
+                          <span>Chạm đáp án trực tiếp để trả lời</span>
+                        </div>
+                      </div>
+
+                      {/* Question Content & Formulas with Guaranteed High Contrast */}
+                      <div className="text-xl md:text-2xl lg:text-3xl font-black text-white leading-relaxed tracking-normal select-text">
+                        <QuizRichContentRenderer
+                          content={presentationQuestionText || 'Chưa có nội dung đề bài.'}
+                          diagramType={currentQ.diagramType}
+                          diagramData={currentQ.diagramData}
+                          textClassName="text-white font-black text-xl md:text-2xl lg:text-3xl"
+                        />
+                      </div>
                     </div>
+                  );
+                })()}
 
-                    <div className="text-xs text-slate-400 font-semibold hidden sm:flex items-center gap-1.5">
-                      <span>Màn hình Tivi 75 inch</span>
-                      <span>•</span>
-                      <span>Chạm đáp án trực tiếp</span>
-                    </div>
-                  </div>
-
-                  {/* Question Content & Formulas */}
-                  <div className="text-2xl md:text-3xl lg:text-4xl font-black text-white leading-relaxed tracking-normal">
-                    <QuizRichContentRenderer
-                      content={currentQ.question}
-                      diagramType={currentQ.diagramType}
-                      diagramData={currentQ.diagramData}
-                    />
-                  </div>
-                </div>
-
-                {/* 2. Interactive Options (A, B, C, D) - Touch Direct on Board */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 flex-1">
+                {/* 2. Interactive Options (A, B, C, D) - Nhỏ lại, gọn gàng, vừa vặn trên màn hình */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 md:gap-4 shrink-0">
                   {currentQ.options.map((opt) => {
                     const isSelected = boardSelectedOption === opt.key;
                     const isCorrect = opt.key === currentQ.correctAnswer;
                     const hasAnswered = boardAnswerResult !== null;
 
-                    let cardClass = 'bg-slate-800/80 border-slate-700 text-white hover:bg-slate-750 hover:border-amber-400 shadow-md hover:scale-[1.01]';
+                    let cardClass = 'bg-slate-800/85 border-slate-700 text-white hover:bg-slate-750 hover:border-amber-400 shadow-md hover:scale-[1.005]';
                     let badgeClass = 'bg-slate-700 text-amber-300 border-slate-600';
 
                     if (hasAnswered) {
                       if (isSelected) {
                         if (isCorrect) {
-                          cardClass = 'bg-emerald-950/90 border-4 border-emerald-400 text-emerald-100 ring-4 ring-emerald-500/30 shadow-2xl scale-[1.02]';
+                          cardClass = 'bg-emerald-950/90 border-3 border-emerald-400 text-emerald-100 ring-2 ring-emerald-500/30 shadow-xl scale-[1.01]';
                           badgeClass = 'bg-emerald-500 text-slate-950 font-black';
                         } else {
-                          cardClass = 'bg-rose-950/90 border-4 border-rose-500 text-rose-100 ring-4 ring-rose-500/30 shadow-xl';
+                          cardClass = 'bg-rose-950/90 border-3 border-rose-500 text-rose-100 ring-2 ring-rose-500/30 shadow-lg';
                           badgeClass = 'bg-rose-500 text-white font-black';
                         }
                       } else if (isCorrect) {
@@ -2083,34 +2253,34 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         type="button"
                         onClick={() => handleBoardOptionClick(opt.key)}
                         disabled={hasAnswered}
-                        className={`p-6 md:p-8 rounded-3xl border-2 transition-all flex items-start gap-5 text-left cursor-pointer active:scale-98 select-none relative group ${cardClass}`}
+                        className={`p-3.5 md:p-4 rounded-2xl border-2 transition-all flex items-center gap-3.5 text-left cursor-pointer active:scale-98 select-none relative group min-h-[58px] md:min-h-[64px] ${cardClass}`}
                       >
                         <div
-                          className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl flex items-center justify-center font-black text-2xl md:text-3xl shrink-0 border transition-all shadow-md ${badgeClass}`}
+                          className={`w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center font-black text-base md:text-lg shrink-0 border transition-all shadow-sm ${badgeClass}`}
                         >
                           {opt.key}
                         </div>
-                        <div className="flex-1 pt-2 text-xl md:text-2xl lg:text-3xl font-bold leading-normal">
+                        <div className="flex-1 text-base md:text-lg font-bold leading-snug text-slate-100">
                           <MathFormulaRenderer content={opt.text} />
                         </div>
 
                         {hasAnswered && isSelected && isCorrect && (
-                          <div className="absolute top-4 right-4 p-2 rounded-xl bg-emerald-500 text-slate-950 font-black flex items-center gap-1 shadow-md text-xs">
-                            <CheckCircle2 className="w-5 h-5" />
+                          <div className="p-1.5 px-2.5 rounded-lg bg-emerald-500 text-slate-950 font-black flex items-center gap-1 shadow-md text-xs shrink-0">
+                            <CheckCircle2 className="w-4 h-4" />
                             <span>ĐÚNG</span>
                           </div>
                         )}
 
                         {hasAnswered && isSelected && !isCorrect && (
-                          <div className="absolute top-4 right-4 p-2 rounded-xl bg-rose-500 text-white font-black flex items-center gap-1 shadow-md text-xs">
-                            <X className="w-5 h-5" />
+                          <div className="p-1.5 px-2.5 rounded-lg bg-rose-500 text-white font-black flex items-center gap-1 shadow-md text-xs shrink-0">
+                            <X className="w-4 h-4" />
                             <span>CHƯA ĐÚNG</span>
                           </div>
                         )}
 
                         {hasAnswered && !isSelected && isCorrect && (
-                          <div className="absolute top-4 right-4 p-2 rounded-xl bg-emerald-600 text-white font-black flex items-center gap-1 shadow-md text-xs">
-                            <CheckCircle2 className="w-5 h-5" />
+                          <div className="p-1.5 px-2.5 rounded-lg bg-emerald-600 text-white font-black flex items-center gap-1 shadow-md text-xs shrink-0">
+                            <CheckCircle2 className="w-4 h-4" />
                             <span>ĐÁP ÁN ĐÚNG</span>
                           </div>
                         )}
@@ -2910,6 +3080,277 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Modal 1: Lưu Bài Tập Trắc Nghiệm Vào Kho */}
+      {showSaveQuizModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-fade-in">
+          <div className="bg-slate-900 rounded-3xl w-full max-w-lg flex flex-col shadow-2xl border border-slate-700 overflow-hidden text-white">
+            <div className="px-6 py-4 bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
+                  <Save className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-black tracking-tight">
+                    Lưu Bài Tập Trắc Nghiệm Vào Kho
+                  </h3>
+                  <p className="text-xs text-indigo-200">
+                    Lưu bài tập tạo sẵn tại nhà để mở nhanh khi đến lớp giảng dạy
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSaveQuizModal(false)}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuizSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                  Tên Bộ Bài Tập Trắc Nghiệm: <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={saveQuizTitle}
+                  onChange={(e) => setSaveQuizTitle(e.target.value)}
+                  placeholder="Ví dụ: Ôn tập hàm số & đồ thị chuyên đề 12"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-sm text-white placeholder-slate-500 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                    Môn Học:
+                  </label>
+                  <select
+                    value={saveQuizSubject}
+                    onChange={(e) => setSaveQuizSubject(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white outline-none"
+                  >
+                    <option value="Toán học">Toán học</option>
+                    <option value="Vật lý">Vật lý</option>
+                    <option value="Hóa học">Hóa học</option>
+                    <option value="Sinh học">Sinh học</option>
+                    <option value="Tiếng Anh">Tiếng Anh</option>
+                    <option value="Lịch sử">Lịch sử</option>
+                    <option value="Địa lý">Địa lý</option>
+                    <option value="Ngữ văn">Ngữ văn</option>
+                    <option value="Tin học">Tin học</option>
+                    <option value="Công nghệ">Công nghệ</option>
+                    <option value="GDCD">GDCD</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                    Khối Lớp:
+                  </label>
+                  <select
+                    value={saveQuizGrade}
+                    onChange={(e) => setSaveQuizGrade(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white outline-none"
+                  >
+                    <option value="Lớp 10">Lớp 10</option>
+                    <option value="Lớp 11">Lớp 11</option>
+                    <option value="Lớp 12">Lớp 12</option>
+                    <option value="Lớp 9">Lớp 9</option>
+                    <option value="Lớp 8">Lớp 8</option>
+                    <option value="Lớp 7">Lớp 7</option>
+                    <option value="Lớp 6">Lớp 6</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs text-slate-300">
+                <span>Số câu hỏi: <strong className="text-emerald-400 font-mono text-sm">{generatedQuestions.length > 0 ? generatedQuestions.length : questions.length} câu</strong></span>
+                <span>Chế độ sẵn sàng: <strong className="text-amber-400">Trình chiếu & Thi trực tiếp</strong></span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-300 uppercase tracking-wider mb-1.5">
+                  Ghi Chú Sư Phạm (Tùy chọn):
+                </label>
+                <input
+                  type="text"
+                  value={saveQuizNotes}
+                  onChange={(e) => setSaveQuizNotes(e.target.value)}
+                  placeholder="Ghi chú tiết học, yêu cầu làm bài..."
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 outline-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowSaveQuizModal(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Xác Nhận Lưu Bài Tập</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Kho Đề & Bài Tập Trắc Nghiệm Đã Lưu */}
+      {showSavedQuizzesModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-fade-in">
+          <div className="bg-slate-900 rounded-3xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-2xl border border-slate-700 overflow-hidden text-white">
+            <div className="px-6 py-4 bg-gradient-to-r from-amber-600 via-orange-600 to-indigo-700 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
+                  <FolderOpen className="w-6 h-6 text-amber-300" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-black tracking-tight">
+                    Kho Đề &amp; Bài Tập Trắc Nghiệm Đã Lưu ({savedQuizzesList.length} đề)
+                  </h3>
+                  <p className="text-xs text-amber-200">
+                    Bấm &quot;Trình Chiếu Lên Bảng&quot; để chiếu câu hỏi cho học sinh lên bảng làm bài ngay trên Tivi 75 inch
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSavedQuizzesModal(false)}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Search */}
+            <div className="p-4 bg-slate-950/60 border-b border-slate-800">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={savedQuizSearch}
+                  onChange={(e) => setSavedQuizSearch(e.target.value)}
+                  placeholder="Tìm kiếm bài tập trắc nghiệm đã lưu theo tên đề, môn học, khối lớp..."
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3.5">
+              {savedQuizzesList.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                  <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                  <p className="text-sm font-bold text-slate-300">Chưa có bài tập trắc nghiệm nào trong kho</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Thầy/Cô hãy tạo đề bằng AI hoặc nhập câu hỏi, sau đó bấm &quot;Lưu Bài Tập&quot; để lưu trữ dùng lâu dài!
+                  </p>
+                </div>
+              ) : (
+                savedQuizzesList
+                  .filter((item) => {
+                    if (!savedQuizSearch.trim()) return true;
+                    const q = savedQuizSearch.toLowerCase();
+                    return (
+                      item.title.toLowerCase().includes(q) ||
+                      (item.subject || '').toLowerCase().includes(q) ||
+                      (item.grade || '').toLowerCase().includes(q)
+                    );
+                  })
+                  .map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-4 md:p-5 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-amber-500/50 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all"
+                    >
+                      <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                        <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-300 shrink-0 font-black text-lg">
+                          📝
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-black text-[10px] uppercase border border-indigo-500/30">
+                              {item.subject}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-bold text-[10px]">
+                              {item.grade}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-mono font-bold text-[10px]">
+                              {item.questionCount || item.questions.length} câu hỏi
+                            </span>
+                          </div>
+                          <h4 className="text-sm md:text-base font-black text-white truncate">
+                            {item.title}
+                          </h4>
+                          {item.notes && (
+                            <p className="text-xs text-slate-400 mt-0.5 truncate">
+                              {item.notes}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Quick 1-Click Action Buttons */}
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap self-end md:self-center">
+                        <button
+                          onClick={(e) => handleDeleteSavedQuiz(item.id, e)}
+                          className="p-2 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+                          title="Xóa đề này"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => handleLaunchSavedQuizCreator(item)}
+                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                          title="Mở đề này trong mục soạn thảo để sửa đổi"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="hidden sm:inline">Soạn lại</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleLaunchSavedQuizLive(item)}
+                          className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-emerald-900/60 text-emerald-300 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                          title="Mở phòng thi đấu trực tiếp cho học sinh làm qua điện thoại"
+                        >
+                          <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Thi Đấu</span>
+                        </button>
+
+                        {/* Button Đinh: Trình Chiếu Lên Bảng Cho Học Sinh Làm Ngay! */}
+                        <button
+                          onClick={() => handleLaunchSavedQuizPresentation(item)}
+                          className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
+                          title="Trình chiếu câu hỏi lên màn hình 75 inch và gọi học sinh lên bảng làm trực tiếp"
+                        >
+                          <Tv className="w-4 h-4 text-slate-950" />
+                          <span>Trình Chiếu Lên Bảng!</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Quiz Toast Notification */}
+      {quizToast && (
+        <div className="absolute bottom-6 right-6 z-50 px-5 py-3.5 rounded-2xl bg-emerald-600 text-white font-bold text-xs md:text-sm shadow-2xl flex items-center gap-2.5 border border-emerald-400 animate-bounce">
+          <CheckCircle2 className="w-5 h-5 text-amber-300 shrink-0" />
+          <span>{quizToast}</span>
         </div>
       )}
     </div>

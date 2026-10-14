@@ -74,14 +74,12 @@ interface QuizRichContentRendererProps {
  */
 function parseEmbeddedDiagram(content: string): {
   cleanContent: string;
-  detectedType?: 'variation_table' | 'sign_table' | 'function_graph';
+  detectedType?: 'variation_table' | 'sign_table' | 'function_graph' | 'geometry' | 'data_table';
   detectedData?: QuizDiagramData;
 } {
   if (!content) return { cleanContent: content };
 
   // 1. Nhận diện Bảng xét dấu dạng markdown hoặc text
-  // Ví dụ: | x | -∞ | 1 | 3 | +∞ |
-  //        | f'(x) | + | 0 | - | 0 | + |
   const signTableMatch = content.match(/\|?\s*x\s*\|([^\n]+)\n\s*\|?\s*(?:f'\(x\)|y'|f\(x\)|y)\s*\|([^\n]+)/i);
   if (signTableMatch) {
     const rawX = signTableMatch[1].split('|').map((s) => s.trim()).filter(Boolean);
@@ -93,7 +91,7 @@ function parseEmbeddedDiagram(content: string): {
         cleanContent: clean,
         detectedType: 'sign_table',
         detectedData: {
-          title: 'Bảng xét dấu',
+          title: 'Bảng xét dấu của hàm số',
           x: rawX,
           rows: [
             {
@@ -106,16 +104,154 @@ function parseEmbeddedDiagram(content: string): {
     }
   }
 
-  // 2. Nhận diện Bảng biến thiên có mũi tên hoặc chiều biến thiên
-  if (
-    content.includes('Bảng biến thiên') ||
-    content.includes('bảng biến thiên') ||
-    content.includes('BBT')
-  ) {
-    // Nếu trong câu hỏi có đề cập bảng biến thiên hàm bậc 3 hoặc phân thức
-    if (content.includes('cực đại') || content.includes('đồng biến') || content.includes('nghịch biến')) {
-      // Giữ nguyên content, tạo mẫu đồ họa BBT chuẩn nếu chưa có
-    }
+  const lower = content.toLowerCase();
+
+  // 2. Nhận diện Hình học không gian chuẩn SGK (Toán 11 & 12)
+  if (lower.includes('chóp tam giác') || lower.includes('tứ diện') || lower.includes('s.abc')) {
+    return {
+      cleanContent: content,
+      detectedType: 'geometry',
+      detectedData: {
+        title: 'Hình chóp tam giác S.ABC',
+        shape: 'pyramid_triangular',
+      },
+    };
+  }
+
+  if (lower.includes('chóp tứ giác') || lower.includes('s.abcd')) {
+    return {
+      cleanContent: content,
+      detectedType: 'geometry',
+      detectedData: {
+        title: 'Hình chóp tứ giác S.ABCD',
+        shape: 'pyramid_quad',
+      },
+    };
+  }
+
+  if (lower.includes('lăng trụ') || lower.includes("abc.a'b'c'")) {
+    return {
+      cleanContent: content,
+      detectedType: 'geometry',
+      detectedData: {
+        title: "Hình lăng trụ tam giác ABC.A'B'C'",
+        shape: 'prism',
+      },
+    };
+  }
+
+  if (lower.includes('hình nón') || lower.includes('khối nón')) {
+    return {
+      cleanContent: content,
+      detectedType: 'geometry',
+      detectedData: {
+        title: 'Hình nón tròn xoay',
+        shape: 'cone',
+      },
+    };
+  }
+
+  if (lower.includes('hình trụ') || lower.includes('khối trụ')) {
+    return {
+      cleanContent: content,
+      detectedType: 'geometry',
+      detectedData: {
+        title: 'Hình trụ tròn xoay',
+        shape: 'cylinder',
+      },
+    };
+  }
+
+  if (lower.includes('mặt cầu') || lower.includes('khối cầu') || lower.includes('hình cầu')) {
+    return {
+      cleanContent: content,
+      detectedType: 'geometry',
+      detectedData: {
+        title: 'Mặt cầu tâm O bán kính R',
+        shape: 'sphere',
+      },
+    };
+  }
+
+  if (lower.includes('lập phương') || lower.includes('hộp chữ nhật')) {
+    return {
+      cleanContent: content,
+      detectedType: 'geometry',
+      detectedData: {
+        title: "Hình hộp chữ nhật / lập phương ABCD.A'B'C'D'",
+        shape: 'cuboid',
+      },
+    };
+  }
+
+  // 3. Nhận diện Bảng biến thiên
+  if (lower.includes('bảng biến thiên') || lower.includes('bbt')) {
+    return {
+      cleanContent: content,
+      detectedType: 'variation_table',
+      detectedData: {
+        title: 'Bảng biến thiên của hàm số',
+        x: ['-\\infty', '-1', '1', '+\\infty'],
+        yPrime: ['+', '0', '-', '0', '+'],
+        yArrows: [
+          { start: '-\\infty', end: '4', dir: 'up' },
+          { start: '4', end: '-2', dir: 'down' },
+          { start: '-2', end: '+\\infty', dir: 'up' },
+        ],
+      },
+    };
+  }
+
+  // 4. Nhận diện Bảng xét dấu
+  if (lower.includes('bảng xét dấu') || lower.includes('xét dấu của')) {
+    return {
+      cleanContent: content,
+      detectedType: 'sign_table',
+      detectedData: {
+        title: 'Bảng xét dấu',
+        x: ['-\\infty', '-2', '3', '+\\infty'],
+        rows: [
+          {
+            label: "f'(x)",
+            signs: ['+', '0', '-', '0', '+'],
+          },
+        ],
+      },
+    };
+  }
+
+  // 5. Nhận diện Bảng thống kê số liệu
+  if (lower.includes('bảng thống kê') || lower.includes('tần số') || lower.includes('tần suất')) {
+    return {
+      cleanContent: content,
+      detectedType: 'data_table',
+      detectedData: {
+        title: 'Bảng phân bố tần số - tần suất ghép nhóm',
+        headers: ['Khoảng giá trị [a; b)', 'Giá trị đại diện', 'Tần số (n_i)', 'Tần suất (%)'],
+        tableRows: [
+          ['[0; 2)', '1', '5', '10%'],
+          ['[2; 4)', '3', '12', '24%'],
+          ['[4; 6)', '5', '18', '36%'],
+          ['[6; 8)', '7', '10', '20%'],
+          ['[8; 10]', '9', '5', '10%'],
+          ['Tổng cộng', '—', 'n = 50', '100%'],
+        ],
+      },
+    };
+  }
+
+  // 6. Nhận diện Đồ thị hàm số
+  if (lower.includes('đồ thị') && (lower.includes('hình vẽ') || lower.includes('như hình') || lower.includes('bên dưới') || lower.includes('đường cong'))) {
+    const isRational = lower.includes('tiệm cận') || lower.includes('phân thức') || lower.includes('hyperbol');
+    const isBiquad = lower.includes('trùng phương') || lower.includes('bậc bốn') || lower.includes('chữ w');
+    return {
+      cleanContent: content,
+      detectedType: 'function_graph',
+      detectedData: {
+        title: isRational ? 'Đồ thị hàm phân thức y = (ax+b)/(cx+d)' : isBiquad ? 'Đồ thị hàm bậc 4 trùng phương' : 'Đồ thị hàm số bậc 3 trên hệ Oxy',
+        graphType: isRational ? 'rational' : isBiquad ? 'biquadratic' : 'cubic',
+      },
+    };
   }
 
   return { cleanContent: content };
@@ -532,38 +668,139 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
               <div className="text-xs font-bold text-slate-800 mb-1">
                 {diagramData.title || 'Hình học không gian chuẩn SGK'}
               </div>
-              <svg width="230" height="185" viewBox="0 0 230 185" className="bg-white rounded-xl border border-slate-300 shadow-xs">
-                {diagramData.shape === 'prism' ? (
-                  // Lăng trụ tam giác ABC.A'B'C'
+              <svg width="240" height="195" viewBox="0 0 240 195" className="bg-white rounded-xl border border-slate-300 shadow-xs">
+                {/* 1. LĂNG TRỤ TAM GIÁC ABC.A'B'C' */}
+                {diagramData.shape === 'prism' && (
                   <>
-                    <polygon points="50,140 140,160 180,135" fill="none" stroke="#334155" strokeWidth="1.6" />
-                    <polygon points="50,50 140,70 180,45" fill="none" stroke="#334155" strokeWidth="1.6" />
-                    <line x1="50" y1="50" x2="50" y2="140" stroke="#334155" strokeWidth="1.6" />
-                    <line x1="140" y1="70" x2="140" y2="160" stroke="#334155" strokeWidth="1.6" />
-                    <line x1="180" y1="45" x2="180" y2="135" stroke="#334155" strokeWidth="1.6" />
-                    <text x="35" y="45" fontSize="10" fontWeight="bold">A'</text>
-                    <text x="145" y="70" fontSize="10" fontWeight="bold">B'</text>
-                    <text x="185" y="45" fontSize="10" fontWeight="bold">C'</text>
-                    <text x="35" y="145" fontSize="10" fontWeight="bold">A</text>
-                    <text x="145" y="170" fontSize="10" fontWeight="bold">B</text>
-                    <text x="185" y="140" fontSize="10" fontWeight="bold">C</text>
+                    <polygon points="50,150 140,170 185,145" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    <polygon points="50,55 140,75 185,50" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="50" y1="55" x2="50" y2="150" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="140" y1="75" x2="140" y2="170" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="185" y1="50" x2="185" y2="145" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="50" y1="150" x2="185" y2="145" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <text x="35" y="52" fontSize="11" fontWeight="bold">A'</text>
+                    <text x="145" y="75" fontSize="11" fontWeight="bold">B'</text>
+                    <text x="190" y="50" fontSize="11" fontWeight="bold">C'</text>
+                    <text x="35" y="155" fontSize="11" fontWeight="bold">A</text>
+                    <text x="145" y="180" fontSize="11" fontWeight="bold">B</text>
+                    <text x="190" y="150" fontSize="11" fontWeight="bold">C</text>
                   </>
-                ) : (
-                  // Hình chóp S.ABCD
+                )}
+
+                {/* 2. HÌNH CHÓP TAM GIÁC ĐỀU S.ABC */}
+                {diagramData.shape === 'pyramid_triangular' && (
                   <>
-                    <line x1="40" y1="130" x2="140" y2="155" stroke="#334155" strokeWidth="1.6" />
-                    <line x1="140" y1="155" x2="190" y2="120" stroke="#334155" strokeWidth="1.6" />
-                    <line x1="40" y1="130" x2="90" y2="105" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
-                    <line x1="90" y1="105" x2="190" y2="120" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
-                    <line x1="110" y1="20" x2="40" y2="130" stroke="#334155" strokeWidth="1.6" />
-                    <line x1="110" y1="20" x2="140" y2="155" stroke="#334155" strokeWidth="1.6" />
-                    <line x1="110" y1="20" x2="190" y2="120" stroke="#334155" strokeWidth="1.6" />
-                    <line x1="110" y1="20" x2="90" y2="105" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
-                    <text x="108" y="15" fontSize="11" fontWeight="bold" fill="#4338ca">S</text>
-                    <text x="25" y="135" fontSize="10" fontWeight="bold">A</text>
-                    <text x="140" y="170" fontSize="10" fontWeight="bold">B</text>
-                    <text x="195" y="125" fontSize="10" fontWeight="bold">C</text>
-                    <text x="80" y="100" fontSize="10" fontWeight="bold">D</text>
+                    <line x1="120" y1="20" x2="40" y2="145" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="120" y1="20" x2="135" y2="170" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="120" y1="20" x2="200" y2="140" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="40" y1="145" x2="135" y2="170" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="135" y1="170" x2="200" y2="140" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="40" y1="145" x2="200" y2="140" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    {/* Trọng tâm H và đường cao SH nét đứt */}
+                    <line x1="120" y1="20" x2="120" y2="152" stroke="#ea580c" strokeWidth="1.5" strokeDasharray="3 3" />
+                    <circle cx="120" cy="152" r="2.5" fill="#ea580c" />
+                    <text x="117" y="15" fontSize="12" fontWeight="bold" fill="#4338ca">S</text>
+                    <text x="25" y="150" fontSize="11" fontWeight="bold">A</text>
+                    <text x="135" y="185" fontSize="11" fontWeight="bold">B</text>
+                    <text x="205" y="145" fontSize="11" fontWeight="bold">C</text>
+                    <text x="124" y="156" fontSize="9" fontWeight="bold" fill="#ea580c">H</text>
+                  </>
+                )}
+
+                {/* 3. HÌNH CHÓP TỨ GIÁC S.ABCD */}
+                {(!diagramData.shape || diagramData.shape === 'pyramid_quad') && (
+                  <>
+                    <line x1="40" y1="140" x2="140" y2="165" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="140" y1="165" x2="200" y2="130" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="40" y1="140" x2="100" y2="110" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <line x1="100" y1="110" x2="200" y2="130" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <line x1="120" y1="20" x2="40" y2="140" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="120" y1="20" x2="140" y2="165" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="120" y1="20" x2="200" y2="130" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="120" y1="20" x2="100" y2="110" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <text x="118" y="15" fontSize="12" fontWeight="bold" fill="#4338ca">S</text>
+                    <text x="25" y="145" fontSize="11" fontWeight="bold">A</text>
+                    <text x="140" y="180" fontSize="11" fontWeight="bold">B</text>
+                    <text x="205" y="135" fontSize="11" fontWeight="bold">C</text>
+                    <text x="90" y="105" fontSize="11" fontWeight="bold">D</text>
+                  </>
+                )}
+
+                {/* 4. HÌNH NÓN TRÒN XOAY */}
+                {diagramData.shape === 'cone' && (
+                  <>
+                    <line x1="120" y1="20" x2="45" y2="150" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="120" y1="20" x2="195" y2="150" stroke="#334155" strokeWidth="1.8" />
+                    {/* Nửa trước elip đáy nét liền */}
+                    <path d="M 45 150 A 75 22 0 0 0 195 150" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    {/* Nửa sau elip đáy nét đứt */}
+                    <path d="M 45 150 A 75 22 0 0 1 195 150" fill="none" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    {/* Trục SO và bán kính đáy OA */}
+                    <line x1="120" y1="20" x2="120" y2="150" stroke="#ea580c" strokeWidth="1.5" strokeDasharray="4 3" />
+                    <line x1="120" y1="150" x2="195" y2="150" stroke="#ea580c" strokeWidth="1.5" strokeDasharray="4 3" />
+                    <circle cx="120" cy="150" r="2.5" fill="#ea580c" />
+                    <text x="117" y="15" fontSize="12" fontWeight="bold" fill="#4338ca">S</text>
+                    <text x="117" y="165" fontSize="11" fontWeight="bold" fill="#ea580c">O</text>
+                    <text x="30" y="155" fontSize="11" fontWeight="bold">A</text>
+                    <text x="200" y="155" fontSize="11" fontWeight="bold">B</text>
+                  </>
+                )}
+
+                {/* 5. HÌNH TRỤ TRÒN XOAY */}
+                {diagramData.shape === 'cylinder' && (
+                  <>
+                    <ellipse cx="120" cy="50" rx="70" ry="20" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="50" y1="50" x2="50" y2="150" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="190" y1="50" x2="190" y2="150" stroke="#334155" strokeWidth="1.8" />
+                    {/* Nửa trước elip đáy dưới nét liền */}
+                    <path d="M 50 150 A 70 20 0 0 0 190 150" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    {/* Nửa sau elip đáy dưới nét đứt */}
+                    <path d="M 50 150 A 70 20 0 0 1 190 150" fill="none" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    {/* Trục OO' */}
+                    <line x1="120" y1="50" x2="120" y2="150" stroke="#ea580c" strokeWidth="1.5" strokeDasharray="4 3" />
+                    <circle cx="120" cy="50" r="2.5" fill="#ea580c" />
+                    <circle cx="120" cy="150" r="2.5" fill="#ea580c" />
+                    <text x="116" y="42" fontSize="11" fontWeight="bold" fill="#ea580c">O</text>
+                    <text x="116" y="165" fontSize="11" fontWeight="bold" fill="#ea580c">O'</text>
+                  </>
+                )}
+
+                {/* 6. MẶT CẦU (S) */}
+                {diagramData.shape === 'sphere' && (
+                  <>
+                    <circle cx="120" cy="98" r="68" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    {/* Đường xích đạo elip: nửa trước liền, nửa sau đứt */}
+                    <path d="M 52 98 A 68 22 0 0 0 188 98" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    <path d="M 52 98 A 68 22 0 0 1 188 98" fill="none" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    {/* Bán kính R */}
+                    <line x1="120" y1="98" x2="188" y2="98" stroke="#ea580c" strokeWidth="1.5" strokeDasharray="4 3" />
+                    <circle cx="120" cy="98" r="3" fill="#ea580c" />
+                    <text x="115" y="90" fontSize="11" fontWeight="bold" fill="#ea580c">O</text>
+                    <text x="150" y="92" fontSize="11" fontWeight="bold" fill="#ea580c">R</text>
+                  </>
+                )}
+
+                {/* 7. HÌNH HỘP CHỮ NHẬT / LẬP PHƯƠNG */}
+                {diagramData.shape === 'cuboid' && (
+                  <>
+                    <polygon points="50,150 140,165 190,140" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    <polygon points="50,65 140,80 190,55" fill="none" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="50" y1="65" x2="50" y2="150" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="140" y1="80" x2="140" y2="165" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="190" y1="55" x2="190" y2="140" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="100" y1="40" x2="50" y2="65" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="100" y1="40" x2="190" y2="55" stroke="#334155" strokeWidth="1.8" />
+                    <line x1="100" y1="40" x2="100" y2="125" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <line x1="50" y1="150" x2="100" y2="125" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <line x1="190" y1="140" x2="100" y2="125" stroke="#94a3b8" strokeWidth="1.6" strokeDasharray="4 3" />
+                    <text x="35" y="65" fontSize="11" fontWeight="bold">A'</text>
+                    <text x="145" y="80" fontSize="11" fontWeight="bold">B'</text>
+                    <text x="195" y="55" fontSize="11" fontWeight="bold">C'</text>
+                    <text x="100" y="35" fontSize="11" fontWeight="bold">D'</text>
+                    <text x="35" y="155" fontSize="11" fontWeight="bold">A</text>
+                    <text x="145" y="175" fontSize="11" fontWeight="bold">B</text>
+                    <text x="195" y="145" fontSize="11" fontWeight="bold">C</text>
+                    <text x="100" y="135" fontSize="11" fontWeight="bold">D</text>
                   </>
                 )}
               </svg>

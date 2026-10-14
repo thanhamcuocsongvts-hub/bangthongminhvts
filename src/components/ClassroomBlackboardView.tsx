@@ -576,7 +576,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     { label: 'Nét Vừa (4p)', size: 4 },
     { label: 'Nét Đậm (8p)', size: 8 },
     { label: 'Nét Rất Đậm (14p)', size: 14 },
-    { label: 'Khăn Lau Bảng Nhanh (50p)', size: 50 },
+    { label: 'Khăn Lau Bảng Lớn (50p)', size: 50 },
   ];
 
   // Resize canvas according to container dimensions
@@ -2100,31 +2100,32 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return;
     }
 
-    if (activeTool === 'select' || isFunctionGraphTool(activeTool)) {
-      // Yêu cầu người dùng: "Thiết kế khi bấm chọn thì khung chữ nhật hiện ra"
-      // Cho phép bấm chọn hình học và đồ thị toán học khi ở công cụ Chọn hoặc bấm trực tiếp vào đồ thị đã vẽ
+    const canSelectExistingShape =
+      activeTool === 'select' ||
+      isFunctionGraphTool(activeTool) ||
+      (!isFreehandStrokeTool(activeTool) && activeTool !== 'text');
+
+    if (canSelectExistingShape) {
+      // Cho phép bấm chọn hình học và đồ thị toán học khi ở công cụ Chọn hoặc bấm trực tiếp vào hình/đồ thị đã vẽ
       const hitStroke = strokes.slice().reverse().find((s) => {
-        // Freehand pen strokes, highlighters, erasers, creative brushes are handwriting - NEVER select them with mouse/pointer
+        // Nét viết tay bút, dạ quang, tẩy, laser không chọn bằng click thường
         if (isFreehandStrokeTool(s.tool) || s.tool === 'laser') {
-          return false;
-        }
-        if (isFunctionGraphTool(activeTool) && !isFunctionGraphTool(s.tool)) {
           return false;
         }
         const bounds = getStrokeBounds(s);
         if (!bounds) return false;
         if (s.tool === 'circle') {
           const dist = Math.hypot(x - bounds.centerX, y - bounds.centerY);
-          return dist <= (bounds.radius || bounds.width / 2) + 25;
+          return dist <= (bounds.radius || bounds.width / 2) + 30;
         }
         if (s.tool === 'ellipse') {
-          const rx = (bounds.rx || bounds.width / 2) + 20;
-          const ry = (bounds.ry || bounds.height / 2) + 20;
+          const rx = (bounds.rx || bounds.width / 2) + 25;
+          const ry = (bounds.ry || bounds.height / 2) + 25;
           const normX = (x - bounds.centerX) / rx;
           const normY = (y - bounds.centerY) / ry;
           return normX * normX + normY * normY <= 1.0;
         }
-        const hitTol = isFunctionGraphTool(s.tool) ? 32 : 28;
+        const hitTol = isFunctionGraphTool(s.tool) ? 36 : 30;
         return x >= bounds.minX - hitTol && x <= bounds.maxX + hitTol && y >= bounds.minY - hitTol && y <= bounds.maxY + hitTol;
       });
 
@@ -2984,8 +2985,8 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       // Track session strokes for instant 1-tap mobile calligraphy selection
       calligraphySessionStrokesRef.current.push(newStroke.id);
 
-      // Automatically select function graphs so the user can easily zoom/scale and move them immediately
-      if (isFunctionGraphTool(activeTool)) {
+      // Automatically select function graphs and shapes so the user can easily scale and move them immediately
+      if (!isFreehandStrokeTool(activeTool) && activeTool !== 'laser' && activeTool !== 'select') {
         setSelectedStrokeId(newStroke.id);
         setIsStrokeToolbarExpanded(false);
       }
@@ -3293,11 +3294,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           : 'h-full w-full min-h-[500px]'
       } ${getBackgroundClass()}`}
     >
-      {/* Hidden File Input */}
+      {/* Hidden File Input (Đầy đủ định dạng: Word, PDF, Excel, PowerPoint, Ảnh, Text) */}
       <input
         ref={fileInputRef}
         type="file"
-        accept=".docx,.doc,.pdf,.pptx,.ppt,.xlsx,.xls,.csv,.txt,.md,.json"
+        accept=".docx,.doc,.pdf,.pptx,.ppt,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.webp,.svg,.bmp,.gif,.txt,.md,.json"
         className="hidden"
         onChange={handleFileUpload}
       />

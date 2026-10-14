@@ -18,7 +18,6 @@ import { PresentationView } from './components/PresentationView';
 import { PPTPresentationMode } from './components/PPTPresentationMode';
 import { DocumentReaderView } from './components/DocumentReaderView';
 import { TouchWhiteboard } from './components/TouchWhiteboard';
-import { FastWhiteboard } from './components/FastWhiteboard';
 import { LiveQuizHub } from './components/LiveQuizHub';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ClassGradebook } from './components/ClassGradebook';
@@ -656,6 +655,9 @@ export default function App() {
         grade: lesson.grade,
         slides: lesson.slides,
         rawText: lesson.rawText,
+        sheetData: lesson.sheetData,
+        htmlContent: lesson.htmlContent,
+        extractedSummary: lesson.extractedSummary,
       }));
     } catch {}
   }, []);
@@ -1282,7 +1284,7 @@ export default function App() {
 
       {/* Main Interactive Screen Content */}
       <main className={`flex-1 ${
-        activeTab === 'whiteboard' || activeTab === 'fast-whiteboard'
+        activeTab === 'whiteboard'
           ? 'p-2 sm:p-3 md:p-4 overflow-hidden bg-white'
           : isMobile
           ? 'p-2.5 pb-24 overflow-y-auto bg-[#f8fafc]'

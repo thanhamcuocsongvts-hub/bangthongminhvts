@@ -38,21 +38,86 @@ export interface VoiceTonePreset {
 
 export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
   {
-    id: 'nam_tram_am',
-    name: 'Giọng Nam (Thầy giáo trầm ấm)',
-    label: '👨‍🏫 Giọng Nam (Thầy giáo)',
-    sub: 'Trầm ấm • Đĩnh đạc • Chuẩn phát thanh',
-    description: 'Giọng thầy giáo trầm ấm, uy nghiêm, phát âm rõ ràng từng âm tiết tiếng Việt',
-    icon: '👨‍🏫',
-    pitch: 0.88,
-    rate: 0.98,
+    id: 'mc_chuyen_nghiep',
+    name: 'MC Gameshow Sôi Động (Chuyên nghiệp, bùng nổ)',
+    label: '⚡ MC Sôi Động (Bùng nổ)',
+    sub: 'Nhiệt huyết • Sôi động • Cuốn hút',
+    description: 'Giọng MC dẫn gameshow truyền hình cực kỳ hào hứng, bùng nổ năng lượng, khuấy động không khí lớp học',
+    icon: '⚡',
+    pitch: 1.15,
+    rate: 1.14,
+    volume: 1.0,
+    gender: 'male',
+    geminiVoice: 'Puck',
+  },
+  {
+    id: 'mc_ai_la_trieu_phu',
+    name: 'MC Ai Là Triệu Phú (Hồi hộp, đanh thép, cuốn hút)',
+    label: '🏆 MC Ai Là Triệu Phú (Kịch tính)',
+    sub: 'Hồi hộp • Đanh thép • Gay cấn',
+    description: 'Phong cách người dẫn chương trình Ai Là Triệu Phú huyền thoại: kịch tính, nhấn nhá sắc sảo, dồn dập quyết định',
+    icon: '🏆',
+    pitch: 1.05,
+    rate: 1.12,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Fenrir',
   },
   {
+    id: 'mc_olympia',
+    name: 'MC Đường Lên Đỉnh Olympia (Sôi nổi, tri thức, cổ vũ)',
+    label: '🌟 MC Olympia (Tri thức, bứt phá)',
+    sub: 'Sôi nổi • Hào hứng • Bứt phá',
+    description: 'Phong cách MC Đường Lên Đỉnh Olympia: hào hứng, đĩnh đạc, truyền động lực bứt phá điểm số tối đa',
+    icon: '🌟',
+    pitch: 1.18,
+    rate: 1.16,
+    volume: 1.0,
+    gender: 'male',
+    geminiVoice: 'Puck',
+  },
+  {
+    id: 'mc_nu_nang_dong',
+    name: 'Nữ MC Hoạt Náo Viên (Hào hứng, cổ vũ, tươi vui)',
+    label: '🎉 Nữ MC Hoạt Náo (Cổ vũ)',
+    sub: 'Hào hứng • Cổ vũ • Tươi vui',
+    description: 'Giọng nữ MC hoạt náo tươi vui, rộn ràng, cổ vũ học sinh đua tài và trả lời nhanh như chớp',
+    icon: '🎉',
+    pitch: 1.22,
+    rate: 1.14,
+    volume: 1.0,
+    gender: 'female',
+    geminiVoice: 'Aoede',
+  },
+  {
+    id: 'mc_the_thao',
+    name: 'MC Bình Luận Viên Trực Tiếp (Cao trào, đếm ngược)',
+    label: '🔥 Bình Luận Viên (Đua điểm số)',
+    sub: 'Kịch tính • Cao trào • Hồi hộp',
+    description: 'Phong cách bình luận viên thể thao trực tiếp kịch tính, tạo không khí đua tài nghẹt thở từng giây',
+    icon: '🔥',
+    pitch: 1.10,
+    rate: 1.18,
+    volume: 1.0,
+    gender: 'male',
+    geminiVoice: 'Fenrir',
+  },
+  {
+    id: 'mc_truyen_hinh',
+    name: 'MC Đài Truyền Hình (Đẳng cấp, thanh lịch, chuẩn mực)',
+    label: '📺 MC Truyền Hình (Chuyên nghiệp)',
+    sub: 'Đẳng cấp • Cuốn hút • Chuẩn mực',
+    description: 'Giọng MC phát thanh truyền hình quốc gia: âm vực vang sáng, rõ ràng, phong thái đĩnh đạc và cuốn hút',
+    icon: '📺',
+    pitch: 1.08,
+    rate: 1.08,
+    volume: 1.0,
+    gender: 'male',
+    geminiVoice: 'Puck',
+  },
+  {
     id: 'nu_diu_dang',
-    name: 'Giọng Nữ (Cô giáo dịu dàng)',
+    name: 'Giọng Nữ (Cô giáo dịu dàng, truyền cảm)',
     label: '👩‍🏫 Giọng Nữ (Cô giáo)',
     sub: 'Dịu dàng • Truyền cảm • Chuẩn mực',
     description: 'Giọng cô giáo dịu dàng, êm ái, truyền cảm hứng, phát âm chuẩn xác sư phạm',
@@ -64,21 +129,34 @@ export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
     geminiVoice: 'Kore',
   },
   {
+    id: 'nam_tram_am',
+    name: 'Giọng Nam (Thầy giáo trầm ấm, đĩnh đạc)',
+    label: '👨‍🏫 Giọng Nam (Thầy giáo)',
+    sub: 'Trầm ấm • Đĩnh đạc • Chuẩn phát thanh',
+    description: 'Giọng thầy giáo trầm ấm, uy nghiêm, phát âm rõ ràng từng âm tiết tiếng Việt',
+    icon: '👨‍🏫',
+    pitch: 0.88,
+    rate: 0.98,
+    volume: 1.0,
+    gender: 'male',
+    geminiVoice: 'Charon',
+  },
+  {
     id: 'hoc_sinh',
-    name: 'Giọng Học Sinh (Trong trẻo, vui tươi)',
-    label: '🎒 Giọng Học Sinh',
+    name: 'Giọng Học Sinh (Trong trẻo, sôi nổi, tự tin)',
+    label: '🎒 Giọng Học Sinh (Sôi nổi)',
     sub: 'Trong trẻo • Vui tươi • Hồn nhiên',
     description: 'Giọng em học sinh trong trẻo, hồn nhiên, phát biểu bài sôi nổi và tràn đầy năng lượng',
     icon: '🎒',
     pitch: 1.28,
-    rate: 1.06,
+    rate: 1.08,
     volume: 1.0,
     gender: 'female',
     geminiVoice: 'Puck',
   },
   {
     id: 'podcast',
-    name: 'Giọng Đọc Podcast (Sâu lắng, tự sự)',
+    name: 'Giọng Đọc Podcast (Sâu lắng, tự sự, truyền cảm)',
     label: '🎙️ Giọng Đọc Podcast',
     sub: 'Sâu lắng • Truyền cảm hứng • Nhấn nhá',
     description: 'Giọng đọc Podcast Radio nghệ thuật, nhịp điệu thư thái, giàu cảm xúc và tự sự',
@@ -200,6 +278,33 @@ export function getBestVietnameseVoice(gender: 'female' | 'male' | 'neutral' = '
 }
 
 /**
+ * Lọc voice tiếng Anh chuẩn (dành riêng cho bộ môn Tiếng Anh / Anh Văn)
+ */
+export function getBestEnglishVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+
+  let voices = cachedVoices;
+  if (!voices || voices.length === 0) {
+    voices = window.speechSynthesis.getVoices();
+    cachedVoices = voices;
+  }
+
+  const enVoices = voices.filter((v) => {
+    const lang = (v.lang || '').toLowerCase();
+    return lang.startsWith('en') || lang.includes('en-us') || lang.includes('en-gb');
+  });
+
+  if (enVoices.length === 0) return null;
+
+  const naturalEn = enVoices.find((v) => {
+    const n = v.name.toLowerCase();
+    return n.includes('natural') || n.includes('google') || n.includes('samantha') || n.includes('zira') || n.includes('jenny');
+  });
+
+  return naturalEn || enVoices[0];
+}
+
+/**
  * Chuyển đổi một chữ số hoặc số nhỏ sang chữ tiếng Việt
  */
 function singleDigitToVietnamese(d: string): string {
@@ -224,6 +329,9 @@ function singleDigitToVietnamese(d: string): string {
 function numberToVietnameseWords(numStr: string): string {
   const n = parseInt(numStr, 10);
   if (isNaN(n)) return numStr;
+  if (n < 0) {
+    return 'trừ ' + numberToVietnameseWords(String(Math.abs(n)));
+  }
   if (n >= 0 && n <= 10) return singleDigitToVietnamese(String(n));
   if (n < 20) {
     if (n === 15) return 'mười lăm';
@@ -297,11 +405,57 @@ export function convertDigitsAndMathToVietnamese(raw: string): string {
   s = s.replace(/(^|[\n.;,])\s*C\.\s*/g, '$1 Phương án Xê, ');
   s = s.replace(/(^|[\n.;,])\s*D\.\s*/g, '$1 Phương án Dê, ');
 
-  // 1c. Đọc khoảng và đoạn toán học: (-1; 0) -> khoảng từ trừ một đến không
-  s = s.replace(/\((-?\d+)\s*;\s*(-?\d+)\)/g, (_, a, b) => `khoảng từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
-  s = s.replace(/\[(-?\d+)\s*;\s*(-?\d+)\]/g, (_, a, b) => `đoạn từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
-  s = s.replace(/\((-?\d+)\s*;\s*([+\-]?\s*vô cực|dương vô cực|âm vô cực)\)/g, (_, a, b) => `khoảng từ ${numberToVietnameseWords(a)} đến ${b}`);
-  s = s.replace(/\(([+\-]?\s*vô cực|âm vô cực)\s*;\s*(-?\d+)\)/g, (_, a, b) => `khoảng từ ${a} đến ${numberToVietnameseWords(b)}`);
+  // 1b-2. Chuẩn hóa triệt để ký hiệu Vô Cùng (Infinity) chuẩn sư phạm tiếng Việt
+  // TUYỆT ĐỐI không đọc nhầm thành "phi" hoặc "in-phi-ty"
+  s = s.replace(/(?:\\pm\s*\\infty|±\s*∞|±∞|\\pm\s*infty|±\s*oo|\+\/-\s*oo|\+\/-\s*infty)\b/gi, ' cộng trừ vô cùng ');
+  s = s.replace(/(?:\+\s*\\infty|\+\s*∞|\+∞|\+\s*infty|\+\s*oo|\+oo)\b/gi, ' dương vô cùng ');
+  s = s.replace(/(?:-\s*\\infty|-\s*∞|-∞|-\s*infty|-\s*oo|-oo)\b/gi, ' âm vô cùng ');
+  s = s.replace(/\\(?:infty|infinity)\b|\b(?:infty|infinity)\b|∞/gi, ' vô cùng ');
+  s = s.replace(/(^|[\s(;\[])\+oo(?=[\s);,\].]|$)/g, '$1dương vô cùng');
+  s = s.replace(/(^|[\s(;\[])-oo(?=[\s);,\].]|$)/g, '$1âm vô cùng');
+  s = s.replace(/(^|[\s(;\[])oo(?=[\s);,\].]|$)/g, '$1vô cùng');
+
+  // Khắc phục triệt để lỗi tài liệu/OCR nhận diện nhầm ký hiệu Vô Cùng thành "phi", "\phi", "\varphi", "φ", "ϕ"
+  s = s.replace(/\(\s*-\s*(?:\\phi|\\varphi|φ|ϕ|phi)\s*;\s*\+?\s*(?:\\phi|\\varphi|φ|ϕ|phi)\s*\)/gi, 'khoảng từ âm vô cùng đến dương vô cùng');
+  s = s.replace(/\(\s*-\s*(?:\\phi|\\varphi|φ|ϕ|phi)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, b) => `khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*;\s*\+?\s*(?:\\phi|\\varphi|φ|ϕ|phi)\s*\)/gi, (_, a) => `khoảng từ ${numberToVietnameseWords(a)} đến dương vô cùng`);
+  s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*;\s*\+?\s*(?:\\phi|\\varphi|φ|ϕ|phi)\s*\)/gi, (_, a) => `nửa khoảng từ ${numberToVietnameseWords(a)} đến dương vô cùng`);
+  s = s.replace(/\[\s*-\s*(?:\\phi|\\varphi|φ|ϕ|phi)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\]/gi, (_, b) => `nửa khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/(?:\\to|->|→|tiến tới|tiến đến)\s*\+\s*(?:\\phi|\\varphi|φ|ϕ|phi)\b/gi, ' tiến đến dương vô cùng ');
+  s = s.replace(/(?:\\to|->|→|tiến tới|tiến đến)\s*-\s*(?:\\phi|\\varphi|φ|ϕ|phi)\b/gi, ' tiến đến âm vô cùng ');
+  s = s.replace(/(?:\\to|->|→|tiến tới|tiến đến)\s*(?:\\phi|\\varphi|φ|ϕ|phi)\b/gi, ' tiến đến vô cùng ');
+  s = s.replace(/(?:[+\/]\s*-\s*|±\s*)(?:\\phi|\\varphi|φ|ϕ|phi)\b/gi, ' cộng trừ vô cùng ');
+  s = s.replace(/\+\s*(?:\\phi|\\varphi|φ|ϕ|phi)\b/gi, ' dương vô cùng ');
+  s = s.replace(/-\s*(?:\\phi|\\varphi|φ|ϕ|phi)\b/gi, ' âm vô cùng ');
+
+  // 1c. Đọc khoảng và đoạn toán học: (-1; 0) -> khoảng từ trừ một đến không, (-∞; 1) -> khoảng từ âm vô cùng đến một
+  s = s.replace(/[\(\[]\s*(?:âm vô cùng|-\s*vô cùng)\s*;\s*(?:dương vô cùng|\+\s*vô cùng)\s*[\)\]]/gi, 'khoảng từ âm vô cùng đến dương vô cùng');
+  s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, b) => `khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\[\s*(?:âm vô cùng|-\s*vô cùng)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, b) => `khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*;\s*(?:dương vô cùng|\+\s*vô cùng)\s*\)/gi, (_, a) => `khoảng từ ${numberToVietnameseWords(a)} đến dương vô cùng`);
+  s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*;\s*(?:dương vô cùng|\+\s*vô cùng)\s*\)/gi, (_, a) => `nửa khoảng từ ${numberToVietnameseWords(a)} đến dương vô cùng`);
+  s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\]/gi, (_, b) => `nửa khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\((-?\d+(?:[.,]\d+)?)\s*;\s*(-?\d+(?:[.,]\d+)?)\)/g, (_, a, b) => `khoảng từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\[(-?\d+(?:[.,]\d+)?)\s*;\s*(-?\d+(?:[.,]\d+)?)\]/g, (_, a, b) => `đoạn từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\((-?\d+)\s*;\s*([+\-]?\s*vô cùng|dương vô cùng|âm vô cùng)\)/gi, (_, a, b) => `khoảng từ ${numberToVietnameseWords(a)} đến ${b}`);
+  s = s.replace(/\(([+\-]?\s*vô cùng|âm vô cùng)\s*;\s*(-?\d+)\)/gi, (_, a, b) => `khoảng từ ${a} đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/(khoảng|đoạn)\s+(khoảng|đoạn)\s+từ/gi, '$1 từ');
+
+  // Xóa triệt để từ "chia cho" vô tình gắn sau Phương án A/B/C/D
+  s = s.replace(/(Phương án|Đáp án|Lựa chọn)\s*([A-Da-d])\s*(?:chia cho|chia|\/|:)\s*/gi, '$1 $2, ');
+  s = s.replace(/(^|[\n.,;])\s*([A-Da-d])\s*(?:chia cho|chia|\/|:)\s*/gi, '$1 Phương án $2, ');
+
+  // 1d. Tọa độ điểm hình học: A(1; 2), M(x0; y0), O(0; 0)
+  s = s.replace(/([A-Z])\s*\(\s*0\s*;\s*0\s*\)/g, 'điểm $1 gốc tọa độ không không');
+  s = s.replace(/([A-Z])\s*\(\s*(-?\d+)\s*;\s*(-?\d+)\s*\)/g, (_, pt, xCoord, yCoord) => `điểm ${pt} tọa độ ${numberToVietnameseWords(xCoord)}, ${numberToVietnameseWords(yCoord)}`);
+  s = s.replace(/([A-Z])\s*\(\s*(-?\d+)\s*;\s*(-?\d+)\s*;\s*(-?\d+)\s*\)/g, (_, pt, xCoord, yCoord, zCoord) => `điểm ${pt} tọa độ ${numberToVietnameseWords(xCoord)}, ${numberToVietnameseWords(yCoord)}, ${numberToVietnameseWords(zCoord)}`);
+
+  // 1e. Hệ trục tọa độ
+  s = s.replace(/\bOxyz\b/g, 'hệ tọa độ O x y z');
+  s = s.replace(/\bOxy\b/g, 'hệ tọa độ O x y');
+  s = s.replace(/\bOx\b/g, 'trục hoành O x');
+  s = s.replace(/\bOy\b/g, 'trục tung O y');
+  s = s.replace(/\bOz\b/g, 'trục cao O z');
 
   // 2. Chuyển đổi các tiền tố sư phạm phổ biến
   // "Câu 1" -> "Câu một", "Bài 2" -> "Bài hai", "Ví dụ 3" -> "Ví dụ ba"
@@ -312,6 +466,15 @@ export function convertDigitsAndMathToVietnamese(raw: string): string {
   s = s.replace(/\b(Trang|trang)\s*(\d+)\b/g, (_, prefix, num) => `${prefix} ${numberToVietnameseWords(num)}`);
   s = s.replace(/\b(Phần|phần)\s*(\d+)\b/g, (_, prefix, num) => `${prefix} ${numberToVietnameseWords(num)}`);
 
+  // 2b. Số thập phân, phần trăm và góc độ
+  s = s.replace(/(\d+)[.,](\d+)\s*°/g, (_, a, b) => `${numberToVietnameseWords(a)} phẩy ${numberToVietnameseWords(b)} độ`);
+  s = s.replace(/(\d+)\s*°/g, (_, num) => `${numberToVietnameseWords(num)} độ`);
+  s = s.replace(/(\d+)\s*%/g, (_, num) => `${numberToVietnameseWords(num)} phần trăm`);
+  s = s.replace(/(\d+)[.,](\d+)/g, (_, a, b) => `${numberToVietnameseWords(a)} phẩy ${numberToVietnameseWords(b)}`);
+
+  // 2c. Phân số dạng a/b (ví dụ: 1/2, 3/4, -5/2)
+  s = s.replace(/(-?\d+)\s*\/\s*(\d+)/g, (_, num, denom) => `${numberToVietnameseWords(num)} phần ${numberToVietnameseWords(denom)}`);
+
   // 3. Chuyển đổi công thức toán học và phép tính
   // Dấu bằng: "x = 2" -> "x bằng hai"
   s = s.replace(/\s*=\s*/g, ' bằng ');
@@ -320,12 +483,27 @@ export function convertDigitsAndMathToVietnamese(raw: string): string {
   s = s.replace(/\s*\+\s*/g, ' cộng ');
   s = s.replace(/\s*-\s*(?=[\d\w])/g, ' trừ ');
   s = s.replace(/\s*[*×•]\s*/g, ' nhân ');
-  s = s.replace(/\s*[:/÷]\s*(?=[\d\w])/g, ' chia cho ');
+  // Ký hiệu phép chia toán học: ÷ hoặc dấu hai chấm chia giữa 2 số (ví dụ 6 : 2 = 3)
+  s = s.replace(/\s*÷\s*/g, ' chia cho ');
+  s = s.replace(/(\d+)\s*:\s*(\d+)/g, (_, a, b) => `${numberToVietnameseWords(a)} chia cho ${numberToVietnameseWords(b)}`);
+  // Dấu hai chấm câu / liệt kê (như Phương án A:, Câu 1:) chuyển thành ngắt giọng tự nhiên, TUYỆT ĐỐI không đọc "chia cho"
+  s = s.replace(/:\s*/g, ', ');
+
+  // Xóa dứt điểm nếu "chia cho" xuất hiện sau nhãn phương án
+  s = s.replace(/\b(Phương án|Đáp án|Lựa chọn)\s*([A-Da-d0-9]+)\s*chia cho\s*/gi, '$1 $2, ');
 
   // 3b. Số âm: -1 -> trừ một, -25 -> trừ hai mươi lăm
   s = s.replace(/(^|\s)-(\d+)($|\s|[,.;:!?\)])/g, (_, pre, n, post) => `${pre}trừ ${numberToVietnameseWords(n)}${post}`);
 
-  // 4. Các biến đi kèm số: "12a" -> "mười hai a", "2x" -> "hai x", "x1" -> "x một"
+  // 4. Lượng giác & Logarit & Vectơ chuẩn tiếng Việt sư phạm
+  s = s.replace(/\\sin\b|(?<![a-zA-Z])sin\b/g, ' sin ');
+  s = s.replace(/\\cos\b|(?<![a-zA-Z])cos\b/g, ' cốt ');
+  s = s.replace(/\\tan\b|(?<![a-zA-Z])tan\b/g, ' tang ');
+  s = s.replace(/\\cot\b|(?<![a-zA-Z])cot\b/g, ' cô-tang ');
+  s = s.replace(/\\ln\b|(?<![a-zA-Z])ln\b/g, ' lô-ga-rít tự nhiên của ');
+  s = s.replace(/\\log_([a-zA-Z0-9]+)\b|log_([a-zA-Z0-9]+)\b/g, (_, b1, b2) => ` lô-ga-rít cơ số ${b1 || b2} của `);
+
+  // 4b. Các biến đi kèm số: "12a" -> "mười hai a", "2x" -> "hai x", "x1" -> "x một"
   s = s.replace(/\b(\d+)([a-zA-Z])\b/g, (_, n, char) => `${numberToVietnameseWords(n)} ${char}`);
   s = s.replace(/\b([a-zA-Z])(\d+)\b/g, (_, char, n) => `${char} ${numberToVietnameseWords(n)}`);
 
@@ -348,7 +526,21 @@ export function preprocessSpeechText(rawText: string): string {
   // Khắc phục triệt để lỗi vỡ font tiếng Việt từ PDF/Scan trước khi chuyển thành lời đọc
   let t = cleanPdfVietnameseText(rawText);
 
-  // 0. Mở rộng từ viết tắt hành chính giáo dục & tiêu đề tài liệu chuẩn tiếng Việt
+  // 0a. Chuẩn hóa triệt để ký hiệu VÔ CÙNG (Infinity) - TUYỆT ĐỐI không đọc nhầm thành "phi" hay "in-phi-ty"
+  t = t.replace(/(?:\\pm\s*\\infty|±\s*∞|±∞|\\pm\s*infty|±\s*oo|\+\/-\s*oo|\+\/-\s*infty)\b/gi, ' cộng trừ vô cùng ');
+  t = t.replace(/(?:\+\s*\\infty|\+\s*∞|\+∞|\+\s*infty|\+\s*oo|\+oo)\b/gi, ' dương vô cùng ');
+  t = t.replace(/(?:-\s*\\infty|-\s*∞|-∞|-\s*infty|-\s*oo|-oo)\b/gi, ' âm vô cùng ');
+  t = t.replace(/\\(?:infty|infinity)\b|\b(?:infty|infinity)\b|∞/gi, ' vô cùng ');
+  t = t.replace(/(^|[\s(;\[])\+oo(?=[\s);,\].]|$)/g, '$1dương vô cùng');
+  t = t.replace(/(^|[\s(;\[])-oo(?=[\s);,\].]|$)/g, '$1âm vô cùng');
+  t = t.replace(/(^|[\s(;\[])oo(?=[\s);,\].]|$)/g, '$1vô cùng');
+
+  // 0b. Loại bỏ triệt để từ "chia cho" vô lý sau Phương án A/B/C/D
+  t = t.replace(/(Phương án|Đáp án|Lựa chọn)\s*([A-Da-d])\s*chia cho\s*/gi, '$1 $2, ');
+  t = t.replace(/(^|[\n.,;])\s*([A-Da-d])\s*chia cho\s*/gi, '$1 Phương án $2, ');
+  t = t.replace(/(Phương án|Đáp án|Lựa chọn)\s*([A-Da-d])\s*[:]\s*/gi, '$1 $2, ');
+
+  // 0c. Mở rộng từ viết tắt hành chính giáo dục & tiêu đề tài liệu chuẩn tiếng Việt
   t = t.replace(/\bTHPT\b/g, 'Trung học phổ thông');
   t = t.replace(/\bTHCS\b/g, 'Trung học cơ sở');
   t = t.replace(/\bTN\.THPT\b/gi, 'Tốt nghiệp Trung học phổ thông');
@@ -435,7 +627,20 @@ export function preprocessSpeechText(rawText: string): string {
   t = t.replace(/([a-zA-Z0-9])\s*mở ngoặc/g, '$1 nhân, mở ngoặc');
   t = t.replace(/đóng ngoặc\s*(bình phương|mũ ba|mũ [a-zA-Z0-9]+)\s*mở ngoặc/g, 'đóng ngoặc $1, nhân, mở ngoặc');
 
-  // 6. Subscripts: x_1, x_2
+  // 6. KÝ HIỆU VÔ CÙNG: Xử lý trước tiên để tránh bị các regex sau (như \in hay chỉ số dưới) cắt xén
+  t = t.replace(/(?:\\pm\s*\\infty|±\s*∞|±∞)/g, ' cộng trừ vô cùng ');
+  t = t.replace(/(?:\+\s*\\infty|\+\s*∞|\+∞)/g, ' dương vô cùng ');
+  t = t.replace(/(?:-\s*\\infty|-\s*∞|-∞)/g, ' âm vô cùng ');
+  t = t.replace(/(?:\\infty|∞)/g, ' vô cùng ');
+
+  // Giới hạn lim x tiến về vô cùng hoặc giá trị
+  t = t.replace(/\\?lim_\{?\s*([a-zA-Z0-9]+)\s*(?:\\to|->|→)\s*([^}]+)\}?/gi, (_, v, target) => ` giới hạn khi ${v} tiến đến ${target.trim()} của `);
+  t = t.replace(/([a-zA-Z])\s*(?:\\to|->|→)\s*(?:dương vô cùng|\+\s*\\infty|\+∞)/g, ' $1 tiến đến dương vô cùng ');
+  t = t.replace(/([a-zA-Z])\s*(?:\\to|->|→)\s*(?:âm vô cùng|-\s*\\infty|-∞)/g, ' $1 tiến đến âm vô cùng ');
+  t = t.replace(/([a-zA-Z])\s*(?:\\to|->|→)\s*(?:vô cùng|\\infty|∞)/g, ' $1 tiến đến vô cùng ');
+  t = t.replace(/\\?lim\b/gi, ' giới hạn lim ');
+
+  // 6b. Subscripts: x_1, x_2
   t = t.replace(/([a-zA-Z])_0/g, ' $1 không ');
   t = t.replace(/([a-zA-Z])_1/g, ' $1 một ');
   t = t.replace(/([a-zA-Z])_2/g, ' $1 hai ');
@@ -443,16 +648,16 @@ export function preprocessSpeechText(rawText: string): string {
   t = t.replace(/([a-zA-Z])_\{([^}]+)\}/g, ' $1 $2 ');
   t = t.replace(/([a-zA-Z])_([a-zA-Z0-9]+)/g, ' $1 $2 ');
 
-  // 7. Math symbols
-  t = t.replace(/\\pm/g, ' cộng trừ ');
+  // 7b. Math symbols với ranh giới ký tự chặt chẽ chống nuốt từ
+  t = t.replace(/\\pm(?![a-zA-Z])/g, ' cộng trừ ');
   t = t.replace(/±/g, ' cộng trừ ');
-  t = t.replace(/\\notin/g, ' không thuộc ');
+  t = t.replace(/\\notin(?![a-zA-Z])/g, ' không thuộc ');
   t = t.replace(/∉/g, ' không thuộc ');
-  t = t.replace(/\\in/g, ' thuộc ');
+  t = t.replace(/\\in(?![a-zA-Z])/g, ' thuộc ');
   t = t.replace(/∈/g, ' thuộc ');
-  t = t.replace(/\\subset/g, ' tập con của ');
-  t = t.replace(/\\cup/g, ' hợp với ');
-  t = t.replace(/\\cap/g, ' giao với ');
+  t = t.replace(/\\subset(?![a-zA-Z])/g, ' tập con của ');
+  t = t.replace(/\\cup(?![a-zA-Z])/g, ' hợp với ');
+  t = t.replace(/\\cap(?![a-zA-Z])/g, ' giao với ');
 
   t = t.replace(/\\implies/g, ', suy ra, ');
   t = t.replace(/\\Rightarrow/g, ', suy ra, ');
@@ -472,24 +677,32 @@ export function preprocessSpeechText(rawText: string): string {
   t = t.replace(/\\geq(?![a-zA-Z])/g, ' lớn hơn hoặc bằng ');
   t = t.replace(/>=/g, ' lớn hơn hoặc bằng ');
   t = t.replace(/≥/g, ' lớn hơn hoặc bằng ');
-  t = t.replace(/\\neq/g, ' khác ');
+  t = t.replace(/\\neq(?![a-zA-Z])/g, ' khác ');
   t = t.replace(/!=/g, ' khác ');
   t = t.replace(/≠/g, ' khác ');
 
   t = t.replace(/\\approx/g, ' xấp xỉ ');
   t = t.replace(/≈/g, ' xấp xỉ ');
-  t = t.replace(/\+\\infty|\+∞/g, ' dương vô cực ');
-  t = t.replace(/-\\infty|-∞/g, ' âm vô cực ');
-  t = t.replace(/\\infty/g, ' vô cực ');
-  t = t.replace(/∞/g, ' vô cực ');
-  t = t.replace(/\\int/g, ' tích phân ');
+  t = t.replace(/\\int(?![a-zA-Z])/g, ' tích phân ');
   t = t.replace(/∫/g, ' tích phân ');
-  t = t.replace(/\\sum/g, ' tổng xích-ma ');
+  t = t.replace(/\\sum(?![a-zA-Z])/g, ' tổng xích-ma ');
   t = t.replace(/∑/g, ' tổng xích-ma ');
-  t = t.replace(/\\lim/g, ' giới hạn lim ');
-  t = t.replace(/\\forall/g, ' với mọi ');
+  t = t.replace(/\\emptyset|\\empty|∅/g, ' tập rỗng ');
+  t = t.replace(/\\varphi\b/g, ' phi ');
+  t = t.replace(/\\phi\b/g, ' phi ');
+  t = t.replace(/\\alpha\b/g, ' an-pha ');
+  t = t.replace(/\\beta\b/g, ' bê-ta ');
+  t = t.replace(/\\gamma\b/g, ' ga-ma ');
+  t = t.replace(/\\delta\b/g, ' đen-ta ');
+  t = t.replace(/\\Delta\b/g, ' đen-ta ');
+  t = t.replace(/\\theta\b/g, ' tê-ta ');
+  t = t.replace(/\\lambda\b/g, ' lam-đa ');
+  t = t.replace(/\\omega\b/g, ' ô-mê-ga ');
+  t = t.replace(/\\Omega\b/g, ' ôm ');
+  t = t.replace(/\\pi\b/g, ' pi ');
+  t = t.replace(/\\forall(?![a-zA-Z])/g, ' với mọi ');
   t = t.replace(/∀/g, ' với mọi ');
-  t = t.replace(/\\exists/g, ' tồn tại ');
+  t = t.replace(/\\exists(?![a-zA-Z])/g, ' tồn tại ');
   t = t.replace(/∃/g, ' tồn tại ');
 
   // 8. BẮT BUỘC: Chuyển đổi toàn bộ chữ số rời rạc và công thức sang từ ngữ tiếng Việt
@@ -543,6 +756,8 @@ export function stopAllSpeech(): void {
 
 export interface SpeakOptions {
   preset?: VoiceTonePreset;
+  subject?: string;
+  isEnglish?: boolean;
   preferGemini?: boolean;
   preferWebSpeech?: boolean;
   onStart?: () => void;
@@ -574,112 +789,132 @@ function splitIntoSentences(text: string, maxLen: number = 220): string[] {
 }
 
 /**
- * Phát giọng đọc Google Cloud Text-To-Speech Tiếng Việt (100% Chuẩn Ngữ Âm Bản Địa)
- * Hỗ trợ 4 phong cách giọng: Nam trầm ấm, Nữ dịu dàng, Học sinh vui tươi, Podcast tự sự
- * Tự động chuyển đổi giữa Server Proxy và Direct Google CDN để hoạt động trên cả Cloud Run và Vercel
+ * Phát giọng đọc Google Cloud Text-To-Speech
+ * - Hỗ trợ 100% Tiếng Việt chuẩn ngữ âm sư phạm cho tất cả các môn (Toán, Lý, Hóa, Sinh, Văn, Sử, Địa, v.v.)
+ * - Tự động nhận diện và phát âm tiếng Anh chuẩn bản ngữ cho riêng bộ môn Tiếng Anh / Anh Văn
  */
 export async function speakWithGoogleCloudTTS(
   processedText: string,
   preset: VoiceTonePreset = VOICE_TONE_PRESETS[0],
+  lang: 'vi' | 'en' = 'vi',
   onStart?: () => void,
   onEnd?: () => void,
   onError?: (err: any) => void
 ): Promise<boolean> {
-  const sentences = splitIntoSentences(processedText, 220);
-  if (sentences.length === 0) return false;
+  if (!processedText || !processedText.trim()) return false;
 
   stopAllSpeech();
   isSpeechCancelled = false;
 
-  let currentIndex = 0;
+  const encoded = encodeURIComponent(processedText.trim());
+  const candidateUrls = [
+    `/api/tts?lang=${lang}&text=${encoded}`,
+  ];
 
-  return new Promise((resolve) => {
-    const playNext = async () => {
-      if (isSpeechCancelled || currentIndex >= sentences.length) {
-        if (!isSpeechCancelled && onEnd) onEnd();
-        currentAudioElement = null;
-        resolve(true);
-        return;
-      }
+  let playSucceeded = false;
 
-      const sentence = sentences[currentIndex];
-      currentIndex++;
-
-      const encoded = encodeURIComponent(sentence);
-      // Danh sách các nguồn phát âm tiếng Việt chuẩn Google (cả proxy backend và direct CDN)
-      const candidateUrls = [
-        `/api/tts?text=${encoded}`,
-        `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=vi&client=gtx&q=${encoded}`,
-        `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=vi&client=tw-ob`,
-      ];
-
-      let playSucceeded = false;
-
-      for (const audioUrl of candidateUrls) {
-        if (isSpeechCancelled) break;
-        try {
-          let audio = currentAudioElement;
-          if (!audio) {
-            audio = new Audio();
-            (audio as any).referrerPolicy = 'no-referrer';
-            currentAudioElement = audio;
+  for (const audioUrl of candidateUrls) {
+    if (isSpeechCancelled) break;
+    let objectUrlToRevoke: string | null = null;
+    try {
+      // Tải trước Blob qua fetch để xử lý dứt điểm các lỗi mạng, CORS và buffering của Audio element
+      let playUrl = audioUrl;
+      try {
+        const fetchRes = await fetch(audioUrl);
+        if (fetchRes.ok) {
+          const blob = await fetchRes.blob();
+          if (blob.size > 200) {
+            objectUrlToRevoke = URL.createObjectURL(blob);
+            playUrl = objectUrlToRevoke;
           }
-          audio.src = audioUrl;
+        }
+      } catch (fErr) {
+        console.warn('TTS prefetch fallback to direct URL:', fErr);
+      }
 
-          // Tinh chỉnh tốc độ theo 4 sắc thái tiếng Việt:
-          if (preset.id === 'hoc_sinh') {
-            audio.playbackRate = 1.08;
-          } else if (preset.id === 'podcast') {
-            audio.playbackRate = 0.90;
-          } else if (preset.id === 'nam_tram_am') {
-            audio.playbackRate = 0.96;
-          } else {
-            audio.playbackRate = 1.0;
+      const audio = new Audio();
+      (audio as any).referrerPolicy = 'no-referrer';
+      currentAudioElement = audio;
+      audio.src = playUrl;
+
+      // Tinh chỉnh tốc độ theo sắc thái MC và sư phạm
+      let playbackRate = preset.rate || 1.0;
+      if (preset.id === 'mc_chuyen_nghiep' || preset.id === 'mc_ai_la_trieu_phu') {
+        playbackRate = 1.15;
+      } else if (preset.id === 'mc_olympia' || preset.id === 'mc_the_thao') {
+        playbackRate = 1.18;
+      } else if (preset.id === 'mc_nu_nang_dong') {
+        playbackRate = 1.14;
+      } else if (preset.id === 'mc_truyen_hinh') {
+        playbackRate = 1.08;
+      } else if (preset.id === 'hoc_sinh') {
+        playbackRate = 1.08;
+      } else if (preset.id === 'podcast') {
+        playbackRate = 0.92;
+      } else if (preset.id === 'nam_tram_am') {
+        playbackRate = 0.98;
+      }
+      audio.playbackRate = playbackRate;
+
+      audio.onplay = () => {
+        if (!isSpeechCancelled && onStart) onStart();
+      };
+
+      const res = await new Promise<boolean>((resolve) => {
+        audio.onended = () => {
+          if (objectUrlToRevoke) {
+            try { URL.revokeObjectURL(objectUrlToRevoke); } catch (_) {}
           }
+          if (!isSpeechCancelled && onEnd) onEnd();
+          currentAudioElement = null;
+          resolve(true);
+        };
+        audio.onerror = (e) => {
+          if (objectUrlToRevoke) {
+            try { URL.revokeObjectURL(objectUrlToRevoke); } catch (_) {}
+          }
+          console.warn('Google Cloud TTS audio playback notice:', e);
+          resolve(false);
+        };
+        audio.play().catch((playErr) => {
+          if (objectUrlToRevoke) {
+            try { URL.revokeObjectURL(objectUrlToRevoke); } catch (_) {}
+          }
+          console.warn('Audio play error, falling back:', playErr);
+          resolve(false);
+        });
+      });
 
-          audio.onplay = () => {
-            if (currentIndex === 1 && onStart) onStart();
-          };
-
-          await new Promise<void>((resAudio, rejAudio) => {
-            audio!.onended = () => {
-              resAudio();
-            };
-            audio!.onerror = (err) => {
-              rejAudio(err);
-            };
-            audio!.play().catch((playErr) => rejAudio(playErr));
-          });
-
-          playSucceeded = true;
-          break; // Thành công, chuyển sang câu tiếp theo
-        } catch (_) {
-          continue;
-        }
+      if (res) {
+        playSucceeded = true;
+        break;
       }
-
-      if (playSucceeded) {
-        if (!isSpeechCancelled) {
-          playNext();
-        }
-      } else {
-        // Fallback Web Speech API có cưỡng chế lang vi-VN
-        speakWithWebSpeech(sentence, preset, onStart, () => {
-          if (!isSpeechCancelled) playNext();
-        }, onError);
+    } catch (_) {
+      if (objectUrlToRevoke) {
+        try { URL.revokeObjectURL(objectUrlToRevoke); } catch (_) {}
       }
-    };
+      continue;
+    }
+  }
 
-    playNext();
-  });
+  if (playSucceeded) {
+    return true;
+  }
+
+  // Fallback Web Speech API có kiểm tra voice và ngôn ngữ
+  if (!isSpeechCancelled) {
+    return speakWithWebSpeech(processedText, preset, lang, onStart, onEnd, onError);
+  }
+  return false;
 }
 
 /**
- * Web Speech API Fallback (Cố định 100% tiếng Việt vi-VN)
+ * Web Speech API Fallback (Cố định vi-VN cho các môn tiếng Việt, en-US cho môn Anh Văn)
  */
 export function speakWithWebSpeech(
   processedText: string,
   preset: VoiceTonePreset = VOICE_TONE_PRESETS[0],
+  lang: 'vi' | 'en' = 'vi',
   onStart?: () => void,
   onEnd?: () => void,
   onError?: (err: any) => void
@@ -690,9 +925,19 @@ export function speakWithWebSpeech(
   }
 
   try {
-    const matchedVoice = getBestVietnameseVoice(preset.gender);
+    const matchedVoice = lang === 'en' ? getBestEnglishVoice() : getBestVietnameseVoice(preset.gender);
+    
+    // NGUYÊN TẮC QUAN TRỌNG:
+    // Nếu môn Toán / tiếng Việt mà máy người dùng không có voice tiếng Việt cài sẵn,
+    // TUYỆT ĐỐI KHÔNG dùng voice tiếng Anh mặc định của hệ thống để đọc (gây phát âm ngọng / tiếng Anh kỳ lạ)!
+    if (lang === 'vi' && !matchedVoice) {
+      console.warn('Không tìm thấy voice tiếng Việt trong Web Speech API; không dùng voice tiếng Anh thay thế.');
+      if (onError) onError(new Error('No Vietnamese voice available'));
+      return false;
+    }
+
     const utterance = new SpeechSynthesisUtterance(processedText);
-    utterance.lang = 'vi-VN';
+    utterance.lang = lang === 'en' ? 'en-US' : 'vi-VN';
     utterance.pitch = preset.pitch;
     utterance.rate = preset.rate;
     utterance.volume = 1.0;
@@ -729,20 +974,27 @@ export function speakWithWebSpeech(
 /**
  * Ultra-fast Text-to-Speech execution (<150ms).
  * ƯU TIÊN 1: Google Cloud Text-To-Speech Tiếng Việt chuẩn 100%, rõ ràng, truyền cảm.
- * ƯU TIÊN 2: Web Speech API vi-VN (không đọc giọng tiếng Anh).
+ * Hỗ trợ tiếng Anh riêng cho bộ môn Tiếng Anh / Anh Văn.
  */
 export function speakText(text: string, options: SpeakOptions = {}): boolean {
   if (!text || !text.trim()) return false;
 
   stopAllSpeech();
 
+  const isEnglish = !!options.isEnglish || 
+    (typeof options.subject === 'string' && (
+      options.subject.toLowerCase().includes('anh') || 
+      options.subject.toLowerCase().includes('english')
+    ));
+
+  const lang: 'vi' | 'en' = isEnglish ? 'en' : 'vi';
   const preset = options.preset || VOICE_TONE_PRESETS[0];
-  const processed = preprocessSpeechText(text);
+  const processed = isEnglish ? text.trim() : preprocessSpeechText(text);
 
   if (!processed) return false;
 
-  // Khởi động phát giọng đọc Google Cloud TTS Tiếng Việt
-  speakWithGoogleCloudTTS(processed, preset, options.onStart, options.onEnd, options.onError);
+  // Khởi động phát giọng đọc Google Cloud TTS
+  speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError);
   return true;
 }
 
@@ -863,27 +1115,66 @@ export function speakQuestionContent(
     question: string;
     options: Array<{ key: string; text: string }>;
     explanation?: string;
+    subject?: string;
   },
   options: SpeakOptions = {}
 ): boolean {
   if (!question || !question.question) return false;
 
-  const parts: string[] = [];
-  parts.push(`Câu hỏi: ${question.question}.`);
+  const isEnglish = !!options.isEnglish || 
+    (typeof question.subject === 'string' && (
+      question.subject.toLowerCase().includes('anh') || 
+      question.subject.toLowerCase().includes('english')
+    )) ||
+    (typeof options.subject === 'string' && (
+      options.subject.toLowerCase().includes('anh') || 
+      options.subject.toLowerCase().includes('english')
+    ));
 
-  if (Array.isArray(question.options) && question.options.length > 0) {
-    question.options.forEach((opt) => {
-      const key = (opt.key || '').trim().toUpperCase();
-      const text = opt.text || '';
-      if (text.trim()) {
-        const keyPhonetic = key === 'A' ? 'A' : key === 'B' ? 'Bê' : key === 'C' ? 'Xê' : key === 'D' ? 'Dê' : key;
-        parts.push(`Phương án ${keyPhonetic}: ${text}.`);
-      }
-    });
+  const parts: string[] = [];
+
+  if (isEnglish) {
+    const cleanQuestion = (question.question || '').trim().replace(/^Question\s*\d*\s*[:.]\s*/i, '').trim();
+    parts.push(`Question: ${cleanQuestion}.`);
+    if (Array.isArray(question.options) && question.options.length > 0) {
+      question.options.forEach((opt) => {
+        const key = (opt.key || '').trim().toUpperCase();
+        const text = opt.text || '';
+        if (text.trim()) {
+          const cleanText = text.trim()
+            .replace(/^[A-Da-d][.:)\-\/]\s*/, '')
+            .replace(/^[:\-–—]\s*/, '')
+            .trim();
+          parts.push(`Option ${key}, ${cleanText}.`);
+        }
+      });
+    }
+  } else {
+    const cleanQuestion = (question.question || '').trim().replace(/^câu\s*\d*\s*[:.]\s*/i, '').trim();
+    parts.push(`Câu hỏi, ${cleanQuestion}.`);
+    if (Array.isArray(question.options) && question.options.length > 0) {
+      question.options.forEach((opt) => {
+        const key = (opt.key || '').trim().toUpperCase();
+        const text = opt.text || '';
+        if (text.trim()) {
+          const keyPhonetic = key === 'A' ? 'A' : key === 'B' ? 'Bê' : key === 'C' ? 'Xê' : key === 'D' ? 'Dê' : key;
+          const cleanText = text.trim()
+            .replace(/^[A-Da-d][.:)\-\/]\s*/, '')
+            .replace(/^[:\-–—/]\s*/, '')
+            .replace(/^chia cho\s*/i, '')
+            .trim();
+          parts.push(`Phương án ${keyPhonetic}, ${cleanText}.`);
+        }
+      });
+    }
   }
 
   const script = parts.join(' ');
-  return speakText(script, options);
+  return speakText(script, {
+    ...options,
+    isEnglish,
+    subject: question.subject || options.subject,
+  });
 }
 
 /**

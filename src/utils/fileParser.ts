@@ -137,7 +137,8 @@ export async function parseUploadedFileToLesson(
     .replace(/\.[^/.]+$/, '')
     .replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF-]/g, '_');
   const expectedServerUrl = `/uploads/${lessonId}_${safeBaseName}.${ext}`;
-  let effectiveFileUrl = expectedServerUrl;
+  // Always initialize effectiveFileUrl to localBlobUrl so viewer opens instantly without 404
+  let effectiveFileUrl = localBlobUrl;
 
   // 2. High-speed parallel cloud upload via Universal Cloud Store (Firestore Base64 Chunks & Server)
   let serverFileUrl = '';
