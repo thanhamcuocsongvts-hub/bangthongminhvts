@@ -42,7 +42,6 @@ export function isEvaluationOrSummaryRow(name: string = '', rowText: string = ''
     'tổng số',
     'số học sinh đạt',
     'số học sinh',
-    'hs1045',
     'tổng cộng',
     'tổng kết',
     'tổng hợp',
@@ -143,9 +142,10 @@ export function isEvaluationOrSummaryRow(name: string = '', rowText: string = ''
 export function cleanStudentList<T extends { name?: string; code?: string }>(students: T[]): T[] {
   if (!Array.isArray(students)) return [];
   return students.filter((st) => {
-    const name = st.name || '';
-    const code = st.code || '';
-    return !isEvaluationOrSummaryRow(name) && !isEvaluationOrSummaryRow(code);
+    const name = st.name ? String(st.name).trim() : '';
+    // Must have a real student name and not be a summary row
+    if (!name || name.length < 2) return false;
+    return !isEvaluationOrSummaryRow(name);
   });
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DEFAULT_LESSONS } from './data/defaultLessons';
 import { DEFAULT_TEACHERS, ADMIN_TEACHER } from './data/defaultTeachers';
@@ -104,7 +104,18 @@ export default function App() {
       const res = await fetch('/api/teachers/sync');
       if (res.ok) {
         const data = await res.json();
-        if (data.teachers) {
+        if (data.teachers && Array.isArray(data.teachers)) {
+          setTeachers(data.teachers);
+          localStorage.setItem('smartboard_teachers', JSON.stringify(data.teachers));
+          setSyncStatus('synced');
+          return;
+        }
+      }
+      // Fallback to /api/teachers
+      const fallbackRes = await fetch('/api/teachers');
+      if (fallbackRes.ok) {
+        const data = await fallbackRes.json();
+        if (data.teachers && Array.isArray(data.teachers)) {
           setTeachers(data.teachers);
           localStorage.setItem('smartboard_teachers', JSON.stringify(data.teachers));
           setSyncStatus('synced');
@@ -147,6 +158,11 @@ export default function App() {
     }
     return DEFAULT_TEACHERS;
   });
+
+  const teachersRef = useRef<TeacherProfile[]>(teachers);
+  useEffect(() => {
+    teachersRef.current = teachers;
+  }, [teachers]);
 
   const [activeTeacherId, setActiveTeacherId] = useState<string>(() => {
     return localStorage.getItem('smartboard_active_teacher') || '';
@@ -870,17 +886,29 @@ export default function App() {
   };
 
   // Update teacher data (e.g. from Gradebook)
-    const handleUpdateActiveTeacher = (updatedTeacher: TeacherProfile) => {
+  const handleUpdateActiveTeacher = (updatedTeacher: TeacherProfile) => {
     if (isGuestMode) {
       setGuestTeacherData(updatedTeacher);
       return;
     }
     setTeachers((prev) => {
-      const next = prev.map((t) => (t.id === updatedTeacher.id ? updatedTeacher : t));
-      localStorage.setItem('smartboard_teachers', JSON.stringify(next));
-      syncTeachersToCloud(next);
+      const exists = prev.some((t) => t.id === updatedTeacher.id);
+      const next = exists
+        ? prev.map((t) => (t.id === updatedTeacher.id ? updatedTeacher : t))
+        : [...prev, updatedTeacher];
 
-      // CRITICAL: Synchronize directly with the server so other computers/devices instantly get the class and student list!
+      teachersRef.current = next;
+      localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+
+      // Save directly to server backend classes endpoint for instant persistence
+      if (updatedTeacher.id) {
+        fetch(`/api/teachers/${updatedTeacher.id}/classes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ classes: updatedTeacher.classes || [] }),
+        }).catch((e) => console.warn('Save classes to server notice:', e));
+      }
+
       syncTeachersToCloud(next);
       return next;
     });
@@ -1499,7 +1527,7 @@ export default function App() {
                   setPickerClassroom(cls);
                   setShowRandomPickerModal(true);
                 }}
-                onForceSyncToCloud={() => syncTeachersToCloud(teachers, true)}
+                onForceSyncToCloud={() => syncTeachersToCloud(teachersRef.current, true)}
                 onForcePullFromCloud={pullTeachersFromCloud}
                 isCloudSyncing={syncStatus === 'syncing'}
                 syncStatus={syncStatus}

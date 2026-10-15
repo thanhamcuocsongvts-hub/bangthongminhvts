@@ -107,7 +107,41 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   const classes = teacher?.classes || [];
   const { isMobile } = useDeviceDetection();
   const [mobileViewMode, setMobileViewMode] = useState<'cards' | 'table'>('cards');
-  const [activeClassId, setActiveClassId] = useState<string>(classes[0]?.id || '');
+  const [activeClassId, setActiveClassId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('smartboard_active_class_id');
+      if (saved && (teacher?.classes || []).some((c) => c.id === saved)) {
+        return saved;
+      }
+    } catch {}
+    return (teacher?.classes || [])[0]?.id || '';
+  });
+
+  const handleSelectClass = (clsId: string) => {
+    setActiveClassId(clsId);
+    try {
+      localStorage.setItem('smartboard_active_class_id', clsId);
+    } catch {}
+  };
+
+  // Keep activeClassId synchronized if classes list changes or loaded asynchronously
+  useEffect(() => {
+    if (classes.length > 0) {
+      if (!activeClassId || !classes.some((c) => c.id === activeClassId)) {
+        try {
+          const saved = localStorage.getItem('smartboard_active_class_id');
+          if (saved && classes.some((c) => c.id === saved)) {
+            setActiveClassId(saved);
+            return;
+          }
+        } catch {}
+        // Prefer first class with students, otherwise first class
+        const classWithStudents = classes.find((c) => (c.students?.length || 0) > 0);
+        setActiveClassId(classWithStudents ? classWithStudents.id : classes[0].id);
+      }
+    }
+  }, [classes, activeClassId]);
+
   const [activeSemester, setActiveSemester] = useState<SemesterTab>('hk1');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [cloudSyncBanner, setCloudSyncBanner] = useState<string | null>(null);
@@ -480,50 +514,70 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
     customColumns?: string[],
     replaceExisting?: boolean
   ) => {
-    if (newClassName) {
+    if (!imported || imported.length === 0) return;
+
+    // Determine target class name
+    const rawTargetName = (newClassName || currentClass?.name || '10A1').trim();
+    const targetName = rawTargetName.toUpperCase();
+
+    // Check if class with this name already exists in classes (case-insensitive)
+    const existingIndex = classes.findIndex(
+      (c) => c.name.trim().toUpperCase() === targetName
+    );
+
+    let updatedClasses: ClassRoom[];
+    let finalClassId: string;
+
+    if (existingIndex >= 0) {
+      // Update the existing class
+      const existing = classes[existingIndex];
+      const baseStudents = replaceExisting ? [] : (existing.students || []);
+      const mergedStudents = [...baseStudents, ...imported];
+      const mergedCols = Array.from(
+        new Set([...(existing.customColumns || []), ...(customColumns || [])])
+      );
+
+      const updatedClass: ClassRoom = {
+        ...existing,
+        students: mergedStudents,
+        customColumns: mergedCols,
+      };
+
+      // Filter out any other duplicate classes with the same name if they existed from prior bugs
+      updatedClasses = classes
+        .filter((c, idx) => idx === existingIndex || c.name.trim().toUpperCase() !== targetName)
+        .map((c) => (c.id === existing.id ? updatedClass : c));
+
+      finalClassId = updatedClass.id;
+    } else {
+      // Create a brand new class
       const newClass: ClassRoom = {
         id: 'class_' + Date.now(),
-        name: newClassName.trim().toUpperCase(),
-        grade: 'Lớp 10',
+        name: targetName,
+        grade: targetName.startsWith('10') ? 'Lớp 10' : targetName.startsWith('11') ? 'Lớp 11' : targetName.startsWith('12') ? 'Lớp 12' : 'Lớp Khác',
         academicYear: '2026 - 2027',
         subject: teacher?.subject || 'Khác',
         students: imported,
         customColumns: customColumns || [],
       };
-      const updatedClasses = [...classes, newClass];
-      onUpdateTeacher({
-        ...teacher,
-        classes: updatedClasses,
-      });
-      setActiveClassId(newClass.id);
-    } else if (currentClass) {
-      const baseStudents = replaceExisting ? [] : (currentClass.students || []);
-      const updatedStudents = [...baseStudents, ...imported];
-      const mergedCols = Array.from(
-        new Set([...(currentClass.customColumns || []), ...(customColumns || [])])
-      );
-
-      const updatedClasses = classes.map((c) =>
-        c.id === currentClass.id
-          ? {
-              ...c,
-              students: updatedStudents,
-              customColumns: mergedCols,
-            }
-          : c
-      );
-
-      onUpdateTeacher({
-        ...teacher,
-        classes: updatedClasses,
-      });
+      updatedClasses = [...classes, newClass];
+      finalClassId = newClass.id;
     }
 
-    if (onForceSyncToCloud) {
-      onForceSyncToCloud();
-      setCloudSyncBanner('☁️ Đã nạp thành công và tự động đồng bộ danh sách học sinh lên Đám Mây!');
-      setTimeout(() => setCloudSyncBanner(null), 6000);
-    }
+    // Set active class ID in state & localStorage
+    setActiveClassId(finalClassId);
+    try {
+      localStorage.setItem('smartboard_active_class_id', finalClassId);
+    } catch {}
+
+    // Update teacher profile (which persists to localStorage, server, and cloud)
+    onUpdateTeacher({
+      ...teacher,
+      classes: updatedClasses,
+    });
+
+    setCloudSyncBanner(`✅ Đã nạp thành công ${imported.length} học sinh vào lớp ${targetName}!`);
+    setTimeout(() => setCloudSyncBanner(null), 6000);
 
     setShowImportModal(false);
   };
@@ -763,7 +817,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
               return (
                 <button
                   key={cls.id}
-                  onClick={() => setActiveClassId(cls.id)}
+                  onClick={() => handleSelectClass(cls.id)}
                   className={`px-3.5 py-1.5 rounded-xl text-xs md:text-sm font-black transition-all shrink-0 cursor-pointer ${
                     isSelected
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
@@ -2095,6 +2149,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
           isOpen={showImportModal}
           classRoom={currentClass}
           targetClassName={currentClass?.name}
+          classes={classes}
           onClose={() => setShowImportModal(false)}
           onImportStudents={handleImportStudents}
         />

@@ -43,6 +43,7 @@ interface ImportStudentsModalProps {
   isOpen?: boolean;
   classRoom?: ClassRoom | null;
   targetClassName?: string;
+  classes?: ClassRoom[];
   onClose: () => void;
   onImportStudents: (
     students: ClassStudent[],
@@ -56,6 +57,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
   isOpen = true,
   classRoom,
   targetClassName,
+  classes = [],
   onClose,
   onImportStudents,
 }) => {
@@ -77,6 +79,9 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
   );
   const [customClassName, setCustomClassName] = useState<string>(
     targetClassName || classRoom?.name || '10A1'
+  );
+  const [selectedExistingClassId, setSelectedExistingClassId] = useState<string>(
+    classRoom?.id || classes[0]?.id || ''
   );
   const [replaceExisting, setReplaceExisting] = useState<boolean>(true);
 
@@ -119,8 +124,17 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
     const result = parseStudentDataMatrix(matrix, sourceFileName);
 
     if (result.detectedClassName) {
-      setDetectedClassName(result.detectedClassName);
-      setCustomClassName(result.detectedClassName);
+      const detected = result.detectedClassName.trim().toUpperCase();
+      setDetectedClassName(detected);
+      setCustomClassName(detected);
+
+      const matched = classes.find((c) => c.name.trim().toUpperCase() === detected);
+      if (matched) {
+        setSelectedExistingClassId(matched.id);
+        setTargetMode('current');
+      } else {
+        setTargetMode('new');
+      }
     }
     setDetectedColumns(result.columns);
     setExtractedStudents(result.students);
@@ -223,8 +237,16 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
 
       if (list.length > 0) {
         if (data.className) {
-          setDetectedClassName(data.className);
-          setCustomClassName(data.className);
+          const detected = data.className.trim().toUpperCase();
+          setDetectedClassName(detected);
+          setCustomClassName(detected);
+          const matched = classes.find((c) => c.name.trim().toUpperCase() === detected);
+          if (matched) {
+            setSelectedExistingClassId(matched.id);
+            setTargetMode('current');
+          } else {
+            setTargetMode('new');
+          }
         }
         if (data.columns && data.columns.length > 0) {
           setDetectedColumns(data.columns);
@@ -487,9 +509,14 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
       }
     });
 
+    const targetClassObj = classes.find((c) => c.id === selectedExistingClassId) || classRoom;
+    const finalClassName = targetMode === 'new'
+      ? customClassName.trim().toUpperCase()
+      : (targetClassObj?.name || targetClassName || customClassName).trim().toUpperCase();
+
     onImportStudents(
       students,
-      targetMode === 'new' ? customClassName.trim().toUpperCase() : undefined,
+      finalClassName,
       extraCols,
       replaceExisting
     );
@@ -790,10 +817,28 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
 
               {/* Target Class Settings */}
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-                <div className="text-xs font-black uppercase text-slate-700 tracking-wider">
-                  CÀI ĐẶT ĐÍCH NHẬP DỮ LIỆU:
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-2">
+                    <span>CÀI ĐẶT ĐÍCH NHẬP DỮ LIỆU:</span>
+                    {detectedClassName && (
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[11px] font-black border border-emerald-300">
+                        🎯 Phát hiện từ file: Lớp {detectedClassName}
+                      </span>
+                    )}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={replaceExisting}
+                      onChange={(e) => setReplaceExisting(e.target.checked)}
+                      className="rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Thay thế toàn bộ học sinh cũ của lớp đích</span>
+                  </label>
                 </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Option 1: Existing Class */}
                   <label
                     className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
                       targetMode === 'current'
@@ -806,18 +851,38 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                       name="targetMode"
                       checked={targetMode === 'current'}
                       onChange={() => setTargetMode('current')}
-                      className="mt-0.5 text-indigo-600"
+                      className="mt-1 text-indigo-600"
                     />
-                    <div>
-                      <div className="text-xs font-bold">
-                        Nhập vào lớp đang mở ({classRoom?.name || targetClassName || 'Lớp hiện tại'})
+                    <div className="flex-1 space-y-1">
+                      <div className="text-xs font-bold flex items-center justify-between">
+                        <span>Cập nhật vào lớp đã có</span>
+                        {classes.length > 0 && (
+                          <select
+                            value={selectedExistingClassId}
+                            onChange={(e) => {
+                              setSelectedExistingClassId(e.target.value);
+                              setTargetMode('current');
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 text-xs font-black focus:ring-2 focus:ring-indigo-500"
+                          >
+                            {classes.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                Lớp {c.name} ({c.students?.length || 0} hs)
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                       <div className="text-[11px] font-normal text-slate-500">
-                        Bổ sung thêm học sinh và cột điểm vào lớp đang chọn
+                        {classes.length > 0
+                          ? `Đang chọn: Lớp ${classes.find(c => c.id === selectedExistingClassId)?.name || classRoom?.name || 'Hiện tại'}`
+                          : `Lớp đang mở: ${classRoom?.name || targetClassName || 'Chưa có lớp'}`}
                       </div>
                     </div>
                   </label>
 
+                  {/* Option 2: New Class */}
                   <label
                     className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
                       targetMode === 'new'
@@ -830,22 +895,25 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                       name="targetMode"
                       checked={targetMode === 'new'}
                       onChange={() => setTargetMode('new')}
-                      className="mt-0.5 text-indigo-600"
+                      className="mt-1 text-indigo-600"
                     />
-                    <div className="flex-1">
-                      <div className="text-xs font-bold flex items-center justify-between">
-                        <span>Tạo một lớp học mới hoàn toàn</span>
+                    <div className="flex-1 space-y-1">
+                      <div className="text-xs font-bold flex items-center justify-between gap-2">
+                        <span>Tạo hoặc nạp theo tên lớp mới</span>
                         <input
                           type="text"
                           value={customClassName}
-                          onChange={(e) => setCustomClassName(e.target.value.toUpperCase())}
-                          placeholder="VD: 10A1"
+                          onChange={(e) => {
+                            setCustomClassName(e.target.value.toUpperCase());
+                            setTargetMode('new');
+                          }}
+                          placeholder="VD: 12A2"
                           onClick={(e) => e.stopPropagation()}
                           className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 text-xs font-black w-24 text-center focus:ring-2 focus:ring-indigo-500"
                         />
                       </div>
                       <div className="text-[11px] font-normal text-slate-500">
-                        Tạo danh sách lớp mới theo tên trên
+                        Nạp {extractedStudents.length} học sinh vào lớp {customClassName || 'mới'}
                       </div>
                     </div>
                   </label>
@@ -1118,17 +1186,25 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                   >
                     Hủy & Chọn Tệp Khác
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmImport}
-                    className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 active:scale-95"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>
-                      Xác Nhận Nạp {extractedStudents.length} Học Sinh Vào{' '}
-                      {targetMode === 'new' ? `Lớp ${customClassName}` : 'Lớp Đang Chọn'}
-                    </span>
-                  </button>
+                  {(() => {
+                    const effectiveTargetClass = classes.find((c) => c.id === selectedExistingClassId) || classRoom;
+                    const effectiveTargetName = targetMode === 'new'
+                      ? (customClassName || 'Lớp Mới').trim().toUpperCase()
+                      : (effectiveTargetClass?.name || targetClassName || 'Lớp Đang Chọn').trim().toUpperCase();
+
+                    return (
+                      <button
+                        type="button"
+                        onClick={handleConfirmImport}
+                        className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>
+                          Hoàn Tất Nạp {extractedStudents.length} Học Sinh Vào Lớp {effectiveTargetName}
+                        </span>
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

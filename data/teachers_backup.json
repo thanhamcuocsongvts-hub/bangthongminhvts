@@ -1,0 +1,34 @@
+[
+  {
+    "id": "teacher_admin_root",
+    "name": "Quản Trị Viên Hệ Thống",
+    "username": "admin",
+    "password": "123456",
+    "email": "admin@smartboard.edu.vn",
+    "phone": "0901.888.999",
+    "subject": "Toán học",
+    "school": "Ban Quản Trị SmartBoard 75 Pro",
+    "avatar": "🛡️",
+    "role": "admin",
+    "classes": [
+      {
+        "id": "class_12a2_test",
+        "name": "12A2",
+        "grade": "Lớp 12",
+        "academicYear": "2026 - 2027",
+        "subject": "Toán học",
+        "students": [
+          {
+            "id": "st_1",
+            "code": "HS1001",
+            "name": "Nguyễn Văn An",
+            "gender": "Nam",
+            "birthDate": "10/02/2009",
+            "group": "Tổ 1"
+          }
+        ]
+      }
+    ],
+    "createdAt": "2026-09-01T00:00:00.000Z"
+  }
+]

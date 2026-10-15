@@ -449,6 +449,15 @@ app.post("/api/teachers/:teacherId/classes", (req, res) => {
   res.json({ success: true, classes: teacher.classes, teachers: teachersStore });
 });
 
+// GET Teacher Sync endpoint for client pull
+app.get("/api/teachers/sync", (req, res) => {
+  if (!teachersStore.some((t) => t.id === 'teacher_admin_root' || t.username === 'admin')) {
+    teachersStore.unshift(DEFAULT_ADMIN_ACCOUNT);
+    writeJsonFileSync(TEACHERS_FILE, teachersStore);
+  }
+  res.json({ success: true, teachers: teachersStore, timestamp: new Date().toISOString() });
+});
+
 // Full Cloud Sync Endpoint (Cross-device PC <-> Mobile with Intelligent Merge)
 app.post("/api/teachers/sync", (req, res) => {
   const { teachers } = req.body;
