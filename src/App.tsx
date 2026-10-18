@@ -446,7 +446,7 @@ export default function App() {
   const currentLesson = useMemo(() => {
     if (activeOpenedLesson) {
       const found = (lessons || []).find((l) => l.id === activeOpenedLesson.id);
-      return found ? { ...activeOpenedLesson, ...found } : activeOpenedLesson;
+      return found ? { ...found, ...activeOpenedLesson } : activeOpenedLesson;
     }
     const found = (lessons || []).find((l) => l.id === activeLessonId);
     if (found) return found;
@@ -1405,12 +1405,28 @@ export default function App() {
                 classroom={activeTeacher?.classes?.[0]}
                 teacher={activeTeacher}
                 onControlRoom={async (idx, isLive) => {
-                  await fetch(`/api/rooms/${roomState?.pin || '758899'}/control`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ activeQuestionIndex: idx, isLive }),
+                  setRoomState((prev) => {
+                    if (!prev) {
+                      return {
+                        pin: '758899',
+                        activeQuestionIndex: idx,
+                        isLive,
+                        submissions: {},
+                        participants: [],
+                      } as any;
+                    }
+                    return { ...prev, activeQuestionIndex: idx, isLive };
                   });
-                  fetchRoom(roomState?.pin || '758899');
+                  try {
+                    await fetch(`/api/rooms/${roomState?.pin || '758899'}/control`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ activeQuestionIndex: idx, isLive }),
+                    });
+                    fetchRoom(roomState?.pin || '758899');
+                  } catch (e) {
+                    console.warn('Room control fetch notice:', e);
+                  }
                 }}
                 onResetRoom={async () => {
                   await fetch(`/api/rooms/${roomState?.pin || '758899'}/reset`, {

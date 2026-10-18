@@ -218,8 +218,24 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       : []
   );
 
+  const [localActiveIndex, setLocalActiveIndex] = useState<number>(() => {
+    return Math.max(0, roomState?.activeQuestionIndex || 0);
+  });
+
+  // Sync with remote room state updates (Chỉ đồng bộ tự động khi không ở chế độ trình chiếu lên bảng để tránh nhảy câu)
+  useEffect(() => {
+    if (activeMode !== 'presentation' && typeof roomState?.activeQuestionIndex === 'number') {
+      setLocalActiveIndex((prev) => {
+        if (roomState.activeQuestionIndex !== prev && roomState.activeQuestionIndex >= 0 && roomState.activeQuestionIndex < Math.max(1, questions.length)) {
+          return roomState.activeQuestionIndex;
+        }
+        return prev;
+      });
+    }
+  }, [roomState?.activeQuestionIndex, questions.length, activeMode]);
+
   const activeIndex = Math.min(
-    Math.max(0, roomState?.activeQuestionIndex || 0),
+    Math.max(0, localActiveIndex),
     Math.max(0, questions.length - 1)
   );
   const currentQ: QuizQuestion | undefined = questions[activeIndex];
@@ -696,22 +712,56 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   };
 
   const handleNextQuestion = () => {
-    if (activeIndex < questions.length - 1) {
-      onControlRoom(activeIndex + 1, true);
-      setBoardSelectedOption(null);
-      setBoardAnswerResult(null);
-      setCongratsMessage('');
-    }
+    setLocalActiveIndex((prev) => {
+      const maxIdx = Math.max(0, questions.length - 1);
+      if (prev < maxIdx) {
+        const nextIndex = prev + 1;
+        try {
+          if (onControlRoom) onControlRoom(nextIndex, true);
+        } catch (_) {}
+        setBoardSelectedOption(null);
+        setBoardAnswerResult(null);
+        setCongratsMessage('');
+        return nextIndex;
+      }
+      return prev;
+    });
   };
 
   const handlePrevQuestion = () => {
-    if (activeIndex > 0) {
-      onControlRoom(activeIndex - 1, true);
-      setBoardSelectedOption(null);
-      setBoardAnswerResult(null);
-      setCongratsMessage('');
-    }
+    setLocalActiveIndex((prev) => {
+      if (prev > 0) {
+        const prevIndex = prev - 1;
+        try {
+          if (onControlRoom) onControlRoom(prevIndex, true);
+        } catch (_) {}
+        setBoardSelectedOption(null);
+        setBoardAnswerResult(null);
+        setCongratsMessage('');
+        return prevIndex;
+      }
+      return prev;
+    });
   };
+
+  // Keyboard navigation & wireless presenter clicker support for TV presentation
+  useEffect(() => {
+    if (activeMode !== 'presentation') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        e.preventDefault();
+        handleNextQuestion();
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        handlePrevQuestion();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeMode, activeIndex, questions.length]);
 
   // Trình Chiếu & Gọi Học Sinh Lên Bảng Handlers
   const handleBoardOptionClick = (key: string) => {
@@ -853,6 +903,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     try {
       localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
     } catch (_) {}
+    setLocalActiveIndex(0);
     onControlRoom(0, true);
     setActiveMode('presentation');
     setBoardSelectedOption(null);
@@ -2407,6 +2458,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       <button
                         key={q.id || idx}
                         onClick={() => {
+                          setLocalActiveIndex(idx);
                           onControlRoom(idx, true);
                           setBoardSelectedOption(null);
                           setBoardAnswerResult(null);

@@ -46,6 +46,7 @@ interface PDFCanvasViewerProps {
   isAnnotating?: boolean;
   onToggleAnnotating?: () => void;
   onFullscreenRequest?: () => void;
+  onOpenFile?: () => void;
 }
 
 export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
@@ -58,6 +59,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   isAnnotating: propIsAnnotating,
   onToggleAnnotating,
   onFullscreenRequest,
+  onOpenFile,
 }) => {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -200,24 +202,34 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
       try {
         let loadingTask: any;
         let doc: any = null;
+        let pdfBytes: Uint8Array | null = null;
+
+        // 1. Convert data URL or fetch blob / http URL to ArrayBuffer in main thread
         try {
-          if (fileUrl.startsWith('data:application/pdf;base64,')) {
-            const base64 = fileUrl.replace('data:application/pdf;base64,', '');
-            const binaryStr = window.atob(base64);
+          if (fileUrl.startsWith('data:')) {
+            const base64Data = fileUrl.includes(',') ? fileUrl.split(',')[1] : fileUrl;
+            const binaryStr = window.atob(base64Data.replace(/\s+/g, ''));
             const len = binaryStr.length;
             const bytes = new Uint8Array(len);
             for (let i = 0; i < len; i++) {
               bytes[i] = binaryStr.charCodeAt(i);
             }
-            loadingTask = pdfjsLib.getDocument({ data: bytes });
-          } else {
-            loadingTask = pdfjsLib.getDocument(fileUrl);
+            pdfBytes = bytes;
+          } else if (!fileUrl.startsWith('firestore://')) {
+            const res = await fetch(fileUrl);
+            if (res.ok) {
+              const arrayBuffer = await res.arrayBuffer();
+              pdfBytes = new Uint8Array(arrayBuffer);
+            }
           }
-          doc = await loadingTask.promise;
-        } catch (firstErr) {
-          // Fallback: Check local IndexedDB or Firestore if URL failed
+        } catch (fetchErr) {
+          console.warn('Main-thread PDF fetch notice, trying cloud storage fallback:', fetchErr);
+        }
+
+        // 2. Fallback: Check local IndexedDB or Firestore if URL failed or was firestore://
+        if (!pdfBytes) {
           const targetId = lessonId || (() => {
-            const docIdMatch = fileUrl.match(/\/uploads\/(lesson_\d+)_/) || fileUrl.match(/(lesson_\d+)/);
+            const docIdMatch = fileUrl.match(/\/uploads\/(lesson_\d+|doc_\d+)_/) || fileUrl.match(/(lesson_\d+|doc_\d+)/);
             return docIdMatch ? docIdMatch[1] : '';
           })();
 
@@ -227,16 +239,23 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
               const fileData = await fetchFileFromCloudStore(targetId);
               if (fileData?.blob) {
                 const arrayBuffer = await fileData.blob.arrayBuffer();
-                const bytes = new Uint8Array(arrayBuffer);
-                loadingTask = pdfjsLib.getDocument({ data: bytes });
-                doc = await loadingTask.promise;
+                pdfBytes = new Uint8Array(arrayBuffer);
               }
             } catch (_) {}
           }
-          if (!doc) {
-            throw firstErr;
-          }
         }
+
+        if (!pdfBytes || pdfBytes.length === 0) {
+          throw new Error('Không thể tải dữ liệu tệp PDF từ bộ nhớ hoặc máy chủ.');
+        }
+
+        // Pass bytes directly so the worker never has cross-origin network fetch issues
+        loadingTask = pdfjsLib.getDocument({
+          data: pdfBytes,
+          cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/cmaps/`,
+          cMapPacked: true,
+        });
+        doc = await loadingTask.promise;
 
         if (!isMounted) return;
         setPdfDoc(doc);
@@ -421,33 +440,69 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
 
   if (error || !pdfDoc) {
     return (
-      <div className="flex-1 w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-4 bg-slate-950 text-white">
-        <div className="p-4 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/30 max-w-md">
-          <AlertCircle className="w-10 h-10 mx-auto mb-2 text-amber-400" />
-          <h4 className="text-base font-black">Xem trước tài liệu: {title}</h4>
-          <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-            {error || 'Không thể kết xuất trang PDF trực tiếp. Thầy/Cô có thể mở trong tab mới hoặc tải về máy.'}
-          </p>
-          <div className="flex items-center justify-center gap-3 mt-4">
-            <a
-              href={fileUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Mở Tab Mới
-            </a>
-            <a
-              href={fileUrl}
-              download={`${title}.pdf`}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1.5 border border-slate-700"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Tải Xuống
-            </a>
+      <div className="flex-1 w-full h-full flex flex-col bg-slate-950 text-white relative">
+        <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-xs shrink-0 z-20">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-200 truncate max-w-xs">{title}</span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold">
+              PDF
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {onOpenFile && (
+              <button
+                onClick={onOpenFile}
+                className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1 text-xs cursor-pointer shadow-xs"
+              >
+                Mở Tệp Khác
+              </button>
+            )}
+            {fileUrl && (
+              <a
+                href={fileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-1 text-xs shadow-xs"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Mở Tab Mới
+              </a>
+            )}
+            {fileUrl && (
+              <a
+                href={fileUrl}
+                download={`${title}.pdf`}
+                className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold flex items-center gap-1 text-xs border border-slate-700 shadow-xs"
+              >
+                <Download className="w-3 h-3" />
+                Tải Về
+              </a>
+            )}
           </div>
         </div>
+        {fileUrl ? (
+          <iframe
+            src={fileUrl}
+            className="w-full flex-1 border-0 bg-white"
+            title={title}
+          />
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
+            <AlertCircle className="w-12 h-12 text-amber-400 mx-auto" />
+            <h4 className="text-base font-bold text-white">Chưa có tệp PDF để hiển thị</h4>
+            <p className="text-xs text-slate-400 max-w-sm">
+              {error || 'Vui lòng chọn hoặc tải lên tệp PDF từ máy tính hoặc USB.'}
+            </p>
+            {onOpenFile && (
+              <button
+                onClick={onOpenFile}
+                className="mt-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs"
+              >
+                Chọn Tệp PDF Ngay
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -468,6 +523,15 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
           <span className="text-[11px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-bold hidden sm:inline shrink-0">
             {numPages} trang
           </span>
+          {onOpenFile && (
+            <button
+              onClick={onOpenFile}
+              className="ml-2 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer shadow-xs"
+              title="Mở tài liệu khác"
+            >
+              Mở Tệp Khác
+            </button>
+          )}
         </div>
 
         {/* Zoom & View Controls */}

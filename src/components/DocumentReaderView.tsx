@@ -530,6 +530,7 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
             onLaunchSlides={onLaunchSlides}
             onLaunchQuiz={onLaunchQuiz}
             onOpenFile={() => setShowOpenFileModal(true)}
+            onOpenTemporaryLesson={onOpenTemporaryLesson}
           />
         </div>
       )}

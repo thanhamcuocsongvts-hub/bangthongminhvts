@@ -195,11 +195,8 @@ export async function parseUploadedFileToLesson(
     }
   })();
 
-  // Race fast upload for up to 2500ms so cross-device sync gets the authentic cloud URL
-  await Promise.race([
-    rawUploadPromise,
-    new Promise((resolve) => setTimeout(resolve, 2500)),
-  ]);
+  // Cloud sync runs in background without blocking instant local rendering
+  rawUploadPromise.catch((e) => console.warn('Background cloud sync notice:', e));
 
   // Microsoft Office Web Viewer requires a public URL, but tmpfiles is unreliable.
   // We will now rely on our robust internal DocumentViewer for all offline rendering.

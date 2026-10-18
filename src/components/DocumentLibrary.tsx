@@ -208,22 +208,31 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       : (activeTeacher?.subject || 'Toán học');
 
     const docId = 'doc_' + Date.now();
-    const cloudFileUrl = `firestore://files/${docId}`;
+    const localBlobUrl = URL.createObjectURL(file);
 
-    // 2. Create Intact LessonDoc immediately (0.05s) - NO heavy blocking parsing
+    let normalizedType: 'pdf' | 'docx' | 'image' | 'xlsx' | 'pptx' | 'text' | 'other' = 'other';
+    if (ext === 'pdf') normalizedType = 'pdf';
+    else if (ext === 'docx' || ext === 'doc') normalizedType = 'docx';
+    else if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') normalizedType = 'xlsx';
+    else if (ext === 'pptx' || ext === 'ppt') normalizedType = 'pptx';
+    else if (['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg'].includes(ext)) normalizedType = 'image';
+    else if (ext === 'txt' || ext === 'json' || ext === 'md') normalizedType = 'text';
+
+    // 2. Create Intact LessonDoc immediately (0.05s) - with instant localBlobUrl
     const newDoc: LessonDoc = {
       id: docId,
       title: cleanTitle,
       fileName: file.name,
-      fileType: ext as any,
+      fileType: normalizedType,
       fileSize: sizeFormatted,
-      fileUrl: cloudFileUrl,
+      fileUrl: localBlobUrl,
+      localBlobUrl,
       subject: guessedSubject,
       grade: 'Lớp 12',
       author: activeTeacher?.name || 'Giáo viên',
       lastModified: new Date().toISOString(),
       syncedToCloud: true,
-      rawText: `Tài liệu nguyên vẹn: ${file.name} (${sizeFormatted})\nĐã sẵn sàng trình chiếu và mở trực tiếp trên bảng tương tác.`,
+      rawText: `Tài liệu: ${file.name} (${sizeFormatted})\nĐã sẵn sàng trình chiếu và mở trực tiếp trên bảng tương tác.`,
       quizzes: [],
       slides: [
         {

@@ -101,6 +101,7 @@ interface PPTXViewerProps {
   title?: string;
   onFullscreen?: () => void;
   onClose?: () => void;
+  onOpenFile?: () => void;
 }
 
 export const PPTXViewer: React.FC<PPTXViewerProps> = ({
@@ -109,6 +110,7 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
   title = 'Bài thuyết trình PowerPoint',
   onFullscreen,
   onClose,
+  onOpenFile,
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingStatus, setLoadingStatus] = useState<string>('Đang nạp bài giảng PowerPoint...');
@@ -183,16 +185,18 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
 
         // Fetch ArrayBuffer with multi-tier fallback
         setLoadingStatus('Đang tải tệp trình chiếu...');
-        try {
-          const response = await fetch(targetUrl);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          arrayBuffer = await response.arrayBuffer();
-        } catch (fetchErr) {
-          // Tier 2: Try localBlobUrl
+        if (!targetUrl.startsWith('firestore://')) {
+          try {
+            const response = await fetch(targetUrl);
+            if (response.ok) {
+              arrayBuffer = await response.arrayBuffer();
+            }
+          } catch (_) {}
+        }
+        // Tier 2: Try localBlobUrl
+        if (!arrayBuffer) {
           const blobUrl = (lesson as any)?.localBlobUrl;
-          if (blobUrl && blobUrl !== targetUrl) {
+          if (blobUrl && blobUrl !== targetUrl && !blobUrl.startsWith('firestore://')) {
             try {
               const resBlob = await fetch(blobUrl);
               if (resBlob.ok) {
@@ -200,19 +204,19 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
               }
             } catch (_) {}
           }
-          // Tier 3: Try IndexedDB / Cloud
-          if (!arrayBuffer && lesson?.id) {
-            try {
-              const { fetchFileFromCloudStore } = await import('../utils/storageUtils');
-              const fileData = await fetchFileFromCloudStore(lesson.id);
-              if (fileData?.blob) {
-                arrayBuffer = await fileData.blob.arrayBuffer();
-              }
-            } catch (_) {}
-          }
-          if (!arrayBuffer) {
-            throw new Error(`Không thể nạp tệp từ máy chủ (${fetchErr instanceof Error ? fetchErr.message : 'Lỗi kết nối'})`);
-          }
+        }
+        // Tier 3: Try IndexedDB / Cloud
+        if (!arrayBuffer && lesson?.id) {
+          try {
+            const { fetchFileFromCloudStore } = await import('../utils/storageUtils');
+            const fileData = await fetchFileFromCloudStore(lesson.id);
+            if (fileData?.blob) {
+              arrayBuffer = await fileData.blob.arrayBuffer();
+            }
+          } catch (_) {}
+        }
+        if (!arrayBuffer) {
+          throw new Error('Không thể nạp tệp trình chiếu từ bộ nhớ hoặc máy chủ.');
         }
 
         if (isCancelled) return;
@@ -1045,6 +1049,18 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
             {renderEngine === 'pptx-preview' ? 'Bản Gốc PPTX' : 'SmartDeck 4K'}
           </span>
         </button>
+
+        {/* Open other file button */}
+        {onOpenFile && (
+          <button
+            onClick={onOpenFile}
+            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+            title="Mở tài liệu hoặc slide khác từ máy tính / USB"
+          >
+            <FileUp className="w-4 h-4" />
+            <span className="hidden sm:inline">Mở File Khác</span>
+          </button>
+        )}
 
         {/* Download original PPTX */}
         {lesson && (

@@ -150,16 +150,18 @@ export const DocxViewer: React.FC<DocxViewerProps> = ({
         } else {
           // Fetch remote or blob URL with resilient multi-tier fallback
           setLoadingStatus('Đang tải tệp Word...');
-          try {
-            const response = await fetch(targetUrl);
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}`);
-            }
-            arrayBuffer = await response.arrayBuffer();
-          } catch (fetchErr) {
-            // Tier 2: Try localBlobUrl
+          if (!targetUrl.startsWith('firestore://')) {
+            try {
+              const response = await fetch(targetUrl);
+              if (response.ok) {
+                arrayBuffer = await response.arrayBuffer();
+              }
+            } catch (_) {}
+          }
+          // Tier 2: Try localBlobUrl
+          if (!arrayBuffer) {
             const blobUrl = (lesson as any).localBlobUrl;
-            if (blobUrl && blobUrl !== targetUrl) {
+            if (blobUrl && blobUrl !== targetUrl && !blobUrl.startsWith('firestore://')) {
               try {
                 const resBlob = await fetch(blobUrl);
                 if (resBlob.ok) {
@@ -167,19 +169,19 @@ export const DocxViewer: React.FC<DocxViewerProps> = ({
                 }
               } catch (_) {}
             }
-            // Tier 3: Try IndexedDB / Cloud storage
-            if (!arrayBuffer && lesson.id) {
-              try {
-                const { fetchFileFromCloudStore } = await import('../utils/storageUtils');
-                const fileData = await fetchFileFromCloudStore(lesson.id);
-                if (fileData?.blob) {
-                  arrayBuffer = await fileData.blob.arrayBuffer();
-                }
-              } catch (_) {}
-            }
-            if (!arrayBuffer) {
-              throw fetchErr;
-            }
+          }
+          // Tier 3: Try IndexedDB / Cloud storage
+          if (!arrayBuffer && lesson.id) {
+            try {
+              const { fetchFileFromCloudStore } = await import('../utils/storageUtils');
+              const fileData = await fetchFileFromCloudStore(lesson.id);
+              if (fileData?.blob) {
+                arrayBuffer = await fileData.blob.arrayBuffer();
+              }
+            } catch (_) {}
+          }
+          if (!arrayBuffer) {
+            throw new Error('Không thể tải dữ liệu tệp Word.');
           }
         }
 

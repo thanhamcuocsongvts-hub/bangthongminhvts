@@ -3,11 +3,11 @@ import {
   X, ZoomIn, ZoomOut, Search, Info,
   FileText, ChevronRight, Download, MonitorPlay,
   Share2, Maximize, FileSpreadsheet, RotateCw, Layers, Pen, Check, Copy, ExternalLink, Table,
-  FolderOpen, ChevronDown
+  FolderOpen, ChevronDown, Upload, FileUp, Sparkles, BookOpen, AlertCircle, Loader2
 } from 'lucide-react';
 import { LessonDoc } from '../types';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
-import { cleanDocumentText } from '../utils/fileParser';
+import { cleanDocumentText, parseUploadedFileToLesson } from '../utils/fileParser';
 import { PDFCanvasViewer } from './PDFCanvasViewer';
 import { PPTXViewer } from './PPTXViewer';
 import { DocxViewer } from './DocxViewer';
@@ -25,6 +25,7 @@ interface UniversalDocumentViewerProps {
   onToggleAnnotating?: () => void;
   onFullscreenRequest?: () => void;
   onOpenFile?: () => void;
+  onOpenTemporaryLesson?: (lesson: LessonDoc) => void;
 }
 
 export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = ({
@@ -37,27 +38,79 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
   onToggleAnnotating,
   onFullscreenRequest,
   onOpenFile,
+  onOpenTemporaryLesson,
 }) => {
+  const fileType = lesson.fileType || 'other';
+  const ext = (lesson.fileName || '').split('.').pop()?.toLowerCase() || '';
+  const isDocx = fileType === 'docx' || ext === 'docx' || ext === 'doc';
+  const isPptx = fileType === 'pptx' || ext === 'pptx' || ext === 'ppt';
+  const isExcel = fileType === 'xlsx' || ext === 'xlsx' || ext === 'xls' || ext === 'csv';
+  const isPdf = fileType === 'pdf' || ext === 'pdf';
+  const isImage = fileType === 'image' || ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg'].includes(ext);
+
   const [zoom, setZoom] = useState<number>(initialZoom);
   const [showZoomMenu, setShowZoomMenu] = useState<boolean>(false);
   const [isPinching, setIsPinching] = useState<boolean>(false);
   const [rotation, setRotation] = useState<number>(0);
   const [invertColors, setInvertColors] = useState<boolean>(false);
+  const [isParsingFile, setIsParsingFile] = useState<boolean>(false);
+  const [isDragOver, setIsDragOver] = useState<boolean>(false);
+  const internalFileInputRef = useRef<HTMLInputElement>(null);
   const [activeFileUrl, setActiveFileUrl] = useState<string>(
     lesson.fileUrl || (lesson as any).localBlobUrl || ''
   );
+
+  const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsParsingFile(true);
+      const newLesson = await parseUploadedFileToLesson(file);
+      if (onOpenTemporaryLesson) {
+        onOpenTemporaryLesson(newLesson);
+      } else if (onOpenFile) {
+        onOpenFile();
+      }
+    } catch (err: any) {
+      alert('Không thể mở tệp: ' + (err.message || 'Kiểm tra lại định dạng tệp'));
+    } finally {
+      setIsParsingFile(false);
+      if (internalFileInputRef.current) internalFileInputRef.current.value = '';
+    }
+  };
+
+  const handleFileDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    try {
+      setIsParsingFile(true);
+      const newLesson = await parseUploadedFileToLesson(file);
+      if (onOpenTemporaryLesson) {
+        onOpenTemporaryLesson(newLesson);
+      } else if (onOpenFile) {
+        onOpenFile();
+      }
+    } catch (err: any) {
+      alert('Không thể mở tệp: ' + (err.message || 'Kiểm tra lại định dạng tệp'));
+    } finally {
+      setIsParsingFile(false);
+    }
+  };
 
   // Synchronize and verify file accessibility, falling back to local IndexedDB/Firestore
   React.useEffect(() => {
     let isMounted = true;
     const initial = lesson.fileUrl || (lesson as any).localBlobUrl || '';
-    if (initial) {
+    if (initial && !initial.startsWith('firestore://')) {
       setActiveFileUrl(initial);
     }
 
     async function ensureAccessibleFile() {
-      // If no file URL or it's a server URL that might not be on disk yet, check IndexedDB
-      if (!initial || initial.startsWith('/uploads/')) {
+      // If no file URL or it's a server URL that might not be on disk yet, or firestore:// scheme, check IndexedDB
+      if (!initial || initial.startsWith('/uploads/') || initial.startsWith('firestore://')) {
         try {
           const cloudData = await fetchFileFromCloudStore(lesson.id);
           if (cloudData?.blob && isMounted) {
@@ -85,14 +138,13 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
 
   // If Excel and missing sheetData (e.g. from localStorage restoration), dynamically parse with XLSX
   React.useEffect(() => {
-    const isExcel = fileType === 'xlsx' || ext === 'xlsx' || ext === 'xls' || ext === 'csv';
     if (isExcel && (!dynamicSheetData || !dynamicSheetData.sheets)) {
       let cancelled = false;
       async function parseExcelBuffer() {
         try {
           let buf: ArrayBuffer | null = null;
           const url = activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl;
-          if (url) {
+          if (url && !url.startsWith('firestore://')) {
             try {
               const res = await fetch(url);
               if (res.ok) buf = await res.arrayBuffer();
@@ -127,7 +179,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
       parseExcelBuffer();
       return () => { cancelled = true; };
     }
-  }, [fileType, ext, activeFileUrl, lesson.fileUrl, lesson.id, dynamicSheetData]);
+  }, [isExcel, activeFileUrl, lesson.fileUrl, lesson.id, dynamicSheetData]);
   const [tableSearch, setTableSearch] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg' | 'xl'>('md');
@@ -177,17 +229,12 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
     }
   };
 
-  const fileType = lesson.fileType || 'other';
-  const ext = (lesson.fileName || '').split('.').pop()?.toLowerCase() || '';
-  const isDocx = fileType === 'docx' || ext === 'docx' || ext === 'doc';
-  const isPptx = fileType === 'pptx' || ext === 'pptx' || ext === 'ppt';
-
   // Excel Sheet processing
   const currentSheetRows = useMemo(() => {
     const sheetSource = dynamicSheetData || lesson.sheetData;
     if (!sheetSource?.sheets) {
       // Fallback: parse rawText as lines
-      if (fileType === 'xlsx' && lesson.rawText) {
+      if (isExcel && lesson.rawText) {
         return lesson.rawText
           .split('\n')
           .filter((line) => line.trim().length > 0)
@@ -203,7 +250,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
       if (idx === 0) return true; // Keep header
       return row.some((cell) => String(cell || '').toLowerCase().includes(term));
     });
-  }, [dynamicSheetData, lesson.sheetData, lesson.rawText, selectedSheet, tableSearch, fileType]);
+  }, [dynamicSheetData, lesson.sheetData, lesson.rawText, selectedSheet, tableSearch, isExcel]);
 
   const handleCopyText = () => {
     navigator.clipboard.writeText(lesson.rawText || '');
@@ -247,6 +294,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         lesson={lesson}
         title={lesson.title}
         onFullscreen={onFullscreenRequest}
+        onOpenFile={onOpenFile}
       />
     );
   }
@@ -517,18 +565,18 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         {/* ========================================================= */}
         {/* 1. EXCEL SPREADSHEET VIEWER (.XLSX, .XLS, .CSV)            */}
         {/* ========================================================= */}
-        {fileType === 'xlsx' && (
+        {isExcel && (
           <div className="flex-1 flex flex-col w-full h-full overflow-hidden bg-slate-900 text-slate-100">
             {/* Sheet Tabs & Search Bar */}
             <div className="px-4 py-2 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
               {/* Sheet selector tabs */}
               <div className="flex items-center gap-1.5 overflow-x-auto">
                 <span className="text-[11px] font-bold text-slate-400 uppercase mr-1">Trang tính:</span>
-                {(lesson.sheetData?.sheetNames || ['Sheet1']).map((sName) => (
+                {(dynamicSheetData?.sheetNames || lesson.sheetData?.sheetNames || ['Sheet1']).map((sName) => (
                   <button
                     key={sName}
                     onClick={() => setSelectedSheet(sName)}
-                    className={`px-3 py-1 rounded-lg font-bold text-xs transition-all ${
+                    className={`px-3 py-1 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                       selectedSheet === sName
                         ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
                         : 'bg-white/10 hover:bg-white/20 text-slate-300'
@@ -632,27 +680,10 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
           </div>
         )}
 
-        
-        {/* FALLBACK FOR MISSING FILE URL */}
-        {!(activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) && (
-          <div className="flex-1 w-full h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-slate-900/40">
-            <div className="w-20 h-20 bg-rose-500/20 text-rose-400 rounded-full flex items-center justify-center mb-6">
-              <FileText className="w-10 h-10" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-200 mb-2">Không tìm thấy nội dung tệp gốc</h3>
-            <p className="max-w-md text-sm text-slate-400">
-              Tệp tài liệu này (định dạng {fileType.toUpperCase()}) được tải lên từ một thiết bị khác. Do giới hạn của bộ nhớ đám mây nội bộ, tệp dung lượng lớn chỉ lưu cục bộ trên máy đã tải lên.
-            </p>
-            <p className="max-w-md text-sm text-slate-400 mt-2">
-              Vui lòng xóa tệp này và <b>tải lên lại từ thiết bị hiện tại</b> để tiếp tục trình chiếu.
-            </p>
-          </div>
-        )}
-
         {/* ========================================================= */}
         {/* 2. IMAGE VIEWER (JPG, PNG, WEBP, SVG)                     */}
         {/* ========================================================= */}
-        {fileType === 'image' && (activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) && (
+        {isImage && (activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) && (
           <div className="flex-1 w-full h-full flex items-center justify-center p-4 overflow-auto">
             <div
               style={{
@@ -685,7 +716,7 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
         {/* ========================================================= */}
         {/* 3. PDF VIEWER (.PDF) - HIGH FIDELITY CANVAS RENDERING      */}
         {/* ========================================================= */}
-        {fileType === 'pdf' && (activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) && (
+        {isPdf && (activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) && (
           <PDFCanvasViewer
             fileUrl={activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl}
             title={lesson.title}
@@ -696,12 +727,14 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
             isAnnotating={effectiveAnnotating}
             onToggleAnnotating={toggleAnnotating}
             onFullscreenRequest={onFullscreenRequest}
+            onOpenFile={onOpenFile}
           />
         )}
 
-        {/* 4. PLAIN TEXT / CODE / OTHER FALLBACK                     */}
         {/* ========================================================= */}
-        {(fileType === 'text' || fileType === 'other') && (
+        {/* 4. PLAIN TEXT / CODE / OTHER FALLBACK (WHEN HAS TEXT)      */}
+        {/* ========================================================= */}
+        {!isExcel && !isPdf && !isImage && cleanDocumentText(lesson.rawText) && lesson.id !== 'empty_lesson' && (
           <div className="flex-1 w-full h-full overflow-y-auto p-4 md:p-8 flex justify-center bg-slate-950">
             <div
               className={`w-full max-w-4xl bg-slate-900 text-slate-200 rounded-2xl p-6 md:p-8 shadow-2xl border border-slate-800 font-mono leading-relaxed ${fontSizeClasses[fontSize]}`}
@@ -713,12 +746,150 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
                 <span className="text-xs text-slate-500">{lesson.fileSize || 'Text'}</span>
               </div>
               <div className="whitespace-pre-line font-sans text-slate-300">
-                {cleanDocumentText(lesson.rawText) || (
-                  <div className="p-8 text-center text-slate-500">
-                    <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>Chưa có nội dung văn bản cho tài liệu này.</p>
-                  </div>
+                <MathFormulaRenderer content={cleanDocumentText(lesson.rawText)} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* 5. TRUNG TÂM MỞ & ĐỌC TÀI LIỆU (PDF, WORD, EXCEL, POWERPOINT, ẢNH)        */}
+        {/* ========================================================================= */}
+        {(!(activeFileUrl || lesson.fileUrl || (lesson as any).localBlobUrl) || lesson.id === 'empty_lesson' || (!isExcel && !isPdf && !isImage && !cleanDocumentText(lesson.rawText))) && (
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragOver(false);
+            }}
+            onDrop={handleFileDrop}
+            className={`flex-1 w-full h-full flex flex-col items-center justify-center p-6 md:p-12 text-center transition-all ${
+              isDragOver ? 'bg-blue-950/60 ring-4 ring-blue-500 ring-inset' : 'bg-slate-950/90'
+            }`}
+          >
+            <input
+              ref={internalFileInputRef}
+              type="file"
+              accept=".docx,.doc,.pdf,.pptx,.ppt,.xlsx,.xls,.csv,image/*"
+              onChange={handleQuickUpload}
+              className="hidden"
+            />
+
+            <div className="max-w-2xl w-full bg-slate-900 border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-3xl p-8 shadow-2xl transition-all space-y-6">
+              {/* Header Icon */}
+              <div className="flex items-center justify-center gap-3">
+                <div className="w-16 h-16 rounded-2xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center shadow-inner">
+                  {isParsingFile ? (
+                    <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+                  ) : (
+                    <FolderOpen className="w-8 h-8 text-blue-400" />
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-xl md:text-2xl font-black text-white">
+                  {isParsingFile ? 'Đang đọc và nạp tài liệu...' : 'Trung Tâm Đọc Tài Liệu Giảng Dạy'}
+                </h3>
+                <p className="text-sm text-slate-400 mt-2 max-w-lg mx-auto">
+                  Hỗ trợ 100% định dạng giáo án và bài giảng: <b>PDF, Word (.docx/.doc), Excel (.xlsx), PowerPoint (.pptx/.ppt), Hình ảnh</b>
+                </p>
+              </div>
+
+              {/* Main Action Button */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isParsingFile}
+                  onClick={() => internalFileInputRef.current?.click()}
+                  className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-sm flex items-center justify-center gap-2.5 shadow-xl shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>Chọn Tệp Từ Máy Tính / USB</span>
+                </button>
+
+                {onOpenFile && (
+                  <button
+                    type="button"
+                    onClick={onOpenFile}
+                    className="w-full sm:w-auto px-5 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm flex items-center justify-center gap-2 border border-slate-700 cursor-pointer transition-all"
+                  >
+                    <BookOpen className="w-4 h-4 text-amber-400" />
+                    <span>Mở Kho Bài Giảng Có Sẵn</span>
+                  </button>
                 )}
+              </div>
+
+              <div className="text-xs text-slate-500 font-medium">
+                💡 Hoặc kéo & thả trực tiếp bất kỳ tệp tài liệu nào vào khung này để đọc ngay
+              </div>
+
+              {/* Supported Format Grid Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-4 border-t border-slate-800/80 text-left">
+                {/* 1. PDF */}
+                <div
+                  onClick={() => internalFileInputRef.current?.click()}
+                  className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700 hover:border-red-500/50 transition-all cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center font-bold text-xs mb-2 group-hover:scale-110 transition-transform">
+                    PDF
+                  </div>
+                  <div className="text-xs font-bold text-slate-200">Tệp PDF</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Lật trang, cuộn mượt, AI đọc</div>
+                </div>
+
+                {/* 2. Word */}
+                <div
+                  onClick={() => internalFileInputRef.current?.click()}
+                  className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700 hover:border-blue-500/50 transition-all cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xs mb-2 group-hover:scale-110 transition-transform">
+                    DOC
+                  </div>
+                  <div className="text-xs font-bold text-slate-200">Tệp Word</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">A4 chuẩn, MathType, KaTeX</div>
+                </div>
+
+                {/* 3. Excel */}
+                <div
+                  onClick={() => internalFileInputRef.current?.click()}
+                  className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/50 transition-all cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs mb-2 group-hover:scale-110 transition-transform">
+                    XLS
+                  </div>
+                  <div className="text-xs font-bold text-slate-200">Tệp Excel</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Mọi Sheet, lọc tìm kiếm</div>
+                </div>
+
+                {/* 4. PowerPoint */}
+                <div
+                  onClick={() => internalFileInputRef.current?.click()}
+                  className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700 hover:border-orange-500/50 transition-all cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-orange-500/20 text-orange-400 flex items-center justify-center font-bold text-xs mb-2 group-hover:scale-110 transition-transform">
+                    PPT
+                  </div>
+                  <div className="text-xs font-bold text-slate-200">PowerPoint</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Chiếu 4K, hiệu ứng, bút vẽ</div>
+                </div>
+
+                {/* 5. Images */}
+                <div
+                  onClick={() => internalFileInputRef.current?.click()}
+                  className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700 hover:border-purple-500/50 transition-all cursor-pointer group col-span-2 sm:col-span-1"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-xs mb-2 group-hover:scale-110 transition-transform">
+                    IMG
+                  </div>
+                  <div className="text-xs font-bold text-slate-200">Hình Ảnh</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Phóng 300%, xoay, đảo màu</div>
+                </div>
               </div>
             </div>
           </div>

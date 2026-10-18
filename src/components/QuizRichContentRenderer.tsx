@@ -42,7 +42,7 @@ export interface QuizDiagramData {
     slant?: { a: number; b: number };
   };
   // Spatial Geometry
-  shape?: 'pyramid' | 'prism' | 'cone' | 'cylinder' | 'cube';
+  shape?: 'pyramid' | 'pyramid_triangular' | 'pyramid_quad' | 'prism' | 'cone' | 'cylinder' | 'cube' | 'cuboid' | 'sphere' | string;
   // Physics Circuit
   circuitType?: 'rlc_series' | 'parallel' | 'pendulum';
   conditions?: string;
