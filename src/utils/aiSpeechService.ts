@@ -844,7 +844,9 @@ export function expandStemFormulasAndTerms(text: string): string {
   s = s.replace(/\\mathbb\{Z\}|ℤ/g, ' tập hợp số nguyên Z ');
   s = s.replace(/\\mathbb\{Q\}|ℚ/g, ' tập hợp số hữu tỉ Q ');
   s = s.replace(/\\mathbb\{C\}|ℂ/g, ' tập hợp số phức C ');
-  s = s.replace(/\\mathbb\{R\}|ℝ|\bIR\b/g, ' tập hợp số thực e-rờ ');
+  s = s.replace(/\\mathbb\{R\}\s*\\setminus\s*\\?\{([^}]+)\}/g, ' tập R hiệu $1 ');
+  s = s.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{R\}|ℝ|\bIR\b)/g, ' x thuộc tập R ');
+  s = s.replace(/\\mathbb\{R\}|ℝ|\bIR\b/g, ' tập R ');
 
   // ===== 2. HÓA HỌC: CÔNG THỨC CHẤT, ION, ĐƠN VỊ & PHẢN ỨNG =====
   s = s.replace(/\bH_?2SO_?4\b/g, ' H hai S O bốn ');
@@ -1061,38 +1063,67 @@ export function cleanMathForVietnameseTTS(text: string, isEnglishSubject: boolea
   // Tiền xử lý ký hiệu STEM chuyên sâu (Toán, Lý, Hóa, Sinh, Tin học)
   let s = expandStemFormulasAndTerms(text);
 
-  // 1. Dịch các ký hiệu hàm số và đạo hàm chuẩn SGK GDPT 2018:
-  // y = f(x) -> "y bằng ép ích"
-  s = s.replace(/y\s*=\s*f\s*\(\s*x\s*\)/gi, ' y bằng ép ích ');
-  // f'(x) -> "ép phẩy ích"
-  s = s.replace(/f\s*'\s*\(\s*x\s*\)/gi, ' ép phẩy ích ');
-  // f(x) -> "ép ích"
-  s = s.replace(/f\s*\(\s*x\s*\)/gi, ' ép ích ');
-  // y' -> "y phẩy"
+  // 1. Dịch ký hiệu hàm số và đạo hàm đọc từng chữ chuẩn sư phạm:
+  // f(x) -> "f x", f(x) = -> "f x bằng", y = f(x) -> "y bằng f x", f'(x) -> "f phẩy x"
+  s = s.replace(/y\s*=\s*f\s*\(\s*x\s*\)/gi, ' y bằng f x ');
+  s = s.replace(/f\s*\(\s*x\s*\)\s*=\s*/gi, ' f x bằng ');
+  s = s.replace(/f\s*'\s*'\s*'\s*\(\s*x\s*\)/gi, ' f ba phẩy x ');
+  s = s.replace(/f\s*'\s*'\s*\(\s*x\s*\)/gi, ' f hai phẩy x ');
+  s = s.replace(/f\s*'\s*\(\s*x\s*\)/gi, ' f phẩy x ');
+  s = s.replace(/f\s*\(\s*x\s*\)/gi, ' f x ');
+  s = s.replace(/g\s*\(\s*x\s*\)\s*=\s*/gi, ' g x bằng ');
+  s = s.replace(/g\s*'\s*\(\s*x\s*\)/gi, ' g phẩy x ');
+  s = s.replace(/g\s*\(\s*x\s*\)/gi, ' g x ');
+  s = s.replace(/h\s*\(\s*x\s*\)\s*=\s*/gi, ' h x bằng ');
+  s = s.replace(/h\s*'\s*\(\s*x\s*\)/gi, ' h phẩy x ');
+  s = s.replace(/h\s*\(\s*x\s*\)/gi, ' h x ');
+  s = s.replace(/f\s*'\s*\(\s*t\s*\)/gi, ' f phẩy t ');
+  s = s.replace(/f\s*\(\s*t\s*\)/gi, ' f t ');
+  s = s.replace(/f\s*'\s*\(\s*u\s*\)/gi, ' f phẩy u ');
+  s = s.replace(/f\s*\(\s*u\s*\)/gi, ' f u ');
+  s = s.replace(/\by\s*'\s*'/gi, ' y hai phẩy ');
   s = s.replace(/\by\s*'/gi, ' y phẩy ');
-  // g'(x) -> "gờ phẩy ích", g(x) -> "gờ ích"
-  s = s.replace(/g\s*'\s*\(\s*x\s*\)/gi, ' gờ phẩy ích ');
-  s = s.replace(/g\s*\(\s*x\s*\)/gi, ' gờ ích ');
 
-  // 2. Ký hiệu tập hợp số thực \mathbb{R} hoặc ℝ -> "tập hợp e-rờ"
-  s = s.replace(/\\mathbb\{R\}|ℝ|\bIR\b/g, ' tập hợp e-rờ ');
+  // 2. Ký hiệu tập hợp số thực R: đọc rõ ràng từng chữ là "tập R" hoặc "trên R"
+  s = s.replace(/\\mathbb\{R\}\s*\\setminus\s*\\?\{([^}]+)\}/g, ' tập R hiệu $1 ');
+  s = s.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{R\}|ℝ|\bIR\b)/g, ' x thuộc tập R ');
+  s = s.replace(/\\mathbb\{R\}|ℝ|\bIR\b/g, ' tập R ');
+  s = s.replace(/(^|[\s(;\[])D\s*=\s*R(?=[\s);,\].]|$)/g, '$1D bằng R');
+  s = s.replace(/(^|[\s(;\[])trên\s+R(?=[\s);,\].]|$)/gi, '$1trên R');
+  s = s.replace(/(^|[\s(;\[])thuộc\s+R(?=[\s);,\].]|$)/gi, '$1thuộc R');
+  s = s.replace(/(^|[\s(;\[])tập\s+R(?=[\s);,\].]|$)/gi, '$1tập R');
+  s = s.replace(/(^|[\s(;\[])với\s+mọi\s+x\s+thuộc\s+R(?=[\s);,\].]|$)/gi, '$1với mọi x thuộc R');
 
   // 3. Ký hiệu vô cùng:
-  // Ký hiệu +\infty -> đọc là "dương vô cùng"; -\infty -> đọc là "âm vô cùng"
   s = s.replace(/(?:-\s*\\infty|-\s*∞|-oo)\b/gi, ' âm vô cùng ');
   s = s.replace(/(?:\+\s*\\infty|\+\s*∞|\+oo)\b/gi, ' dương vô cùng ');
   s = s.replace(/(?:\\infty|∞|oo)\b/gi, ' vô cùng ');
 
-  // 4. Khoảng, đoạn, nửa khoảng toán học chuẩn thuật ngữ GDPT 2018
-  // (đặt lên TRƯỚC các quy tắc thay thế dấu ngoặc và dấu chấm phẩy đơn lẻ):
-  // Nửa khoảng [a; b) -> đọc là "nửa khoảng a, b"
-  s = s.replace(/\[\s*([^;()[\]]+?)\s*;\s*([^;()[\]]+?)\s*\)/g, ' nửa khoảng $1, $2 ');
-  // Nửa khoảng (a; b] -> đọc là "nửa khoảng a, b"
-  s = s.replace(/\(\s*([^;()[\]]+?)\s*;\s*([^;()[\]]+?)\s*\]/g, ' nửa khoảng $1, $2 ');
-  // Đoạn [a; b] -> đọc là "đoạn a, b"
-  s = s.replace(/\[\s*([^;()[\]]+?)\s*;\s*([^;()[\]]+?)\s*\]/g, ' đoạn $1, $2 ');
-  // Khoảng (a; b) -> đọc là "khoảng a, b"
-  s = s.replace(/\(\s*([^;()[\]]+?)\s*;\s*([^;()[\]]+?)\s*\)/g, ' khoảng $1, $2 ');
+  // 4. PHÂN BIỆT RÕ RÀNG TỌA ĐỘ ĐIỂM HÌNH HỌC VÀ KHOẢNG ĐƠN ĐIỆU:
+  // 4a. Tọa độ điểm hình học: A(1; 2), B(-1; 3), M(2; -1), I(0; 1), O(0; 0), \vec{u}(1; 2)...
+  s = s.replace(/([A-Z])\s*\(\s*0\s*[;,]\s*0\s*\)/g, ' điểm $1 gốc tọa độ không không ');
+  s = s.replace(/([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' điểm $1 tọa độ $2, $3, $4 ');
+  s = s.replace(/([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' điểm $1 tọa độ $2, $3 ');
+  s = s.replace(/([A-Z])\s*\(\s*([a-zA-Z]\d*)\s*[;,]\s*([a-zA-Z]\d*)\s*\)/g, ' điểm $1 tọa độ $2, $3 ');
+  s = s.replace(/(véc-tơ\s+[a-zA-Z0-9]+|\b\\vec\{?[a-zA-Z0-9]+\}?)\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' $1 tọa độ $2, $3 ');
+  s = s.replace(/(tọa độ|toạ độ|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|điểm cực đại|điểm cực tiểu|điểm cực trị|điểm uốn|tại điểm)\s*(?:là|=)?\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' $1 tọa độ $2, $3 ');
+
+  // 4b. Khoảng trong ngữ cảnh xét tính đơn điệu và giải tích:
+  s = s.replace(/(đồng biến|nghịch biến|đơn điệu|tăng|giảm|liên tục|xét|thuộc)\s+trên\s+(?:khoảng\s+)?\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' $1 trên khoảng từ $2 đến $3 ');
+  s = s.replace(/(khoảng|thuộc khoảng)\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' khoảng từ $2 đến $3 ');
+
+  // 4c. Cặp ngoặc chứa VÔ CÙNG: (-∞; b), (a; +∞), (-∞; +∞) -> luôn là khoảng
+  s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng|-\s*∞)\s*[;,]\s*(?:dương vô cùng|\+\s*vô cùng|\+\s*∞)\s*\)/gi, ' khoảng từ âm vô cùng đến dương vô cùng ');
+  s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng|-\s*∞)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' khoảng từ âm vô cùng đến $1 ');
+  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(?:dương vô cùng|\+\s*vô cùng|\+\s*∞)\s*\)/gi, ' khoảng từ $1 đến dương vô cùng ');
+  s = s.replace(/\[\s*(?:âm vô cùng|-\s*vô cùng|-\s*∞)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\]/gi, ' nửa khoảng từ âm vô cùng đến $1 ');
+  s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(?:dương vô cùng|\+\s*vô cùng|\+\s*∞)\s*\)/gi, ' nửa khoảng từ $1 đến dương vô cùng ');
+
+  // 4d. Đoạn và Nửa khoảng:
+  s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\]/g, ' đoạn từ $1 đến $2 ');
+  s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' nửa khoảng từ $1 đến $2 ');
+  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\]/g, ' nửa khoảng từ $1 đến $2 ');
+  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' khoảng $1, $2 ');
 
   // 5. Phân số \frac{([^}]+)}{([^}]+)} -> "$1 phần $2"
   for (let iter = 0; iter < 5; iter++) {
@@ -1213,27 +1244,30 @@ export function convertDigitsAndMathToVietnamese(raw: string): string {
   s = s.replace(/\+\s*(?:\\phi|\\varphi|φ|ϕ|phi)\b/gi, ' dương vô cùng ');
   s = s.replace(/-\s*(?:\\phi|\\varphi|φ|ϕ|phi)\b/gi, ' âm vô cùng ');
 
-  // 1c. Đọc khoảng và đoạn toán học: (-1; 0) -> khoảng từ trừ một đến không, (-∞; 1) -> khoảng từ âm vô cùng đến một
-  s = s.replace(/[\(\[]\s*(?:âm vô cùng|-\s*vô cùng)\s*;\s*(?:dương vô cùng|\+\s*vô cùng)\s*[\)\]]/gi, 'khoảng từ âm vô cùng đến dương vô cùng');
-  s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, b) => `khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
-  s = s.replace(/\[\s*(?:âm vô cùng|-\s*vô cùng)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, b) => `khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
-  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*;\s*(?:dương vô cùng|\+\s*vô cùng)\s*\)/gi, (_, a) => `khoảng từ ${numberToVietnameseWords(a)} đến dương vô cùng`);
-  s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*;\s*(?:dương vô cùng|\+\s*vô cùng)\s*\)/gi, (_, a) => `nửa khoảng từ ${numberToVietnameseWords(a)} đến dương vô cùng`);
-  s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\]/gi, (_, b) => `nửa khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
-  s = s.replace(/\((-?\d+(?:[.,]\d+)?)\s*;\s*(-?\d+(?:[.,]\d+)?)\)/g, (_, a, b) => `khoảng từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
-  s = s.replace(/\[(-?\d+(?:[.,]\d+)?)\s*;\s*(-?\d+(?:[.,]\d+)?)\]/g, (_, a, b) => `đoạn từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
-  s = s.replace(/\((-?\d+)\s*;\s*([+\-]?\s*vô cùng|dương vô cùng|âm vô cùng)\)/gi, (_, a, b) => `khoảng từ ${numberToVietnameseWords(a)} đến ${b}`);
-  s = s.replace(/\(([+\-]?\s*vô cùng|âm vô cùng)\s*;\s*(-?\d+)\)/gi, (_, a, b) => `khoảng từ ${a} đến ${numberToVietnameseWords(b)}`);
+  // 1c. Tọa độ điểm hình học & vectơ (ƯU TIÊN CAO HƠN KHOẢNG ĐỂ KHÔNG BỊ ĐỌC NHẦM TỌA ĐỘ THÀNH KHOẢNG):
+  s = s.replace(/([A-Z])\s*\(\s*0\s*[;,]\s*0\s*\)/g, 'điểm $1 gốc tọa độ không không');
+  s = s.replace(/([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, (_, pt, xCoord, yCoord, zCoord) => `điểm ${pt} tọa độ ${numberToVietnameseWords(xCoord)}, ${numberToVietnameseWords(yCoord)}, ${numberToVietnameseWords(zCoord)}`);
+  s = s.replace(/([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, (_, pt, xCoord, yCoord) => `điểm ${pt} tọa độ ${numberToVietnameseWords(xCoord)}, ${numberToVietnameseWords(yCoord)}`);
+  s = s.replace(/(tọa độ|toạ độ|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|điểm cực đại|điểm cực tiểu|điểm cực trị|điểm uốn|tại điểm)\s*(?:là|=)?\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, prefix, xCoord, yCoord) => `${prefix} tọa độ ${numberToVietnameseWords(xCoord)}, ${numberToVietnameseWords(yCoord)}`);
+  s = s.replace(/(tọa độ|toạ độ|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm)\s*(?:là|=)?\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, prefix, xCoord, yCoord, zCoord) => `${prefix} tọa độ ${numberToVietnameseWords(xCoord)}, ${numberToVietnameseWords(yCoord)}, ${numberToVietnameseWords(zCoord)}`);
+
+  // 1d. Đọc khoảng và đoạn toán học (ngữ cảnh xét tính đơn điệu, liên tục, hoặc chứa vô cùng):
+  s = s.replace(/[\(\[]\s*(?:âm vô cùng|-\s*vô cùng)\s*[;,]\s*(?:dương vô cùng|\+\s*vô cùng)\s*[\)\]]/gi, 'khoảng từ âm vô cùng đến dương vô cùng');
+  s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, b) => `khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\[\s*(?:âm vô cùng|-\s*vô cùng)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, (_, b) => `khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(?:dương vô cùng|\+\s*vô cùng)\s*\)/gi, (_, a) => `khoảng từ ${numberToVietnameseWords(a)} đến dương vô cùng`);
+  s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(?:dương vô cùng|\+\s*vô cùng)\s*\)/gi, (_, a) => `nửa khoảng từ ${numberToVietnameseWords(a)} đến dương vô cùng`);
+  s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\]/gi, (_, b) => `nửa khoảng từ âm vô cùng đến ${numberToVietnameseWords(b)}`);
+  
+  // Khoảng rõ ràng có từ khóa đơn điệu đứng trước:
+  s = s.replace(/(đồng biến|nghịch biến|đơn điệu|tăng|giảm|liên tục)\s+trên\s+(?:khoảng\s+)?\((-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\)/gi, (_, kw, a, b) => `${kw} trên khoảng từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/(khoảng|thuộc khoảng)\s*\((-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\)/gi, (_, kw, a, b) => `${kw} từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
+  s = s.replace(/\[(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\]/g, (_, a, b) => `đoạn từ ${numberToVietnameseWords(a)} đến ${numberToVietnameseWords(b)}`);
   s = s.replace(/(khoảng|đoạn)\s+(khoảng|đoạn)\s+từ/gi, '$1 từ');
 
   // Xóa triệt để từ "chia cho" vô tình gắn sau Phương án A/B/C/D
   s = s.replace(/(Phương án|Đáp án|Lựa chọn)\s*([A-Da-d])\s*(?:chia cho|chia|\/|:)\s*/gi, '$1 $2, ');
   s = s.replace(/(^|[\n.,;])\s*([A-Da-d])\s*(?:chia cho|chia|\/|:)\s*/gi, '$1 Phương án $2, ');
-
-  // 1d. Tọa độ điểm hình học: A(1; 2), M(x0; y0), O(0; 0)
-  s = s.replace(/([A-Z])\s*\(\s*0\s*;\s*0\s*\)/g, 'điểm $1 gốc tọa độ không không');
-  s = s.replace(/([A-Z])\s*\(\s*(-?\d+)\s*;\s*(-?\d+)\s*\)/g, (_, pt, xCoord, yCoord) => `điểm ${pt} tọa độ ${numberToVietnameseWords(xCoord)}, ${numberToVietnameseWords(yCoord)}`);
-  s = s.replace(/([A-Z])\s*\(\s*(-?\d+)\s*;\s*(-?\d+)\s*;\s*(-?\d+)\s*\)/g, (_, pt, xCoord, yCoord, zCoord) => `điểm ${pt} tọa độ ${numberToVietnameseWords(xCoord)}, ${numberToVietnameseWords(yCoord)}, ${numberToVietnameseWords(zCoord)}`);
 
   // 1e. Hệ trục tọa độ
   s = s.replace(/\bOxyz\b/g, 'hệ tọa độ O x y z');
@@ -1370,7 +1404,7 @@ export function preprocessSpeechText(rawText: string, isEnglishSubject: boolean 
   t = t.replace(/\\text\{([^}]+)\}/g, ' $1 ');
   t = t.replace(/\\mathrm\{([^}]+)\}/g, ' $1 ');
   t = t.replace(/\\mathbf\{([^}]+)\}/g, ' $1 ');
-  t = t.replace(/\\mathbb\{R\}/g, ' tập số thực R ');
+  t = t.replace(/\\mathbb\{R\}/g, ' tập R ');
   t = t.replace(/\\mathbb\{N\}/g, ' tập số tự nhiên N ');
   t = t.replace(/\\mathbb\{Z\}/g, ' tập số nguyên Z ');
   t = t.replace(/\\mathbb\{Q\}/g, ' tập số hữu tỉ Q ');
@@ -1378,14 +1412,17 @@ export function preprocessSpeechText(rawText: string, isEnglishSubject: boolean 
   t = t.replace(/\\left\s*([(\[{|])/g, '$1');
   t = t.replace(/\\right\s*([)\]}|])/g, '$1');
 
-  // 2b. Derivatives & Functions in Vietnamese
-  t = t.replace(/f''\(([a-zA-Z])\)/g, ' đạo hàm cấp hai f hai phẩy của $1 ');
-  t = t.replace(/f'\(([a-zA-Z])\)/g, ' đạo hàm f phẩy của $1 ');
+  // 2b. Derivatives & Functions in Vietnamese: đọc từng chữ rõ ràng chuẩn sư phạm GDPT
+  t = t.replace(/y\s*=\s*f\s*\(\s*x\s*\)/gi, ' y bằng f x ');
+  t = t.replace(/f\s*\(\s*x\s*\)\s*=\s*/gi, ' f x bằng ');
+  t = t.replace(/f'''\s*\(([a-zA-Z])\)/g, ' f ba phẩy $1 ');
+  t = t.replace(/f''\s*\(([a-zA-Z])\)/g, ' f hai phẩy $1 ');
+  t = t.replace(/f'\s*\(([a-zA-Z])\)/g, ' f phẩy $1 ');
   t = t.replace(/\by''\b/g, ' y hai phẩy ');
   t = t.replace(/\by'\b/g, ' y phẩy ');
-  t = t.replace(/\bf\(([a-zA-Z])\)/g, ' f của $1 ');
-  t = t.replace(/\bg\(([a-zA-Z])\)/g, ' g của $1 ');
-  t = t.replace(/\bh\(([a-zA-Z])\)/g, ' h của $1 ');
+  t = t.replace(/\bf\s*\(([a-zA-Z])\)/g, ' f $1 ');
+  t = t.replace(/\bg\s*\(([a-zA-Z])\)/g, ' g $1 ');
+  t = t.replace(/\bh\s*\(([a-zA-Z])\)/g, ' h $1 ');
 
   // 3. Fractions: \frac{a}{b} -> phân số a trên b
   t = t.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, ' phân số $1 trên $2, ');
@@ -1619,8 +1656,8 @@ export async function speakWithGoogleTranslateStream(
     const encoded = encodeURIComponent(chunk);
     const candidateUrls = [
       `https://translate.googleapis.com/translate_tts?client=gtx&ie=UTF-8&tl=${lang}&dt=t&q=${encoded}`,
-      `/api/tts?lang=${lang}&text=${encoded}`,
       `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encoded}`,
+      `/api/tts?lang=${lang}&text=${encoded}`,
     ];
 
     let played = false;
@@ -1630,6 +1667,9 @@ export async function speakWithGoogleTranslateStream(
         try {
           const audio = new Audio();
           currentAudioElement = audio;
+          try {
+            (audio as any).referrerPolicy = 'no-referrer';
+          } catch (_) {}
           audio.playbackRate = playbackRate || 1.08;
 
           audio.onplay = () => {
@@ -1686,6 +1726,7 @@ export async function speakWithGoogleTranslateStream(
  * Phát giọng đọc Google Cloud Text-To-Speech / Audio Stream
  * - Hỗ trợ 100% Tiếng Việt chuẩn ngữ âm sư phạm cho tất cả các môn (Toán, Lý, Hóa, Sinh, Văn, Sử, Địa, v.v.)
  * - Tự động nhận diện và phát âm tiếng Anh chuẩn bản ngữ cho riêng bộ môn Tiếng Anh / Anh Văn
+ * - Hoạt động ổn định trên cả Web Vercel, Netlify lẫn AI Studio Preview
  */
 export async function speakWithGoogleCloudTTS(
   processedText: string,
@@ -1719,44 +1760,7 @@ export async function speakWithGoogleCloudTTS(
     playbackRate = 0.98;
   }
 
-  // Phương án 1: Thử gọi qua endpoint server /api/tts nếu đang chạy full-stack
-  const encoded = encodeURIComponent(processedText.trim());
-  let serverPlayed = false;
-  try {
-    const audio = new Audio();
-    currentAudioElement = audio;
-    audio.playbackRate = playbackRate;
-
-    audio.onplay = () => {
-      if (!isSpeechCancelled && onStart) onStart();
-    };
-
-    serverPlayed = await new Promise<boolean>((resolve) => {
-      audio.onended = () => {
-        if (!isSpeechCancelled && onEnd) onEnd();
-        currentAudioElement = null;
-        resolve(true);
-      };
-      audio.onerror = () => {
-        currentAudioElement = null;
-        resolve(false);
-      };
-
-      audio.src = `/api/tts?lang=${lang}&text=${encoded}`;
-      const p = audio.play();
-      if (p !== undefined) {
-        p.catch(() => resolve(false));
-      }
-    });
-  } catch (_) {
-    serverPlayed = false;
-  }
-
-  if (serverPlayed) {
-    return true;
-  }
-
-  // Phương án 2: Khi chạy trên web Vercel không có backend Node, dùng Google Translate TTS Stream trực tiếp
+  // Phát trực tiếp qua luồng audio stream được chia nhỏ theo câu, đảm bảo tương thích 100% Web & Preview
   const streamOk = await speakWithGoogleTranslateStream(
     processedText,
     lang,
@@ -1770,7 +1774,7 @@ export async function speakWithGoogleCloudTTS(
     return true;
   }
 
-  // Phương án 3: Web Speech API dự phòng nếu có voice phù hợp
+  // Phương án dự phòng: Web Speech API nếu thiết bị có voice phù hợp
   if (!isSpeechCancelled) {
     return speakWithWebSpeech(processedText, preset, lang, onStart, onEnd, onError);
   }
@@ -2086,17 +2090,42 @@ export function speakQuestionContent(
   } else {
     const cleanQ = qText.trim().replace(/^câu\s*\d*\s*[:.]\s*/i, '').trim();
     rawScript = `Câu hỏi: ${cleanQ}. `;
+
+    // Nhận diện ngữ cảnh đề bài: TỌA ĐỘ hay KHOẢNG ĐƠN ĐIỆU để hướng dẫn AI đọc chính xác
+    const isCoordinateContext = /(tọa độ|toạ độ|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|cực trị của đồ thị|cực đại của đồ thị|cực tiểu của đồ thị|điểm uốn|vectơ|véc-tơ|Oxy|Oxyz|mặt phẳng|không gian)/i.test(cleanQ);
+    const isIntervalContext = /(đồng biến|nghịch biến|đơn điệu|liên tục|khoảng biến thiên|khoảng nghịch biến|khoảng đồng biến|trên khoảng)/i.test(cleanQ);
+
     if (Array.isArray(question.options) && question.options.length > 0) {
       question.options.forEach((opt, idx) => {
         const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
         const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
         if (text) {
           const keyPhonetic = key === 'A' ? 'A' : key === 'B' ? 'Bê' : key === 'C' ? 'Xê' : key === 'D' ? 'Dê' : key;
-          const cleanText = text
+          let cleanText = text
             .replace(/^[A-Da-d][.:)\-\/]\s*/, '')
             .replace(/^[:\-–—/]\s*/, '')
             .replace(/^chia cho\s*/i, '')
             .trim();
+
+          // Xử lý thông minh dạng ngoặc (a; b) hoặc (a; b; c) trong phương án trắc nghiệm:
+          const tripletMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)?$/i);
+          const pairMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?|âm vô cùng|-\s*∞|\\-?\\infty)\s*[;,]\s*(-?\d+(?:[.,]\d+)?|dương vô cùng|\+\s*∞|\\\+?\\infty)\s*\)?$/i);
+
+          if (tripletMatch) {
+            cleanText = `tọa độ ${tripletMatch[1]}, ${tripletMatch[2]}, ${tripletMatch[3]}`;
+          } else if (pairMatch) {
+            const val1 = pairMatch[1].replace(/\\?-\s*(?:\\infty|∞)/g, 'âm vô cùng');
+            const val2 = pairMatch[2].replace(/\\?\+?\s*(?:\\infty|∞)/g, 'dương vô cùng');
+            const hasInf = /vô cùng/i.test(val1) || /vô cùng/i.test(val2);
+            if (hasInf || isIntervalContext) {
+              cleanText = `khoảng từ ${val1} đến ${val2}`;
+            } else if (isCoordinateContext) {
+              cleanText = `tọa độ ${val1}, ${val2}`;
+            } else {
+              cleanText = `${val1}, ${val2}`;
+            }
+          }
+
           rawScript += `Đáp án ${keyPhonetic}: ${cleanText}. `;
         }
       });
