@@ -2833,14 +2833,41 @@ app.post("/api/rooms/:pin/simulate-class", (req, res) => {
 // 8. Seed initial room
 ensureRoom("758899");
 
-// Integrate Vite Middleware
-async function startServer() {
+// Integrate Vite Middleware & Instant Startup
+let viteServerInstance: any = null;
+
+// Route frontend requests to Vite middleware when ready, with instantaneous fallback during warm-up
+app.use((req, res, next) => {
+  if (viteServerInstance) {
+    return viteServerInstance.middlewares(req, res, next);
+  }
+  if (req.method === "GET" && !req.path.startsWith("/api") && !req.path.startsWith("/uploads")) {
+    const distIndex = path.join(process.cwd(), "dist", "index.html");
+    if (fs.existsSync(distIndex)) {
+      return res.sendFile(distIndex);
+    }
+  }
+  next();
+});
+
+// Start listening immediately on port 3000 and host 0.0.0.0 so health checks pass instantaneously
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`SmartBoard 75 Server running on http://0.0.0.0:${PORT}`);
+});
+
+// Initialize Vite in the background
+async function initVite() {
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      viteServerInstance = vite;
+      console.log("[Vite] Dev server middleware attached successfully on port 3000");
+    } catch (err) {
+      console.error("[Vite] Error initializing Vite dev server:", err);
+    }
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -2853,10 +2880,6 @@ async function startServer() {
       }
     });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`SmartBoard 75 Server running on http://0.0.0.0:${PORT}`);
-  });
 }
 
-startServer();
+initVite();
