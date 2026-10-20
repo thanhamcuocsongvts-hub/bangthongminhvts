@@ -419,7 +419,7 @@ export async function fetchGeminiAudioBuffer(
     let response: any = null;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-preview-tts',
+        model: 'gemini-3.8-flash-lite-tts',
         contents: trimmed,
         config: {
           responseModalities: ['AUDIO'],
@@ -433,38 +433,21 @@ export async function fetchGeminiAudioBuffer(
         },
       });
     } catch {
-      try {
-        response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite-tts',
-          contents: trimmed,
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: voiceName,
-                },
+      // Dự phòng sang gemini-3.8-flash-tts
+      response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash-tts',
+        contents: trimmed,
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voiceName,
               },
             },
           },
-        });
-      } catch {
-        // Dự phòng sang gemini-2.5-flash nếu các model preview bận
-        response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: trimmed,
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: voiceName,
-                },
-              },
-            },
-          },
-        });
-      }
+        },
+      });
     }
 
     const parts = response?.candidates?.[0]?.content?.parts;
@@ -1084,15 +1067,25 @@ export function cleanMathForVietnameseTTS(text: string, isEnglishSubject: boolea
   s = s.replace(/\by\s*'\s*'/gi, ' y hai phẩy ');
   s = s.replace(/\by\s*'/gi, ' y phẩy ');
 
-  // 2. Ký hiệu tập hợp số thực R: đọc rõ ràng từng chữ là "tập R" hoặc "trên R"
+  // 2. Ký hiệu tập hợp số: R, N, Z, Q, C đọc chuẩn xác
   s = s.replace(/\\mathbb\{R\}\s*\\setminus\s*\\?\{([^}]+)\}/g, ' tập R hiệu $1 ');
   s = s.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{R\}|ℝ|\bIR\b)/g, ' x thuộc tập R ');
   s = s.replace(/\\mathbb\{R\}|ℝ|\bIR\b/g, ' tập R ');
-  s = s.replace(/(^|[\s(;\[])D\s*=\s*R(?=[\s);,\].]|$)/g, '$1D bằng R');
-  s = s.replace(/(^|[\s(;\[])trên\s+R(?=[\s);,\].]|$)/gi, '$1trên R');
-  s = s.replace(/(^|[\s(;\[])thuộc\s+R(?=[\s);,\].]|$)/gi, '$1thuộc R');
+  s = s.replace(/(^|[\s(;\[])D\s*=\s*R(?=[\s);,\].]|$)/g, '$1D bằng tập R');
+  s = s.replace(/(^|[\s(;\[])trên\s+R(?=[\s);,\].]|$)/gi, '$1trên tập R');
+  s = s.replace(/(^|[\s(;\[])thuộc\s+R(?=[\s);,\].]|$)/gi, '$1thuộc tập R');
   s = s.replace(/(^|[\s(;\[])tập\s+R(?=[\s);,\].]|$)/gi, '$1tập R');
-  s = s.replace(/(^|[\s(;\[])với\s+mọi\s+x\s+thuộc\s+R(?=[\s);,\].]|$)/gi, '$1với mọi x thuộc R');
+  s = s.replace(/(^|[\s(;\[])với\s+mọi\s+x\s+thuộc\s+R(?=[\s);,\].]|$)/gi, '$1với mọi x thuộc tập R');
+  s = s.replace(/\\mathbb\{N\}\^\*|ℕ\*/g, ' tập N sao ');
+  s = s.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{N\}\^\*|ℕ\*)/g, ' x thuộc tập N sao ');
+  s = s.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{N\}|ℕ)/g, ' x thuộc tập N ');
+  s = s.replace(/\\mathbb\{N\}|ℕ/g, ' tập N ');
+  s = s.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{Z\}|ℤ)/g, ' x thuộc tập Z ');
+  s = s.replace(/\\mathbb\{Z\}|ℤ/g, ' tập Z ');
+  s = s.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{Q\}|ℚ)/g, ' x thuộc tập Q ');
+  s = s.replace(/\\mathbb\{Q\}|ℚ/g, ' tập Q ');
+  s = s.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{C\}|ℂ)/g, ' x thuộc tập C ');
+  s = s.replace(/\\mathbb\{C\}|ℂ/g, ' tập C ');
 
   // 3. Ký hiệu vô cùng:
   s = s.replace(/(?:-\s*\\infty|-\s*∞|-oo)\b/gi, ' âm vô cùng ');
@@ -1101,16 +1094,20 @@ export function cleanMathForVietnameseTTS(text: string, isEnglishSubject: boolea
 
   // 4. PHÂN BIỆT RÕ RÀNG TỌA ĐỘ ĐIỂM HÌNH HỌC VÀ KHOẢNG ĐƠN ĐIỆU:
   // 4a. Tọa độ điểm hình học: A(1; 2), B(-1; 3), M(2; -1), I(0; 1), O(0; 0), \vec{u}(1; 2)...
+  s = s.replace(/(?:cho\s+điểm|điểm)\s+([A-Z])\s*\(\s*0\s*[;,]\s*0\s*\)/g, ' điểm $1 gốc tọa độ không không ');
   s = s.replace(/([A-Z])\s*\(\s*0\s*[;,]\s*0\s*\)/g, ' điểm $1 gốc tọa độ không không ');
+  s = s.replace(/(?:cho\s+điểm|điểm)\s+([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' điểm $1 tọa độ $2, $3, $4 ');
   s = s.replace(/([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' điểm $1 tọa độ $2, $3, $4 ');
+  s = s.replace(/(?:cho\s+điểm|điểm)\s+([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' điểm $1 tọa độ $2, $3 ');
   s = s.replace(/([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' điểm $1 tọa độ $2, $3 ');
   s = s.replace(/([A-Z])\s*\(\s*([a-zA-Z]\d*)\s*[;,]\s*([a-zA-Z]\d*)\s*\)/g, ' điểm $1 tọa độ $2, $3 ');
+  s = s.replace(/\b(điểm)\s+điểm\b/g, 'điểm');
   s = s.replace(/(véc-tơ\s+[a-zA-Z0-9]+|\b\\vec\{?[a-zA-Z0-9]+\}?)\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' $1 tọa độ $2, $3 ');
-  s = s.replace(/(tọa độ|toạ độ|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|điểm cực đại|điểm cực tiểu|điểm cực trị|điểm uốn|tại điểm)\s*(?:là|=)?\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' $1 tọa độ $2, $3 ');
+  s = s.replace(/(tọa độ|toạ độ|tọa độ cực đại|tọa độ cực tiểu|tọa độ cực trị|điểm cực đại|điểm cực tiểu|điểm cực trị|cực đại|cực tiểu|cực trị|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|điểm uốn|tại điểm)\s*(?:của\s+đồ\s+thị\s+hàm\s+số)?\s*(?:là|=)?\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' $1 tọa độ $2, $3 ');
 
   // 4b. Khoảng trong ngữ cảnh xét tính đơn điệu và giải tích:
-  s = s.replace(/(đồng biến|nghịch biến|đơn điệu|tăng|giảm|liên tục|xét|thuộc)\s+trên\s+(?:khoảng\s+)?\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' $1 trên khoảng từ $2 đến $3 ');
-  s = s.replace(/(khoảng|thuộc khoảng)\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' khoảng từ $2 đến $3 ');
+  s = s.replace(/(đồng biến|nghịch biến|đơn điệu|tăng|giảm|liên tục|khoảng biến thiên)\s+(?:trên\s+)?(?:khoảng\s+)?\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' $1 trên khoảng từ $2 đến $3 ');
+  s = s.replace(/(khoảng|thuộc khoảng|trên khoảng)\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' khoảng từ $2 đến $3 ');
 
   // 4c. Cặp ngoặc chứa VÔ CÙNG: (-∞; b), (a; +∞), (-∞; +∞) -> luôn là khoảng
   s = s.replace(/\(\s*(?:âm vô cùng|-\s*vô cùng|-\s*∞)\s*[;,]\s*(?:dương vô cùng|\+\s*vô cùng|\+\s*∞)\s*\)/gi, ' khoảng từ âm vô cùng đến dương vô cùng ');
@@ -1123,7 +1120,7 @@ export function cleanMathForVietnameseTTS(text: string, isEnglishSubject: boolea
   s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\]/g, ' đoạn từ $1 đến $2 ');
   s = s.replace(/\[\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' nửa khoảng từ $1 đến $2 ');
   s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\]/g, ' nửa khoảng từ $1 đến $2 ');
-  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*;\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' khoảng $1, $2 ');
+  s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' $1, $2 ');
 
   // 5. Phân số \frac{([^}]+)}{([^}]+)} -> "$1 phần $2"
   for (let iter = 0; iter < 5; iter++) {
@@ -1404,11 +1401,14 @@ export function preprocessSpeechText(rawText: string, isEnglishSubject: boolean 
   t = t.replace(/\\text\{([^}]+)\}/g, ' $1 ');
   t = t.replace(/\\mathrm\{([^}]+)\}/g, ' $1 ');
   t = t.replace(/\\mathbf\{([^}]+)\}/g, ' $1 ');
-  t = t.replace(/\\mathbb\{R\}/g, ' tập R ');
-  t = t.replace(/\\mathbb\{N\}/g, ' tập số tự nhiên N ');
-  t = t.replace(/\\mathbb\{Z\}/g, ' tập số nguyên Z ');
-  t = t.replace(/\\mathbb\{Q\}/g, ' tập số hữu tỉ Q ');
-  t = t.replace(/\\mathbb\{C\}/g, ' tập số phức C ');
+  t = t.replace(/\\mathbb\{R\}\s*\\setminus\s*\\?\{([^}]+)\}/g, ' tập R hiệu $1 ');
+  t = t.replace(/(?:x\s*\\in|x\s*∈|x\s*thuộc)\s*(?:\\mathbb\{R\}|ℝ|\bIR\b)/g, ' x thuộc tập R ');
+  t = t.replace(/\\mathbb\{R\}|ℝ|\bIR\b/g, ' tập R ');
+  t = t.replace(/\\mathbb\{N\}\^\*|ℕ\*/g, ' tập N sao ');
+  t = t.replace(/\\mathbb\{N\}|ℕ/g, ' tập N ');
+  t = t.replace(/\\mathbb\{Z\}|ℤ/g, ' tập Z ');
+  t = t.replace(/\\mathbb\{Q\}|ℚ/g, ' tập Q ');
+  t = t.replace(/\\mathbb\{C\}|ℂ/g, ' tập C ');
   t = t.replace(/\\left\s*([(\[{|])/g, '$1');
   t = t.replace(/\\right\s*([)\]}|])/g, '$1');
 
@@ -1760,8 +1760,57 @@ export async function speakWithGoogleCloudTTS(
     playbackRate = 0.98;
   }
 
-  // Phát trực tiếp qua luồng audio stream được chia nhỏ theo câu, đảm bảo tương thích 100% Web & Preview
-  const streamOk = await speakWithGoogleTranslateStream(
+  // Phương án 1: Gọi endpoint server /api/tts (gộp âm thanh tiếng Việt chuẩn, không bị CORS/Referer, hoạt động 100% trên Web)
+  const encoded = encodeURIComponent(processedText.trim());
+  let serverPlayed = false;
+  try {
+    const audio = new Audio();
+    currentAudioElement = audio;
+    try {
+      (audio as any).referrerPolicy = 'no-referrer';
+    } catch (_) {}
+    audio.playbackRate = playbackRate;
+
+    audio.onplay = () => {
+      if (!isSpeechCancelled && onStart) onStart();
+    };
+
+    serverPlayed = await new Promise<boolean>((resolve) => {
+      audio.onended = () => {
+        if (!isSpeechCancelled && onEnd) onEnd();
+        currentAudioElement = null;
+        resolve(true);
+      };
+      audio.onerror = () => {
+        currentAudioElement = null;
+        resolve(false);
+      };
+
+      audio.src = `/api/tts?lang=${lang}&text=${encoded}`;
+      const p = audio.play();
+      if (p !== undefined) {
+        p.catch(() => {
+          currentAudioElement = null;
+          resolve(false);
+        });
+      }
+    });
+  } catch (_) {
+    serverPlayed = false;
+  }
+
+  if (serverPlayed) {
+    return true;
+  }
+
+  // Phương án 2: Web Speech API dự phòng nếu thiết bị có voice phù hợp (Android, macOS, Windows có gói tiếng Việt)
+  if (!isSpeechCancelled) {
+    const webSpeechOk = speakWithWebSpeech(processedText, preset, lang, onStart, onEnd, onError);
+    if (webSpeechOk) return true;
+  }
+
+  // Phương án 3: Google Translate stream trực tiếp trên client
+  return speakWithGoogleTranslateStream(
     processedText,
     lang,
     playbackRate,
@@ -1769,16 +1818,6 @@ export async function speakWithGoogleCloudTTS(
     onEnd,
     onError
   );
-
-  if (streamOk) {
-    return true;
-  }
-
-  // Phương án dự phòng: Web Speech API nếu thiết bị có voice phù hợp
-  if (!isSpeechCancelled) {
-    return speakWithWebSpeech(processedText, preset, lang, onStart, onEnd, onError);
-  }
-  return false;
 }
 
 /**
@@ -1928,7 +1967,7 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
   // 1. Kiểm tra API Key: nếu có Key và người dùng không yêu cầu Web Speech cụ thể
   const effectiveKey = getEffectiveGeminiApiKey();
   if (effectiveKey && options.preferWebSpeech !== true) {
-    speakWithGeminiAudio(processed, preset, options.onStart, options.onEnd, isEnglish, options.subject);
+    speakWithGeminiAudio(processed, preset, options.onStart, options.onEnd, isEnglish, options.subject, options.onError);
     return true;
   }
 
@@ -1945,7 +1984,7 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
  * - Tất cả các môn khác (Toán học, Vật lí, Hóa học, Sinh học, Tin học...) -> đọc 100% bằng Tiếng Việt chuẩn mực.
  * - 5 sắc thái giọng AI cao cấp: Kore, Aoede, Puck, Charon, Fenrir.
  * - Có audioCache lưu đệm AudioBuffer theo text (0ms khi đọc lại).
- * - Bọc trong try-catch có timeout 2.5s (quá 2.5s hoặc lỗi là tự động đọc bằng Google Cloud/Translate TTS stream ngay).
+ * - Bọc trong try-catch có timeout 4.5s (quá 4.5s hoặc lỗi là tự động đọc bằng Google Cloud/Translate TTS stream ngay).
  */
 export async function speakWithGeminiAudio(
   text: string,
@@ -1953,7 +1992,8 @@ export async function speakWithGeminiAudio(
   onStart?: () => void,
   onEnd?: () => void,
   isEnglish: boolean = false,
-  subject?: string
+  subject?: string,
+  onError?: (err: any) => void
 ): Promise<boolean> {
   const apiKey = getEffectiveGeminiApiKey();
   const isEn = isEnglish || (typeof subject === 'string' && (
@@ -1992,7 +2032,7 @@ export async function speakWithGeminiAudio(
   if (apiKey) {
     try {
       const bufferPromise = fetchGeminiAudioBuffer(processed, voiceName, apiKey);
-      const timeoutPromise = new Promise<null>((res) => setTimeout(() => res(null), 2500));
+      const timeoutPromise = new Promise<null>((res) => setTimeout(() => res(null), 4500));
       const buffer = await Promise.race([bufferPromise, timeoutPromise]);
       if (buffer && !isSpeechCancelled) {
         audioCache.set(cacheKey, buffer);
@@ -2006,7 +2046,7 @@ export async function speakWithGeminiAudio(
   if (isSpeechCancelled) return false;
 
   // 3. Fallback sang Google Cloud / Google Translate TTS stream tiếng Việt chuẩn 100%
-  return speakWithGoogleCloudTTS(processed, preset, isEn ? 'en' : 'vi', onStart, onEnd);
+  return speakWithGoogleCloudTTS(processed, preset, isEn ? 'en' : 'vi', onStart, onEnd, onError);
 }
 
 /**
