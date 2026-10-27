@@ -37,10 +37,12 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
     }
   }, [isOpen, initialFormula]);
 
-  // Biên dịch toán học & KaTeX trực tiếp tức thì (<16ms), không trễ debounce gây giật nhảy
+  // Sử dụng useDeferredValue để việc gõ phím/nhập số liệu đạt 60fps mượt mà tuyệt đối, không bị trễ hay lag bởi KaTeX
+  const deferredFormula = React.useDeferredValue(formulaInput);
+
   const parsed = React.useMemo(() => {
-    return compileMathExpression(formulaInput);
-  }, [formulaInput]);
+    return compileMathExpression(deferredFormula);
+  }, [deferredFormula]);
 
   const katexHtml = React.useMemo(() => {
     if (!parsed.latex) return null;
@@ -54,6 +56,68 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
       return null;
     }
   }, [parsed.latex]);
+
+  // Nhận diện xem đồ thị có phải dao động cơ / hàm theo thời gian t (Vật lý 12)
+  const isTimeVariable = React.useMemo(() => {
+    const s = formulaInput.toLowerCase();
+    return s.includes('t') || s.startsWith('x =') || s.startsWith('v =') || s.startsWith('a =') || activeTab === 'vatly12';
+  }, [formulaInput, activeTab]);
+
+  // Tự động phân tích chu kỳ T hiện tại từ công thức
+  const currentPeriodT = React.useMemo(() => {
+    const s = formulaInput.toLowerCase().replace(/\s+/g, '');
+    const trig = s.match(/(?:cos|sin)\s*\(\s*([^()]+)\s*\)/);
+    if (!trig) return 1;
+    const inside = trig[1];
+    const match = inside.match(/([0-9.]*)\s*\*?\s*(?:π|pi)?\s*\*?\s*t/);
+    if (!match) return 1;
+    const hasPi = /π|pi/.test(match[0]);
+    const num = match[1] === '' || match[1] === '+' ? 1 : parseFloat(match[1]) || 1;
+    let omega = num * (hasPi ? Math.PI : 1);
+    const div = inside.match(/(?:t|\))\s*\/\s*([0-9.]+)/);
+    if (div && parseFloat(div[1]) > 0) {
+      omega /= parseFloat(div[1]);
+    }
+    if (omega > 0) {
+      const T = (2 * Math.PI) / omega;
+      return Number(T.toFixed(2));
+    }
+    return 1;
+  }, [formulaInput]);
+
+  // Cập nhật chu kỳ T (giây) -> tự động tính lại tần số góc omega = 2π / T đưa vào phương trình
+  const handleSetPeriodT = (newT: number) => {
+    if (newT <= 0) return;
+    const ratio = 2 / newT;
+    let omegaTerm = '';
+    if (Math.abs(ratio - 1) < 0.01) {
+      omegaTerm = 'π';
+    } else if (Math.abs(ratio - 2) < 0.01) {
+      omegaTerm = '2π';
+    } else if (Math.abs(ratio - 4) < 0.01) {
+      omegaTerm = '4π';
+    } else if (Math.abs(ratio - 0.5) < 0.01) {
+      omegaTerm = '0.5π';
+    } else if (Number.isInteger(ratio)) {
+      omegaTerm = `${ratio}π`;
+    } else {
+      omegaTerm = `${Number(ratio.toFixed(2))}π`;
+    }
+
+    setFormulaInput((prev) => {
+      const s = prev;
+      if (/(cos|sin)\s*\([^)]*t[^)]*\)/i.test(s)) {
+        return s.replace(
+          /(cos|sin)\s*\(\s*([0-9.]*)\s*\*?\s*(?:π|pi)?\s*\*?\s*t(\s*[+-]\s*[^)]*)?\s*\)/gi,
+          (_match, fnName, _oldOmega, phase) => {
+            return `${fnName}(${omegaTerm}t${phase || ''})`;
+          }
+        );
+      } else {
+        return `x = 4cos(${omegaTerm}t)`;
+      }
+    });
+  };
 
   if (!isOpen) return null;
 
@@ -427,6 +491,58 @@ export const VirtualMathKeyboard: React.FC<VirtualMathKeyboardProps> = ({
               </span>
             )}
           </div>
+          {/* Ô THIẾT LẬP CHU KỲ T (GIÂY) CHO ĐỒ THỊ DAO ĐỒNG SGK VẬT LÝ 12 */}
+          {isTimeVariable && (
+            <div className="p-2.5 rounded-2xl bg-cyan-950/70 border-2 border-cyan-500/50 flex flex-wrap items-center justify-between gap-2 shadow-md">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-xl bg-cyan-500/20 text-cyan-300 font-mono font-black text-xs border border-cyan-400/40">
+                  Chu kỳ T
+                </span>
+                <span className="text-xs font-bold text-slate-200">
+                  Thời gian 1 dao động toàn phần:
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  {[0.5, 1, 2, 4].map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        handleSetPeriodT(t);
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                        Math.abs(currentPeriodT - t) < 0.05
+                          ? 'bg-cyan-500 text-slate-950 shadow-md font-black ring-2 ring-cyan-300'
+                          : 'bg-slate-800 hover:bg-slate-700 text-cyan-200 border border-slate-700'
+                      }`}
+                    >
+                      T={t}s
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-900 border border-cyan-500/40 rounded-xl px-2 py-1">
+                  <span className="text-[10px] text-slate-400 font-semibold">Tùy chọn T:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    max="60"
+                    value={currentPeriodT}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (v > 0) handleSetPeriodT(v);
+                    }}
+                    className="w-14 px-1 py-0.5 text-xs font-black text-cyan-300 bg-transparent text-center focus:outline-none"
+                  />
+                  <span className="text-[11px] text-cyan-400 font-mono font-bold">s</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* BÀN PHÍM CẢM ỨNG ĐA NĂNG CHUẨN CASIO FX-580VN PLUS CHO MÀN HÌNH 75 INCH */}

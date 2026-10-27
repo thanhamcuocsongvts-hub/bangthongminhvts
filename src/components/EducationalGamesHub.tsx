@@ -62,6 +62,8 @@ import {
 
 interface EducationalGamesHubProps {
   classroom?: ClassroomGroup | null;
+  allClasses?: ClassroomGroup[];
+  onSelectClassroom?: (cls: ClassroomGroup) => void;
   questions?: QuizQuestion[];
   lessonTitle?: string;
   lessonSubject?: string;
@@ -199,6 +201,8 @@ export function normalizeGameQuestions(rawList?: QuizQuestion[]): QuizQuestion[]
 
 export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   classroom,
+  allClasses = [],
+  onSelectClassroom,
   questions = [],
   lessonTitle = '',
   lessonSubject = 'Toán học',
@@ -208,6 +212,15 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 }) => {
   const [activeGame, setActiveGame] = useState<ActiveGame>('race');
   const [localQuestions, setLocalQuestions] = useState<QuizQuestion[] | null>(null);
+  const [selectedClassId, setSelectedClassId] = useState<string>(classroom?.id || '');
+
+  useEffect(() => {
+    if (classroom?.id) {
+      setSelectedClassId(classroom.id);
+    }
+  }, [classroom?.id]);
+
+  const activeClassroom = allClasses.find((c) => c.id === selectedClassId) || classroom || null;
 
   // AI Game Voice Host state
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
@@ -485,8 +498,34 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
           </button>
         </div>
 
-        {/* Action Buttons: Voice Controls, Question Inspector & AI Quiz Maker */}
+        {/* Action Buttons: Class Selector, Voice Controls, Question Inspector & AI Quiz Maker */}
         <div className="flex items-center gap-2">
+          {/* Class Selection Dropdown */}
+          {allClasses && allClasses.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-200">
+              <Users className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="text-xs font-bold text-slate-300 hidden md:inline">Lớp:</span>
+              <select
+                value={activeClassroom?.id || ''}
+                onChange={(e) => {
+                  setSelectedClassId(e.target.value);
+                  const found = allClasses.find((c) => c.id === e.target.value);
+                  if (found && onSelectClassroom) {
+                    onSelectClassroom(found);
+                  }
+                }}
+                className="text-xs font-black text-amber-300 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-400 cursor-pointer"
+                title="Chọn lớp học sinh tham gia trò chơi"
+              >
+                {allClasses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.students?.length || 0} HS)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* AI Voice Preset Selector */}
           <select
             value={selectedVoice.id}
@@ -603,7 +642,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
         )}
         {activeGame === 'wheel' && (
           <LuckyWheelGame
-            classroom={classroom}
+            classroom={activeClassroom}
             questions={activeQuestions}
             voiceEnabled={voiceEnabled}
             readingQId={readingQId}

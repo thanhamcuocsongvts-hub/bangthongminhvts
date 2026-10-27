@@ -41,8 +41,29 @@ export function sanitizeMathExpression(raw: string): string {
   // Normalize excessive backslashes (e.g. \\\\frac -> \\frac)
   math = math.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
 
-  // Normalize common Vietnamese textbook LaTeX macros
+  // Normalize unicode math symbols to LaTeX equivalents
   math = math
+    .replace(/ℝ/g, '\\mathbb{R}')
+    .replace(/ℕ/g, '\\mathbb{N}')
+    .replace(/ℤ/g, '\\mathbb{Z}')
+    .replace(/ℚ/g, '\\mathbb{Q}')
+    .replace(/∈/g, '\\in ')
+    .replace(/∉/g, '\\notin ')
+    .replace(/⊂/g, '\\subset ')
+    .replace(/⊃/g, '\\supset ')
+    .replace(/∪/g, '\\cup ')
+    .replace(/∩/g, '\\cap ')
+    .replace(/∅/g, '\\emptyset')
+    .replace(/∞/g, '\\infty')
+    .replace(/±/g, '\\pm ')
+    .replace(/≤/g, '\\le ')
+    .replace(/≥/g, '\\ge ')
+    .replace(/≠/g, '\\neq ')
+    .replace(/≈/g, '\\approx ')
+    .replace(/⇔/g, '\\Leftrightarrow ')
+    .replace(/⇒/g, '\\Rightarrow ')
+    .replace(/→/g, '\\to ')
+    .replace(/\\mathbb\s+([A-Z])/g, '\\mathbb{$1}')
     .replace(/\\degree/g, '^{\\circ}')
     .replace(/\\tg\b/g, '\\tan')
     .replace(/\\cotg\b/g, '\\cot')
@@ -89,14 +110,31 @@ export const MathFormulaRenderer: React.FC<MathFormulaRendererProps> = ({
       .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
       .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-    // Auto-detect unwrapped LaTeX commands like \frac{...}{...}, \sqrt{...} if not wrapped in $
-    if (!normalized.includes('$') && /\\(frac|sqrt|int|lim|vec|alpha|beta|gamma|theta|lambda|pi|Delta|infty|sum|times|le|ge|neq|approx|rightarrow|leftarrow)/.test(normalized)) {
-      normalized = normalized.replace(/([a-zA-Z0-9+\-*=><\s\\{}^_()]{4,})/g, (match) => {
-        if (/\\(frac|sqrt|int|lim|vec|alpha|beta|Delta|infty|sum)/.test(match)) {
-          return `$${match.trim()}$`;
-        }
-        return match;
-      });
+    // Auto-detect math formulas that were written without $ delimiters
+    if (!normalized.includes('$')) {
+      // If it contains LaTeX commands like \frac, \sqrt, \mathbb, \in, \int, etc.
+      if (/\\(frac|sqrt|int|lim|vec|alpha|beta|gamma|theta|lambda|pi|Delta|infty|sum|times|le|ge|neq|approx|rightarrow|leftarrow|mathbb|setminus|cup|cap|subset|Leftrightarrow|Rightarrow)/.test(normalized)) {
+        normalized = normalized.replace(/([a-zA-Z0-9+\-*=><\s\\{}^_()]{4,})/g, (match) => {
+          if (/\\(frac|sqrt|int|lim|vec|alpha|beta|Delta|infty|sum|mathbb|setminus|cup|cap|subset|le|ge|neq|Leftrightarrow|Rightarrow)/.test(match)) {
+            return `$${match.trim()}$`;
+          }
+          return match;
+        });
+      }
+      // If it is a polynomial equation or function like y = x^3 - 3x^2 + 1, f(x) = x^2 - 4
+      else if (/^(?:y|f\(x\)|g\(x\)|h\(x\)|y'|f'\(x\))\s*=\s*[^$.]+$/i.test(normalized)) {
+        normalized = `$${normalized}$`;
+      }
+      // If it contains power caret like x^3, x^2 or subscript like x_1, x_2
+      else if (/\b[a-zA-Z]\^[0-9{]/.test(normalized) || /\b[a-zA-Z]_[0-9{]/.test(normalized)) {
+        // Wrap mathematical parts
+        normalized = normalized.replace(/([a-zA-Z0-9_^{}]+(?:\s*[+\-*/=<>]\s*[a-zA-Z0-9_^{}()]+)+)/g, (match) => {
+          if (match.includes('^') || match.includes('_')) {
+            return `$${match.trim()}$`;
+          }
+          return match;
+        });
+      }
     }
 
     // Check if the content contains explicit LaTeX $ or $$

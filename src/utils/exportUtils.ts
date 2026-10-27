@@ -232,8 +232,21 @@ export function exportQuizAnalyticsToExcel(roomState: RoomState, lesson: LessonD
  * 3. Export Lesson / Questions to Word Document (.docx)
  */
 export async function exportLessonToWord(lesson: LessonDoc, roomState?: RoomState | null) {
-  const createdDate = lesson.lastModified ? lesson.lastModified.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const questions = (lesson.quizzes && lesson.quizzes.length > 0) ? lesson.quizzes : (roomState?.questions || []);
+  
+  if (questions.length > 0) {
+    const { exportExamToWordDocx } = await import('./docxExportService');
+    await exportExamToWordDocx({
+      title: lesson.title,
+      subject: lesson.subject,
+      grade: lesson.grade,
+      questions,
+      teacherName: lesson.author || 'Tổ Bộ Môn',
+    });
+    return;
+  }
+
+  const createdDate = lesson.lastModified ? lesson.lastModified.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const docContent = lesson.rawText || (lesson.slides ? lesson.slides.map(s => `• ${s.title}: ${s.content}`).join('\n') : 'Chưa có nội dung tóm tắt chi tiết.');
 
   const doc = new Document({
@@ -258,32 +271,6 @@ export async function exportLessonToWord(lesson: LessonDoc, roomState?: RoomStat
           new Paragraph({
             text: docContent.slice(0, 2000),
           }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            text: 'II. HỆ THỐNG CÂU HỎI TRẮC NGHIỆM & ĐÁNH GIÁ',
-            heading: HeadingLevel.HEADING_2,
-          }),
-          ...questions.flatMap((q, idx) => [
-            new Paragraph({
-              children: [
-                new TextRun({ text: `Câu ${idx + 1}: `, bold: true }),
-                new TextRun({ text: q.question }),
-              ],
-            }),
-            ...q.options.map(
-              (opt, oIdx) =>
-                new Paragraph({
-                  text: `   ${opt.key || String.fromCharCode(65 + oIdx)}. ${opt.text || opt}`,
-                })
-            ),
-            new Paragraph({
-              children: [
-                new TextRun({ text: `   -> Đáp án đúng: ${q.correctAnswer}`, bold: true }),
-                new TextRun({ text: q.explanation ? ` | Giải thích: ${q.explanation}` : '' }),
-              ],
-            }),
-            new Paragraph({ text: '' }),
-          ]),
         ],
       },
     ],

@@ -444,9 +444,33 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
                   type="text"
                   value={topic}
                   onChange={(e) => setTopic(e.target.value)}
-                  placeholder="Ví dụ: Quang hợp và hô hấp tế bào, Định luật II Newton, Khảo sát hàm số..."
+                  placeholder="Ví dụ: Quang hợp và hô hấp tế bào, Định luật II Newton, Bảng biến thiên hàm số..."
                   className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
+
+                {/* Quick Topic Chips for Standard Textbook Diagrams & Math Topics */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[11px] font-bold text-slate-500">Chủ đề chuẩn SGK:</span>
+                  {[
+                    { label: '📐 Bảng biến thiên hàm số', topic: 'Bảng biến thiên và tính đơn điệu của hàm số bậc ba, hàm phân thức', sub: 'Toán học' },
+                    { label: '📊 Bảng xét dấu đạo hàm', topic: 'Bảng xét dấu đạo hàm f\'(x) và tìm điểm cực trị của hàm số', sub: 'Toán học' },
+                    { label: '📈 Đồ thị hàm số & Tiệm cận', topic: 'Nhận dạng đồ thị hàm số và các đường tiệm cận đứng, ngang', sub: 'Toán học' },
+                    { label: '🧊 Khối chóp & Thể tích', topic: 'Thể tích khối chóp tam giác, hình lăng trụ đứng và góc khoảng cách', sub: 'Toán học' },
+                    { label: '⚡ Dao động điều hòa & Sóng', topic: 'Phương trình dao động điều hòa, con lắc lò xo và sóng cơ học', sub: 'Vật lý' },
+                  ].map((chip, cIdx) => (
+                    <button
+                      key={cIdx}
+                      type="button"
+                      onClick={() => {
+                        setTopic(chip.topic);
+                        setSubject(chip.sub);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 text-indigo-700 text-[11px] font-semibold transition-all cursor-pointer"
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-1">

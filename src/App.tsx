@@ -34,6 +34,8 @@ import { RandomStudentPickerModal } from './components/RandomStudentPickerModal'
 import { TeacherProfileModal } from './components/TeacherProfileModal';
 import { AIConfigModal } from './components/AIConfigModal';
 import { AdminManagementModal } from './components/AdminManagementModal';
+import { CasioCalculatorModal } from './components/CasioCalculatorModal';
+import { StepByStepConstructionModal } from './components/StepByStepConstructionModal';
 import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { QRCodeSVG } from 'qrcode.react';
@@ -470,6 +472,8 @@ export default function App() {
   const [isGeneratingAIQuiz, setIsGeneratingAIQuiz] = useState<boolean>(false);
   const [showAIQuizModal, setShowAIQuizModal] = useState<boolean>(false);
   const [showAIConfigModal, setShowAIConfigModal] = useState<boolean>(false);
+  const [showCasioModal, setShowCasioModal] = useState<boolean>(false);
+  const [showStepByStepModal, setShowStepByStepModal] = useState<boolean>(false);
 
   // AI Chat Messages
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -1308,6 +1312,8 @@ export default function App() {
         onLogout={handleLogout}
         onOpenAIConfig={() => setShowAIConfigModal(true)}
         pendingTeachersCount={pendingTeachersCount}
+        onOpenCasioCalculator={() => setShowCasioModal(true)}
+        onOpenStepByStepSimulation={() => setShowStepByStepModal(true)}
       />
 
       {/* Main Interactive Screen Content */}
@@ -1508,8 +1514,9 @@ export default function App() {
                 questions={currentLesson.quizzes}
                 lessonTitle={currentLesson.title}
                 lessonSubject={currentLesson.subject}
-                lessonContent={currentLesson.rawText}
-                classroom={activeTeacher?.classes?.[0] || null}
+                classroom={pickerClassroom || activeTeacher?.classes?.[0] || null}
+                allClasses={activeTeacher?.classes || []}
+                onSelectClassroom={(cls) => setPickerClassroom(cls)}
                 onOpenAIQuizCreator={() => setShowAIQuizModal(true)}
                 onUpdateQuestions={(newQuestions) => {
                   const updatedLessons = lessons.map((l) =>
@@ -1770,6 +1777,18 @@ export default function App() {
       <AIConfigModal
         isOpen={showAIConfigModal}
         onClose={() => setShowAIConfigModal(false)}
+      />
+
+      {/* Casio fx-580VN X Scientific Calculator Emulator */}
+      <CasioCalculatorModal
+        isOpen={showCasioModal}
+        onClose={() => setShowCasioModal(false)}
+      />
+
+      {/* Step-by-Step Construction & Virtual Experiment Modal */}
+      <StepByStepConstructionModal
+        isOpen={showStepByStepModal}
+        onClose={() => setShowStepByStepModal(false)}
       />
 
       {/* Global QR Code Modal */}

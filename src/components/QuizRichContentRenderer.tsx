@@ -1,5 +1,7 @@
 import React from 'react';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
+import { StandardTextbookGraph } from './StandardTextbookGraph';
+import { PracticalMathIllustration, detectPracticalScenario, PracticalScenario } from './PracticalMathIllustration';
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -32,7 +34,11 @@ export interface QuizDiagramData {
     label: string; // f(x), f'(x), (x-1)...
     signs: string[]; // +, -, 0, ||
   }>;
-  // Function graph
+  // Function graph (Interactive Desmos & LaTeX)
+  latex?: string;
+  fn?: string;
+  functions?: string[];
+  points?: Array<{ x: number; y: number; label?: string }>;
   graphType?: 'cubic' | 'quadratic' | 'rational' | 'biquadratic' | 'rational_21' | 'sine' | 'linear';
   equation?: string;
   extrema?: Array<{ x: number; y: number; label?: string }>;
@@ -66,6 +72,7 @@ interface QuizRichContentRendererProps {
   diagramData?: QuizDiagramData;
   className?: string;
   textClassName?: string;
+  isPresentationMode?: boolean;
 }
 
 /**
@@ -74,7 +81,7 @@ interface QuizRichContentRendererProps {
  */
 function parseEmbeddedDiagram(content: string): {
   cleanContent: string;
-  detectedType?: 'variation_table' | 'sign_table' | 'function_graph' | 'geometry' | 'data_table';
+  detectedType?: 'variation_table' | 'sign_table' | 'function_graph' | 'geometry' | 'data_table' | 'practical_illustration';
   detectedData?: QuizDiagramData;
 } {
   if (!content) return { cleanContent: content };
@@ -240,16 +247,66 @@ function parseEmbeddedDiagram(content: string): {
     };
   }
 
-  // 6. Nhận diện Đồ thị hàm số
-  if (lower.includes('đồ thị') && (lower.includes('hình vẽ') || lower.includes('như hình') || lower.includes('bên dưới') || lower.includes('đường cong'))) {
-    const isRational = lower.includes('tiệm cận') || lower.includes('phân thức') || lower.includes('hyperbol');
-    const isBiquad = lower.includes('trùng phương') || lower.includes('bậc bốn') || lower.includes('chữ w');
+  // 6. Nhận diện Đồ thị hàm số (bảo đảm 100% câu hỏi có đồ thị đều được vẽ)
+  const hasGraphKeywords =
+    lower.includes('đồ thị') ||
+    lower.includes('hình vẽ') ||
+    lower.includes('như hình') ||
+    lower.includes('hình bên') ||
+    lower.includes('đường cong');
+
+  if (hasGraphKeywords) {
+    const isRational =
+      lower.includes('tiệm cận') ||
+      lower.includes('phân thức') ||
+      lower.includes('hyperbol') ||
+      content.includes('\\frac') ||
+      content.includes('/') ||
+      /(?:ax\+b|cx\+d)/i.test(content) ||
+      /y\s*=\s*\\frac/i.test(content);
+    const isBiquad =
+      lower.includes('trùng phương') ||
+      lower.includes('bậc bốn') ||
+      lower.includes('chữ w') ||
+      content.includes('x^4') ||
+      content.includes('x^{4}');
+    const isQuad =
+      lower.includes('parabol') ||
+      lower.includes('bậc hai') ||
+      (!isBiquad && (content.includes('x^2') || content.includes('x^{2}')));
+
+    // Trích xuất công thức LaTeX nếu có trong câu hỏi
+    const formulaMatch =
+      content.match(/(?:y|f\(x\))\s*=\s*([^$,\n?]+)/i) ||
+      content.match(/\$([^$]+=[^$]+)\$/);
+    const extractedLatex = formulaMatch ? formulaMatch[0].replace(/\$/g, '').trim() : '';
+
     return {
       cleanContent: content,
       detectedType: 'function_graph',
       detectedData: {
-        title: isRational ? 'Đồ thị hàm phân thức y = (ax+b)/(cx+d)' : isBiquad ? 'Đồ thị hàm bậc 4 trùng phương' : 'Đồ thị hàm số bậc 3 trên hệ Oxy',
-        graphType: isRational ? 'rational' : isBiquad ? 'biquadratic' : 'cubic',
+        title: isRational
+          ? 'Đồ thị hàm phân thức y = (ax+b)/(cx+d)'
+          : isBiquad
+          ? 'Đồ thị hàm số bậc bốn trùng phương'
+          : isQuad
+          ? 'Đồ thị hàm số bậc hai (Parabol)'
+          : 'Đồ thị hàm số bậc ba',
+        graphType: isRational ? 'rational' : isBiquad ? 'biquadratic' : isQuad ? 'quadratic' : 'cubic',
+        latex: extractedLatex || (isRational ? 'y = \\frac{ax+b}{cx+d}' : isBiquad ? 'y = x^4 - 2x^2 - 1' : isQuad ? 'y = x^2 - 4x + 3' : 'y = x^3 - 3x + 1'),
+      },
+    };
+  }
+
+  // 7. Nhận diện Bài toán thực tế / ứng dụng cần hình minh họa trực quan
+  const practicalScenario = detectPracticalScenario(content);
+  if (practicalScenario) {
+    return {
+      cleanContent: content,
+      detectedType: 'practical_illustration',
+      detectedData: {
+        scenario: practicalScenario,
+        title: 'Mô hình minh họa bài toán thực tế',
       },
     };
   }
@@ -263,6 +320,7 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
   diagramData: initialData,
   className = '',
   textClassName = '',
+  isPresentationMode = false,
 }) => {
   const parsed = parseEmbeddedDiagram(content);
   const displayContent = initialType ? content : parsed.cleanContent;
@@ -282,115 +340,203 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
           {/* ========================================================= */}
           {/* 1. BẢNG BIẾN THIÊN HÀM SỐ CHUẨN SGK TOÁN 12 VIỆT NAM      */}
           {/* ========================================================= */}
-          {diagramType === 'variation_table' && (
-            <div className="w-full max-w-xl bg-white rounded-xl border-2 border-slate-700 shadow-md p-3.5 font-serif text-xs">
-              <div className="text-xs font-sans font-extrabold text-slate-800 mb-2.5 text-center flex items-center justify-center gap-1.5 uppercase tracking-wide">
-                <Table className="w-4 h-4 text-indigo-600" />
-                <span>{diagramData.title || 'Bảng biến thiên của hàm số'}</span>
-              </div>
+          {diagramType === 'variation_table' && (() => {
+            const xVals: string[] = diagramData.x || ['-\\infty', '-1', '2', '+\\infty'];
+            const n = Math.max(2, xVals.length);
+            const padPct = 7;
+            const getXPos = (i: number) => padPct + (i * (100 - 2 * padPct)) / (n - 1);
 
-              {/* Bảng viền kép chuẩn mực SGK Toán KNTT & Cánh Diều */}
-              <div className="border border-slate-800 rounded overflow-hidden">
-                <table className="w-full border-collapse border-slate-800 text-center font-sans">
-                  <tbody>
-                    {/* HÀNG 1: DÒNG BIẾN SỐ x */}
-                    <tr className="border-b-2 border-slate-800 bg-slate-100/90">
-                      <td className="w-16 py-2 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-200/80">
-                        x
-                      </td>
-                      {(diagramData.x || ['-\\infty', '-1', '1', '+\\infty']).map((val, i) => (
-                        <td key={i} className="py-2 px-3 font-semibold text-slate-900 border-r border-slate-300 last:border-r-0">
+            // Raw or default arrows
+            const rawArrows: { start: string; end: string; dir: 'up' | 'down' }[] =
+              diagramData.yArrows && diagramData.yArrows.length > 0
+                ? diagramData.yArrows
+                : [
+                    { start: '-\\infty', end: '3', dir: 'up' },
+                    { start: '3', end: '-2', dir: 'down' },
+                    { start: '-2', end: '+\\infty', dir: 'up' },
+                  ];
+
+            // Determine elevations (high = 18%, low = 80%) for each x point
+            const pointValues: { val: string; isHigh: boolean; isAsymptote?: boolean }[] = [];
+            for (let i = 0; i < n; i++) {
+              if (i === 0) {
+                const isHigh = rawArrows[0]?.dir === 'down';
+                pointValues.push({ val: rawArrows[0]?.start || '-\\infty', isHigh });
+              } else {
+                const prevArr = rawArrows[i - 1];
+                const isHigh = prevArr ? prevArr.dir === 'up' : false;
+                pointValues.push({ val: prevArr?.end || (isHigh ? '+\\infty' : '-\\infty'), isHigh });
+              }
+            }
+
+            // Raw or default yPrime signs and zeros
+            const yPrimeList = diagramData.yPrime || ['+', '0', '-', '0', '+'];
+
+            return (
+              <div className="w-full max-w-xl bg-white rounded-xl border-2 border-slate-800 shadow-md p-3.5 font-serif text-xs">
+                <div className="text-xs font-sans font-extrabold text-slate-800 mb-2.5 text-center flex items-center justify-center gap-1.5 uppercase tracking-wide">
+                  <Table className="w-4 h-4 text-indigo-600" />
+                  <span>{diagramData.title || 'Bảng biến thiên của hàm số'}</span>
+                </div>
+
+                {/* Khung Bảng Chuẩn Mực SGK Việt Nam */}
+                <div className="border border-slate-900 rounded overflow-hidden select-none bg-white">
+                  {/* HÀNG 1: DÒNG BIẾN SỐ x */}
+                  <div className="flex border-b-2 border-slate-900 bg-slate-100">
+                    <div className="w-14 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r-2 border-slate-900 bg-slate-200/90 py-2 text-sm">
+                      x
+                    </div>
+                    <div className="relative flex-1 h-9 flex items-center">
+                      {xVals.map((val, idx) => (
+                        <div
+                          key={idx}
+                          className="absolute -translate-x-1/2 font-semibold text-slate-900 text-xs whitespace-nowrap"
+                          style={{ left: `${getXPos(idx)}%` }}
+                        >
                           <MathFormulaRenderer content={val.startsWith('$') ? val : `$${val}$`} />
-                        </td>
+                        </div>
                       ))}
-                    </tr>
+                    </div>
+                  </div>
 
-                    {/* HÀNG 2: DÒNG ĐẠO HÀM y' HOẶC f'(x) */}
-                    <tr className="border-b-2 border-slate-800 bg-white">
-                      <td className="w-16 py-2 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-100/80">
-                        y'
-                      </td>
-                      {(diagramData.yPrime || ['+', '0', '-', '0', '+']).map((sign, i) => {
-                        const trimmed = sign.trim();
-                        const isPlus = trimmed === '+';
-                        const isMinus = trimmed === '-';
-                        const isZero = trimmed === '0';
-                        const isAsymptote = trimmed === '||' || trimmed === '|';
-
+                  {/* HÀNG 2: DÒNG ĐẠO HÀM y' HOẶC f'(x) */}
+                  <div className="flex border-b-2 border-slate-900 bg-white">
+                    <div className="w-14 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r-2 border-slate-900 bg-slate-100/90 py-2 text-sm">
+                      y'
+                    </div>
+                    <div className="relative flex-1 h-9 flex items-center">
+                      {/* Critical roots & asymptotes directly under critical x points */}
+                      {xVals.map((_, idx) => {
+                        if (idx === 0 || idx === n - 1) return null;
+                        // Find sign or 0 at this point
+                        const rootSign = yPrimeList[idx * 2] || '0';
+                        const isAsymptote = rootSign === '||' || rootSign === '|';
                         return (
-                          <td
-                            key={i}
-                            className={`py-2 px-3 font-bold text-sm border-r border-slate-300 last:border-r-0 ${
-                              isPlus
-                                ? 'text-rose-600'
-                                : isMinus
-                                ? 'text-blue-600'
-                                : isZero
-                                ? 'text-slate-900'
-                                : isAsymptote
-                                ? 'text-slate-800 font-black font-mono tracking-tighter'
-                                : 'text-slate-700'
+                          <div
+                            key={`root-${idx}`}
+                            className={`absolute -translate-x-1/2 font-bold text-xs ${
+                              isAsymptote ? 'text-slate-900 tracking-tighter font-mono' : 'text-slate-900'
                             }`}
+                            style={{ left: `${getXPos(idx)}%` }}
                           >
-                            {isAsymptote ? '||' : trimmed}
-                          </td>
+                            {isAsymptote ? '||' : rootSign}
+                          </div>
                         );
                       })}
-                    </tr>
 
-                    {/* HÀNG 3: DÒNG HÀM SỐ y VỚI MŨI TÊN BIẾN THIÊN CHUẨN */}
-                    <tr className="bg-white">
-                      <td className="w-16 py-4 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-100/80 align-middle">
-                        y
-                      </td>
-                      <td colSpan={(diagramData.x || ['-\\infty', '-1', '1', '+\\infty']).length} className="p-3">
-                        <div className="flex items-center justify-around gap-1.5 px-2 py-1 min-h-[56px]">
-                          {(
-                            diagramData.yArrows || [
-                              { start: '-\\infty', end: '4', dir: 'up' },
-                              { start: '4', end: '-2', dir: 'down' },
-                              { start: '-2', end: '+\\infty', dir: 'up' },
-                            ]
-                          ).map((arr, i) => {
-                            const isUp = arr.dir === 'up';
+                      {/* Interval Signs centered between critical x points */}
+                      {rawArrows.map((_, idx) => {
+                        if (idx >= n - 1) return null;
+                        const midLeft = (getXPos(idx) + getXPos(idx + 1)) / 2;
+                        // Get sign from yPrimeList
+                        const sign = yPrimeList[idx * 2 + 1] || (rawArrows[idx]?.dir === 'up' ? '+' : '-');
+                        const isPlus = sign.includes('+');
+                        const isMinus = sign.includes('-');
+                        return (
+                          <div
+                            key={`sign-${idx}`}
+                            className={`absolute -translate-x-1/2 font-bold text-sm ${
+                              isPlus ? 'text-rose-600' : isMinus ? 'text-blue-600' : 'text-slate-800'
+                            }`}
+                            style={{ left: `${midLeft}%` }}
+                          >
+                            {sign.trim()}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
 
+                  {/* HÀNG 3: DÒNG HÀM SỐ y VỚI CÁC MỨC CAO/THẤP VÀ MŨI TÊN CHÉO SGK */}
+                  <div className="flex bg-white">
+                    <div className="w-14 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r-2 border-slate-900 bg-slate-100/90 text-sm">
+                      y
+                    </div>
+                    <div className="relative flex-1 h-28 bg-white overflow-hidden">
+                      {/* SVG Canvas vẽ các mũi tên chéo biến thiên và vạch tiệm cận đứng kép */}
+                      <svg
+                        className="absolute inset-0 w-full h-full pointer-events-none"
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                      >
+                        <defs>
+                          <marker
+                            id="sgkArrow"
+                            viewBox="0 0 10 10"
+                            refX="7"
+                            refY="5"
+                            markerWidth="6"
+                            markerHeight="6"
+                            orient="auto"
+                          >
+                            <path d="M 0 1 L 9 5 L 0 9 z" fill="#1e293b" />
+                          </marker>
+                        </defs>
+
+                        {/* Tiệm cận đứng || kép nếu có */}
+                        {xVals.map((_, idx) => {
+                          const rootSign = yPrimeList[idx * 2];
+                          if (rootSign === '||' || rootSign === '|') {
+                            const xP = getXPos(idx);
                             return (
-                              <div
-                                key={i}
-                                className="flex items-center gap-1.5 bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-200/90 shadow-2xs"
-                              >
-                                <span className="text-[11px] font-semibold text-slate-700">
-                                  <MathFormulaRenderer
-                                    content={arr.start.startsWith('$') ? arr.start : `$${arr.start}$`}
-                                  />
-                                </span>
-
-                                {isUp ? (
-                                  <div className="flex items-center text-rose-600">
-                                    <ArrowUpRight className="w-5 h-5 stroke-[2.5]" />
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center text-blue-600">
-                                    <ArrowDownRight className="w-5 h-5 stroke-[2.5]" />
-                                  </div>
-                                )}
-
-                                <span className="text-[11px] font-bold text-slate-900">
-                                  <MathFormulaRenderer
-                                    content={arr.end.startsWith('$') ? arr.end : `$${arr.end}$`}
-                                  />
-                                </span>
-                              </div>
+                              <g key={`asymp-${idx}`}>
+                                <line x1={xP - 0.4} y1="0" x2={xP - 0.4} y2="100" stroke="#0f172a" strokeWidth="0.8" />
+                                <line x1={xP + 0.4} y1="0" x2={xP + 0.4} y2="100" stroke="#0f172a" strokeWidth="0.8" />
+                              </g>
                             );
-                          })}
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                          }
+                          return null;
+                        })}
+
+                        {/* Mũi tên chéo biến thiên */}
+                        {rawArrows.map((arr, idx) => {
+                          if (idx >= n - 1) return null;
+                          const x1 = getXPos(idx);
+                          const x2 = getXPos(idx + 1);
+                          const isUp = arr.dir === 'up';
+
+                          // Tránh đè lên text: start padding & end padding
+                          const startX = x1 + 3.5;
+                          const endX = x2 - 3.5;
+                          const startY = isUp ? 76 : 24;
+                          const endY = isUp ? 24 : 76;
+
+                          return (
+                            <line
+                              key={`arr-${idx}`}
+                              x1={startX}
+                              y1={startY}
+                              x2={endX}
+                              y2={endY}
+                              stroke="#1e293b"
+                              strokeWidth="1.6"
+                              markerEnd="url(#sgkArrow)"
+                            />
+                          );
+                        })}
+                      </svg>
+
+                      {/* Các giá trị số cực trị / vô cùng tại vị trí Cao (đỉnh) hoặc Thấp (đáy) */}
+                      {pointValues.map((pt, idx) => {
+                        const xPos = getXPos(idx);
+                        return (
+                          <div
+                            key={`val-${idx}`}
+                            className={`absolute -translate-x-1/2 font-semibold text-slate-900 text-xs px-1 bg-white/95 rounded whitespace-nowrap z-10 ${
+                              pt.isHigh ? 'top-2' : 'bottom-2'
+                            }`}
+                            style={{ left: `${xPos}%` }}
+                          >
+                            <MathFormulaRenderer content={pt.val.startsWith('$') ? pt.val : `$${pt.val}$`} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ========================================================= */}
           {/* 2. BẢNG XÉT DẤU CHUẨN SGK (Toán 10, 11 & 12)               */}
@@ -465,198 +611,59 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
           )}
 
           {/* ========================================================= */}
-          {/* 3. ĐỒ THỊ HÀM SỐ OXY CHUẨN SÁCH GIÁO KHOA TOÁN VIỆT NAM   */}
+          {/* 3. ĐỒ THỊ HÀM SỐ CHUẨN SÁCH GIÁO KHOA (SVG NATIVE)       */}
           {/* ========================================================= */}
-          {diagramType === 'function_graph' && (
-            <div className="flex flex-col items-center">
-              <div className="text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
-                <span>{diagramData.title || 'Đồ thị hàm số trên mặt phẳng tọa độ Oxy'}</span>
+          {diagramType === 'function_graph' && (() => {
+            // Trích xuất công thức LaTeX từ diagramData hoặc từ nội dung câu hỏi
+            let targetLatex = diagramData.latex || diagramData.equation || diagramData.fn || '';
+
+            if (!targetLatex && content) {
+              const formulaMatch =
+                content.match(/(?:y|f\(x\)|x\(t\)|x)\s*=\s*([^$,\n?]+)/i) ||
+                content.match(/\$([^$]+=[^$]+)\$/);
+              if (formulaMatch) {
+                targetLatex = formulaMatch[0].replace(/\$/g, '').trim();
+              }
+            }
+
+            if (!targetLatex) {
+              targetLatex =
+                diagramData.graphType === 'quadratic'
+                  ? 'y = x^2 - 3x'
+                  : diagramData.graphType === 'biquadratic'
+                  ? 'y = x^4 - 2x^2 - 1'
+                  : diagramData.graphType === 'rational'
+                  ? 'y = \\frac{ax+b}{cx+d}'
+                  : diagramData.graphType === 'sine'
+                  ? 'y = 2\\sin(x)'
+                  : 'y = x^3 - 3x + 1';
+            }
+
+            return (
+              <div className="w-full max-w-lg my-2 flex justify-center">
+                <StandardTextbookGraph
+                  latex={targetLatex}
+                  graphType={diagramData.graphType}
+                  title={diagramData.title}
+                  asymptoteX={diagramData.asymptoteX}
+                  asymptoteY={diagramData.asymptoteY}
+                  height={isPresentationMode ? 340 : 290}
+                  isPresentationMode={isPresentationMode}
+                />
               </div>
+            );
+          })()}
 
-              <div className="relative bg-white rounded-2xl border-2 border-slate-300 shadow-md p-2 overflow-hidden">
-                <svg
-                  width="300"
-                  height="220"
-                  viewBox="0 0 300 220"
-                  className="rounded-xl"
-                >
-                  <defs>
-                    <marker
-                      id="arrow-axis"
-                      viewBox="0 0 10 10"
-                      refX="6"
-                      refY="5"
-                      markerWidth="6"
-                      markerHeight="6"
-                      orient="auto-start-reverse"
-                    >
-                      <path d="M 0 1 L 10 5 L 0 9 z" fill="#334155" />
-                    </marker>
-
-                    {/* Subtle Grid Pattern (Ô ly chuẩn vở học sinh) */}
-                    <pattern id="grid-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
-                      <line x1="0" y1="0" x2="20" y2="0" stroke="#f1f5f9" strokeWidth="1" />
-                      <line x1="0" y1="0" x2="0" y2="20" stroke="#f1f5f9" strokeWidth="1" />
-                    </pattern>
-                  </defs>
-
-                  {/* Lưới ô vuông mờ */}
-                  <rect width="300" height="220" fill="url(#grid-pattern)" />
-
-                  {/* Trục hoành Ox */}
-                  <line
-                    x1="20"
-                    y1="110"
-                    x2="285"
-                    y2="110"
-                    stroke="#334155"
-                    strokeWidth="1.8"
-                    markerEnd="url(#arrow-axis)"
-                  />
-                  {/* Trục tung Oy */}
-                  <line
-                    x1="150"
-                    y1="205"
-                    x2="150"
-                    y2="15"
-                    stroke="#334155"
-                    strokeWidth="1.8"
-                    markerEnd="url(#arrow-axis)"
-                  />
-
-                  {/* Nhãn trục x, y, gốc O */}
-                  <text x="288" y="114" fontSize="12" fontWeight="bold" fontStyle="italic" fill="#0f172a">
-                    x
-                  </text>
-                  <text x="156" y="16" fontSize="12" fontWeight="bold" fontStyle="italic" fill="#0f172a">
-                    y
-                  </text>
-                  <text x="138" y="125" fontSize="11" fontWeight="bold" fill="#475569">
-                    O
-                  </text>
-
-                  {/* Vạch chia đơn vị (ticks) trên trục Ox */}
-                  {[-2, -1, 1, 2].map((val) => {
-                    const posX = 150 + val * 45;
-                    return (
-                      <g key={`tick-x-${val}`}>
-                        <line x1={posX} y1="107" x2={posX} y2="113" stroke="#475569" strokeWidth="1.2" />
-                        <text x={posX - 4} y="125" fontSize="9" fontWeight="bold" fill="#64748b">
-                          {val}
-                        </text>
-                      </g>
-                    );
-                  })}
-
-                  {/* Vạch chia đơn vị (ticks) trên trục Oy */}
-                  {[-1, 1, 2].map((val) => {
-                    const posY = 110 - val * 40;
-                    return (
-                      <g key={`tick-y-${val}`}>
-                        <line x1="147" y1={posY} x2="153" y2={posY} stroke="#475569" strokeWidth="1.2" />
-                        <text x="133" y={posY + 3} fontSize="9" fontWeight="bold" fill="#64748b">
-                          {val}
-                        </text>
-                      </g>
-                    );
-                  })}
-
-                  {/* 1. Hàm số bậc 3: y = ax^3 + bx^2 + cx + d */}
-                  {(!diagramData.graphType || diagramData.graphType === 'cubic') && (
-                    <>
-                      {/* Đường dóng nét đứt tọa độ cực đại & cực tiểu */}
-                      <line x1="105" y1="110" x2="105" y2="40" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
-                      <line x1="105" y1="40" x2="150" y2="40" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
-                      <line x1="195" y1="110" x2="195" y2="160" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
-                      <line x1="150" y1="160" x2="195" y2="160" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
-
-                      {/* Đường cong hàm bậc 3 mượt mà */}
-                      <path
-                        d="M 50 195 C 90 30, 110 35, 150 100 C 185 165, 210 170, 250 25"
-                        fill="none"
-                        stroke="#4f46e5"
-                        strokeWidth="2.8"
-                        strokeLinecap="round"
-                      />
-
-                      {/* Điểm cực đại & cực tiểu */}
-                      <circle cx="105" cy="40" r="3.5" fill="#e11d48" />
-                      <circle cx="195" cy="160" r="3.5" fill="#2563eb" />
-                    </>
-                  )}
-
-                  {/* 2. Hàm phân thức hữu tỉ bậc nhất / bậc nhất y = (ax+b)/(cx+d) */}
-                  {diagramData.graphType === 'rational' && (
-                    <>
-                      {/* Tiệm cận đứng x = 1 (nét đứt màu cam) */}
-                      <line x1="195" y1="10" x2="195" y2="210" stroke="#ea580c" strokeWidth="1.4" strokeDasharray="4 3" />
-                      {/* Tiệm cận ngang y = 1 (nét đứt màu cam) */}
-                      <line x1="15" y1="70" x2="285" y2="70" stroke="#ea580c" strokeWidth="1.4" strokeDasharray="4 3" />
-
-                      {/* Nhánh 1 (bên trái tiệm cận đứng) */}
-                      <path
-                        d="M 25 60 Q 180 50 185 15"
-                        fill="none"
-                        stroke="#dc2626"
-                        strokeWidth="2.8"
-                        strokeLinecap="round"
-                      />
-                      {/* Nhánh 2 (bên phải tiệm cận đứng) */}
-                      <path
-                        d="M 205 205 Q 210 80 275 75"
-                        fill="none"
-                        stroke="#dc2626"
-                        strokeWidth="2.8"
-                        strokeLinecap="round"
-                      />
-                    </>
-                  )}
-
-                  {/* 3. Hàm bậc 4 trùng phương: y = ax^4 + bx^2 + c (chữ W) */}
-                  {diagramData.graphType === 'biquadratic' && (
-                    <>
-                      {/* Đường cong hình chữ W với 3 cực trị */}
-                      <path
-                        d="M 55 25 C 75 160, 95 160, 110 160 C 130 160, 140 70, 150 70 C 160 70, 170 160, 190 160 C 205 160, 225 160, 245 25"
-                        fill="none"
-                        stroke="#7c3aed"
-                        strokeWidth="2.8"
-                        strokeLinecap="round"
-                      />
-                      <circle cx="110" cy="160" r="3" fill="#2563eb" />
-                      <circle cx="150" cy="70" r="3" fill="#e11d48" />
-                      <circle cx="190" cy="160" r="3" fill="#2563eb" />
-                    </>
-                  )}
-
-                  {/* 4. Hàm parabol bậc 2: y = ax^2 + bx + c */}
-                  {diagramData.graphType === 'quadratic' && (
-                    <>
-                      <line x1="150" y1="10" x2="150" y2="200" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
-                      <path
-                        d="M 70 30 Q 150 190 230 30"
-                        fill="none"
-                        stroke="#0284c7"
-                        strokeWidth="2.8"
-                        strokeLinecap="round"
-                      />
-                      <circle cx="150" cy="190" r="3.5" fill="#e11d48" />
-                    </>
-                  )}
-
-                  {/* 5. Hàm lượng giác hình sin: y = sin(x) */}
-                  {diagramData.graphType === 'sine' && (
-                    <path
-                      d="M 30 110 Q 75 40 120 110 T 210 110 T 280 110"
-                      fill="none"
-                      stroke="#059669"
-                      strokeWidth="2.8"
-                      strokeLinecap="round"
-                    />
-                  )}
-                </svg>
-              </div>
+          {/* ========================================================= */}
+          {/* 3B. BÀI TOÁN THỰC TẾ & HÌNH VẼ MINH HỌA TRỰC QUAN         */}
+          {/* ========================================================= */}
+          {(diagramType === 'practical_illustration' || diagramType === 'practical') && (
+            <div className="w-full max-w-lg my-2 flex justify-center">
+              <PracticalMathIllustration
+                scenario={diagramData.scenario || detectPracticalScenario(content) || 'box_folding'}
+                title={diagramData.title}
+                isPresentationMode={isPresentationMode}
+              />
             </div>
           )}
 

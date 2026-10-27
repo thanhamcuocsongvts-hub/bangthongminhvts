@@ -4,7 +4,8 @@ import {
   BookOpen, Trophy, PenTool, CheckSquare, Globe, 
   FolderOpen, ShieldCheck, KeyRound, RefreshCw, LogOut, 
   LogIn, Dices, Type, ChevronDown, Smartphone, Menu, X,
-  GraduationCap, Sparkles, Zap, Sprout, Gamepad2, Presentation
+  GraduationCap, Sparkles, Zap, Sprout, Gamepad2, Presentation,
+  Calculator, Layers
 } from 'lucide-react';
 import { TextScale, TeacherProfile } from '../types';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
@@ -39,6 +40,8 @@ interface HeaderBarProps {
   onLogout: () => void;
   onOpenAIConfig?: () => void;
   pendingTeachersCount?: number;
+  onOpenCasioCalculator?: () => void;
+  onOpenStepByStepSimulation?: () => void;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -60,6 +63,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onLogout,
   onOpenAIConfig,
   pendingTeachersCount = 0,
+  onOpenCasioCalculator,
+  onOpenStepByStepSimulation,
 }) => {
   const { isMobile } = useDeviceDetection();
   const [showTeacherMenu, setShowTeacherMenu] = useState<boolean>(false);
@@ -287,6 +292,28 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                   >
                     <Dices className="w-4 h-4 text-amber-400" />
                     <span>Quay gọi học sinh ngẫu nhiên</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowMobileDrawer(false);
+                      onOpenCasioCalculator?.();
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-sky-500/40 text-sky-300 text-xs font-bold flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <Calculator className="w-4 h-4 text-sky-400" />
+                    <span>Máy tính Casio fx-580VN X</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowMobileDrawer(false);
+                      onOpenStepByStepSimulation?.();
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-indigo-950/60 hover:bg-indigo-900 border border-purple-500/40 text-purple-200 text-xs font-bold flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <Layers className="w-4 h-4 text-purple-400" />
+                    <span>Dựng hình bài toán & Thí nghiệm ảo</span>
                   </button>
 
                   <button
@@ -722,76 +749,26 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         </button>
       </nav>
 
-      {/* 3. RIGHT: THU GỌN TỐI ĐA CÁC NÚT (Khóa AI, #Mã phòng, Zoom %, Xuất, Fullscreen) */}
+      {/* 3. RIGHT: MÁY TÍNH CASIO FX-580VN X, DỰNG HÌNH & TN ẢO, XUẤT BÀI GIẢNG, TOÀN MÀN HÌNH */}
       <div className="flex items-center gap-1 xl:gap-1.5 shrink-0">
-        {/* Nút Khóa AI compact: icon nhỏ + nhãn ngắn */}
+        {/* Nút Giả lập máy tính Casio fx-580VN X */}
         <button
-          onClick={onOpenAIConfig}
-          className="px-2 py-1 rounded-xl bg-purple-950/70 hover:bg-purple-900 border border-purple-500/50 text-purple-200 text-xs font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer shrink-0"
-          title="Cài đặt khóa Google Gemini API"
+          onClick={onOpenCasioCalculator}
+          className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border border-sky-500/50 text-sky-300 text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0 active:scale-95"
+          title="Mở máy tính khoa học Casio fx-580VN X (COMP, Phương trình bậc 2-3, Hệ PT, Bảng giá trị f(x))"
         >
-          <Sparkles className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
-          <span className="text-[11px] font-bold">Khóa AI</span>
+          <Calculator className="w-3.5 h-3.5 text-sky-400" />
+          <span className="text-[11px] font-black tracking-tight">Máy tính 580 VN X</span>
         </button>
 
-        {/* Mã phòng: Badge thu nhỏ hiển thị #758899 */}
-        <div className="relative shrink-0" ref={studentMenuRef}>
-          <button
-            onClick={() => setShowStudentMenu((prev) => !prev)}
-            className="flex items-center gap-1 px-2 py-1 rounded-xl bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 text-xs font-mono font-bold transition-all shadow-xs cursor-pointer"
-            title="Mã phòng học sinh nộp bài"
-          >
-            <QrCode className="w-3.5 h-3.5 text-emerald-400" />
-            <span>#{roomPin}</span>
-          </button>
-
-          {showStudentMenu && (
-            <div className="absolute right-0 top-full mt-2 w-64 bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 p-2.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150 space-y-2 text-white">
-              <div className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-center">
-                <div className="text-[10px] font-black uppercase tracking-wider text-emerald-400">MÃ PIN VÀO PHÒNG</div>
-                <div className="text-2xl font-mono font-black text-emerald-300 tracking-wider my-0.5">#{roomPin}</div>
-                <div className="text-[11px] text-emerald-300">Học sinh nhập mã PIN để nộp bài</div>
-              </div>
-
-              <button
-                onClick={() => {
-                  setShowStudentMenu(false);
-                  onOpenQR();
-                }}
-                className="w-full p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                <QrCode className="w-4 h-4 text-emerald-400" />
-                <span>Quét mã QR vào phòng</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowStudentMenu(false);
-                  onSwitchToStudentView();
-                }}
-                className="w-full p-2 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/50 text-indigo-300 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                <Smartphone className="w-4 h-4 text-indigo-400" />
-                <span>Mở giao diện làm bài của HS</span>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Tỷ lệ Zoom (125%): Icon tròn tối giản kích thước w-8 h-8 */}
+        {/* Nút Dựng hình từng bước & Thí nghiệm ảo KHTN */}
         <button
-          onClick={() => {
-            const nextScale: Record<TextScale, TextScale> = {
-              normal: 'large',
-              large: 'huge',
-              huge: 'normal',
-            };
-            onTextScaleChange(nextScale[textScale] || 'normal');
-          }}
-          className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[10px] font-mono font-bold flex items-center justify-center shrink-0 cursor-pointer shadow-xs transition-all"
-          title={`Tỷ lệ màn hình (Hiện tại: ${textScale === 'huge' ? '150%' : textScale === 'large' ? '125%' : '100%'}) - Bấm để chuyển đổi`}
+          onClick={onOpenStepByStepSimulation}
+          className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-indigo-950 to-purple-950 hover:from-indigo-900 hover:to-purple-900 border border-purple-500/50 text-purple-200 text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0 active:scale-95"
+          title="Dựng hình từng bước cho bài toán thực tế & Thí nghiệm ảo (Vật lý, Hóa học, Sinh học)"
         >
-          <span>{textScale === 'huge' ? '150%' : textScale === 'large' ? '125%' : '100%'}</span>
+          <Layers className="w-3.5 h-3.5 text-purple-400" />
+          <span className="text-[11px] font-black tracking-tight">Dựng Hình & TN Ảo</span>
         </button>
 
         {/* Nút Xuất bài giảng icon tròn tối giản w-8 h-8 */}

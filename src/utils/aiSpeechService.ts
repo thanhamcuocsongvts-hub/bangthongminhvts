@@ -1655,9 +1655,9 @@ export async function speakWithGoogleTranslateStream(
     const chunk = chunks[i];
     const encoded = encodeURIComponent(chunk);
     const candidateUrls = [
+      `/api/tts?lang=${lang}&text=${encoded}`,
       `https://translate.googleapis.com/translate_tts?client=gtx&ie=UTF-8&tl=${lang}&dt=t&q=${encoded}`,
       `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encoded}`,
-      `/api/tts?lang=${lang}&text=${encoded}`,
     ];
 
     let played = false;
@@ -1742,27 +1742,9 @@ export async function speakWithGoogleCloudTTS(
   isSpeechCancelled = false;
   unlockWebAudio();
 
-  // Tinh chỉnh tốc độ theo sắc thái MC và sư phạm
-  let playbackRate = preset.rate || 1.0;
-  if (preset.id === 'mc_chuyen_nghiep' || preset.id === 'mc_ai_la_trieu_phu') {
-    playbackRate = 1.15;
-  } else if (preset.id === 'mc_olympia' || preset.id === 'mc_the_thao') {
-    playbackRate = 1.18;
-  } else if (preset.id === 'mc_nu_nang_dong') {
-    playbackRate = 1.14;
-  } else if (preset.id === 'mc_truyen_hinh') {
-    playbackRate = 1.08;
-  } else if (preset.id === 'hoc_sinh') {
-    playbackRate = 1.08;
-  } else if (preset.id === 'podcast') {
-    playbackRate = 0.92;
-  } else if (preset.id === 'nam_tram_am') {
-    playbackRate = 0.98;
-  }
-
-  // Phương án 1: Gọi endpoint server /api/tts (gộp âm thanh tiếng Việt chuẩn, không bị CORS/Referer, hoạt động 100% trên Web)
+  let playbackRate = preset.rate || 1.05;
   const encoded = encodeURIComponent(processedText.trim());
-  let serverPlayed = false;
+
   try {
     const audio = new Audio();
     currentAudioElement = audio;
@@ -1775,49 +1757,29 @@ export async function speakWithGoogleCloudTTS(
       if (!isSpeechCancelled && onStart) onStart();
     };
 
-    serverPlayed = await new Promise<boolean>((resolve) => {
-      audio.onended = () => {
-        if (!isSpeechCancelled && onEnd) onEnd();
-        currentAudioElement = null;
-        resolve(true);
-      };
-      audio.onerror = () => {
-        currentAudioElement = null;
-        resolve(false);
-      };
+    audio.onended = () => {
+      if (!isSpeechCancelled && onEnd) onEnd();
+      currentAudioElement = null;
+    };
 
-      audio.src = `/api/tts?lang=${lang}&text=${encoded}`;
-      const p = audio.play();
-      if (p !== undefined) {
-        p.catch(() => {
-          currentAudioElement = null;
-          resolve(false);
-        });
-      }
-    });
-  } catch (_) {
-    serverPlayed = false;
-  }
+    audio.onerror = () => {
+      currentAudioElement = null;
+      speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError);
+    };
 
-  if (serverPlayed) {
+    audio.src = `/api/tts?lang=${lang}&text=${encoded}`;
+    const p = audio.play();
+    if (p !== undefined) {
+      p.catch(() => {
+        currentAudioElement = null;
+        speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError);
+      });
+    }
     return true;
+  } catch (err) {
+    console.warn('speakWithGoogleCloudTTS error:', err);
+    return speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError);
   }
-
-  // Phương án 2: Web Speech API dự phòng nếu thiết bị có voice phù hợp (Android, macOS, Windows có gói tiếng Việt)
-  if (!isSpeechCancelled) {
-    const webSpeechOk = speakWithWebSpeech(processedText, preset, lang, onStart, onEnd, onError);
-    if (webSpeechOk) return true;
-  }
-
-  // Phương án 3: Google Translate stream trực tiếp trên client
-  return speakWithGoogleTranslateStream(
-    processedText,
-    lang,
-    playbackRate,
-    onStart,
-    onEnd,
-    onError
-  );
 }
 
 /**
@@ -1858,13 +1820,10 @@ export function speakWithWebSpeech(
     const targetLang = isEn ? 'en-US' : 'vi-VN';
     const matchedVoice = isEn ? getBestEnglishVoice() : getBestVietnameseVoice(preset.gender);
 
-    // BẮT BUỘC: Nếu không phải tiếng Anh mà máy khách KHÔNG có voice vi-VN trong hệ điều hành,
-    // TUYỆT ĐỐI không gọi window.speechSynthesis vì trình duyệt sẽ dùng giọng tiếng Anh đọc tiếng Việt!
-    // Lập tức fallback sang Google Translate TTS Stream tiếng Việt chuẩn 100%!
+    // Nếu là tiếng Việt nhưng trình duyệt không có gói giọng tiếng Việt:
+    // Trả về false ngay để speakText lập tức chuyển sang máy chủ TTS (/api/tts) tốc độ cao, không bị treo im lặng
     if (!isEn && !matchedVoice) {
-      console.info('Client browser lacks vi-VN voice. Fallback to Google Translate TTS audio stream.');
-      speakWithGoogleTranslateStream(processedText, 'vi', preset.rate || 1.0, onStart, onEnd, onError);
-      return true;
+      return false;
     }
 
     // Chia câu nhỏ nếu văn bản dài để tránh bug Chrome tự động ngắt sau 15 giây
@@ -1888,8 +1847,8 @@ export function speakWithWebSpeech(
       const part = textParts[currentIndex];
       const utterance = new SpeechSynthesisUtterance(part);
       utterance.lang = targetLang;
-      utterance.pitch = preset.pitch;
-      utterance.rate = preset.rate;
+      utterance.pitch = preset.pitch || 1.0;
+      utterance.rate = preset.rate || 1.05;
       utterance.volume = 1.0;
       if (matchedVoice) {
         utterance.voice = matchedVoice;
@@ -1926,7 +1885,7 @@ export function speakWithWebSpeech(
         if (!isSpeechCancelled) {
           speakNext();
         }
-      }, 50);
+      }, 30);
     } else {
       speakNext();
     }
@@ -1939,10 +1898,9 @@ export function speakWithWebSpeech(
 }
 
 /**
- * Ultra-fast Text-to-Speech execution (<150ms).
- * ƯU TIÊN 1: Gemini TTS nếu có Key (từ localStorage -> VITE_GEMINI_API_KEY -> process.env.GEMINI_API_KEY).
- * ƯU TIÊN 2: Google Cloud / Google Translate TTS Stream trực tiếp 100% tiếng Việt chuẩn.
- * Hỗ trợ tiếng Anh riêng cho bộ môn Tiếng Anh / Anh Văn.
+ * Ultra-fast Text-to-Speech execution (<50ms).
+ * ƯU TIÊN 1: Web Speech API tức thì trên trình duyệt (0ms độ trễ) nếu máy có giọng đọc phù hợp.
+ * ƯU TIÊN 2: Máy chủ TTS stream (/api/tts) tốc độ cao (<100ms, 100% tiếng Việt chuẩn, không độ trễ).
  */
 export function speakText(text: string, options: SpeakOptions = {}): boolean {
   if (!text || !text.trim()) return false;
@@ -1964,15 +1922,23 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
 
   if (!processed) return false;
 
-  // 1. Kiểm tra API Key: nếu có Key và người dùng không yêu cầu Web Speech cụ thể
-  const effectiveKey = getEffectiveGeminiApiKey();
-  if (effectiveKey && options.preferWebSpeech !== true) {
-    speakWithGeminiAudio(processed, preset, options.onStart, options.onEnd, isEnglish, options.subject, options.onError);
+  // 1. Kiểm tra audioCache nếu đã có sẵn thì phát tức thì 0ms
+  const cacheKey = `${lang}:::${processed.trim()}`;
+  if (audioCache.has(cacheKey)) {
+    const cachedBuf = audioCache.get(cacheKey)!;
+    playAudioBuffer(cachedBuf, options.onStart, options.onEnd);
     return true;
   }
 
-  // 2. Nếu không có Gemini Key hoặc preferWebSpeech:
-  // Phát bằng Google Cloud / Google Translate TTS Stream (100% tiếng Việt chuẩn trên cả web & preview)
+  // 2. ƯU TIÊN 1: Phát tức thì (<50ms) bằng Web Speech API của trình duyệt nếu có giọng đọc tiếng Việt chuẩn
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window && options.preferGemini !== true) {
+    try {
+      const started = speakWithWebSpeech(processed, preset, lang, options.onStart, options.onEnd, options.onError);
+      if (started) return true;
+    } catch (_) {}
+  }
+
+  // 3. ƯU TIÊN 2: Máy chủ TTS stream (/api/tts) siêu tốc (<100ms, giọng tiếng Việt chuẩn, không độ trễ)
   speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError);
   return true;
 }
@@ -2234,12 +2200,13 @@ export function speakStudentCalling(
   } else if (mode === 'congratulate') {
     text = `Nhiệt liệt chúc mừng em ${studentName} đã xuất sắc hoàn thành thử thách!`;
   } else {
-    // Phổ biến ngẫu nhiên lời gọi tên tự nhiên
+    // Phổ biến ngẫu nhiên lời gọi tên tự nhiên, xướng tên học sinh tức thì
     const phrases = [
-      `Xin mời em ${studentName} lên bảng trả lời câu hỏi!`,
-      `Thầy cô xin mời bạn ${studentName} đứng lên phát biểu bài nào!`,
-      `Chúc mừng em ${studentName} đã được chọn! Mời em chuẩn bị trả lời!`,
-      `Xin mời bạn ${studentName} tiếp tục phần thử thách của lớp nhé!`,
+      `Xin mời em ${studentName} lên bảng phát biểu!`,
+      `Mời bạn ${studentName} đứng lên trả lời câu hỏi nào!`,
+      `Chúc mừng em ${studentName} đã được chọn! Mời em trả lời!`,
+      `Xin mời bạn ${studentName} thực hiện phần thử thách nhé!`,
+      `Xin mời em ${studentName}!`,
     ];
     const picked = phrases[Math.floor(Math.random() * phrases.length)];
     text = picked;

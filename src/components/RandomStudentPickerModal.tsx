@@ -1167,6 +1167,33 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Classroom Selector */}
+            {allClasses && allClasses.length > 0 && (
+              <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200/90 rounded-xl px-2.5 py-1 text-blue-900 shadow-2xs">
+                <Users className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="text-xs font-black text-blue-800 hidden sm:inline">Lớp:</span>
+                <select
+                  value={classroom?.id}
+                  onChange={(e) => {
+                    const found = allClasses.find((c) => c.id === e.target.value);
+                    if (found && onSelectClassroom) {
+                      onSelectClassroom(found);
+                      setSelectedStudent(null);
+                      setSelectedGroup([]);
+                    }
+                  }}
+                  className="text-xs font-black text-blue-950 bg-white border border-blue-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
+                  title="Chọn đúng lớp học cần gọi tên học sinh tham gia trò chơi"
+                >
+                  {allClasses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.students?.length || 0} HS)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* AI Voice Preset Selector */}
             <select
               value={selectedVoice.id}

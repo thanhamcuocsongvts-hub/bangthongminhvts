@@ -55,6 +55,9 @@ import {
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
 import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist';
+import { extractCleanPdfText } from '../utils/pdfTextExtractor';
+import { exportExamToWordDocx } from '../utils/docxExportService';
 import { QuizQuestion, RoomState, StudentSubmission, TextScale, ActiveStudent } from '../types';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
@@ -78,6 +81,12 @@ import {
   deleteEducationalItem,
   SavedEducationalItem,
 } from '../utils/savedQuizzesService';
+
+if (typeof window !== 'undefined' && 'Worker' in window && pdfjsLib) {
+  try {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+  } catch (_) {}
+}
 
 interface LiveQuizHubProps {
   roomState: RoomState | null;
@@ -129,8 +138,35 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [boardAnswerResult, setBoardAnswerResult] = useState<'correct' | 'wrong' | null>(null);
   const [showCallStudentModal, setShowCallStudentModal] = useState<boolean>(false);
   const [studentCallManualInput, setStudentCallManualInput] = useState<string>('');
+  const [selectedCallingClass, setSelectedCallingClass] = useState<string>('Lớp 12A1');
   const [congratsMessage, setCongratsMessage] = useState<string>('');
   const [isReadingBoardQuestion, setIsReadingBoardQuestion] = useState<boolean>(false);
+
+  const CLASS_ROSTERS: Record<string, string[]> = {
+    'Lớp 12A1': [
+      'Nguyễn Văn An', 'Trần Thị Bình', 'Lê Hoàng Cường', 'Phạm Thu Dung',
+      'Vũ Quốc Bảo', 'Đỗ Gia Hân', 'Hoàng Đức Anh', 'Bùi Ngọc Ánh',
+      'Đặng Khánh Linh', 'Trịnh Tuấn Kiệt', 'Lê Mỹ Duyên', 'Nguyễn Tiến Đạt'
+    ],
+    'Lớp 12A2': [
+      'Trần Hoàng Nam', 'Lê Quỳnh Nga', 'Phạm Minh Quân', 'Ngô Gia Huy',
+      'Võ Phương Anh', 'Dương Quốc Thái', 'Nguyễn Thu Trang', 'Phan Bảo Long',
+      'Đinh Ngọc Diệp', 'Vũ Thành Đạt', 'Lương Minh Trí', 'Bùi Thảo Vy'
+    ],
+    'Lớp 12A3': [
+      'Nguyễn Nhật Minh', 'Phạm Thùy Linh', 'Trương Quốc Anh', 'Hồ Diệu My',
+      'Tô Hải Đăng', 'Vũ Kim Ngân', 'Đoàn Hữu Phước', 'Lý Gia Hưng',
+      'Mai Thị Bích', 'Trần Văn Hào', 'Chu Phương Uyên', 'Nguyễn Đức Thắng'
+    ],
+    'Lớp 11A1': [
+      'Nguyễn Bảo Châu', 'Lê Trọng Nghĩa', 'Phạm Thùy Dương', 'Trần Hữu Kiên',
+      'Vũ Mai Lan', 'Đặng Quốc Huy', 'Bùi Yến Nhi', 'Hoàng Minh Khôi'
+    ],
+    'Lớp 10A1': [
+      'Trần Minh Đức', 'Nguyễn Phương Thảo', 'Lê Tuấn Hùng', 'Phạm Lan Anh',
+      'Hoàng Đình Trọng', 'Đỗ Thảo Nguyên', 'Vũ Duy Khánh', 'Ngô Thanh Hà'
+    ],
+  };
 
   // Exam Room Mode state (Chế độ phòng thi)
   const [examDurationMinutes, setExamDurationMinutes] = useState<number>(45);
@@ -148,6 +184,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [selectedSubject, setSelectedSubject] = useState<string>('Toán học');
   const [selectedGrade, setSelectedGrade] = useState<string>('Lớp 12');
   const [questionCount, setQuestionCount] = useState<number>(4);
+  const [isMatrixMode, setIsMatrixMode] = useState<boolean>(false);
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('Đa cấp độ (Chuẩn BGD)');
   const [selectedTimeLimit, setSelectedTimeLimit] = useState<number>(30);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -260,7 +297,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     }
   }, [questions.length]);
 
-  // Reset timer whenever question changes in Live mode
+  // Reset timer whenever question changes in Live mode & pre-warm TTS audio
   useEffect(() => {
     stopAllSpeech();
     setReadingQuestionId(null);
@@ -268,6 +305,16 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       setTimeLeft(currentQ.timeLimit || 30);
       setIsRevealed(false);
       setIsTimerRunning(true);
+    }
+    // Pre-warm question audio in background so button click speaks instantly (0ms)
+    if (currentQ) {
+      try {
+        const cleanQ = (currentQ.question || '').replace(/^câu\s*\d*\s*[:.]\s*/i, '').trim();
+        if (cleanQ) {
+          const prefetchUrl = `/api/tts?lang=vi&text=${encodeURIComponent(`Câu hỏi: ${cleanQ}.`)}`;
+          fetch(prefetchUrl, { cache: 'force-cache' }).catch(() => {});
+        }
+      } catch (_) {}
     }
   }, [activeIndex, currentQ?.id, activeMode]);
 
@@ -512,6 +559,37 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         const res = await mammoth.extractRawText({ arrayBuffer });
         extractedText = res.value;
       } else if (fileCategory === 'pdf') {
+        // Trích xuất văn bản tiếng Việt nguyên bản từ tệp PDF
+        try {
+          if (pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+          }
+          const arrayBuffer = await file.arrayBuffer();
+          const loadingTask = pdfjsLib.getDocument({
+            data: new Uint8Array(arrayBuffer),
+            useSystemFonts: true,
+          });
+          const pdf = await loadingTask.promise;
+          const maxPages = Math.min(pdf.numPages, 30);
+          const textParts: string[] = [];
+
+          for (let i = 1; i <= maxPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = extractCleanPdfText(textContent);
+            if (pageText) {
+              textParts.push(`--- Trang ${i} ---\n${pageText}`);
+            }
+          }
+
+          if (textParts.length > 0) {
+            extractedText = textParts.join('\n\n');
+          }
+        } catch (pdfErr) {
+          console.warn('PDF text extraction notice in LiveQuizHub:', pdfErr);
+        }
+
+        // Đồng thời đọc base64 dự phòng
         base64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(reader.result as string);
@@ -531,8 +609,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         base64,
         extractedText,
       });
+      setIsMatrixMode(true);
 
-      setStatusMessage(`✓ Đã nhận ma trận đề: "${file.name}". Bấm "Tạo Câu Hỏi Bằng AI" để khởi tạo.`);
+      const hasTextNotice = extractedText ? ` (${extractedText.length} ký tự văn bản đã bóc tách)` : '';
+      setStatusMessage(`✓ Đã nhận ma trận đề: "${file.name}"${hasTextNotice}. Chế độ "Tạo theo ma trận" đã được bật. Bấm "Tạo Câu Hỏi Bằng AI" để khởi tạo.`);
     } catch (err: any) {
       console.error('File parsing error', err);
       setStatusMessage(`Lỗi đọc tệp: ${err?.message || 'Không thể đọc tệp'}`);
@@ -550,23 +630,24 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         prompt: promptTopic || currentLesson?.title || 'Khảo sát hàm số và đồ thị',
         subject: selectedSubject,
         grade: selectedGrade,
-        count: questionCount,
+        count: isMatrixMode ? 'auto_matrix' : questionCount,
+        isMatrixMode: isMatrixMode,
         difficulty: selectedDifficulty,
         timeLimit: selectedTimeLimit,
         apiKey: getGeminiApiKey(),
       };
 
       if (uploadedFile) {
-        if (uploadedFile.type === 'image' || uploadedFile.type === 'pdf') {
+        if (uploadedFile.extractedText) {
+          payload.matrixFile = {
+            fileName: uploadedFile.name,
+            text: uploadedFile.extractedText,
+          };
+        } else if (uploadedFile.type === 'image' || uploadedFile.type === 'pdf') {
           payload.matrixFile = {
             fileName: uploadedFile.name,
             mimeType: uploadedFile.file.type || (uploadedFile.type === 'image' ? 'image/jpeg' : 'application/pdf'),
             base64: uploadedFile.base64,
-          };
-        } else if (uploadedFile.extractedText) {
-          payload.matrixFile = {
-            fileName: uploadedFile.name,
-            text: uploadedFile.extractedText,
           };
         }
       }
@@ -685,6 +766,36 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       origin: { y: 0.6 },
       colors: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'],
     });
+  };
+
+  // Export generated questions to standardized Word (.docx) with OMML math & OpenXML tables
+  const [isExportingDocx, setIsExportingDocx] = useState<boolean>(false);
+  const handleExportToWordDocx = async () => {
+    const questionsToExport = generatedQuestions.length > 0 ? generatedQuestions : questions;
+    if (questionsToExport.length === 0) {
+      setStatusMessage('Chưa có câu hỏi nào để xuất file Word (.docx)');
+      return;
+    }
+
+    setIsExportingDocx(true);
+    setStatusMessage('📄 Đang xử lý công thức OMML & khởi tạo tệp Word (.docx)...');
+
+    try {
+      await exportExamToWordDocx({
+        title: promptTopic || currentLesson?.title || `ĐỀ KIỂM TRA ĐỊNH KỲ ${selectedSubject.toUpperCase()}`,
+        subject: selectedSubject,
+        grade: selectedGrade,
+        questions: questionsToExport,
+        teacherName: teacher?.name || 'Thầy Trịnh Tuấn',
+        examCode: roomState?.pin?.slice(-3) || '101',
+      });
+      setStatusMessage(`✓ Đã xuất thành công tệp Word (.docx) gồm ${questionsToExport.length} câu hỏi chuẩn OMML!`);
+    } catch (err: any) {
+      console.error('Word export error:', err);
+      setStatusMessage(`Lỗi xuất Word: ${err?.message || 'Không thể tạo file docx'}`);
+    } finally {
+      setIsExportingDocx(false);
+    }
   };
 
   // Delete a generated question
@@ -828,16 +939,14 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
   const handleCallRandomStudent = () => {
     let candidateList: string[] = [];
-    if (classroom?.students && Array.isArray(classroom.students) && classroom.students.length > 0) {
+    if (CLASS_ROSTERS[selectedCallingClass] && CLASS_ROSTERS[selectedCallingClass].length > 0) {
+      candidateList = CLASS_ROSTERS[selectedCallingClass];
+    } else if (classroom?.students && Array.isArray(classroom.students) && classroom.students.length > 0) {
       candidateList = classroom.students.map((s: any) => s.name || s);
     } else if (roomState?.activeStudents && roomState.activeStudents.length > 0) {
       candidateList = roomState.activeStudents.map((s) => s.name);
     } else {
-      candidateList = [
-        'Nguyễn Văn An', 'Trần Thị Bình', 'Lê Hoàng Cường', 'Phạm Thu Dung',
-        'Vũ Quốc Bảo', 'Đỗ Gia Hân', 'Hoàng Đức Anh', 'Bùi Ngọc Ánh',
-        'Đặng Khánh Linh', 'Trịnh Tuấn Kiệt', 'Lê Mỹ Duyên', 'Nguyễn Tiến Đạt'
-      ];
+      candidateList = CLASS_ROSTERS['Lớp 12A1'];
     }
 
     const picked = candidateList[Math.floor(Math.random() * candidateList.length)];
@@ -1183,6 +1292,19 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             </button>
           )}
 
+          {/* Nút Xuất File Word .docx chuẩn OMML đọc tốt trên điện thoại */}
+          {(generatedQuestions.length > 0 || questions.length > 0) && (
+            <button
+              onClick={handleExportToWordDocx}
+              disabled={isExportingDocx}
+              className="px-3.5 py-2 rounded-xl bg-blue-900/70 hover:bg-blue-800 text-blue-200 border border-blue-700/60 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shadow-xs"
+              title="Xuất bộ đề thi ra file Word .docx chuẩn cấu trúc OMML đọc tốt trên điện thoại và máy tính"
+            >
+              <FileText className="w-4 h-4 text-blue-300" />
+              <span>{isExportingDocx ? 'Đang xuất Word...' : 'Xuất Word (.docx)'}</span>
+            </button>
+          )}
+
           {activeMode === 'creator' && generatedQuestions.length > 0 && (
             <button
               onClick={handleDeployToStudents}
@@ -1388,6 +1510,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   <button
                     onClick={() => {
                       setUploadedFile(null);
+                      setIsMatrixMode(false);
                       if (fileInputRef.current) fileInputRef.current.value = '';
                     }}
                     className="p-2 rounded-xl hover:bg-emerald-100 text-emerald-800 transition-colors shrink-0"
@@ -1428,9 +1551,9 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     onChange={(e) => setSelectedGrade(e.target.value)}
                     className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    <option value="Lớp 12">Lớp 12 (Ôn thi TN THPT)</option>
-                    <option value="Lớp 11">Lớp 11 (Chương trình mới)</option>
-                    <option value="Lớp 10">Lớp 10 (Chương trình mới)</option>
+                    <option value="Lớp 12">Lớp 12</option>
+                    <option value="Lớp 11">Lớp 11</option>
+                    <option value="Lớp 10">Lớp 10</option>
                     <option value="Khối THCS">Khối THCS (Lớp 6-9)</option>
                   </select>
                 </div>
@@ -1438,23 +1561,87 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">Số lượng câu hỏi:</label>
-                  <div className="grid grid-cols-4 gap-1">
-                    {[4, 5, 8, 10].map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => setQuestionCount(c)}
-                        className={`py-2 rounded-xl text-xs font-black transition-all ${
-                          questionCount === c
-                            ? 'bg-indigo-600 text-white shadow-xs'
-                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                        }`}
-                      >
-                        {c} câu
-                      </button>
-                    ))}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-bold text-slate-700">Số lượng câu hỏi:</label>
+                    {isMatrixMode ? (
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-emerald-600" /> Theo ma trận
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-black text-indigo-700 font-mono bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200">
+                        {questionCount} câu
+                      </span>
+                    )}
                   </div>
+
+                  {/* Tùy chọn: Tạo theo ma trận đính kèm */}
+                  <label
+                    className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                      isMatrixMode
+                        ? 'bg-emerald-50/90 border-emerald-300 text-emerald-900 shadow-xs'
+                        : 'bg-slate-50/70 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isMatrixMode}
+                      onChange={(e) => setIsMatrixMode(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 accent-emerald-600 cursor-pointer"
+                    />
+                    <span className="flex-1">Tạo theo ma trận đính kèm</span>
+                    {uploadedFile && (
+                      <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-200/80 text-emerald-800 px-1.5 py-0.5 rounded-md">
+                        Đã tải tệp
+                      </span>
+                    )}
+                  </label>
+
+                  {/* Khi isMatrixMode bật: làm mờ / khóa nút và hiển thị thông báo */}
+                  {isMatrixMode ? (
+                    <div className="p-2.5 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 text-[11px] font-semibold leading-snug">
+                      <div className="flex items-start gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                        <span>Số lượng câu hỏi sẽ được tự động trích xuất từ file ma trận.</span>
+                      </div>
+                      <div className="text-[10px] text-amber-700 mt-1 pl-5">
+                        Tự tạo đủ Phần I, II, III (và IV tự luận) đúng số câu trong ma trận.
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-4 gap-1 mb-1.5">
+                        {[4, 5, 8, 10].map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setQuestionCount(c)}
+                            className={`py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                              questionCount === c
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+                        <span className="text-[10px] font-bold text-slate-500 whitespace-nowrap">Tự chọn:</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={50}
+                          value={questionCount}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 1;
+                            setQuestionCount(Math.min(50, Math.max(1, val)));
+                          }}
+                          className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded-lg text-xs font-black text-indigo-700 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">(tối đa 50)</span>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div>
@@ -1537,7 +1724,17 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               </div>
 
               {generatedQuestions.length > 0 && (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={handleExportToWordDocx}
+                    disabled={isExportingDocx}
+                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                    title="Xuất đề thi ra tệp Word (.docx) chuẩn OMML không dùng markdown"
+                  >
+                    <FileText className="w-4 h-4 text-white" />
+                    <span>{isExportingDocx ? 'Đang xuất Word...' : 'Xuất File Word (.docx)'}</span>
+                  </button>
+
                   <button
                     onClick={handleDeployToStudents}
                     className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
@@ -1572,87 +1769,201 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   </button>
                 </div>
               ) : (
-                generatedQuestions.map((q, idx) => (
-                  <div
-                    key={q.id || idx}
-                    className="p-6 rounded-3xl bg-white border border-slate-200 shadow-xs hover:border-indigo-300 transition-all space-y-4"
-                  >
-                    {/* Question Header */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <span className="px-3 py-1 rounded-xl bg-indigo-600 text-white text-xs font-black">
-                          CÂU {idx + 1}
-                        </span>
-                        {q.difficulty && (
-                          <span className="px-2.5 py-0.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold">
-                            {q.difficulty}
-                          </span>
-                        )}
-                        <span className="px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono font-bold flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          <span>{q.timeLimit || 30}s</span>
-                        </span>
-                      </div>
+                generatedQuestions.map((q, idx) => {
+                  const prevQ = idx > 0 ? generatedQuestions[idx - 1] : null;
+                  const isNewPart = !prevQ || (q.partLabel && q.partLabel !== prevQ.partLabel) || (q.partType && q.partType !== prevQ.partType);
 
-                      <button
-                        onClick={() => handleDeleteQuestion(q.id)}
-                        className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
-                        title="Xóa câu hỏi này"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Question Text */}
-                    <div className="text-base font-bold text-slate-900 leading-relaxed">
-                      <MathFormulaRenderer content={q.question} />
-                    </div>
-
-                    {/* Options Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                      {q.options.map((opt) => {
-                        const isCorrect = opt.key === q.correctAnswer;
-                        return (
-                          <div
-                            key={opt.key}
-                            className={`p-3.5 rounded-2xl border transition-all flex items-start gap-3 ${
-                              isCorrect
-                                ? 'bg-emerald-50 border-emerald-300 text-emerald-950 ring-1 ring-emerald-300'
-                                : 'bg-slate-50 border-slate-200 text-slate-800'
-                            }`}
-                          >
-                            <span
-                              className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
-                                isCorrect
-                                  ? 'bg-emerald-600 text-white'
-                                  : 'bg-white border border-slate-200 text-slate-700'
-                              }`}
-                            >
-                              {opt.key}
+                  return (
+                    <React.Fragment key={q.id || idx}>
+                      {/* Section Part Header Banner when moving to new Part */}
+                      {isNewPart && q.partLabel && (
+                        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-indigo-700 via-indigo-800 to-purple-800 text-white shadow-md flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-8 h-8 rounded-xl bg-white/15 flex items-center justify-center font-black text-sm">
+                              {q.partType === 'part_2_true_false' ? 'II' : q.partType === 'part_3_short_answer' ? 'III' : q.partType === 'part_4_essay' ? 'IV' : 'I'}
                             </span>
-                            <div className="flex-1 text-sm font-semibold pt-0.5">
-                              <MathFormulaRenderer content={opt.text} />
+                            <div>
+                              <h4 className="text-sm font-black tracking-wide uppercase">{q.partLabel}</h4>
+                              <p className="text-[11px] text-indigo-200">
+                                {q.partType === 'part_2_true_false'
+                                  ? 'Mỗi câu hỏi có 4 ý a), b), c), d). Thí sinh chọn Đúng hoặc Sai cho từng ý.'
+                                  : q.partType === 'part_3_short_answer'
+                                  ? 'Thí sinh tính toán và điền đáp số ngắn / số nguyên hoặc thập phân.'
+                                  : q.partType === 'part_4_essay'
+                                  ? 'Câu hỏi tự luận kiểm tra lập luận, các bước giải chi tiết và biểu điểm.'
+                                  : 'Mỗi câu hỏi có 4 phương án A, B, C, D. Thí sinh chọn 1 phương án đúng nhất.'}
+                              </p>
                             </div>
-                            {isCorrect && (
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-1" />
+                          </div>
+                          <span className="px-2.5 py-1 rounded-xl bg-white/20 text-[11px] font-bold">
+                            Chuẩn BGD 2025
+                          </span>
+                        </div>
+                      )}
+
+                      <div
+                        className="p-6 rounded-3xl bg-white border border-slate-200 shadow-xs hover:border-indigo-300 transition-all space-y-4"
+                      >
+                        {/* Question Header */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="px-3 py-1 rounded-xl bg-indigo-600 text-white text-xs font-black">
+                              CÂU {idx + 1}
+                            </span>
+                            {q.partLabel && (
+                              <span className="px-2.5 py-0.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">
+                                {q.partLabel.split(':')[0]}
+                              </span>
+                            )}
+                            {q.difficulty && (
+                              <span className="px-2.5 py-0.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold">
+                                {q.difficulty}
+                              </span>
+                            )}
+                            <span className="px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono font-bold flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              <span>{q.timeLimit || 30}s</span>
+                            </span>
+                            {q.maxScore && (
+                              <span className="px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-bold">
+                                {q.maxScore} điểm
+                              </span>
                             )}
                           </div>
-                        );
-                      })}
-                    </div>
 
-                    {/* Explanation */}
-                    {q.explanation && (
-                      <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-950 flex items-start gap-2.5">
-                        <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-bold text-amber-900">Giải thích: </span>
-                          <MathFormulaRenderer content={q.explanation} />
+                          <button
+                            onClick={() => handleDeleteQuestion(q.id)}
+                            className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
+                            title="Xóa câu hỏi này"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
+
+                        {/* Question Text & Diagram (Tự động vẽ đồ thị hàm số & hình minh họa thực tế chuẩn SGK) */}
+                        <div className="py-1">
+                          <QuizRichContentRenderer
+                            content={q.question}
+                            diagramType={q.diagramType}
+                            diagramData={q.diagramData}
+                            textClassName="text-base font-bold text-slate-900 leading-relaxed mb-3"
+                          />
+                        </div>
+
+                        {/* Format 1: Part II - True / False with 4 Sub-Statements (a, b, c, d) */}
+                        {q.partType === 'part_2_true_false' || (q.subStatements && q.subStatements.length > 0) ? (
+                          <div className="space-y-2.5 pt-1">
+                            <div className="text-xs font-bold text-slate-600">Đánh giá tính Đúng / Sai của các khẳng định sau:</div>
+                            <div className="grid grid-cols-1 gap-2">
+                              {(q.subStatements || []).map((sub, sIdx) => {
+                                const subKey = sub.key || sub.label || ['a', 'b', 'c', 'd'][sIdx] || `ý ${sIdx + 1}`;
+                                const subText = sub.text || sub.statement || '';
+                                const isSubCorrect = typeof sub.isCorrect === 'boolean' ? sub.isCorrect : Boolean(sub.correct);
+                                return (
+                                  <div
+                                    key={sIdx}
+                                    className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-start justify-between gap-3"
+                                  >
+                                    <div className="flex items-start gap-2.5 flex-1">
+                                      <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 font-black text-xs flex items-center justify-center shrink-0">
+                                        {subKey}
+                                      </span>
+                                      <div className="text-sm font-semibold text-slate-800 pt-0.5">
+                                        <MathFormulaRenderer content={subText} />
+                                      </div>
+                                    </div>
+                                    <div className="shrink-0 flex items-center gap-1.5">
+                                      <span
+                                        className={`px-3 py-1 rounded-xl text-xs font-black border ${
+                                          isSubCorrect
+                                            ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                                            : 'bg-rose-100 text-rose-700 border-rose-300'
+                                        }`}
+                                      >
+                                        {isSubCorrect ? '✓ ĐÚNG' : '✗ SAI'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : q.partType === 'part_3_short_answer' || q.shortAnswerKey ? (
+                          /* Format 2: Part III - Short Answer / Numeric Fill */
+                          <div className="p-4 rounded-2xl bg-cyan-50/70 border border-cyan-200 space-y-2">
+                            <div className="text-xs font-bold text-cyan-900 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-4 h-4 text-cyan-600" />
+                              <span>Đáp Án Điền Khuyết / Trả Lời Ngắn:</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="px-4 py-2 rounded-xl bg-white border-2 border-cyan-400 text-slate-900 font-mono font-black text-base shadow-xs">
+                                {q.shortAnswerKey || q.correctAnswer || 'Chưa cung cấp'}
+                              </span>
+                              <span className="text-xs text-slate-500 font-medium">
+                                (Học sinh nhập chính xác số hoặc cụm từ ngắn trên máy tính/điện thoại)
+                              </span>
+                            </div>
+                          </div>
+                        ) : q.partType === 'part_4_essay' || q.essayRubric ? (
+                          /* Format 3: Part IV - Essay & Scoring Rubric */
+                          <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 space-y-2">
+                            <div className="text-xs font-black text-amber-900 uppercase flex items-center gap-1.5">
+                              <Sparkles className="w-4 h-4 text-amber-600" />
+                              <span>Hướng Dẫn Chấm Tự Luận & Thang Điểm:</span>
+                            </div>
+                            <div className="text-xs text-slate-800 leading-relaxed font-medium bg-white/80 p-3 rounded-xl border border-amber-200/60">
+                              <MathFormulaRenderer content={q.essayRubric || q.explanation || 'Xem hướng dẫn giải chi tiết bên dưới.'} />
+                            </div>
+                          </div>
+                        ) : (
+                          /* Format 4: Part I - Multiple Choice (A, B, C, D) */
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                            {q.options.map((opt) => {
+                              const isCorrect = opt.key === q.correctAnswer;
+                              return (
+                                <div
+                                  key={opt.key}
+                                  className={`p-3.5 rounded-2xl border transition-all flex items-start gap-3 ${
+                                    isCorrect
+                                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950 ring-1 ring-emerald-300'
+                                      : 'bg-slate-50 border-slate-200 text-slate-800'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                                      isCorrect
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-white border border-slate-200 text-slate-700'
+                                    }`}
+                                  >
+                                    {opt.key}
+                                  </span>
+                                  <div className="flex-1 text-sm font-semibold pt-0.5">
+                                    <MathFormulaRenderer content={opt.text} />
+                                  </div>
+                                  {isCorrect && (
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-1" />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Explanation */}
+                        {q.explanation && (
+                          <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-950 flex items-start gap-2.5">
+                            <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-bold text-amber-900">Giải thích chi tiết: </span>
+                              <MathFormulaRenderer content={q.explanation} />
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))
+                    </React.Fragment>
+                  );
+                })
               )}
             </div>
 
@@ -1664,6 +1975,15 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleExportToWordDocx}
+                    disabled={isExportingDocx}
+                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                  >
+                    <FileText className="w-4 h-4 text-white" />
+                    <span>{isExportingDocx ? 'Đang xuất Word...' : 'Xuất File Word (.docx)'}</span>
+                  </button>
+
                   <button
                     onClick={handleGenerateFastQuiz}
                     disabled={isGenerating}
@@ -2263,6 +2583,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                           diagramType={currentQ.diagramType}
                           diagramData={currentQ.diagramData}
                           textClassName="text-white font-black text-xl md:text-2xl lg:text-3xl"
+                          isPresentationMode={true}
                         />
                       </div>
                     </div>
@@ -2568,29 +2889,43 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             </div>
 
             {/* Student list from class */}
+            {/* Class Selector Dropdown */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-300">Tùy chọn lớp học:</label>
+                <span className="text-[11px] text-amber-400 font-bold font-mono">
+                  {(CLASS_ROSTERS[selectedCallingClass] || []).length} học sinh
+                </span>
+              </div>
+              <select
+                value={selectedCallingClass}
+                onChange={(e) => setSelectedCallingClass(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border-2 border-slate-700 text-white font-bold text-xs focus:border-amber-400 outline-none cursor-pointer"
+              >
+                {Object.keys(CLASS_ROSTERS).map((cls) => (
+                  <option key={cls} value={cls}>
+                    🏫 {cls} (Sĩ số: {CLASS_ROSTERS[cls].length} em)
+                  </option>
+                ))}
+                {classroom?.name && (
+                  <option value={classroom.name}>
+                    🏫 {classroom.name} (Lớp hiện tại)
+                  </option>
+                )}
+              </select>
+            </div>
+
+            {/* Student list from selected class */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-400">Danh sách học sinh lớp học:</label>
+              <label className="text-xs font-bold text-slate-400">
+                Danh sách học sinh {selectedCallingClass}:
+              </label>
               <div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-2 p-1">
-                {(classroom?.students && Array.isArray(classroom.students) && classroom.students.length > 0
-                  ? classroom.students
-                  : [
-                      { id: '1', name: 'Nguyễn Văn An' },
-                      { id: '2', name: 'Trần Thị Bình' },
-                      { id: '3', name: 'Lê Hoàng Cường' },
-                      { id: '4', name: 'Phạm Thu Dung' },
-                      { id: '5', name: 'Vũ Quốc Bảo' },
-                      { id: '6', name: 'Đỗ Gia Hân' },
-                      { id: '7', name: 'Hoàng Đức Anh' },
-                      { id: '8', name: 'Bùi Ngọc Ánh' },
-                      { id: '9', name: 'Đặng Khánh Linh' },
-                      { id: '10', name: 'Trịnh Tuấn Kiệt' },
-                    ]
-                ).map((st: any) => (
+                {(CLASS_ROSTERS[selectedCallingClass] || (classroom?.students?.map((s: any) => s.name || s) || [])).map((name: string, stIdx: number) => (
                   <button
-                    key={st.id || st.name}
+                    key={stIdx}
                     type="button"
                     onClick={() => {
-                      const name = st.name || st;
                       setBoardSelectedStudent(name);
                       setBoardSelectedOption(null);
                       setBoardAnswerResult(null);
@@ -2600,7 +2935,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     }}
                     className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 hover:border-amber-400 border border-slate-700 text-left text-xs font-bold text-slate-200 truncate transition-all cursor-pointer"
                   >
-                    🎒 {st.name || st}
+                    🎒 {name}
                   </button>
                 ))}
               </div>

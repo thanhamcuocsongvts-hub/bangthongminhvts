@@ -2605,17 +2605,24 @@ export function drawFunctionGraph(
 
         for (let tVal = periodStep; tVal <= xMaxMath + 0.01; tVal += periodStep) {
           const ratio = tVal / T;
-          let lbl = '';
-          if (Math.abs(ratio - 0.5) < 0.01) lbl = 'T/2';
-          else if (Math.abs(ratio - 1) < 0.01) lbl = 'T';
-          else if (Math.abs(ratio - 1.5) < 0.01) lbl = '3T/2';
-          else if (Math.abs(ratio - 2) < 0.01) lbl = '2T';
-          else if (Math.abs(ratio - 2.5) < 0.01) lbl = '5T/2';
-          else if (Math.abs(ratio - 3) < 0.01) lbl = '3T';
-          else if (Math.abs(ratio - 4) < 0.01) lbl = '4T';
-          else lbl = formatPeriodNumber(tVal);
+          let symbolLbl = '';
+          if (Math.abs(ratio - 0.5) < 0.01) symbolLbl = 'T/2';
+          else if (Math.abs(ratio - 1) < 0.01) symbolLbl = 'T';
+          else if (Math.abs(ratio - 1.5) < 0.01) symbolLbl = '3T/2';
+          else if (Math.abs(ratio - 2) < 0.01) symbolLbl = '2T';
+          else if (Math.abs(ratio - 2.5) < 0.01) symbolLbl = '5T/2';
+          else if (Math.abs(ratio - 3) < 0.01) symbolLbl = '3T';
+          else if (Math.abs(ratio - 4) < 0.01) symbolLbl = '4T';
+          else symbolLbl = formatPeriodNumber(tVal);
 
-          customTicksX.push({ val: tVal, label: lbl });
+          let finalLbl = symbolLbl;
+          if (periodic.isTimeVariable) {
+            const secNum = Number(tVal.toFixed(2));
+            const secStr = `${secNum}s`;
+            finalLbl = symbolLbl ? `${secStr} (${symbolLbl})` : secStr;
+          }
+
+          customTicksX.push({ val: tVal, label: finalLbl });
         }
 
         if (!periodic.isTimeVariable) {
@@ -2726,6 +2733,30 @@ export function drawFunctionGraph(
             [],
             unitY
           );
+        }
+
+        if (periodic.isTimeVariable) {
+          ctx.save();
+          ctx.font = 'bold 11.5px "Cambria", "Times New Roman", serif';
+          const tBadge = `Chu kỳ T = ${Number(T.toFixed(2))}s  •  f = ${Number((1 / T).toFixed(2))} Hz  •  ω = ${Number(periodic.omega.toFixed(2))} rad/s`;
+          const bw = ctx.measureText(tBadge).width + 18;
+          const bx = right - bw - 10;
+          const by = top + 8;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          if (typeof (ctx as any).roundRect === 'function') {
+            (ctx as any).roundRect(bx, by, bw, 22, 6);
+          } else {
+            ctx.rect(bx, by, bw, 22);
+          }
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#facc15';
+          ctx.fillText(tBadge, bx + 9, by + 15);
+          ctx.restore();
         }
 
         drawStandardMathBanner(ctx, eqInput, parsed, null, cx, bottom, width, labelVarX, labelVarY, left, right);

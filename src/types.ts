@@ -29,6 +29,21 @@ export interface QuizQuestion {
   difficulty?: 'Dễ' | 'Trung bình' | 'Vận dụng cao' | 'Cơ bản' | 'Thông hiểu' | 'Vận dụng' | string;
   diagramType?: string;
   diagramData?: any;
+  // Multi-part matrix exam support (Phần I, Phần II, Phần III, Phần IV theo chuẩn BGD&ĐT)
+  partType?: 'part_1_choice' | 'part_2_true_false' | 'part_3_short_answer' | 'part_4_essay';
+  partLabel?: string;
+  subStatements?: Array<{
+    id?: string;
+    label?: string; // 'a', 'b', 'c', 'd'
+    key?: string;
+    statement?: string;
+    text?: string;
+    correct?: boolean; // true = Đúng, false = Sai
+    isCorrect?: boolean;
+  }>;
+  shortAnswerKey?: string;
+  essayRubric?: string;
+  maxScore?: number;
 }
 
 export interface StudentSubmission {
