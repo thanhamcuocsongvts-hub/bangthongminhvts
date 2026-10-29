@@ -94,6 +94,34 @@ async function fetchSingleTtsAudio(chunk: string, lang: string): Promise<Buffer 
   return null;
 }
 
+function pcmToWavBuffer(
+  pcmBuffer: Buffer,
+  sampleRate: number = 24000,
+  numChannels: number = 1,
+  bitsPerSample: number = 16
+): Buffer {
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const dataSize = pcmBuffer.length;
+  const header = Buffer.alloc(44);
+
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // Linear PCM
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcmBuffer]);
+}
+
 // High-Fidelity Multi-Voice AI Text-To-Speech Route with Gemini Audio & Google TTS Fallback
 app.get("/api/tts", async (req, res) => {
   try {
@@ -107,14 +135,95 @@ app.get("/api/tts", async (req, res) => {
     const requestedVoice = String(req.query.voice || req.query.preset || "").trim();
     const validVoices = ["Kore", "Aoede", "Puck", "Charon", "Fenrir"];
     const voice = validVoices.includes(requestedVoice) ? requestedVoice : "Kore";
-    const cacheKey = `${lang}:${text}`;
+    const cacheKey = `${voice}:${lang}:${text}`;
 
     if (ttsAudioCache.has(cacheKey)) {
       const cached = ttsAudioCache.get(cacheKey)!;
-      res.setHeader("Content-Type", "audio/mpeg");
+      const isWav = cached.length > 12 && cached.toString("ascii", 0, 4) === "RIFF";
+      res.setHeader("Content-Type", isWav ? "audio/wav" : "audio/mpeg");
       res.setHeader("Cache-Control", "public, max-age=86400");
       res.setHeader("Content-Length", cached.length);
       return res.send(cached);
+    }
+
+    // 1. Try Gemini TTS for natural, expressive human-like voice synthesis
+    const apiKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.VITE_GEMINI_API_KEY ||
+      process.env.API_KEY ||
+      process.env.VITE_API_KEY ||
+      process.env.GOOGLE_API_KEY;
+
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        let response: any = null;
+        try {
+          response = await ai.models.generateContent({
+            model: "gemini-3.8-flash-lite-tts",
+            contents: text,
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: voice,
+                  },
+                },
+              },
+            },
+          });
+        } catch {
+          response = await ai.models.generateContent({
+            model: "gemini-3.8-flash-tts",
+            contents: text,
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: voice,
+                  },
+                },
+              },
+            },
+          });
+        }
+
+        const parts = response?.candidates?.[0]?.content?.parts;
+        let audioBase64 = "";
+        let mimeType = "audio/wav";
+        if (parts) {
+          for (const p of parts) {
+            if (p.inlineData?.data) {
+              audioBase64 = p.inlineData.data;
+              if (p.inlineData.mimeType) mimeType = p.inlineData.mimeType;
+              break;
+            }
+          }
+        }
+
+        if (audioBase64) {
+          const rawPcm = Buffer.from(audioBase64, "base64");
+          let wavBuffer = rawPcm;
+          if (mimeType.includes("pcm") || mimeType.includes("raw") || !rawPcm.toString("ascii", 0, 4).startsWith("RIFF")) {
+            wavBuffer = pcmToWavBuffer(rawPcm, 24000);
+            mimeType = "audio/wav";
+          }
+          if (ttsAudioCache.size > 200) {
+            const firstKey = ttsAudioCache.keys().next().value;
+            if (firstKey) ttsAudioCache.delete(firstKey);
+          }
+          ttsAudioCache.set(cacheKey, wavBuffer);
+
+          res.setHeader("Content-Type", mimeType);
+          res.setHeader("Cache-Control", "public, max-age=86400");
+          res.setHeader("Content-Length", wavBuffer.length);
+          return res.send(wavBuffer);
+        }
+      } catch (geminiErr) {
+        console.warn("[Local Server] Gemini TTS error, falling back to Google TTS:", geminiErr);
+      }
     }
 
     // 2. Fallback: Google Translate TTS Stream with chunk concatenation

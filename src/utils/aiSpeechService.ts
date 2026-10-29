@@ -102,10 +102,10 @@ export interface VoiceTonePreset {
 export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
   {
     id: 'nu_truyen_cam',
-    name: 'Cô giáo Kore (Nữ truyền cảm, dịu dàng, tự nhiên như người thật)',
-    label: '👩‍🏫 Kore (Nữ truyền cảm - Tự nhiên)',
-    sub: 'Dịu dàng • Truyền cảm • Chuẩn mực',
-    description: 'Giọng đọc AI cao cấp Kore tự nhiên như người thật, âm điệu sư phạm dịu dàng, truyền cảm hứng và không bị tiếng robot',
+    name: 'Cô giáo Kore (Giọng cô giáo dịu dàng, sư phạm, chuẩn mực)',
+    label: '👩‍🏫 Cô giáo (Dịu dàng - Sư phạm)',
+    sub: 'Chuẩn mực • Truyền cảm • Tự nhiên như thật',
+    description: 'Giọng đọc AI cao cấp Kore âm điệu sư phạm dịu dàng, truyền cảm hứng, phát âm tròn vành rõ chữ chuẩn sách giáo khoa',
     icon: '👩‍🏫',
     pitch: 1.05,
     rate: 1.0,
@@ -115,52 +115,52 @@ export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
   },
   {
     id: 'nu_am_ap',
-    name: 'Cô giáo Aoede (Nữ ấm áp, nhẹ nhàng, sâu lắng)',
-    label: '🌸 Aoede (Nữ ấm áp - Nhẹ nhàng)',
-    sub: 'Ấm áp • Nhẹ nhàng • Sâu lắng',
-    description: 'Giọng đọc nữ Aoede ấm áp, trong sáng, diễn đạt tự nhiên và giàu cảm xúc',
-    icon: '🌸',
-    pitch: 1.08,
-    rate: 1.0,
+    name: 'Giọng Podcast Aoede (Trầm lắng, sâu sắc, truyền cảm xúc)',
+    label: '🎙️ Podcast (Sâu lắng - Truyền cảm)',
+    sub: 'Ấm áp • Sâu lắng • Phong cách Podcast & Radio',
+    description: 'Giọng đọc Podcast ấm áp, nhẹ nhàng, giàu cảm xúc, âm sắc ngân vang truyền cảm hứng học tập',
+    icon: '🎙️',
+    pitch: 0.94,
+    rate: 0.94,
     volume: 1.0,
     gender: 'female',
     geminiVoice: 'Aoede',
   },
   {
     id: 'nam_nang_dong',
-    name: 'MC Puck (Nam năng động, sôi nổi, bùng nổ)',
-    label: '⚡ Puck (Nam năng động - Bùng nổ)',
-    sub: 'Năng động • Sôi nổi • Cuốn hút',
-    description: 'Giọng nam Puck tràn đầy năng lượng, hào hứng, khuấy động không khí lớp học',
+    name: 'MC Sôi Động Puck (Hào hứng, cuốn hút, bùng nổ năng lượng)',
+    label: '⚡ MC Sôi Động (Năng lượng - Bùng nổ)',
+    sub: 'Hào hứng • Cuốn hút • Khuấy động không khí',
+    description: 'Phong cách MC trẻ trung, bùng nổ, vui tươi, tốc độ nhanh nhẹn, khơi dậy tinh thần thi đua sôi nổi',
     icon: '⚡',
-    pitch: 1.12,
-    rate: 1.12,
+    pitch: 1.18,
+    rate: 1.14,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Puck',
   },
   {
     id: 'nam_tram_am',
-    name: 'Thầy giáo Charon (Nam trầm ấm, đĩnh đạc, chuẩn phát thanh)',
-    label: '👨‍🏫 Charon (Nam trầm ấm - Thầy giáo)',
-    sub: 'Trầm ấm • Đĩnh đạc • Uy nghiêm',
-    description: 'Giọng thầy giáo Charon trầm ấm, uy nghiêm, phát âm rõ ràng từng từ ngữ chuẩn sư phạm',
+    name: 'Thầy giáo Charon (Nam trầm ấm, đĩnh đạc, uy nghiêm)',
+    label: '👨‍🏫 Thầy giáo (Trầm ấm - Đĩnh đạc)',
+    sub: 'Trầm ấm • Đĩnh đạc • Giọng thầy giáo chuẩn',
+    description: 'Giọng thầy giáo trầm ấm, dứt khoát, điềm đạm, phong thái chuẩn mực giúp học sinh tập trung cao độ',
     icon: '👨‍🏫',
-    pitch: 0.90,
-    rate: 0.98,
+    pitch: 0.82,
+    rate: 0.95,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Charon',
   },
   {
     id: 'nam_dut_khoat',
-    name: 'MC Fenrir (Nam dứt khoát, kịch tính, phong cách Olympia)',
-    label: '🏆 Fenrir (Nam dứt khoát - Kịch tính)',
-    sub: 'Dứt khoát • Kịch tính • Sắc sảo',
-    description: 'Phong cách MC Fenrir dứt khoát, kịch tính, nhấn nhá sắc nét, tạo không khí học tập sôi động',
-    icon: '🏆',
-    pitch: 1.05,
-    rate: 1.10,
+    name: 'Phát thanh viên Fenrir (Chuẩn mực, sắc bén, dứt khoát)',
+    label: '📻 Phát thanh viên (Chuẩn mực - Dứt khoát)',
+    sub: 'Sắc nét • Dứt khoát • Phong cách thời sự',
+    description: 'Giọng phát thanh viên truyền hình chuẩn mực, ngữ điệu rõ nét, dứt khoát từng câu chữ',
+    icon: '📻',
+    pitch: 1.0,
+    rate: 1.08,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Fenrir',
@@ -1631,13 +1631,17 @@ export async function speakWithGoogleTranslateStream(
   playbackRate: number = 1.08,
   onStart?: () => void,
   onEnd?: () => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  preset?: VoiceTonePreset
 ): Promise<boolean> {
   if (!processedText || !processedText.trim()) return false;
 
   stopAllSpeech();
   isSpeechCancelled = false;
   unlockWebAudio();
+
+  const effectivePreset = preset || VOICE_TONE_PRESETS[0];
+  const voiceName = effectivePreset.geminiVoice || (effectivePreset.gender === 'male' ? 'Charon' : 'Kore');
 
   // Chia nhỏ theo câu ngắn (tối đa ~120 ký tự) để stream Google Translate ổn định và đọc dứt khoát
   const chunks = splitIntoSentences(processedText.trim(), 120);
@@ -1655,7 +1659,7 @@ export async function speakWithGoogleTranslateStream(
     const chunk = chunks[i];
     const encoded = encodeURIComponent(chunk);
     const candidateUrls = [
-      `/api/tts?lang=${lang}&text=${encoded}`,
+      `/api/tts?lang=${lang}&voice=${voiceName}&preset=${effectivePreset.id}&rate=${playbackRate}&text=${encoded}`,
       `https://translate.googleapis.com/translate_tts?client=gtx&ie=UTF-8&tl=${lang}&dt=t&q=${encoded}`,
       `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encoded}`,
     ];
@@ -1742,7 +1746,8 @@ export async function speakWithGoogleCloudTTS(
   isSpeechCancelled = false;
   unlockWebAudio();
 
-  let playbackRate = preset.rate || 1.05;
+  const voiceName = preset.geminiVoice || (preset.gender === 'male' ? 'Charon' : 'Kore');
+  let playbackRate = preset.rate || 1.0;
   const encoded = encodeURIComponent(processedText.trim());
 
   try {
@@ -1764,21 +1769,21 @@ export async function speakWithGoogleCloudTTS(
 
     audio.onerror = () => {
       currentAudioElement = null;
-      speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError);
+      speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
     };
 
-    audio.src = `/api/tts?lang=${lang}&text=${encoded}`;
+    audio.src = `/api/tts?lang=${lang}&voice=${voiceName}&preset=${preset.id}&rate=${playbackRate}&text=${encoded}`;
     const p = audio.play();
     if (p !== undefined) {
       p.catch(() => {
         currentAudioElement = null;
-        speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError);
+        speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
       });
     }
     return true;
   } catch (err) {
     console.warn('speakWithGoogleCloudTTS error:', err);
-    return speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError);
+    return speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
   }
 }
 
@@ -2094,7 +2099,11 @@ export function speakQuestionContent(
       });
     }
   } else {
-    const cleanQ = qText.trim().replace(/^câu\s*\d*\s*[:.]\s*/i, '').trim();
+    let cleanQ = qText.trim()
+      .replace(/\\begin\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}[\s\S]*?\\end\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}/gi, ' ')
+      .replace(/^câu\s*\d*\s*[:.]\s*/i, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
     rawScript = `Câu hỏi: ${cleanQ}. `;
 
     // Nhận diện ngữ cảnh đề bài: TỌA ĐỘ hay KHOẢNG ĐƠN ĐIỆU để hướng dẫn AI đọc chính xác

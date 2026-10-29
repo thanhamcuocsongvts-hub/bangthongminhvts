@@ -110,6 +110,12 @@ export const MathFormulaRenderer: React.FC<MathFormulaRendererProps> = ({
       .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
       .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
+    // Automatically wrap bare LaTeX array/matrix/cases blocks that lack $ or $$ delimiters
+    normalized = normalized.replace(
+      /(?<!\$|\\begin\{)(\\begin\{(?:array|matrix|pmatrix|bmatrix|vmatrix|cases|aligned)\}[\s\S]*?\\end\{(?:array|matrix|pmatrix|bmatrix|vmatrix|cases|aligned)\})(?!\$)/gi,
+      '$$$$$1$$$$'
+    );
+
     // Auto-detect math formulas that were written without $ delimiters
     if (!normalized.includes('$')) {
       // If it contains LaTeX commands like \frac, \sqrt, \mathbb, \in, \int, etc.

@@ -552,8 +552,8 @@ export const UniversalDocumentViewer: React.FC<UniversalDocumentViewerProps> = (
             <span className="font-mono text-base text-cyan-300">{zoom}%</span>
           </div>
         )}
-        {/* Interactive Annotation Drawing Layer with Full Toolbar, Fluorescent Colors & Shapes (when standalone) */}
-        {effectiveAnnotating && fileType !== 'pdf' && !onToggleAnnotating && (
+        {/* Interactive Annotation Drawing Layer with Full Toolbar, Fluorescent Colors & Shapes */}
+        {effectiveAnnotating && fileType !== 'pdf' && (
           <div className="absolute inset-0 z-40 pointer-events-none">
             <TouchWhiteboard
               id={`doc-whiteboard-${lesson.id}`}

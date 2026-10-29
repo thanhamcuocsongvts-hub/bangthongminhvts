@@ -1,5 +1,99 @@
 import { GoogleGenAI } from '@google/genai';
 
+// In-memory audio cache for fast serverless responses (<10ms)
+const ttsAudioCache = new Map<string, { buffer: Buffer; mime: string }>();
+
+function chunkTextForTTS(text: string, maxLen: number = 140): string[] {
+  const parts = text.split(/(?<=[.!?:;\n])\s+/);
+  const chunks: string[] = [];
+  let cur = '';
+
+  for (const part of parts) {
+    const s = part.trim();
+    if (!s) continue;
+    if (s.length > maxLen) {
+      if (cur) chunks.push(cur);
+      cur = '';
+      const words = s.split(/\s+/);
+      let wordChunk = '';
+      for (const w of words) {
+        if ((wordChunk + ' ' + w).length > maxLen) {
+          if (wordChunk) chunks.push(wordChunk.trim());
+          wordChunk = w;
+        } else {
+          wordChunk = wordChunk ? `${wordChunk} ${w}` : w;
+        }
+      }
+      if (wordChunk) cur = wordChunk;
+    } else {
+      if ((cur + ' ' + s).length > maxLen) {
+        if (cur) chunks.push(cur);
+        cur = s;
+      } else {
+        cur = cur ? `${cur} ${s}` : s;
+      }
+    }
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks.length > 0 ? chunks : [text.slice(0, maxLen)];
+}
+
+async function fetchSingleTtsAudio(chunk: string, lang: string): Promise<Buffer | null> {
+  const encoded = encodeURIComponent(chunk);
+  const urls = [
+    `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=${lang}&client=gtx&q=${encoded}`,
+    `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=${lang}&client=tw-ob`,
+    `https://translate.google.com.vn/translate_tts?ie=UTF-8&q=${encoded}&tl=${lang}&client=tw-ob`,
+  ];
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          Referer: 'https://translate.google.com/',
+          Accept: 'audio/mpeg, audio/*; q=0.9, */*; q=0.5',
+        },
+      });
+      if (response.ok) {
+        const arrayBuf = await response.arrayBuffer();
+        if (arrayBuf.byteLength > 100) {
+          return Buffer.from(arrayBuf);
+        }
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+function pcmToWavBuffer(
+  pcmBuffer: Buffer,
+  sampleRate: number = 24000,
+  numChannels: number = 1,
+  bitsPerSample: number = 16
+): Buffer {
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const dataSize = pcmBuffer.length;
+  const header = Buffer.alloc(44);
+
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // Linear PCM
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcmBuffer]);
+}
+
 export default async function handler(req: any, res: any) {
   // CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -32,6 +126,143 @@ export default async function handler(req: any, res: any) {
     '';
 
   const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+
+  // 0. High-Fidelity Text-To-Speech Route (Gemini Audio + Google TTS Fallback)
+  if (url.includes('/api/tts')) {
+    try {
+      const parsedUrl = new URL(url, 'https://localhost');
+      const text = String(req.query?.text || parsedUrl.searchParams.get('text') || '').trim();
+      if (!text) {
+        return res.status(400).send('Text is required');
+      }
+
+      const requestedLang = String(req.query?.lang || parsedUrl.searchParams.get('lang') || 'vi');
+      const lang = requestedLang.toLowerCase().startsWith('en') ? 'en' : 'vi';
+      const requestedVoice = String(
+        req.query?.voice ||
+        req.query?.preset ||
+        parsedUrl.searchParams.get('voice') ||
+        parsedUrl.searchParams.get('preset') ||
+        'Kore'
+      ).trim();
+      const validVoices = ['Kore', 'Aoede', 'Puck', 'Charon', 'Fenrir'];
+      const voice = validVoices.includes(requestedVoice) ? requestedVoice : 'Kore';
+      const cacheKey = `${voice}:${lang}:${text}`;
+
+      if (ttsAudioCache.has(cacheKey)) {
+        const cached = ttsAudioCache.get(cacheKey)!;
+        res.setHeader('Content-Type', cached.mime);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Content-Length', cached.buffer.length);
+        return res.send(cached.buffer);
+      }
+
+      // 1. Try Gemini TTS for natural, human-like voice synthesis
+      if (ai) {
+        try {
+          let response: any = null;
+          try {
+            response = await ai.models.generateContent({
+              model: 'gemini-3.8-flash-lite-tts',
+              contents: text,
+              config: {
+                responseModalities: ['AUDIO'],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: {
+                      voiceName: voice,
+                    },
+                  },
+                },
+              },
+            });
+          } catch {
+            response = await ai.models.generateContent({
+              model: 'gemini-3.8-flash-tts',
+              contents: text,
+              config: {
+                responseModalities: ['AUDIO'],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: {
+                      voiceName: voice,
+                    },
+                  },
+                },
+              },
+            });
+          }
+
+          const parts = response?.candidates?.[0]?.content?.parts;
+          let audioBase64 = '';
+          let mimeType = 'audio/wav';
+          if (parts) {
+            for (const p of parts) {
+              if (p.inlineData?.data) {
+                audioBase64 = p.inlineData.data;
+                if (p.inlineData.mimeType) mimeType = p.inlineData.mimeType;
+                break;
+              }
+            }
+          }
+
+          if (audioBase64) {
+            const rawPcm = Buffer.from(audioBase64, 'base64');
+            let wavBuffer = rawPcm;
+            if (
+              mimeType.includes('pcm') ||
+              mimeType.includes('raw') ||
+              !rawPcm.toString('ascii', 0, 4).startsWith('RIFF')
+            ) {
+              wavBuffer = pcmToWavBuffer(rawPcm, 24000);
+              mimeType = 'audio/wav';
+            }
+            if (ttsAudioCache.size > 200) {
+              const firstKey = ttsAudioCache.keys().next().value;
+              if (firstKey) ttsAudioCache.delete(firstKey);
+            }
+            ttsAudioCache.set(cacheKey, { buffer: wavBuffer, mime: mimeType });
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.setHeader('Content-Length', wavBuffer.length);
+            return res.send(wavBuffer);
+          }
+        } catch (geminiErr) {
+          console.warn('[Vercel Serverless] Gemini TTS error, falling back to Google TTS:', geminiErr);
+        }
+      }
+
+      // 2. Fallback: Google Translate TTS Stream with chunk concatenation
+      const chunks = chunkTextForTTS(text, 140);
+      const audioBuffers: Buffer[] = [];
+
+      for (const chunk of chunks) {
+        const buf = await fetchSingleTtsAudio(chunk, lang);
+        if (buf) {
+          audioBuffers.push(buf);
+        }
+      }
+
+      if (audioBuffers.length === 0) {
+        return res.status(502).send('Không thể tạo giọng đọc tiếng Việt từ máy chủ');
+      }
+
+      const combinedBuffer = Buffer.concat(audioBuffers);
+      if (ttsAudioCache.size > 200) {
+        const firstKey = ttsAudioCache.keys().next().value;
+        if (firstKey) ttsAudioCache.delete(firstKey);
+      }
+      ttsAudioCache.set(cacheKey, { buffer: combinedBuffer, mime: 'audio/mpeg' });
+
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Content-Length', combinedBuffer.length);
+      return res.send(combinedBuffer);
+    } catch (err: any) {
+      console.error('[Vercel Serverless] /api/tts error:', err);
+      return res.status(500).send('Lỗi máy chủ TTS: ' + (err?.message || String(err)));
+    }
+  }
 
   // Helper: Generates curriculum-standard questions when AI is offline or without API key
   const generateServerFallbackQuestions = (

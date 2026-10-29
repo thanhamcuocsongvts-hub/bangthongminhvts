@@ -111,6 +111,50 @@ function parseEmbeddedDiagram(content: string): {
     }
   }
 
+  // 1b. Nhận diện Bảng xét dấu dạng LaTeX \begin{array} (Khắc phục triệt để lỗi hiển thị raw code)
+  const latexArrayMatch = content.match(/\\begin\{array\}(?:\{[^}]*\})?([\s\S]*?)\\end\{array\}/i);
+  if (latexArrayMatch) {
+    const inner = latexArrayMatch[1];
+    const lines = inner.split(/\\\\/g).map((l) => l.trim()).filter(Boolean);
+    if (lines.length >= 2) {
+      const xParts = lines[0].split('&').map((p) => p.trim()).filter(Boolean);
+      const secondLineClean = lines[1].replace(/\\hline/g, '').trim();
+      const signParts = secondLineClean.split('&').map((p) => p.trim()).filter(Boolean);
+
+      const xVals = xParts.slice(1);
+      const signLabel = signParts[0] || "f'(x)";
+      const signVals = signParts.slice(1);
+
+      if (xVals.length > 0 && signVals.length > 0) {
+        const clean = content.replace(latexArrayMatch[0], ' ').replace(/\s{2,}/g, ' ').trim();
+        return {
+          cleanContent: clean,
+          detectedType: 'sign_table',
+          detectedData: {
+            title: 'Bảng xét dấu của đạo hàm ' + (signLabel.includes('f') ? "f'(x)" : "y'"),
+            x: xVals,
+            rows: [
+              {
+                label: signLabel,
+                signs: signVals,
+              },
+            ],
+          },
+        };
+      }
+    }
+    const clean = content.replace(latexArrayMatch[0], ' ').replace(/\s{2,}/g, ' ').trim();
+    return {
+      cleanContent: clean,
+      detectedType: 'sign_table',
+      detectedData: {
+        title: 'Bảng xét dấu',
+        x: ['-\\infty', '-1', '2', '+\\infty'],
+        rows: [{ label: "f'(x)", signs: ['+', '0', '-', '0', '+'] }],
+      },
+    };
+  }
+
   const lower = content.toLowerCase();
 
   // 2. Nhận diện Hình học không gian chuẩn SGK (Toán 11 & 12)

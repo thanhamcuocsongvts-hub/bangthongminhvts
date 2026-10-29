@@ -21,11 +21,62 @@ import {
   Square,
   ChevronDown,
   Check,
+  Users,
 } from 'lucide-react';
 import { TouchWhiteboard } from './TouchWhiteboard';
+import { RandomStudentPickerModal } from './RandomStudentPickerModal';
+import { ClassRoom } from '../types';
 import { speakText, stopAllSpeech, VOICE_TONE_PRESETS, VoiceTonePreset } from '../utils/aiSpeechService';
 import { cleanPdfVietnameseText, extractCleanPdfText } from '../utils/pdfTextExtractor';
 import 'pdfjs-dist/web/pdf_viewer.css';
+
+const loadViewerClassrooms = (): ClassRoom[] => {
+  try {
+    const saved = localStorage.getItem('smartboard_teachers');
+    if (saved) {
+      const teachers = JSON.parse(saved);
+      if (Array.isArray(teachers) && teachers.length > 0) {
+        const activeId = localStorage.getItem('smartboard_active_teacher_id');
+        const activeT = teachers.find((t: any) => t.id === activeId) || teachers[0];
+        if (activeT?.classes && activeT.classes.length > 0) {
+          return activeT.classes;
+        }
+      }
+    }
+  } catch (_) {}
+  return [
+    {
+      id: 'class_12a1',
+      name: '12A1',
+      grade: 'Lớp 12',
+      academicYear: '2026 - 2027',
+      subject: 'Toán học',
+      students: [
+        { id: 'st_1', code: '12A101', name: 'Nguyễn Văn An', studentCode: '12A101', oralScore: 9, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
+        { id: 'st_2', code: '12A102', name: 'Trần Thị Bình', studentCode: '12A102', oralScore: 10, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
+        { id: 'st_3', code: '12A103', name: 'Lê Hoàng Cường', studentCode: '12A103', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
+        { id: 'st_4', code: '12A104', name: 'Phạm Thu Dung', studentCode: '12A104', oralScore: 9, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
+        { id: 'st_5', code: '12A105', name: 'Hoàng Minh Đức', studentCode: '12A105', oralScore: 9, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
+        { id: 'st_6', code: '12A106', name: 'Đỗ Thảo Linh', studentCode: '12A106', oralScore: 10, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
+        { id: 'st_7', code: '12A107', name: 'Vũ Quốc Nam', studentCode: '12A107', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
+        { id: 'st_8', code: '12A108', name: 'Ngô Mai Phương', studentCode: '12A108', oralScore: 10, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
+      ],
+    },
+    {
+      id: 'class_12a2',
+      name: '12A2',
+      grade: 'Lớp 12',
+      academicYear: '2026 - 2027',
+      subject: 'Toán học',
+      students: [
+        { id: 'st_21', code: '12A201', name: 'Đặng Tuấn Anh', studentCode: '12A201', oralScore: 9, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
+        { id: 'st_22', code: '12A202', name: 'Bùi Kim Chi', studentCode: '12A202', oralScore: 10, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
+        { id: 'st_23', code: '12A203', name: 'Võ Minh Hải', studentCode: '12A203', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
+        { id: 'st_24', code: '12A204', name: 'Dương Thúy Nga', studentCode: '12A204', oralScore: 9, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
+      ],
+    },
+  ];
+};
 
 // Configure pdfjs worker using unpkg / cdnjs or inline worker to avoid Vite bundling worker issues
 if (typeof window !== 'undefined' && 'Worker' in window) {
@@ -145,6 +196,12 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
       setInternalAnnotating((prev) => !prev);
     }
   }, [onToggleAnnotating]);
+
+  // Student Caller state & Class Selection
+  const [allClassrooms, setAllClassrooms] = useState<ClassRoom[]>(loadViewerClassrooms);
+  const [selectedClassIndex, setSelectedClassIndex] = useState<number>(0);
+  const [showClassDropdown, setShowClassDropdown] = useState<boolean>(false);
+  const [showRandomPickerModal, setShowRandomPickerModal] = useState<boolean>(false);
 
   // Action state
   const [internalZoom, setInternalZoom] = useState<number>(zoom);
@@ -728,6 +785,54 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
             )}
           </div>
 
+          {/* Class Selection Dropdown & Random Student Caller */}
+          <div className="relative flex items-center">
+            <button
+              onClick={() => setShowClassDropdown((prev) => !prev)}
+              className="px-2.5 py-1 rounded-l-lg bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-700/80 text-indigo-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              title="Lựa chọn lớp học để gọi học sinh lên bảng"
+            >
+              <Users className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Lớp: {allClassrooms[selectedClassIndex]?.name || '12A1'}</span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${showClassDropdown ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showClassDropdown && (
+              <div
+                className="absolute top-full mt-1.5 left-0 z-50 w-48 bg-slate-950/95 backdrop-blur-xl border border-indigo-500/50 rounded-xl shadow-2xl p-1.5 text-white space-y-1 animate-in fade-in zoom-in-95"
+                onMouseLeave={() => setShowClassDropdown(false)}
+              >
+                <div className="px-2 py-1 text-[10px] font-black uppercase text-indigo-400 border-b border-white/10 flex items-center justify-between">
+                  <span>LỰA CHỌN LỚP HỌC</span>
+                  <span className="text-[9px] text-slate-400 font-mono">{allClassrooms.length} Lớp</span>
+                </div>
+                {allClassrooms.map((c, idx) => (
+                  <button
+                    key={c.id || idx}
+                    onClick={() => {
+                      setSelectedClassIndex(idx);
+                      setShowClassDropdown(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                      selectedClassIndex === idx ? 'bg-indigo-600 text-white font-black' : 'hover:bg-white/10 text-slate-300'
+                    }`}
+                  >
+                    <span>{c.name} ({c.students?.length || 0} HS)</span>
+                    {selectedClassIndex === idx && <Check className="w-3.5 h-3.5 text-amber-300" />}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowRandomPickerModal(true)}
+              className="px-3 py-1 rounded-r-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black flex items-center gap-1.5 border border-amber-400 shadow-md transition-all active:scale-95 cursor-pointer"
+              title="Gọi ngẫu nhiên học sinh trong lớp lên bảng phát biểu hoặc trả lời câu hỏi"
+            >
+              <span>🎯 Gọi Học Sinh</span>
+            </button>
+          </div>
+
           {/* Prominent Pen Annotation Button in Toolbar */}
           <button
             onClick={toggleAnnotating}
@@ -886,8 +991,8 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
         </div>
       )}
 
-      {/* Interactive Overlay Touch Whiteboard in standalone mode (if parent does not manage overlay) */}
-      {effectiveAnnotating && !onToggleAnnotating && (
+      {/* Interactive Overlay Touch Whiteboard (always active when effectiveAnnotating is true) */}
+      {effectiveAnnotating && (
         <div className="absolute inset-0 z-50 pointer-events-none">
           <TouchWhiteboard
             id={`pdf-whiteboard-overlay-${title.replace(/[^a-zA-Z0-9]/g, '_')}`}
@@ -895,6 +1000,40 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
             onCloseOverlay={toggleAnnotating}
           />
         </div>
+      )}
+
+      {/* Lucky Random Student Picker Game Modal */}
+      {showRandomPickerModal && (
+        <RandomStudentPickerModal
+          isOpen={showRandomPickerModal}
+          onClose={() => setShowRandomPickerModal(false)}
+          classroom={allClassrooms[selectedClassIndex] || allClassrooms[0]}
+          allClasses={allClassrooms}
+          onSelectClassroom={(cls) => {
+            const idx = allClassrooms.findIndex((c) => c.id === cls.id);
+            if (idx !== -1) setSelectedClassIndex(idx);
+          }}
+          onAddBonusPoint={(studentId) => {
+            setAllClassrooms((prev) =>
+              prev.map((c) => ({
+                ...c,
+                students: c.students.map((st) =>
+                  st.id === studentId ? { ...st, bonusPoints: (st.bonusPoints || 0) + 1 } : st
+                ),
+              }))
+            );
+          }}
+          onSetOralScore={(studentId, score) => {
+            setAllClassrooms((prev) =>
+              prev.map((c) => ({
+                ...c,
+                students: c.students.map((st) =>
+                  st.id === studentId ? { ...st, oralScore: score } : st
+                ),
+              }))
+            );
+          }}
+        />
       )}
     </div>
   );
