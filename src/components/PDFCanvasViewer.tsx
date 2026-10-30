@@ -30,20 +30,55 @@ import { speakText, stopAllSpeech, VOICE_TONE_PRESETS, VoiceTonePreset } from '.
 import { cleanPdfVietnameseText, extractCleanPdfText } from '../utils/pdfTextExtractor';
 import 'pdfjs-dist/web/pdf_viewer.css';
 
+const persistUpdatedClassrooms = (updatedClasses: ClassRoom[]) => {
+  try {
+    const saved = localStorage.getItem('smartboard_teachers');
+    if (saved) {
+      const teachers = JSON.parse(saved);
+      if (Array.isArray(teachers) && teachers.length > 0) {
+        const activeId = localStorage.getItem('smartboard_active_teacher') || localStorage.getItem('smartboard_active_teacher_id');
+        const activeIdx = teachers.findIndex((t: any) => t.id === activeId);
+        const targetIdx = activeIdx !== -1 ? activeIdx : 0;
+        teachers[targetIdx] = { ...teachers[targetIdx], classes: updatedClasses };
+        localStorage.setItem('smartboard_teachers', JSON.stringify(teachers));
+        localStorage.setItem('smartboard_active_classroom_list', JSON.stringify(updatedClasses));
+        window.dispatchEvent(new CustomEvent('smartboard_classes_updated', { detail: updatedClasses }));
+      }
+    }
+  } catch (_) {}
+};
+
 const loadViewerClassrooms = (): ClassRoom[] => {
   try {
     const saved = localStorage.getItem('smartboard_teachers');
     if (saved) {
       const teachers = JSON.parse(saved);
       if (Array.isArray(teachers) && teachers.length > 0) {
-        const activeId = localStorage.getItem('smartboard_active_teacher_id');
-        const activeT = teachers.find((t: any) => t.id === activeId) || teachers[0];
-        if (activeT?.classes && activeT.classes.length > 0) {
+        const activeId = localStorage.getItem('smartboard_active_teacher') || localStorage.getItem('smartboard_active_teacher_id');
+        const activeT = teachers.find((t: any) => t.id === activeId);
+        if (activeT?.classes && activeT.classes.length > 0 && activeT.classes.some((c: any) => (c.students?.length || 0) > 0)) {
           return activeT.classes;
+        }
+        // Tìm giáo viên bất kỳ có danh sách lớp đã tải lên
+        const teacherWithClasses = teachers.find((t: any) => t.classes && t.classes.length > 0 && t.classes.some((c: any) => (c.students?.length || 0) > 0));
+        if (teacherWithClasses?.classes && teacherWithClasses.classes.length > 0) {
+          return teacherWithClasses.classes;
         }
       }
     }
   } catch (_) {}
+
+  try {
+    const savedList = localStorage.getItem('smartboard_active_classroom_list') || localStorage.getItem('smartboard_classrooms');
+    if (savedList) {
+      const parsed = JSON.parse(savedList);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.some((c: any) => (c.students?.length || 0) > 0)) {
+        return parsed;
+      }
+    }
+  } catch (_) {}
+
+  // Danh sách mặc định chuẩn 12 học sinh Lớp 12A1 đồng bộ chuẩn xác với tab Lớp học
   return [
     {
       id: 'class_12a1',
@@ -52,14 +87,18 @@ const loadViewerClassrooms = (): ClassRoom[] => {
       academicYear: '2026 - 2027',
       subject: 'Toán học',
       students: [
-        { id: 'st_1', code: '12A101', name: 'Nguyễn Văn An', studentCode: '12A101', oralScore: 9, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
-        { id: 'st_2', code: '12A102', name: 'Trần Thị Bình', studentCode: '12A102', oralScore: 10, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
-        { id: 'st_3', code: '12A103', name: 'Lê Hoàng Cường', studentCode: '12A103', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
-        { id: 'st_4', code: '12A104', name: 'Phạm Thu Dung', studentCode: '12A104', oralScore: 9, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
-        { id: 'st_5', code: '12A105', name: 'Hoàng Minh Đức', studentCode: '12A105', oralScore: 9, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
-        { id: 'st_6', code: '12A106', name: 'Đỗ Thảo Linh', studentCode: '12A106', oralScore: 10, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
-        { id: 'st_7', code: '12A107', name: 'Vũ Quốc Nam', studentCode: '12A107', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
-        { id: 'st_8', code: '12A108', name: 'Ngô Mai Phương', studentCode: '12A108', oralScore: 10, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
+        { id: 'st_1', code: 'HS1201', name: 'Nguyễn Văn An', studentCode: 'HS1201', oralScore: 9, bonusPoints: 2, gender: 'male', avatar: '👨‍🎓', isCalled: false },
+        { id: 'st_2', code: 'HS1202', name: 'Trần Thị Bình', studentCode: 'HS1202', oralScore: 10, bonusPoints: 1, gender: 'female', avatar: '👩‍🎓', isCalled: false },
+        { id: 'st_3', code: 'HS1203', name: 'Lê Hoàng Cường', studentCode: 'HS1203', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓', isCalled: false },
+        { id: 'st_4', code: 'HS1204', name: 'Phạm Thu Dung', studentCode: 'HS1204', oralScore: 9, bonusPoints: 3, gender: 'female', avatar: '👩‍🎓', isCalled: false },
+        { id: 'st_5', code: 'HS1205', name: 'Vũ Quốc Bảo', studentCode: 'HS1205', oralScore: 8, bonusPoints: 1, gender: 'male', avatar: '👨‍🎓', isCalled: false },
+        { id: 'st_6', code: 'HS1206', name: 'Đỗ Gia Hân', studentCode: 'HS1206', oralScore: 10, bonusPoints: 2, gender: 'female', avatar: '👩‍🎓', isCalled: false },
+        { id: 'st_7', code: 'HS1207', name: 'Hoàng Đức Anh', studentCode: 'HS1207', oralScore: 9, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓', isCalled: false },
+        { id: 'st_8', code: 'HS1208', name: 'Bùi Ngọc Ánh', studentCode: 'HS1208', oralScore: 10, bonusPoints: 2, gender: 'female', avatar: '👩‍🎓', isCalled: false },
+        { id: 'st_9', code: 'HS1209', name: 'Đặng Khánh Linh', studentCode: 'HS1209', oralScore: 9, bonusPoints: 1, gender: 'female', avatar: '👩‍🎓', isCalled: false },
+        { id: 'st_10', code: 'HS1210', name: 'Trịnh Tuấn Kiệt', studentCode: 'HS1210', oralScore: 10, bonusPoints: 3, gender: 'male', avatar: '👨‍🎓', isCalled: false },
+        { id: 'st_11', code: 'HS1211', name: 'Lê Mỹ Duyên', studentCode: 'HS1211', oralScore: 9, bonusPoints: 1, gender: 'female', avatar: '👩‍🎓', isCalled: false },
+        { id: 'st_12', code: 'HS1212', name: 'Nguyễn Tiến Đạt', studentCode: 'HS1212', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓', isCalled: false },
       ],
     },
     {
@@ -69,10 +108,10 @@ const loadViewerClassrooms = (): ClassRoom[] => {
       academicYear: '2026 - 2027',
       subject: 'Toán học',
       students: [
-        { id: 'st_21', code: '12A201', name: 'Đặng Tuấn Anh', studentCode: '12A201', oralScore: 9, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
-        { id: 'st_22', code: '12A202', name: 'Bùi Kim Chi', studentCode: '12A202', oralScore: 10, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
-        { id: 'st_23', code: '12A203', name: 'Võ Minh Hải', studentCode: '12A203', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓' },
-        { id: 'st_24', code: '12A204', name: 'Dương Thúy Nga', studentCode: '12A204', oralScore: 9, bonusPoints: 0, gender: 'female', avatar: '👩‍🎓' },
+        { id: 'st_21', code: 'HS1213', name: 'Trần Hoàng Nam', studentCode: 'HS1213', oralScore: 9, bonusPoints: 1, gender: 'male', avatar: '👨‍🎓', isCalled: false },
+        { id: 'st_22', code: 'HS1214', name: 'Lê Quỳnh Nga', studentCode: 'HS1214', oralScore: 10, bonusPoints: 2, gender: 'female', avatar: '👩‍🎓', isCalled: false },
+        { id: 'st_23', code: 'HS1215', name: 'Phạm Minh Quân', studentCode: 'HS1215', oralScore: 8, bonusPoints: 0, gender: 'male', avatar: '👨‍🎓', isCalled: false },
+        { id: 'st_24', code: 'HS1216', name: 'Ngô Gia Huy', studentCode: 'HS1216', oralScore: 9, bonusPoints: 1, gender: 'male', avatar: '👨‍🎓', isCalled: false },
       ],
     },
   ];
@@ -202,6 +241,30 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   const [selectedClassIndex, setSelectedClassIndex] = useState<number>(0);
   const [showClassDropdown, setShowClassDropdown] = useState<boolean>(false);
   const [showRandomPickerModal, setShowRandomPickerModal] = useState<boolean>(false);
+
+  // Synchronize classrooms when teacher updates or uploads roster in "Lớp học" tab
+  const refreshClassrooms = useCallback(() => {
+    const latest = loadViewerClassrooms();
+    setAllClassrooms(latest);
+  }, []);
+
+  useEffect(() => {
+    const handleSync = () => refreshClassrooms();
+    window.addEventListener('smartboard_classes_updated', handleSync);
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('smartboard_classes_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, [refreshClassrooms]);
+
+  useEffect(() => {
+    if (showClassDropdown || showRandomPickerModal) {
+      refreshClassrooms();
+    }
+  }, [showClassDropdown, showRandomPickerModal, refreshClassrooms]);
 
   // Action state
   const [internalZoom, setInternalZoom] = useState<number>(zoom);
@@ -1014,24 +1077,28 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
             if (idx !== -1) setSelectedClassIndex(idx);
           }}
           onAddBonusPoint={(studentId) => {
-            setAllClassrooms((prev) =>
-              prev.map((c) => ({
+            setAllClassrooms((prev) => {
+              const updated = prev.map((c) => ({
                 ...c,
                 students: c.students.map((st) =>
-                  st.id === studentId ? { ...st, bonusPoints: (st.bonusPoints || 0) + 1 } : st
+                  st.id === studentId ? { ...st, bonusPoints: (st.bonusPoints || 0) + 1, isCalled: true } : st
                 ),
-              }))
-            );
+              }));
+              persistUpdatedClassrooms(updated);
+              return updated;
+            });
           }}
           onSetOralScore={(studentId, score) => {
-            setAllClassrooms((prev) =>
-              prev.map((c) => ({
+            setAllClassrooms((prev) => {
+              const updated = prev.map((c) => ({
                 ...c,
                 students: c.students.map((st) =>
-                  st.id === studentId ? { ...st, oralScore: score } : st
+                  st.id === studentId ? { ...st, oralScore: score, isCalled: true } : st
                 ),
-              }))
-            );
+              }));
+              persistUpdatedClassrooms(updated);
+              return updated;
+            });
           }}
         />
       )}

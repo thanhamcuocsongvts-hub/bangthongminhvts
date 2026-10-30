@@ -756,8 +756,8 @@ function drawStandardMathBanner(
   // Banner chỉ hiển thị tên công thức hàm số toán học (phân số, căn thức, luỹ thừa...), không chèn tiệm cận làm rối mắt
   const bannerW = Math.min(width - 20, Math.max(120, formulaW + 24));
 
-  // VỊ TRÍ: NẰM Ở PHÍA DƯỚI ĐỒ THỊ (sát cạnh dưới bottom - bannerH - 2) - Hoàn toàn không che khuất đồ thị!
-  const bannerY = bottom - bannerH - 2;
+  // VỊ TRÍ: NẰM Ở PHÍA DƯỚI ĐỒ THỊ (sát cạnh dưới đáy khung) - Chuyển xuống phía dưới để đồ thị hiển thị trọn vẹn
+  const bannerY = bottom - bannerH + 6;
   const bannerX = Math.max(left + 6, Math.min(right - bannerW - 6, cx - bannerW / 2));
 
   // Khung nền đen mờ sang trọng, viền vàng ánh kim/xanh cyan thanh mảnh
@@ -2587,8 +2587,9 @@ export function drawFunctionGraph(
           unitX = (pxPerPeriod / T) * gScale;
         }
 
-        // Tự động căn chỉnh tỷ lệ trục đứng Oy (auto-scale Y): đỉnh và đáy sóng nằm ở ~75-80% chiều cao khung
-        const availH = (height * 0.40) * gScale;
+        // Tự động căn chỉnh tỷ lệ trục đứng Oy (auto-scale Y): đỉnh và đáy sóng nằm ở ~56-60% chiều cao khả dụng
+        // Điều chỉnh để đỉnh và đáy sóng không bao giờ chạm vào badge chu kỳ ở trên hoặc banner phương trình ở dưới
+        const availH = (height * 0.28) * gScale;
         const unitY = Math.max(0.001, availH / A);
 
         // CƠ CHẾ MỞ RỘNG NHÁNH KHI KÉO RỘNG KHUNG (DYNAMIC DOMAIN BY WIDTH):
@@ -2617,9 +2618,9 @@ export function drawFunctionGraph(
 
           let finalLbl = symbolLbl;
           if (periodic.isTimeVariable) {
+            // Yêu cầu người dùng: bỏ luôn các chữ T và bỏ chữ s kế bên con số vì mũi tên ngang đã ghi t (s)
             const secNum = Number(tVal.toFixed(2));
-            const secStr = `${secNum}s`;
-            finalLbl = symbolLbl ? `${secStr} (${symbolLbl})` : secStr;
+            finalLbl = `${secNum}`;
           }
 
           customTicksX.push({ val: tVal, label: finalLbl });
@@ -2675,26 +2676,26 @@ export function drawFunctionGraph(
           drawAsymptote(ctx, envStartX, originY - A * unitY, right - 8, originY - A * unitY, '', undefined, undefined, 'rgba(56, 189, 248, 0.65)');
           drawAsymptote(ctx, envStartX, originY + A * unitY, right - 8, originY + A * unitY, '', undefined, undefined, 'rgba(56, 189, 248, 0.65)');
 
-          // Đường gióng nét đứt tại T/2
+          // Đường gióng nét đứt tại T/2 (chỉ vẽ đường dóng, không in lặp chữ T/2 làm rối đồ thị)
           if (T / 2 <= xMaxMath) {
             const pxHalf = originX + (T / 2) * unitX;
             const yHalf = parsed.fn(T / 2);
             const pyHalf = Number.isFinite(yHalf) ? originY - yHalf * unitY : originY;
-            drawTextbookProjection(ctx, originX, originY, pxHalf, pyHalf, 'T/2', '', '#38bdf8', '#facc15');
+            drawTextbookProjection(ctx, originX, originY, pxHalf, pyHalf, '', '', '#38bdf8', '#facc15');
           }
           // Đường gióng nét đứt tại T
           if (T <= xMaxMath) {
             const pxT = originX + T * unitX;
             const yT = parsed.fn(T);
             const pyT = Number.isFinite(yT) ? originY - yT * unitY : originY;
-            drawTextbookProjection(ctx, originX, originY, pxT, pyT, 'T', '', '#38bdf8', '#facc15');
+            drawTextbookProjection(ctx, originX, originY, pxT, pyT, '', '', '#38bdf8', '#facc15');
           }
           // Đường gióng nét đứt tại 2T khi kéo rộng khung
           if (2 * T <= xMaxMath) {
             const px2T = originX + (2 * T) * unitX;
             const y2T = parsed.fn(2 * T);
             const py2T = Number.isFinite(y2T) ? originY - y2T * unitY : originY;
-            drawTextbookProjection(ctx, originX, originY, px2T, py2T, '2T', '', '#38bdf8', '#facc15');
+            drawTextbookProjection(ctx, originX, originY, px2T, py2T, '', '', '#38bdf8', '#facc15');
           }
           if (!periodic.isTimeVariable) {
             if (-T / 2 >= xMinMath) {
@@ -2737,25 +2738,26 @@ export function drawFunctionGraph(
 
         if (periodic.isTimeVariable) {
           ctx.save();
-          ctx.font = 'bold 11.5px "Cambria", "Times New Roman", serif';
+          ctx.font = 'bold 11px "Cambria", "Times New Roman", serif';
           const tBadge = `Chu kỳ T = ${Number(T.toFixed(2))}s  •  f = ${Number((1 / T).toFixed(2))} Hz  •  ω = ${Number(periodic.omega.toFixed(2))} rad/s`;
-          const bw = ctx.measureText(tBadge).width + 18;
-          const bx = right - bw - 10;
-          const by = top + 8;
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          const bw = ctx.measureText(tBadge).width + 16;
+          const bx = right - bw - 8;
+          // Chuyển lên trên một chút để không che đỉnh sóng của đồ thị:
+          const by = Math.max(minY + 2, top - 6);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
           ctx.strokeStyle = '#38bdf8';
           ctx.lineWidth = 1.2;
           ctx.beginPath();
           if (typeof (ctx as any).roundRect === 'function') {
-            (ctx as any).roundRect(bx, by, bw, 22, 6);
+            (ctx as any).roundRect(bx, by, bw, 20, 5);
           } else {
-            ctx.rect(bx, by, bw, 22);
+            ctx.rect(bx, by, bw, 20);
           }
           ctx.fill();
           ctx.stroke();
 
           ctx.fillStyle = '#facc15';
-          ctx.fillText(tBadge, bx + 9, by + 15);
+          ctx.fillText(tBadge, bx + 8, by + 14);
           ctx.restore();
         }
 

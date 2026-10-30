@@ -903,6 +903,10 @@ export default function App() {
 
       teachersRef.current = next;
       localStorage.setItem('smartboard_teachers', JSON.stringify(next));
+      if (updatedTeacher.classes) {
+        localStorage.setItem('smartboard_active_classroom_list', JSON.stringify(updatedTeacher.classes));
+        window.dispatchEvent(new CustomEvent('smartboard_classes_updated', { detail: updatedTeacher.classes }));
+      }
 
       // Save directly to server backend classes endpoint for instant persistence
       if (updatedTeacher.id) {
