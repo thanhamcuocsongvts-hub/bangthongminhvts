@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   RotateCcw,
   QrCode,
@@ -58,7 +58,7 @@ import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist';
 import { extractCleanPdfText } from '../utils/pdfTextExtractor';
 import { exportExamToWordDocx } from '../utils/docxExportService';
-import { QuizQuestion, RoomState, StudentSubmission, TextScale, ActiveStudent } from '../types';
+import { QuizQuestion, RoomState, StudentSubmission, TextScale, ActiveStudent, ClassRoom } from '../types';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
@@ -73,6 +73,52 @@ import {
 } from '../utils/aiSpeechService';
 import { gameSounds } from '../utils/gameSoundEffects';
 import { db } from '../lib/firebase';
+
+// Helper to retrieve the current logged-in teacher's active classes from props, active session or localStorage
+const getActiveTeacherClasses = (currentTeacher?: any, currentClassroom?: any): ClassRoom[] => {
+  // 1. Direct check on teacher prop
+  if (currentTeacher?.classes && Array.isArray(currentTeacher.classes) && currentTeacher.classes.length > 0) {
+    return currentTeacher.classes;
+  }
+
+  // 2. Read from localStorage for the active logged-in teacher
+  try {
+    const saved = localStorage.getItem('smartboard_teachers');
+    if (saved) {
+      const teachers = JSON.parse(saved);
+      if (Array.isArray(teachers) && teachers.length > 0) {
+        const activeId = localStorage.getItem('smartboard_active_teacher') || localStorage.getItem('smartboard_active_teacher_id') || currentTeacher?.id;
+        const activeT = teachers.find((t: any) => t.id === activeId);
+        if (activeT?.classes && Array.isArray(activeT.classes) && activeT.classes.length > 0) {
+          return activeT.classes;
+        }
+        // Fallback to first teacher with configured classes
+        const teacherWithClasses = teachers.find((t: any) => t.classes && Array.isArray(t.classes) && t.classes.length > 0);
+        if (teacherWithClasses?.classes && teacherWithClasses.classes.length > 0) {
+          return teacherWithClasses.classes;
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 3. Read from smartboard_active_classroom_list or smartboard_classrooms
+  try {
+    const savedList = localStorage.getItem('smartboard_active_classroom_list') || localStorage.getItem('smartboard_classrooms');
+    if (savedList) {
+      const parsed = JSON.parse(savedList);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (_) {}
+
+  // 4. Fallback to currentClassroom prop if available
+  if (currentClassroom) {
+    return [currentClassroom];
+  }
+
+  return [];
+};
 import { doc } from 'firebase/firestore';
 import { safeSetDoc } from '../utils/firebaseSafe';
 import {
@@ -138,35 +184,87 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [boardAnswerResult, setBoardAnswerResult] = useState<'correct' | 'wrong' | null>(null);
   const [showCallStudentModal, setShowCallStudentModal] = useState<boolean>(false);
   const [studentCallManualInput, setStudentCallManualInput] = useState<string>('');
-  const [selectedCallingClass, setSelectedCallingClass] = useState<string>('Lớp 12A1');
   const [congratsMessage, setCongratsMessage] = useState<string>('');
   const [isReadingBoardQuestion, setIsReadingBoardQuestion] = useState<boolean>(false);
 
-  const CLASS_ROSTERS: Record<string, string[]> = {
-    'Lớp 12A1': [
-      'Nguyễn Văn An', 'Trần Thị Bình', 'Lê Hoàng Cường', 'Phạm Thu Dung',
-      'Vũ Quốc Bảo', 'Đỗ Gia Hân', 'Hoàng Đức Anh', 'Bùi Ngọc Ánh',
-      'Đặng Khánh Linh', 'Trịnh Tuấn Kiệt', 'Lê Mỹ Duyên', 'Nguyễn Tiến Đạt'
-    ],
-    'Lớp 12A2': [
-      'Trần Hoàng Nam', 'Lê Quỳnh Nga', 'Phạm Minh Quân', 'Ngô Gia Huy',
-      'Võ Phương Anh', 'Dương Quốc Thái', 'Nguyễn Thu Trang', 'Phan Bảo Long',
-      'Đinh Ngọc Diệp', 'Vũ Thành Đạt', 'Lương Minh Trí', 'Bùi Thảo Vy'
-    ],
-    'Lớp 12A3': [
-      'Nguyễn Nhật Minh', 'Phạm Thùy Linh', 'Trương Quốc Anh', 'Hồ Diệu My',
-      'Tô Hải Đăng', 'Vũ Kim Ngân', 'Đoàn Hữu Phước', 'Lý Gia Hưng',
-      'Mai Thị Bích', 'Trần Văn Hào', 'Chu Phương Uyên', 'Nguyễn Đức Thắng'
-    ],
-    'Lớp 11A1': [
-      'Nguyễn Bảo Châu', 'Lê Trọng Nghĩa', 'Phạm Thùy Dương', 'Trần Hữu Kiên',
-      'Vũ Mai Lan', 'Đặng Quốc Huy', 'Bùi Yến Nhi', 'Hoàng Minh Khôi'
-    ],
-    'Lớp 10A1': [
-      'Trần Minh Đức', 'Nguyễn Phương Thảo', 'Lê Tuấn Hùng', 'Phạm Lan Anh',
-      'Hoàng Đình Trọng', 'Đỗ Thảo Nguyên', 'Vũ Duy Khánh', 'Ngô Thanh Hà'
-    ],
-  };
+  // Dynamic Teacher Classes synchronized with tab "Lớp Học" and logged-in teacher profile
+  const [teacherClasses, setTeacherClasses] = useState<ClassRoom[]>(() =>
+    getActiveTeacherClasses(teacher, classroom)
+  );
+
+  const [selectedCallingClassId, setSelectedCallingClassId] = useState<string>(() => {
+    const savedActiveId = localStorage.getItem('smartboard_active_class_id');
+    const classes = getActiveTeacherClasses(teacher, classroom);
+    if (savedActiveId && classes.some((c) => c.id === savedActiveId)) {
+      return savedActiveId;
+    }
+    return classes[0]?.id || '';
+  });
+
+  // Re-sync when teacher or classroom prop changes
+  useEffect(() => {
+    const classes = getActiveTeacherClasses(teacher, classroom);
+    if (classes.length > 0) {
+      setTeacherClasses(classes);
+      if (!selectedCallingClassId || !classes.some((c) => c.id === selectedCallingClassId)) {
+        const savedActiveId = localStorage.getItem('smartboard_active_class_id');
+        if (savedActiveId && classes.some((c) => c.id === savedActiveId)) {
+          setSelectedCallingClassId(savedActiveId);
+        } else {
+          setSelectedCallingClassId(classes[0].id);
+        }
+      }
+    }
+  }, [teacher, classroom]);
+
+  // Listen to real-time events when classes are created or uploaded in tab "Lớp Học"
+  useEffect(() => {
+    const handleClassesUpdated = (e: any) => {
+      let updatedList: ClassRoom[] = [];
+      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
+        updatedList = e.detail;
+      } else {
+        updatedList = getActiveTeacherClasses(teacher, classroom);
+      }
+      if (updatedList.length > 0) {
+        setTeacherClasses(updatedList);
+        const savedActiveId = localStorage.getItem('smartboard_active_class_id');
+        if (savedActiveId && updatedList.some((c) => c.id === savedActiveId)) {
+          setSelectedCallingClassId(savedActiveId);
+        } else if (!updatedList.some((c) => c.id === selectedCallingClassId)) {
+          setSelectedCallingClassId(updatedList[0].id);
+        }
+      }
+    };
+
+    window.addEventListener('smartboard_classes_updated', handleClassesUpdated);
+    window.addEventListener('storage', handleClassesUpdated);
+    return () => {
+      window.removeEventListener('smartboard_classes_updated', handleClassesUpdated);
+      window.removeEventListener('storage', handleClassesUpdated);
+    };
+  }, [teacher, classroom, selectedCallingClassId]);
+
+  // Current active calling classroom and its actual student roster
+  const currentClassroom: ClassRoom | null = useMemo(() => {
+    return teacherClasses.find((c) => c.id === selectedCallingClassId) || teacherClasses[0] || classroom || null;
+  }, [teacherClasses, selectedCallingClassId, classroom]);
+
+  const currentClassStudents = useMemo(() => {
+    if (!currentClassroom || !currentClassroom.students) return [];
+    return currentClassroom.students.map((s: any) => {
+      if (typeof s === 'string') return { id: s, name: s, avatar: '👨‍🎓', gender: 'male' };
+      return {
+        id: s.id || s.code || s.name,
+        name: s.name || s.studentName || 'Học sinh',
+        studentCode: s.studentCode || s.code || '',
+        oralScore: s.oralScore,
+        bonusPoints: s.bonusPoints,
+        gender: s.gender,
+        avatar: s.avatar || (s.gender === 'female' ? '👩‍🎓' : '👨‍🎓'),
+      };
+    });
+  }, [currentClassroom]);
 
   // Exam Room Mode state (Chế độ phòng thi)
   const [examDurationMinutes, setExamDurationMinutes] = useState<number>(45);
@@ -938,15 +1036,16 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   };
 
   const handleCallRandomStudent = () => {
-    let candidateList: string[] = [];
-    if (CLASS_ROSTERS[selectedCallingClass] && CLASS_ROSTERS[selectedCallingClass].length > 0) {
-      candidateList = CLASS_ROSTERS[selectedCallingClass];
-    } else if (classroom?.students && Array.isArray(classroom.students) && classroom.students.length > 0) {
-      candidateList = classroom.students.map((s: any) => s.name || s);
-    } else if (roomState?.activeStudents && roomState.activeStudents.length > 0) {
+    let candidateList: string[] = currentClassStudents.map((s) => s.name);
+
+    if (candidateList.length === 0 && roomState?.activeStudents && roomState.activeStudents.length > 0) {
       candidateList = roomState.activeStudents.map((s) => s.name);
-    } else {
-      candidateList = CLASS_ROSTERS['Lớp 12A1'];
+    }
+
+    if (candidateList.length === 0) {
+      const clsName = currentClassroom?.name || 'này';
+      alert(`Lớp ${clsName} hiện chưa có danh sách học sinh. Thầy/Cô vui lòng chuyển sang tab "Lớp Học" để thêm học sinh hoặc nhập danh sách lớp từ file Excel!`);
+      return;
     }
 
     const picked = candidateList[Math.floor(Math.random() * candidateList.length)];
@@ -2477,10 +2576,12 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               <button
                 onClick={() => setShowCallStudentModal(true)}
                 className="px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                title="Chọn học sinh cụ thể từ danh sách lớp"
+                title={`Chọn học sinh cụ thể từ danh sách ${currentClassroom?.name ? (currentClassroom.name.toLowerCase().startsWith('lớp') ? currentClassroom.name : `Lớp ${currentClassroom.name}`) : 'lớp'}`}
               >
                 <Users className="w-4 h-4 text-blue-400" />
-                <span className="hidden sm:inline">Danh Sách Lớp</span>
+                <span className="hidden sm:inline">
+                  Danh Sách {currentClassroom?.name ? (currentClassroom.name.toLowerCase().startsWith('lớp') ? currentClassroom.name : `Lớp ${currentClassroom.name}`) : 'Lớp'}
+                </span>
               </button>
 
               <button
@@ -2892,53 +2993,76 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             {/* Class Selector Dropdown */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-300">Tùy chọn lớp học:</label>
+                <label className="text-xs font-bold text-slate-300">Tùy chọn lớp học của Thầy/Cô:</label>
                 <span className="text-[11px] text-amber-400 font-bold font-mono">
-                  {(CLASS_ROSTERS[selectedCallingClass] || []).length} học sinh
+                  {currentClassStudents.length} học sinh
                 </span>
               </div>
               <select
-                value={selectedCallingClass}
-                onChange={(e) => setSelectedCallingClass(e.target.value)}
+                value={currentClassroom?.id || selectedCallingClassId}
+                onChange={(e) => {
+                  const newId = e.target.value;
+                  setSelectedCallingClassId(newId);
+                  try {
+                    localStorage.setItem('smartboard_active_class_id', newId);
+                  } catch (_) {}
+                }}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border-2 border-slate-700 text-white font-bold text-xs focus:border-amber-400 outline-none cursor-pointer"
               >
-                {Object.keys(CLASS_ROSTERS).map((cls) => (
-                  <option key={cls} value={cls}>
-                    🏫 {cls} (Sĩ số: {CLASS_ROSTERS[cls].length} em)
-                  </option>
-                ))}
-                {classroom?.name && (
-                  <option value={classroom.name}>
-                    🏫 {classroom.name} (Lớp hiện tại)
-                  </option>
-                )}
+                {teacherClasses.map((cls) => {
+                  const count = (cls.students || []).length;
+                  const rawName = cls.name || 'Lớp học';
+                  const formattedName = rawName.toLowerCase().startsWith('lớp') ? rawName : `Lớp ${rawName}`;
+                  return (
+                    <option key={cls.id} value={cls.id}>
+                      🏫 {formattedName} (Sĩ số: {count} em)
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
             {/* Student list from selected class */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-400">
-                Danh sách học sinh {selectedCallingClass}:
-              </label>
-              <div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-2 p-1">
-                {(CLASS_ROSTERS[selectedCallingClass] || (classroom?.students?.map((s: any) => s.name || s) || [])).map((name: string, stIdx: number) => (
-                  <button
-                    key={stIdx}
-                    type="button"
-                    onClick={() => {
-                      setBoardSelectedStudent(name);
-                      setBoardSelectedOption(null);
-                      setBoardAnswerResult(null);
-                      setCongratsMessage('');
-                      setShowCallStudentModal(false);
-                      speakStudentCalling(name, 'call', [], { preset: selectedVoice });
-                    }}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 hover:border-amber-400 border border-slate-700 text-left text-xs font-bold text-slate-200 truncate transition-all cursor-pointer"
-                  >
-                    🎒 {name}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-400">
+                  Danh sách học sinh {currentClassroom?.name ? (currentClassroom.name.toLowerCase().startsWith('lớp') ? currentClassroom.name : `Lớp ${currentClassroom.name}`) : ''}:
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  (Bấm vào tên học sinh để chọn lên bảng)
+                </span>
               </div>
+
+              {currentClassStudents.length === 0 ? (
+                <div className="p-4 rounded-xl bg-slate-800/60 border border-dashed border-slate-700 text-center space-y-2">
+                  <p className="text-xs text-slate-400">Lớp này hiện chưa có danh sách học sinh.</p>
+                  <p className="text-[11px] text-amber-400 font-medium">Thầy/Cô vui lòng chuyển sang tab "Lớp Học" để thêm học sinh hoặc nhập từ file Excel.</p>
+                </div>
+              ) : (
+                <div className="max-h-52 overflow-y-auto grid grid-cols-2 gap-2 p-1 custom-scrollbar">
+                  {currentClassStudents.map((st, stIdx: number) => (
+                    <button
+                      key={st.id || stIdx}
+                      type="button"
+                      onClick={() => {
+                        setBoardSelectedStudent(st.name);
+                        setBoardSelectedOption(null);
+                        setBoardAnswerResult(null);
+                        setCongratsMessage('');
+                        setShowCallStudentModal(false);
+                        speakStudentCalling(st.name, 'call', [], { preset: selectedVoice });
+                      }}
+                      className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 hover:border-amber-400 border border-slate-700 text-left text-xs font-bold text-slate-200 truncate transition-all cursor-pointer flex items-center gap-2 group"
+                      title={`Gọi em ${st.name} lên bảng`}
+                    >
+                      <span className="text-amber-400 group-hover:scale-110 transition-transform">
+                        {st.avatar || (st.gender === 'female' ? '👩‍🎓' : '👨‍🎓')}
+                      </span>
+                      <span className="truncate">{st.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
