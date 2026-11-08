@@ -2249,9 +2249,11 @@ Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm khách quan 
 - Khối lớp: ${grade}
 - Mức độ tư duy: ${difficulty}${scopeInstruction}
 
-QUY TẮC BẮT BUỘC:
+QUY TẮC BẮT BUỘC & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
 1. KHÔNG VIẾT CÂU HỎI CHUNG CHUNG như "Định nghĩa cốt lõi...", "Khi tìm hiểu về...". Phải đưa ra bài toán, hàm số, phương trình, công thức, hiện tượng khoa học hoặc câu hỏi thực tế cụ thể!
-2. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC BỌC TRONG $ ... $ (Ví dụ: $y = x^3 - 3x^2 + 1$, $x \\in (0; 2)$, $\\vec{F} = m\\vec{a}$, $\\text{C}_2\\text{H}_5\\text{OH}$).
+2. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC BỌC TRONG $ ... $ (Ví dụ: $y = x^3 - 3x^2 + 1$, $x \\in (0; 2)$, $\\overrightarrow{F} = m\\overrightarrow{a}$, $\\text{C}_2\\text{H}_5\\text{OH}$).
+   - ĐẶC BIỆT KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (TUYỆT ĐỐI KHÔNG dùng \\vec{AB} vì mũi tên quá ngắn chỉ che chữ cái cuối; KHÔNG tự ghép ký tự unicode mũi tên rời).
+   - Nếu phương án A, B, C, D chứa véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").
 3. Bốn phương án A, B, C, D phải rõ ràng, độc lập và có độ phân tán tốt.
 4. Chỉ định đúng "correctAnswer" (A, B, C, hoặc D) kèm phần "explanation" chi tiết, chuẩn xác có dẫn chứng công thức toán học.
 5. "timeLimit" là số giây (từ 20 đến 60).
@@ -2311,7 +2313,7 @@ Trả về định dạng JSON array hợp lệ:
     }
 
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return res.json({ questions: parsed });
+      return res.json({ questions: normalizeQuizQuestionsMath(parsed) });
     }
   } catch (error: any) {
     console.warn("[AI Notice] Quiz generation fallback triggered:", error?.message || error);
@@ -2319,8 +2321,56 @@ Trả về định dạng JSON array hợp lệ:
 
   // Authentic Curriculum Fallback
   const fallbackQuestions = generateSmartCurriculumQuestions(targetTopic, subject, numQuestions, difficulty);
-  res.json({ questions: fallbackQuestions });
+  res.json({ questions: normalizeQuizQuestionsMath(fallbackQuestions) });
 });
+
+/**
+ * Standardize math formulas, vector accents and symbols across quiz questions
+ */
+function normalizeMathInText(text: string): string {
+  if (!text || typeof text !== 'string') return text || '';
+  return text
+    // Replace \vec{...} with \overrightarrow{...}
+    .replace(/\\vec\s*\{([^}]+)\}/g, '\\overrightarrow{$1}')
+    .replace(/\\vec\s+([a-zA-Z0-9']+)/g, '\\overrightarrow{$1}')
+    // Replace unicode combining arrow / inline arrows with \overrightarrow
+    .replace(/([a-zA-Z0-9']+)[⃗\u20D7]/g, '\\overrightarrow{$1}')
+    // Replace \hat{...} with \widehat{...}
+    .replace(/\\hat\s*\{([^}]+)\}/g, '\\widehat{$1}')
+    .replace(/\\hat\s+([a-zA-Z0-9']+)/g, '\\widehat{$1}')
+    .replace(/([a-zA-Z0-9']+)̂/g, '\\widehat{$1}')
+    // Replace \bar{...} with \overline{...}
+    .replace(/\\bar\s*\{([^}]+)\}/g, '\\overline{$1}')
+    .replace(/\\bar\s+([a-zA-Z0-9']+)/g, '\\overline{$1}')
+    .replace(/([a-zA-Z0-9']+)̄/g, '\\overline{$1}');
+}
+
+function normalizeQuizQuestionsMath(questions: any[]): any[] {
+  if (!Array.isArray(questions)) return questions;
+  return questions.map((q) => {
+    if (!q || typeof q !== 'object') return q;
+    const cleanQ = { ...q };
+    cleanQ.question = normalizeMathInText(cleanQ.question);
+    cleanQ.explanation = normalizeMathInText(cleanQ.explanation);
+    if (Array.isArray(cleanQ.options)) {
+      cleanQ.options = cleanQ.options.map((opt: any) => {
+        if (typeof opt === 'string') return normalizeMathInText(opt);
+        return {
+          ...opt,
+          text: normalizeMathInText(opt.text || ''),
+        };
+      });
+    }
+    if (Array.isArray(cleanQ.subStatements)) {
+      cleanQ.subStatements = cleanQ.subStatements.map((sub: any) => ({
+        ...sub,
+        statement: normalizeMathInText(sub.statement || sub.text || ''),
+        text: normalizeMathInText(sub.statement || sub.text || ''),
+      }));
+    }
+    return cleanQ;
+  });
+}
 
 // Helper to safely parse JSON strings that contain unescaped LaTeX backslashes from LLM
 function safeParseJsonWithLatex(raw: string): any {
@@ -2576,6 +2626,8 @@ YÊU CẦU CẤU TRÚC TỪNG LOẠI CÂU HỎI TRONG MẢNG JSON:
 
 YÊU CẦU ĐẶC THÙ MÔN HỌC & ĐỒ THỊ / BẢNG BIẾN THIÊN / BÀI TOÁN THỰC TẾ (BẮT BUỘC):
 1. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC BỌC TRONG $: $\\frac{a}{b}$, $\\sqrt{x}$, $x(t) = A\\cos(\\omega t + \\varphi)$, $T = 2\\text{s}$.
+   - ĐẶC BIỆT KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (TUYỆT ĐỐI KHÔNG dùng \\vec{AB} vì mũi tên quá ngắn chỉ che chữ cái cuối; KHÔNG tự ghép ký tự unicode mũi tên rời).
+   - Nếu phương án A, B, C, D chứa véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").
 2. NẾU CÂU HỎI LIÊN QUAN ĐẾN BẢNG BIẾN THIÊN, BẮT BUỘC trả về:
    "diagramType": "variation_table",
    "diagramData": {
@@ -2792,7 +2844,7 @@ LƯU Ý QUAN TRỌNG: Hãy biên soạn đúng ${numQuestions} câu hỏi trắc
         };
       });
 
-      return res.json({ success: true, questions: sanitized });
+      return res.json({ success: true, questions: normalizeQuizQuestionsMath(sanitized) });
     }
   } catch (error: any) {
     console.warn("[Fast Matrix Quiz] AI generation notice:", error?.message || error);
@@ -2806,7 +2858,7 @@ LƯU Ý QUAN TRỌNG: Hãy biên soạn đúng ${numQuestions} câu hỏi trắc
 
   res.json({
     success: true,
-    questions: fallback,
+    questions: normalizeQuizQuestionsMath(fallback),
     isFallback: true
   });
 });

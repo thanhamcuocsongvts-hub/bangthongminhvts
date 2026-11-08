@@ -41,6 +41,13 @@ export function sanitizeMathExpression(raw: string): string {
   // Normalize excessive backslashes (e.g. \\\\frac -> \\frac)
   math = math.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
 
+  // 1. Normalize all vector expressions into standard SGK \overrightarrow{...}
+  // Ensures KaTeX renders an authentic, wide, stretchy arrow over whole vector names (AB, BC, AA', A'B', etc.)
+  math = math.replace(/\\vec\s*\{([^{}]+)\}/g, '\\overrightarrow{$1}');
+  math = math.replace(/\\vec\s+([A-Z][a-zA-Z0-9']?)/g, '\\overrightarrow{$1}');
+  // Unicode combining arrow or single arrow attached to letters (e.g. AB⃗ or u⃗) -> \overrightarrow{...}
+  math = math.replace(/([A-Z][a-zA-Z0-9']*)(?:\u20D7|[\u2192\u27F6])/g, '\\overrightarrow{$1}');
+
   // Normalize unicode math symbols to LaTeX equivalents
   math = math
     .replace(/ℝ/g, '\\mathbb{R}')
@@ -63,6 +70,9 @@ export function sanitizeMathExpression(raw: string): string {
     .replace(/⇔/g, '\\Leftrightarrow ')
     .replace(/⇒/g, '\\Rightarrow ')
     .replace(/→/g, '\\to ')
+    .replace(/⊥|⟂/g, '\\perp ')
+    .replace(/∥/g, '\\parallel ')
+    .replace(/∠/g, '\\angle ')
     .replace(/\\mathbb\s+([A-Z])/g, '\\mathbb{$1}')
     .replace(/\\degree/g, '^{\\circ}')
     .replace(/\\tg\b/g, '\\tan')
@@ -78,7 +88,7 @@ export function sanitizeMathExpression(raw: string): string {
     .replace(/\\ne\b/g, '\\neq ');
 
   // Wrap Vietnamese words inside math mode in \text{...} so KaTeX does not crash on non-ASCII characters
-  const vietnameseWordRegex = /([a-zA-Z0-9]*[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđÀÁẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÈÉẺẼẸÊẾỀỂỄỆÌÍỈĨỊÒÓỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÙÚỦŨỤƯỨỪỬỮỰỲÝỶỸỴĐ]+[a-zA-Z0-9]*)/g;
+  const vietnameseWordRegex = /([a-zA-Z0-9]*[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđÀÁẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÈÉẺẸÊẾỀỂỄỆÌÍỈĨỊÒÓỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÙÚỦŨỤƯỨỪỬỮỰỲÝỶỸỴĐ]+[a-zA-Z0-9]*)/g;
 
   // Protect existing \text{...} blocks from double-wrapping
   math = math.replace(/\\text\{[^{}]*\}/g, (m) => m.replace(/./g, (c) => `__K_${c.charCodeAt(0)}__`));
@@ -118,23 +128,31 @@ export const MathFormulaRenderer: React.FC<MathFormulaRendererProps> = ({
 
     // Auto-detect math formulas that were written without $ delimiters
     if (!normalized.includes('$')) {
-      // If it contains LaTeX commands like \frac, \sqrt, \mathbb, \in, \int, etc.
-      if (/\\(frac|sqrt|int|lim|vec|alpha|beta|gamma|theta|lambda|pi|Delta|infty|sum|times|le|ge|neq|approx|rightarrow|leftarrow|mathbb|setminus|cup|cap|subset|Leftrightarrow|Rightarrow)/.test(normalized)) {
-        normalized = normalized.replace(/([a-zA-Z0-9+\-*=><\s\\{}^_()]{4,})/g, (match) => {
-          if (/\\(frac|sqrt|int|lim|vec|alpha|beta|Delta|infty|sum|mathbb|setminus|cup|cap|subset|le|ge|neq|Leftrightarrow|Rightarrow)/.test(match)) {
-            return `$${match.trim()}$`;
-          }
-          return match;
-        });
+      // If it contains LaTeX commands like \frac, \sqrt, \mathbb, \in, \int, \vec, \overrightarrow etc.
+      if (/\\(frac|dfrac|sqrt|int|lim|vec|overrightarrow|widehat|overline|alpha|beta|gamma|theta|lambda|pi|Delta|infty|sum|times|cdot|le|ge|neq|approx|rightarrow|leftarrow|mathbb|setminus|cup|cap|subset|Leftrightarrow|Rightarrow)/.test(normalized)) {
+        // If the string contains no Vietnamese accented words, wrap the whole string as a math formula!
+        if (!/[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(normalized)) {
+          normalized = `$${normalized}$`;
+        } else {
+          normalized = normalized.replace(/([a-zA-Z0-9+\-*=><\s\\{}^_'()]{3,})/g, (match) => {
+            if (/\\(frac|dfrac|sqrt|int|lim|vec|overrightarrow|widehat|overline|alpha|beta|Delta|infty|sum|mathbb|setminus|cup|cap|subset|le|ge|neq|Leftrightarrow|Rightarrow)/.test(match)) {
+              return `$${match.trim()}$`;
+            }
+            return match;
+          });
+        }
       }
       // If it is a polynomial equation or function like y = x^3 - 3x^2 + 1, f(x) = x^2 - 4
       else if (/^(?:y|f\(x\)|g\(x\)|h\(x\)|y'|f'\(x\))\s*=\s*[^$.]+$/i.test(normalized)) {
         normalized = `$${normalized}$`;
       }
+      // If it contains vector expressions with unicode arrows like AB⃗ + BC⃗ = AC⃗
+      else if (/[A-Z][a-zA-Z0-9']*(?:\u20D7|[\u2192\u27F6])/.test(normalized)) {
+        normalized = `$${normalized}$`;
+      }
       // If it contains power caret like x^3, x^2 or subscript like x_1, x_2
       else if (/\b[a-zA-Z]\^[0-9{]/.test(normalized) || /\b[a-zA-Z]_[0-9{]/.test(normalized)) {
-        // Wrap mathematical parts
-        normalized = normalized.replace(/([a-zA-Z0-9_^{}]+(?:\s*[+\-*/=<>]\s*[a-zA-Z0-9_^{}()]+)+)/g, (match) => {
+        normalized = normalized.replace(/([a-zA-Z0-9_^{}'+=\-/*<>(),\s]+)/g, (match) => {
           if (match.includes('^') || match.includes('_')) {
             return `$${match.trim()}$`;
           }

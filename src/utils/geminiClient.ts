@@ -190,6 +190,56 @@ Người bình thường có thể đọc và đoán được từ ngữ dù ch�
 }
 
 /**
+ * Normalize and clean mathematical notation in quiz questions (standard vectors, KaTeX compat, etc.)
+ */
+export function normalizeMathInText(text: string): string {
+  if (!text || typeof text !== 'string') return text || '';
+  return text
+    // Replace \vec{...} with \overrightarrow{...}
+    .replace(/\\vec\s*\{([^}]+)\}/g, '\\overrightarrow{$1}')
+    .replace(/\\vec\s+([a-zA-Z0-9']+)/g, '\\overrightarrow{$1}')
+    // Replace unicode combining arrow / inline arrows with \overrightarrow
+    .replace(/([a-zA-Z0-9']+)[⃗\u20D7]/g, '\\overrightarrow{$1}')
+    // Replace \hat{...} with \widehat{...}
+    .replace(/\\hat\s*\{([^}]+)\}/g, '\\widehat{$1}')
+    .replace(/\\hat\s+([a-zA-Z0-9']+)/g, '\\widehat{$1}')
+    .replace(/([a-zA-Z0-9']+)̂/g, '\\widehat{$1}')
+    // Replace \bar{...} with \overline{...}
+    .replace(/\\bar\s*\{([^}]+)\}/g, '\\overline{$1}')
+    .replace(/\\bar\s+([a-zA-Z0-9']+)/g, '\\overline{$1}')
+    .replace(/([a-zA-Z0-9']+)̄/g, '\\overline{$1}');
+}
+
+export function sanitizeQuizQuestionMath(q: any): any {
+  if (!q || typeof q !== 'object') return q;
+  const cleanQ = { ...q };
+  cleanQ.question = normalizeMathInText(cleanQ.question);
+  cleanQ.explanation = normalizeMathInText(cleanQ.explanation);
+
+  if (Array.isArray(cleanQ.options)) {
+    cleanQ.options = cleanQ.options.map((opt: any) => {
+      if (typeof opt === 'string') {
+        return normalizeMathInText(opt);
+      }
+      return {
+        ...opt,
+        text: normalizeMathInText(opt.text || ''),
+      };
+    });
+  }
+
+  if (Array.isArray(cleanQ.subStatements)) {
+    cleanQ.subStatements = cleanQ.subStatements.map((sub: any) => ({
+      ...sub,
+      statement: normalizeMathInText(sub.statement || sub.text || ''),
+      text: normalizeMathInText(sub.statement || sub.text || ''),
+    }));
+  }
+
+  return cleanQ;
+}
+
+/**
  * Direct client-side Quiz Generation
  */
 export async function directGenerateQuiz(params: {
@@ -208,12 +258,15 @@ export async function directGenerateQuiz(params: {
 Hãy tạo đúng ${count} câu hỏi trắc nghiệm chất lượng cao về chủ đề: "${topic}".
 Môn học: ${subject}, Khối lớp: ${grade}, Mức độ: ${difficulty}.
 
-YÊU CẦU ĐẶC BIỆT:
+YÊU CẦU ĐẶC BIỆT & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
 1. Mỗi câu hỏi gồm đúng 4 lựa chọn (A, B, C, D).
 2. Đáp án đúng correctAnswer phải là một trong các chữ cái: "A", "B", "C", "D".
 3. Có phần giải thích chi tiết, sư phạm, chuẩn xác.
-4. Công thức toán, lý, hóa viết bằng cú pháp LaTeX chuẩn bọc trong cặp dấu $...$ (ví dụ: $x^2 + 2x - 3 = 0$).
-5. BẮT BUỘC chỉ trả về định dạng JSON thuần túy (không bọc trong markdown code block, không giải thích ngoài lề):
+4. MỌI CÔNG THỨC TOÁN, LÝ, HÓA, BIỂU THỨC BẮT BUỘC BỌC TRONG CẶP DẤU $...$ (ví dụ: $x^2 + 2x - 3 = 0$, $y = f(x)$).
+5. ĐẶC BIỆT VỚI KÝ HIỆU VÉC-TƠ:
+   - BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (KHÔNG dùng \\vec{AB} vì mũi tên không bao phủ hết hai chữ cái; KHÔNG tự ghép ký tự unicode mũi tên rời).
+   - Nếu phương án A, B, C, D chứa véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").
+6. BẮT BUỘC chỉ trả về định dạng JSON thuần túy (không bọc trong markdown code block, không giải thích ngoài lề):
 [
   {
     "id": "q1",
@@ -246,10 +299,14 @@ YÊU CẦU ĐẶC BIỆT:
       let raw = (response.text || '').trim();
       raw = raw.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '').trim();
       const parsed = JSON.parse(raw);
+      let resList: any[] = [];
       if (Array.isArray(parsed)) {
-        return parsed;
+        resList = parsed;
       } else if (parsed && Array.isArray(parsed.questions)) {
-        return parsed.questions;
+        resList = parsed.questions;
+      }
+      if (resList.length > 0) {
+        return resList.map((q) => sanitizeQuizQuestionMath(q));
       }
     } catch (e: any) {
       console.warn(`Direct Gemini generateQuiz error with ${model}:`, e?.message || e);
@@ -393,7 +450,11 @@ Cấu trúc các loại câu:
 4. Phần IV: { "id": "q4", "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "Barem điểm...", "correctAnswer": "Lời giải mẫu", "options": [], "explanation": "...", "timeLimit": 120 }
 - Nếu câu hỏi có Bảng biến thiên: "diagramType": "variation_table", "diagramData": { "title": "Bảng biến thiên", "x": ["-\\infty", "-1", "2", "+\\infty"], "yPrime": ["+", "0", "-", "0", "+"], "yArrows": [{"start": "-\\infty", "end": "3", "dir": "up"}, {"start": "3", "end": "-2", "dir": "down"}, {"start": "-2", "end": "+\\infty", "dir": "up"}] }
 - Nếu câu hỏi có Đồ thị hoặc cụm từ "như hình vẽ", "hình bên": BẮT BUỘC có "diagramType": "function_graph" và "diagramData": { "graphType": "rational" | "cubic" | "biquadratic" | "quadratic", "latex": "y = \\frac{2x-1}{x-1}" hoặc công thức hàm số tương ứng }
-- Nếu câu hỏi là Bài toán thực tế (Cắt 4 góc gấp hộp, vỏ lon hình trụ, vòm cổng parabol, chèo thuyền qua sông, máng nước hình thang, rào đất giáp bờ sông, bồn hình nón, bể bơi): BẮT BUỘC có "diagramType": "practical_illustration" và "diagramData": { "scenario": "box_folding" | "cylinder_can" | "parabola_arch" | "boat_river" | "water_gutter" | "fence_plot" | "cone_tank" | "water_pool", "title": "Hình vẽ minh họa bài toán thực tế" }`;
+- Nếu câu hỏi là Bài toán thực tế (Cắt 4 góc gấp hộp, vỏ lon hình trụ, vòm cổng parabol, chèo thuyền qua sông, máng nước hình thang, rào đất giáp bờ sông, bồn hình nón, bể bơi): BẮT BUỘC có "diagramType": "practical_illustration" và "diagramData": { "scenario": "box_folding" | "cylinder_can" | "parabola_arch" | "boat_river" | "water_gutter" | "fence_plot" | "cone_tank" | "water_pool", "title": "Hình vẽ minh họa bài toán thực tế" }
+- QUY TẮC BẮT BUỘC VỀ KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
+  + Mọi công thức, phương trình, biến số bắt buộc bọc trong $...$ (ví dụ $y = f(x)$, $A(1; 2; 3)$).
+  + Ký hiệu véc-tơ BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (KHÔNG dùng \\vec{AB} vì mũi tên quá ngắn, KHÔNG dùng ký tự nối rời).
+  + Các phương án A, B, C, D nếu chứa biểu thức/đẳng thức/véc-tơ thì BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").`;
 
   if (ai) {
     const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
@@ -499,7 +560,7 @@ Cấu trúc các loại câu:
             const diagramType = q.diagramType || enriched.diagramType || undefined;
             const diagramData = q.diagramData || enriched.diagramData || undefined;
 
-            return {
+            return sanitizeQuizQuestionMath({
               id: q.id || `q_${Date.now()}_${idx + 1}`,
               question: q.question || `Câu hỏi ${idx + 1}`,
               partType,
@@ -513,7 +574,7 @@ Cấu trúc các loại câu:
               diagramType,
               diagramData,
               timeLimit: Number(q.timeLimit) || Number(timeLimit) || (isTrueFalse ? 60 : (isShortAnswer ? 45 : (isEssay ? 120 : 30))),
-            };
+            });
           });
         }
       } catch (err: any) {

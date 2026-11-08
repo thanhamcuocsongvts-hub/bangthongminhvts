@@ -19,6 +19,7 @@ import {
   MathSubScript,
   MathSubSuperScript,
   MathRadical,
+  BuilderElement,
 } from 'docx';
 import { QuizQuestion } from '../types';
 import { saveBlobSafely } from './exportUtils';
@@ -50,6 +51,12 @@ export function cleanLatexSymbols(text: string): string {
     .replace(/\\times\b/g, '×')
     .replace(/\\cdot\b/g, '·')
     .replace(/\\div\b/g, '÷')
+    .replace(/\\perp\b/g, '⟂')
+    .replace(/\\parallel\b/g, '∥')
+    .replace(/\\angle\b/g, '∠')
+    .replace(/\\measuredangle\b/g, '∡')
+    .replace(/\\sphericalangle\b/g, '∢')
+    .replace(/\\triangle\b/g, '△')
     .replace(/\\(?:to|rightarrow)\b/g, '→')
     .replace(/\\Rightarrow\b/g, '⇒')
     .replace(/\\Leftarrow\b/g, '⇐')
@@ -78,8 +85,12 @@ export function cleanLatexSymbols(text: string): string {
     .replace(/\\mathit\{([^}]*)\}/g, '$1')
     .replace(/\\setminus\b/g, '\\')
     .replace(/\\(?:sin|cos|tan|cot|ln|log|lim|max|min)\b/g, '$& ')
-    .replace(/\\vec\{([a-zA-Z0-9]+)\}/g, '$1⃗')
-    .replace(/\\overrightarrow\{([a-zA-Z0-9]+)\}/g, '$1⃗')
+    .replace(/\\(?:vec|overrightarrow)\{([^}]+)\}/g, '$1⃗')
+    .replace(/\\(?:vec|overrightarrow)\s+([a-zA-Z0-9']+)/g, '$1⃗')
+    .replace(/\\(?:widehat|hat)\{([^}]+)\}/g, '$1̂')
+    .replace(/\\(?:widehat|hat)\s+([a-zA-Z0-9']+)/g, '$1̂')
+    .replace(/\\(?:overline|bar)\{([^}]+)\}/g, '$1̄')
+    .replace(/\\(?:overline|bar)\s+([a-zA-Z0-9']+)/g, '$1̄')
     .replace(/\\[,;!]/g, ' ')
     .replace(/\\quad/g, '  ')
     .replace(/\\qquad/g, '    ')
@@ -93,15 +104,49 @@ type DocxMathChild =
   | MathSuperScript
   | MathSubScript
   | MathSubSuperScript
-  | MathRadical;
+  | MathRadical
+  | BuilderElement
+  | any;
+
+/**
+ * Creates a native Word OMML <m:acc> accent element (e.g. vector arrow →, hat ^, or overline ¯)
+ */
+export function createMathAccent(accentChar: string, innerNodes: DocxMathChild[]): BuilderElement {
+  return new BuilderElement({
+    name: 'm:acc',
+    children: [
+      new BuilderElement({
+        name: 'm:accPr',
+        children: [
+          new BuilderElement({
+            name: 'm:chr',
+            attributes: {
+              val: { key: 'm:val', value: accentChar },
+            },
+          }),
+        ],
+      }),
+      new BuilderElement({
+        name: 'm:e',
+        children: innerNodes.length > 0 ? innerNodes : [new MathRun('')],
+      }),
+    ],
+  });
+}
 
 /**
  * Recursively parses LaTeX formulas into native docx.Math components
  * Perfectly renders <m:oMath> in Microsoft Word without XML errors or corruption
  */
 export function parseLatexNodes(raw: string): DocxMathChild[] {
-  let src = raw.trim();
+  let src = (raw || '').trim();
   if (!src) return [];
+
+  // Normalize unicode combining characters and inline arrow notations to LaTeX accent commands for uniform native OMML accents
+  src = src
+    .replace(/([a-zA-Z0-9']+)[⃗\u20D7]/g, '\\overrightarrow{$1}')
+    .replace(/([a-zA-Z0-9']+)̂/g, '\\widehat{$1}')
+    .replace(/([a-zA-Z0-9']+)̄/g, '\\overline{$1}');
 
   const nodes: DocxMathChild[] = [];
   let i = 0;
@@ -111,7 +156,7 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
 
     if (str[startIdx] !== '{' && str[startIdx] !== '[') {
       let end = startIdx + 1;
-      while (end < str.length && /[a-zA-Z0-9]/.test(str[end])) end++;
+      while (end < str.length && /[a-zA-Z0-9']/.test(str[end])) end++;
       return { text: str.slice(startIdx, end), nextIdx: end };
     }
 
@@ -175,7 +220,37 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
         })
       );
     }
-    // 3. Superscripts: base^{exp} or base^2
+    // 3. Vector accents: \overrightarrow{AB}, \vec{AB}, \vec{AA'}
+    else if (src.startsWith('\\overrightarrow', i) || src.startsWith('\\vec', i)) {
+      const cmd = src.startsWith('\\overrightarrow', i) ? '\\overrightarrow' : '\\vec';
+      i += cmd.length;
+      while (i < src.length && (src[i] === ' ' || src[i] === '\t')) i++;
+      const vecG = readGroup(src, i);
+      i = vecG.nextIdx;
+
+      nodes.push(createMathAccent('→', parseLatexNodes(vecG.text)));
+    }
+    // 4. Angle / Hat accents: \widehat{ABC}, \hat{A}
+    else if (src.startsWith('\\widehat', i) || src.startsWith('\\hat', i)) {
+      const cmd = src.startsWith('\\widehat', i) ? '\\widehat' : '\\hat';
+      i += cmd.length;
+      while (i < src.length && (src[i] === ' ' || src[i] === '\t')) i++;
+      const hatG = readGroup(src, i);
+      i = hatG.nextIdx;
+
+      nodes.push(createMathAccent('^', parseLatexNodes(hatG.text)));
+    }
+    // 5. Overline accents: \overline{AB}, \bar{z}
+    else if (src.startsWith('\\overline', i) || src.startsWith('\\bar', i)) {
+      const cmd = src.startsWith('\\overline', i) ? '\\overline' : '\\bar';
+      i += cmd.length;
+      while (i < src.length && (src[i] === ' ' || src[i] === '\t')) i++;
+      const barG = readGroup(src, i);
+      i = barG.nextIdx;
+
+      nodes.push(createMathAccent('¯', parseLatexNodes(barG.text)));
+    }
+    // 6. Superscripts: base^{exp} or base^2
     else if (src[i] === '^' && nodes.length > 0) {
       i++;
       while (i < src.length && (src[i] === ' ' || src[i] === '\t')) i++;
@@ -201,7 +276,7 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
         );
       }
     }
-    // 4. Subscripts: base_{sub} or base_1
+    // 7. Subscripts: base_{sub} or base_1
     else if (src[i] === '_' && nodes.length > 0) {
       i++;
       while (i < src.length && (src[i] === ' ' || src[i] === '\t')) i++;
@@ -216,7 +291,7 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
         })
       );
     }
-    // 5. Plain text, operators, symbols, or identifiers
+    // 8. Plain text, operators, symbols, or identifiers
     else {
       let start = i;
       while (
@@ -224,6 +299,12 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
         !src.startsWith('\\frac', i) &&
         !src.startsWith('\\dfrac', i) &&
         !src.startsWith('\\sqrt', i) &&
+        !src.startsWith('\\overrightarrow', i) &&
+        !src.startsWith('\\vec', i) &&
+        !src.startsWith('\\widehat', i) &&
+        !src.startsWith('\\hat', i) &&
+        !src.startsWith('\\overline', i) &&
+        !src.startsWith('\\bar', i) &&
         src[i] !== '^' &&
         src[i] !== '_'
       ) {
@@ -259,6 +340,11 @@ export function convertLatexToDocxMath(latex: string): DocxMath {
     src = src.slice(2, -2).trim();
   }
 
+  // Pre-normalize vector notation: convert \vec{AB} to \overrightarrow{AB}
+  src = src
+    .replace(/\\vec\s*\{([^}]+)\}/g, '\\overrightarrow{$1}')
+    .replace(/\\vec\s+([a-zA-Z0-9']+)/g, '\\overrightarrow{$1}');
+
   try {
     const children = parseLatexNodes(src);
     return new DocxMath({ children: children.length > 0 ? children : [new MathRun(cleanLatexSymbols(src))] });
@@ -280,10 +366,28 @@ export function parseTextWithLatexToDocxRuns(
   if (!text) return [];
 
   // Remove markdown headers or HTML tags from text
-  const cleanInput = text
+  let cleanInput = text
     .replace(/^#+\s+/gm, '')
     .replace(/<[^>]+>/g, '')
     .trim();
+
+  // If text has NO delimiters ($ or \( or \[) but is a formula or contains LaTeX commands/vectors:
+  const hasDelimiters = /\$|\\\(|\\\[/.test(cleanInput);
+  if (!hasDelimiters) {
+    const isFormulaOnly =
+      /(\\vec|\\overrightarrow|\\widehat|\\hat|\\frac|\\sqrt|[A-Za-z0-9']+⃗|[A-Za-z0-9']+\u20D7)/.test(cleanInput) ||
+      (/^[a-zA-Z0-9\s()',.+\-*=/\\_^{}≤≥±∓×÷·|∈∉⊂⊆∪∩≠≈≡→⇒⇔∀∃α-ωΑ-Ω]+$/.test(cleanInput) &&
+       /[=<>≤≥±∓×÷·^_\\∈∉⊂⊆∪∩≠]/.test(cleanInput));
+
+    if (isFormulaOnly) {
+      cleanInput = `$${cleanInput}$`;
+    } else {
+      // Auto-wrap isolated LaTeX commands or vectors in $...$
+      cleanInput = cleanInput
+        .replace(/(\\(?:vec|overrightarrow|widehat|hat|frac|sqrt)\{[^}]+\}(?:\{[^}]+\})?)/g, '$$$1$$')
+        .replace(/([A-Z]{1,3}[']?[⃗\u20D7])/g, '$$$1$$');
+    }
+  }
 
   const runs: (TextRun | DocxMath)[] = [];
 
