@@ -125,6 +125,8 @@ import {
   getSavedEducationalItems,
   saveEducationalItem,
   deleteEducationalItem,
+  pullSavedQuizzesFromCloud,
+  initSavedQuizzesRealtimeSync,
   SavedEducationalItem,
 } from '../utils/savedQuizzesService';
 
@@ -308,6 +310,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [savedQuizzesList, setSavedQuizzesList] = useState<SavedEducationalItem[]>(() =>
     getSavedEducationalItems().filter((x) => x.type === 'quiz')
   );
+  const [isSyncingSavedQuizzes, setIsSyncingSavedQuizzes] = useState<boolean>(false);
   const [showSavedQuizzesModal, setShowSavedQuizzesModal] = useState<boolean>(false);
   const [showSaveQuizModal, setShowSaveQuizModal] = useState<boolean>(false);
   const [saveQuizTitle, setSaveQuizTitle] = useState<string>('');
@@ -316,6 +319,56 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [saveQuizNotes, setSaveQuizNotes] = useState<string>('');
   const [savedQuizSearch, setSavedQuizSearch] = useState<string>('');
   const [quizToast, setQuizToast] = useState<string | null>(null);
+
+  // Tự động đồng bộ thời gian thực cho Kho Đề Đã Lưu giữa PC và Điện thoại
+  useEffect(() => {
+    // 1. Tải từ Cloud khi mở
+    pullSavedQuizzesFromCloud().then((items) => {
+      if (items && Array.isArray(items)) {
+        setSavedQuizzesList(items.filter((x) => x.type === 'quiz'));
+      }
+    });
+
+    // 2. Lắng nghe Firestore Realtime (khi PC lưu, Điện thoại cập nhật trong tích tắc)
+    const unsub = initSavedQuizzesRealtimeSync((items) => {
+      if (items && Array.isArray(items)) {
+        setSavedQuizzesList(items.filter((x) => x.type === 'quiz'));
+      }
+    });
+
+    // 3. Lắng nghe sự kiện cục bộ
+    const handleLocalUpdate = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setSavedQuizzesList(e.detail.filter((x: any) => x.type === 'quiz'));
+      } else {
+        setSavedQuizzesList(getSavedEducationalItems().filter((x) => x.type === 'quiz'));
+      }
+    };
+    window.addEventListener('saved-quizzes-updated', handleLocalUpdate);
+
+    return () => {
+      unsub();
+      window.removeEventListener('saved-quizzes-updated', handleLocalUpdate);
+    };
+  }, []);
+
+  // Hàm bấm tay để đồng bộ tức thì từ Đám Mây
+  const handleManualSyncQuizzesFromCloud = async () => {
+    setIsSyncingSavedQuizzes(true);
+    try {
+      const items = await pullSavedQuizzesFromCloud();
+      const quizzesOnly = items.filter((x) => x.type === 'quiz');
+      setSavedQuizzesList(quizzesOnly);
+      gameSounds.playCorrectChime();
+      setQuizToast(`Đã đồng bộ thành công ${quizzesOnly.length} bộ đề từ Đám Mây (PC & Điện Thoại)!`);
+      setTimeout(() => setQuizToast(null), 3500);
+    } catch (_) {
+      setQuizToast('Đã kiểm tra đồng bộ với Đám Mây.');
+      setTimeout(() => setQuizToast(null), 2500);
+    } finally {
+      setIsSyncingSavedQuizzes(false);
+    }
+  };
 
   // State chung lưu trữ câu hỏi phòng thi trực tiếp (ưu tiên từ roomState, sau đó localStorage, hoặc currentLesson)
   const [liveExamQuestions, setLiveExamQuestions] = useState<QuizQuestion[]>(() => {
@@ -3736,12 +3789,24 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowSavedQuizzesModal(false)}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleManualSyncQuizzesFromCloud}
+                  disabled={isSyncingSavedQuizzes}
+                  className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 active:scale-95 text-white font-bold text-xs flex items-center gap-1.5 border border-white/20 transition-all cursor-pointer shadow-sm"
+                  title="Đồng bộ ngay với Đám Mây để cập nhật các đề mới tạo trên máy tính hoặc điện thoại"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSavedQuizzes ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">{isSyncingSavedQuizzes ? 'Đang đồng bộ...' : 'Đồng Bộ Đám Mây'}</span>
+                </button>
+                <button
+                  onClick={() => setShowSavedQuizzesModal(false)}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Search */}

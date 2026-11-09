@@ -40,6 +40,7 @@ import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadLessonsFromDB, saveLessonsToDB, forceSyncLessonsToCloud, forcePullLessonsFromCloud, deleteLessonFromStorage } from './utils/storageUtils';
+import { pullSavedQuizzesFromCloud } from './utils/savedQuizzesService';
 import { db, auth } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
@@ -229,15 +230,31 @@ export default function App() {
     if (!navigator.onLine) setSyncStatus('offline');
     // Subscribe to realtime updates
     const unsub = onSnapshot(doc(db, 'global_store', 'smartboard_data'), (docSnap) => {
-       if (docSnap.exists() && docSnap.data().teachers) {
-          const cloudTeachers = docSnap.data().teachers;
-          // Trust the cloud as the absolute source of truth for cross-device sync
-          setTeachers(cloudTeachers);
-          localStorage.setItem('smartboard_teachers', JSON.stringify(cloudTeachers));
+       if (docSnap.exists()) {
+          const d = docSnap.data();
+          if (d.teachers) {
+            setTeachers(d.teachers);
+            localStorage.setItem('smartboard_teachers', JSON.stringify(d.teachers));
+          }
+          if (d.savedQuizzes && Array.isArray(d.savedQuizzes)) {
+            try {
+              localStorage.setItem('smartboard_saved_quizzes_and_games', JSON.stringify(d.savedQuizzes));
+              window.dispatchEvent(new CustomEvent('saved-quizzes-updated', { detail: d.savedQuizzes }));
+            } catch (_) {}
+          }
+          if (d.savedEmbedLinks && Array.isArray(d.savedEmbedLinks)) {
+            try {
+              localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(d.savedEmbedLinks));
+              window.dispatchEvent(new CustomEvent('saved-embed-links-updated', { detail: d.savedEmbedLinks }));
+            } catch (_) {}
+          }
        }
     }, (err) => {
        console.warn('[Smartboard] Data onSnapshot notice:', err?.message);
     });
+
+    // Initial background pull for quizzes on startup
+    pullSavedQuizzesFromCloud().catch(() => {});
 
     // 1. Listen for real-time Deletion Tombstones across all devices (Mobile & Web)
     let globalDeletedIds = new Set<string>();

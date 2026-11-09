@@ -33,6 +33,9 @@ import {
   Share2,
 } from 'lucide-react';
 import { TouchWhiteboard } from './TouchWhiteboard';
+import { db } from '../lib/firebase';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { safeSetDoc } from '../utils/firebaseSafe';
 
 export interface SavedEmbedLink {
   id: string;
@@ -499,13 +502,144 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
   const [filterCategory, setFilterCategory] = useState<string>('Tất cả');
   const [searchSaved, setSearchSaved] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isSyncingLinks, setIsSyncingLinks] = useState<boolean>(false);
 
-  // Sync saved links to localStorage
-  useEffect(() => {
+  // Sync to Cloud function (Firestore + Server + LocalStorage)
+  const syncLinksToCloud = async (links: SavedEmbedLink[], immediate = true) => {
     try {
-      localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(savedLinks));
+      localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(links));
+      window.dispatchEvent(new CustomEvent('saved-embed-links-updated', { detail: links }));
     } catch (_) {}
-  }, [savedLinks]);
+
+    const runSync = async () => {
+      try {
+        const sanitized = JSON.parse(JSON.stringify(links));
+        const payload = { links: sanitized, updatedAt: new Date().toISOString() };
+        // 1. Firestore dedicated document
+        await safeSetDoc(doc(db, 'global_store', 'embedded_links'), payload, { merge: true });
+        // 2. Also save to smartboard_data
+        await safeSetDoc(doc(db, 'global_store', 'smartboard_data'), { savedEmbedLinks: sanitized, updatedAt: new Date().toISOString() }, { merge: true });
+        // 3. Server fallback
+        fetch('/api/links/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ links: sanitized }),
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('[Embed Links Sync] Cloud sync notice:', err);
+      }
+    };
+
+    if (immediate) {
+      runSync();
+    } else {
+      if ((window as any)._embedLinksSyncTimer) clearTimeout((window as any)._embedLinksSyncTimer);
+      (window as any)._embedLinksSyncTimer = setTimeout(runSync, 600);
+    }
+  };
+
+  // Pull from Cloud function
+  const pullLinksFromCloud = async () => {
+    setIsSyncingLinks(true);
+    let cloudLinks: SavedEmbedLink[] = [];
+    try {
+      // 1. From Firestore
+      const snap = await getDoc(doc(db, 'global_store', 'embedded_links'));
+      if (snap.exists() && snap.data()?.links && Array.isArray(snap.data()?.links)) {
+        cloudLinks = snap.data()?.links as SavedEmbedLink[];
+      } else {
+        const mainSnap = await getDoc(doc(db, 'global_store', 'smartboard_data'));
+        if (mainSnap.exists() && mainSnap.data()?.savedEmbedLinks && Array.isArray(mainSnap.data()?.savedEmbedLinks)) {
+          cloudLinks = mainSnap.data()?.savedEmbedLinks as SavedEmbedLink[];
+        }
+      }
+    } catch (e) {
+      console.warn('[Embed Links Pull] Firestore warning:', e);
+    }
+
+    if (cloudLinks.length === 0) {
+      try {
+        const res = await fetch('/api/links');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.links) && data.links.length > 0) {
+            cloudLinks = data.links;
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (cloudLinks.length > 0) {
+      setSavedLinks((prev) => {
+        const linkMap = new Map<string, SavedEmbedLink>();
+        cloudLinks.forEach((l) => {
+          if (l && (l.id || l.url)) linkMap.set(l.id || l.url, l);
+        });
+        // Preserve local links not yet on cloud
+        let localAdded = false;
+        prev.forEach((l) => {
+          const key = l.id || l.url;
+          if (!linkMap.has(key)) {
+            linkMap.set(key, l);
+            localAdded = true;
+          }
+        });
+        const merged = Array.from(linkMap.values());
+        try {
+          localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(merged));
+        } catch (_) {}
+        if (localAdded) {
+          syncLinksToCloud(merged, false);
+        }
+        return merged;
+      });
+    }
+    setIsSyncingLinks(false);
+  };
+
+  // Real-time listener for multi-device sync (PC <-> Mobile)
+  useEffect(() => {
+    pullLinksFromCloud();
+
+    let unsub: (() => void) | null = null;
+    try {
+      unsub = onSnapshot(doc(db, 'global_store', 'embedded_links'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data && Array.isArray(data.links) && data.links.length > 0) {
+            const incoming = data.links as SavedEmbedLink[];
+            setSavedLinks((prev) => {
+              const linkMap = new Map<string, SavedEmbedLink>();
+              incoming.forEach((l) => {
+                if (l && (l.id || l.url)) linkMap.set(l.id || l.url, l);
+              });
+              prev.forEach((l) => {
+                const key = l.id || l.url;
+                if (!linkMap.has(key)) linkMap.set(key, l);
+              });
+              const merged = Array.from(linkMap.values());
+              try {
+                localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(merged));
+              } catch (_) {}
+              return merged;
+            });
+          }
+        }
+      });
+    } catch (_) {}
+
+    const handleLocalUpdate = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setSavedLinks(e.detail);
+      }
+    };
+    window.addEventListener('saved-embed-links-updated', handleLocalUpdate);
+
+    return () => {
+      if (unsub) unsub();
+      window.removeEventListener('saved-embed-links-updated', handleLocalUpdate);
+    };
+  }, []);
 
   // Apply parsed URL to view
   const handleApplyUrl = (target?: string) => {
@@ -601,7 +735,7 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
     setShowSaveDialog(true);
   };
 
-  // Save new link into library
+  // Save new link into library & sync across PC and mobile devices
   const handleSaveLink = () => {
     if (!saveUrl.trim() || !saveTitle.trim()) return;
     const newLink: SavedEmbedLink = {
@@ -612,12 +746,18 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
       notes: saveNotes.trim(),
       createdAt: new Date().toISOString().split('T')[0],
     };
-    setSavedLinks((prev) => [newLink, ...prev]);
+    const next = [newLink, ...savedLinks];
+    setSavedLinks(next);
+    syncLinksToCloud(next, true);
     setShowSaveDialog(false);
+    setPasteNotification(`Đã lưu & đồng bộ "${newLink.title}" lên Đám Mây (PC & Điện thoại)!`);
+    setTimeout(() => setPasteNotification(null), 3500);
   };
 
   const handleDeleteSavedLink = (id: string) => {
-    setSavedLinks((prev) => prev.filter((l) => l.id !== id));
+    const next = savedLinks.filter((l) => l.id !== id);
+    setSavedLinks(next);
+    syncLinksToCloud(next, true);
   };
 
   const handleExportLinks = () => {
@@ -639,7 +779,9 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
           setSavedLinks((prev) => {
             const existingUrls = new Set(prev.map((p) => p.url));
             const newOnes = imported.filter((item) => item.url && !existingUrls.has(item.url));
-            return [...newOnes, ...prev];
+            const next = [...newOnes, ...prev];
+            syncLinksToCloud(next, true);
+            return next;
           });
         }
       } catch (err) {
@@ -1175,12 +1317,24 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
                   {savedLinks.length}
                 </span>
               </div>
-              <button
-                onClick={() => setShowSavedLinksDrawer(false)}
-                className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={pullLinksFromCloud}
+                  disabled={isSyncingLinks}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center gap-1 border border-amber-500/40 transition-all cursor-pointer shadow-xs active:scale-95"
+                  title="Đồng bộ ngay với đám mây để tải các link đã lưu trên máy tính hoặc điện thoại"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isSyncingLinks ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingLinks ? 'Đang tải...' : 'Đồng Bộ Cloud'}</span>
+                </button>
+                <button
+                  onClick={() => setShowSavedLinksDrawer(false)}
+                  className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Filter & Search Bar */}

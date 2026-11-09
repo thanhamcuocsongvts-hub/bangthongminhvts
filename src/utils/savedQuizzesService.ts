@@ -7,6 +7,9 @@
  */
 
 import { QuizQuestion } from '../types';
+import { db } from '../lib/firebase';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { safeSetDoc } from './firebaseSafe';
 
 export interface SavedEducationalItem {
   id: string;
@@ -255,7 +258,198 @@ export function getSavedEducationalItems(): SavedEducationalItem[] {
 }
 
 /**
- * Lưu bài tập hoặc trò chơi mới (hoặc cập nhật nếu đã có ID)
+ * Đẩy toàn bộ danh sách bài tập trắc nghiệm & trò chơi lên Đám mây (Firestore & Server)
+ * Đảm bảo mọi bài tạo trên máy tính (PC) đều xuất hiện ngay lập tức trên điện thoại (Mobile)
+ */
+export async function syncSavedEducationalItemsToCloud(
+  items: SavedEducationalItem[],
+  immediate: boolean = true
+): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    window.dispatchEvent(new CustomEvent('saved-quizzes-updated', { detail: items }));
+  } catch (_) {}
+
+  const runCloudSync = async () => {
+    try {
+      const sanitized = JSON.parse(JSON.stringify(items));
+      const payload = { items: sanitized, updatedAt: new Date().toISOString() };
+
+      // 1. Lưu vào Firestore doc chuyên dụng 'saved_quizzes'
+      try {
+        await safeSetDoc(doc(db, 'global_store', 'saved_quizzes'), payload, { merge: true });
+      } catch (fsErr) {
+        console.warn('[Cloud Sync] Firestore saved_quizzes notice:', fsErr);
+      }
+
+      // 2. Đồng thời lưu vào smartboard_data để phòng hờ
+      try {
+        await safeSetDoc(doc(db, 'global_store', 'smartboard_data'), { savedQuizzes: sanitized, updatedAt: new Date().toISOString() }, { merge: true });
+      } catch (_) {}
+
+      // 3. Sao lưu lên Express backend server qua /api/quizzes/sync
+      try {
+        await fetch('/api/quizzes/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: sanitized }),
+        });
+      } catch (_) {}
+    } catch (e) {
+      console.warn('[Cloud Sync] Error syncing saved items to cloud:', e);
+    }
+  };
+
+  if (immediate) {
+    runCloudSync();
+  } else {
+    if ((window as any)._savedQuizzesSyncTimer) {
+      clearTimeout((window as any)._savedQuizzesSyncTimer);
+    }
+    (window as any)._savedQuizzesSyncTimer = setTimeout(runCloudSync, 600);
+  }
+}
+
+/**
+ * Tải danh sách bài tập từ Đám mây về thiết bị và hợp nhất thông minh với dữ liệu cục bộ
+ */
+export async function pullSavedQuizzesFromCloud(): Promise<SavedEducationalItem[]> {
+  const localItems = getSavedEducationalItems();
+  let cloudItems: SavedEducationalItem[] = [];
+
+  // 1. Thử lấy từ Firestore trước
+  try {
+    const snap = await getDoc(doc(db, 'global_store', 'saved_quizzes'));
+    if (snap.exists() && snap.data()?.items && Array.isArray(snap.data()?.items)) {
+      cloudItems = snap.data()?.items as SavedEducationalItem[];
+    } else {
+      // Fallback: Kiểm tra smartboard_data
+      const mainSnap = await getDoc(doc(db, 'global_store', 'smartboard_data'));
+      if (mainSnap.exists() && mainSnap.data()?.savedQuizzes && Array.isArray(mainSnap.data()?.savedQuizzes)) {
+        cloudItems = mainSnap.data()?.savedQuizzes as SavedEducationalItem[];
+      }
+    }
+  } catch (err) {
+    console.warn('[Cloud Pull] Firestore pull warning:', err);
+  }
+
+  // 2. Nếu Firestore chưa có hoặc lỗi mạng, thử lấy từ backend server
+  if (cloudItems.length === 0) {
+    try {
+      const res = await fetch('/api/quizzes/sync');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.items) && data.items.length > 0) {
+          cloudItems = data.items;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Hợp nhất thông minh giữa Cloud và Local:
+  // - Nếu Cloud có dữ liệu: hợp nhất dữ liệu từ Cloud và Local
+  // - Bảo toàn tất cả các bài tập đã tạo ở cả 2 thiết bị
+  if (cloudItems.length > 0) {
+    const mergedMap = new Map<string, SavedEducationalItem>();
+    
+    // Đưa cloud items vào map trước
+    cloudItems.forEach((it) => {
+      if (it && it.id) mergedMap.set(it.id, it);
+    });
+
+    // Nếu local có item mới tạo chưa có trên cloud, thêm vào và đẩy ngược lên cloud
+    let hasLocalOnly = false;
+    localItems.forEach((it) => {
+      if (!it || !it.id) return;
+      if (!mergedMap.has(it.id)) {
+        // Chỉ thêm nếu khác ID mẫu mặc định hoặc là bài người dùng tạo
+        mergedMap.set(it.id, it);
+        hasLocalOnly = true;
+      }
+    });
+
+    const finalMerged = Array.from(mergedMap.values());
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(finalMerged));
+      window.dispatchEvent(new CustomEvent('saved-quizzes-updated', { detail: finalMerged }));
+    } catch (_) {}
+
+    if (hasLocalOnly) {
+      syncSavedEducationalItemsToCloud(finalMerged, false);
+    }
+    return finalMerged;
+  } else if (localItems.length > 0) {
+    // Nếu Cloud trống mà Local đã có bài tập do giáo viên tạo trên máy này, tự động đẩy lên Cloud
+    syncSavedEducationalItemsToCloud(localItems, false);
+  }
+
+  return localItems;
+}
+
+/**
+ * Lắng nghe cập nhật thời gian thực từ Firestore để khi máy tính bấm LƯU,
+ * điện thoại tự động nhận bài tập mới trong tích tắc mà không cần tải lại trang!
+ */
+export function initSavedQuizzesRealtimeSync(
+  onUpdate?: (items: SavedEducationalItem[]) => void
+): () => void {
+  let unsub: (() => void) | null = null;
+  try {
+    unsub = onSnapshot(
+      doc(db, 'global_store', 'saved_quizzes'),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data && Array.isArray(data.items) && data.items.length > 0) {
+            const cloudItems = data.items as SavedEducationalItem[];
+            const localItems = getSavedEducationalItems();
+            
+            // Hợp nhất map
+            const mergedMap = new Map<string, SavedEducationalItem>();
+            cloudItems.forEach((item) => {
+              if (item && item.id) mergedMap.set(item.id, item);
+            });
+            localItems.forEach((item) => {
+              if (item && item.id && !mergedMap.has(item.id)) {
+                mergedMap.set(item.id, item);
+              }
+            });
+
+            const finalItems = Array.from(mergedMap.values());
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(finalItems));
+              window.dispatchEvent(new CustomEvent('saved-quizzes-updated', { detail: finalItems }));
+            } catch (_) {}
+
+            if (onUpdate) {
+              onUpdate(finalItems);
+            }
+          }
+        }
+      },
+      (err) => {
+        console.warn('[Realtime Sync] Saved quizzes listener warning:', err);
+      }
+    );
+  } catch (e) {
+    console.warn('[Realtime Sync] Could not attach listener:', e);
+  }
+
+  // Kéo dữ liệu một lần ngay khi khởi tạo
+  pullSavedQuizzesFromCloud().then((items) => {
+    if (onUpdate && items.length > 0) {
+      onUpdate(items);
+    }
+  });
+
+  return () => {
+    if (unsub) unsub();
+  };
+}
+
+/**
+ * Lưu bài tập hoặc trò chơi mới (hoặc cập nhật nếu đã có ID) và tự động đồng bộ Cloud
  */
 export function saveEducationalItem(
   item: Omit<SavedEducationalItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
@@ -264,6 +458,8 @@ export function saveEducationalItem(
   const now = new Date().toISOString();
 
   let finalItem: SavedEducationalItem;
+  let next: SavedEducationalItem[];
+
   if (item.id && all.some((x) => x.id === item.id)) {
     // Cập nhật
     finalItem = {
@@ -271,8 +467,7 @@ export function saveEducationalItem(
       id: item.id,
       updatedAt: now,
     };
-    const next = all.map((x) => (x.id === item.id ? finalItem : x));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    next = all.map((x) => (x.id === item.id ? finalItem : x));
   } else {
     // Tạo mới
     const newId = item.id || `saved_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -282,27 +477,20 @@ export function saveEducationalItem(
       createdAt: now,
       updatedAt: now,
     };
-    const next = [finalItem, ...all];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    next = [finalItem, ...all];
   }
 
-  // Tự động sao lưu lên máy chủ nếu có kết nối
-  try {
-    fetch('/api/documents/auto-sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: STORAGE_KEY, count: all.length + 1 }),
-    }).catch(() => {});
-  } catch (_) {}
+  // Đẩy đồng bộ lên Đám Mây ngay lập tức (Firestore + Server + LocalStorage)
+  syncSavedEducationalItemsToCloud(next, true);
 
   return finalItem;
 }
 
 /**
- * Xóa một bài tập hoặc trò chơi đã lưu
+ * Xóa một bài tập hoặc trò chơi đã lưu và đồng bộ lên Đám mây
  */
 export function deleteEducationalItem(id: string): void {
   const all = getSavedEducationalItems();
   const next = all.filter((x) => x.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  syncSavedEducationalItemsToCloud(next, true);
 }

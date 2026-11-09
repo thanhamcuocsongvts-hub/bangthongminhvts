@@ -289,6 +289,7 @@ const TEACHERS_FILE = path.join(DATA_DIR, "teachers.json");
 const LESSONS_FILE = path.join(DATA_DIR, "cloud_lessons.json");
 const DOCUMENTS_FILE = path.join(DATA_DIR, "cloud_documents.json");
 const LINKS_FILE = path.join(DATA_DIR, "cloud_links.json");
+const QUIZZES_FILE = path.join(DATA_DIR, "cloud_quizzes.json");
 
 function readJsonFileSync<T>(filePath: string, fallback: T): T {
   try {
@@ -495,6 +496,7 @@ if (!teachersStore.some((t) => t.id === 'teacher_admin_root' || t.username === '
 let cloudLessonsStore: any[] = readJsonFileSync(LESSONS_FILE, []);
 let cloudDocumentsStore: any[] = readJsonFileSync(DOCUMENTS_FILE, []);
 let cloudLinksStore: any[] = readJsonFileSync(LINKS_FILE, []);
+let cloudQuizzesStore: any[] = readJsonFileSync(QUIZZES_FILE, []);
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -504,6 +506,7 @@ app.get("/api/health", (req, res) => {
     cloudLessonsCount: cloudLessonsStore.length,
     cloudDocumentsCount: cloudDocumentsStore.length,
     cloudLinksCount: cloudLinksStore.length,
+    cloudQuizzesCount: cloudQuizzesStore.length,
   });
 });
 
@@ -1200,16 +1203,89 @@ app.delete("/api/links", (req, res) => {
   res.json({ success: true, links: [] });
 });
 
+// 3c-2. Cloud Quizzes & Educational Items Endpoints for Cross-Device Sync (PC <-> Mobile)
+app.get("/api/quizzes", (req, res) => {
+  cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  res.json({ success: true, items: cloudQuizzesStore });
+});
+
+app.get("/api/quizzes/sync", (req, res) => {
+  cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  res.json({ success: true, items: cloudQuizzesStore, timestamp: new Date().toISOString() });
+});
+
+app.post("/api/quizzes/sync", (req, res) => {
+  const { items } = req.body;
+  if (Array.isArray(items)) {
+    cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+    const itemMap = new Map<string, any>();
+    // Existing items first
+    cloudQuizzesStore.forEach((it) => {
+      if (it && it.id) itemMap.set(it.id, it);
+    });
+    // Merge or update with incoming items
+    items.forEach((it) => {
+      if (!it || !it.id) return;
+      if (itemMap.has(it.id)) {
+        const existing = itemMap.get(it.id);
+        const existingDate = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+        const incomingDate = new Date(it.updatedAt || it.createdAt || 0).getTime();
+        if (incomingDate >= existingDate) {
+          itemMap.set(it.id, { ...existing, ...it });
+        }
+      } else {
+        itemMap.set(it.id, it);
+      }
+    });
+    cloudQuizzesStore = Array.from(itemMap.values());
+    writeJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  }
+  res.json({ success: true, items: cloudQuizzesStore, timestamp: new Date().toISOString() });
+});
+
+app.post("/api/quizzes", (req, res) => {
+  const newItem = req.body;
+  if (!newItem || !newItem.title) {
+    return res.status(400).json({ error: "Thiếu dữ liệu bài tập hoặc câu hỏi" });
+  }
+  cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  const now = new Date().toISOString();
+  const finalItem = {
+    ...newItem,
+    id: newItem.id || `saved_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    createdAt: newItem.createdAt || now,
+    updatedAt: now,
+  };
+  const idx = cloudQuizzesStore.findIndex((q) => q.id === finalItem.id);
+  if (idx >= 0) {
+    cloudQuizzesStore[idx] = { ...cloudQuizzesStore[idx], ...finalItem };
+  } else {
+    cloudQuizzesStore.unshift(finalItem);
+  }
+  writeJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  res.json({ success: true, item: finalItem, items: cloudQuizzesStore });
+});
+
+app.delete("/api/quizzes/:id", (req, res) => {
+  const { id } = req.params;
+  cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  cloudQuizzesStore = cloudQuizzesStore.filter((q) => q.id !== id);
+  writeJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  res.json({ success: true, items: cloudQuizzesStore });
+});
+
 // 3d. Comprehensive Storage Overview for Multi-Device Auto-Sync
 app.get("/api/storage/overview", (req, res) => {
   cloudDocumentsStore = readJsonFileSync(DOCUMENTS_FILE, cloudDocumentsStore);
   cloudLessonsStore = readJsonFileSync(LESSONS_FILE, cloudLessonsStore);
   cloudLinksStore = readJsonFileSync(LINKS_FILE, cloudLinksStore);
+  cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
   res.json({
     success: true,
     documents: cloudDocumentsStore,
     lessons: cloudLessonsStore,
     links: cloudLinksStore,
+    quizzes: cloudQuizzesStore,
     timestamp: Date.now(),
   });
 });

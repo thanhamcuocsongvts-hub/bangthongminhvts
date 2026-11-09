@@ -274,6 +274,18 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   const [savedGameSearch, setSavedGameSearch] = useState<string>('');
   const [gameToast, setGameToast] = useState<string | null>(null);
 
+  useEffect(() => {
+    const handleUpdate = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setSavedGamesList(e.detail.filter((x: any) => x.type === 'game'));
+      } else {
+        setSavedGamesList(getSavedEducationalItems().filter((x) => x.type === 'game'));
+      }
+    };
+    window.addEventListener('saved-quizzes-updated', handleUpdate);
+    return () => window.removeEventListener('saved-quizzes-updated', handleUpdate);
+  }, []);
+
   const [gameTopic, setGameTopic] = useState<string>(lessonTitle || '');
   const [gameSubject, setGameSubject] = useState<string>(lessonSubject || 'Toán học');
   const [gameGrade, setGameGrade] = useState<string>('Lớp 12');
