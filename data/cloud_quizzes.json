@@ -1,1 +1,41 @@
-[]
+[
+  {
+    "id": "saved_math_12_khao_sat",
+    "title": "Toán 12: Khảo sát hàm số & Tính đơn điệu cực trị",
+    "type": "quiz",
+    "subject": "Toán học",
+    "grade": "Lớp 12",
+    "questionCount": 4,
+    "createdAt": "2026-11-09T23:02:27.608Z",
+    "updatedAt": "2026-11-09T23:02:27.608Z",
+    "notes": "Bộ câu hỏi chuẩn bị cho tiết học ôn tập chuyên đề Khảo sát hàm số.",
+    "questions": [
+      {
+        "id": "sm1",
+        "question": "Cho hàm số  = x^3 - 3x^2 + 2$. Điểm cực đại của đồ thị hàm số có tọa độ là:",
+        "options": [
+          {
+            "key": "A",
+            "text": "$"
+          },
+          {
+            "key": "B",
+            "text": "$"
+          },
+          {
+            "key": "C",
+            "text": "$"
+          },
+          {
+            "key": "D",
+            "text": "$"
+          }
+        ],
+        "correctAnswer": "A",
+        "explanation": "Ta có y' = 3x^2 - 6x. Nghiệm y' = 0 <=> x = 0 hoặc x = 2. Điểm cực đại là (0; 2).",
+        "timeLimit": 45,
+        "difficulty": "Thông hiểu"
+      }
+    ]
+  }
+]

@@ -1,0 +1,65 @@
+[
+  {
+    "id": "link_user_dao_ham",
+    "title": "Đạo hàm",
+    "url": "https://youtu.be/cn7tgRAy10U?si=wEeUHiFihdLaVyfm",
+    "category": "Khác",
+    "notes": "Bài giảng video đạo hàm và ứng dụng",
+    "createdAt": "2026-10-30",
+    "addedAt": "30/10/2026"
+  },
+  {
+    "id": "link_user_nha_toan_hoc",
+    "title": "Nhà Toán học",
+    "url": "https://youtu.be/KLCQW6YYZMk?si=1LnjZWjTZFfh23Cv",
+    "category": "Toán Học",
+    "notes": "Video danh nhân và lịch sử toán học",
+    "createdAt": "2026-10-29",
+    "addedAt": "29/10/2026"
+  },
+  {
+    "id": "link_user_tiem_can_xien",
+    "title": "Tiệm cận xiên",
+    "url": "https://www.tiktok.com/@onthithptqg_good/video/7656495616289197",
+    "category": "Toán Học",
+    "notes": "Clip ôn thi THPTQG phương pháp tìm tiệm cận xiên",
+    "createdAt": "2026-10-29",
+    "addedAt": "29/10/2026"
+  },
+  {
+    "id": "link_1",
+    "title": "GeoGebra Toán 3D - Hình không gian & Đồ thị mặt cong",
+    "url": "https://www.geogebra.org/3d?lang=vi",
+    "category": "Toán Học",
+    "notes": "Dùng cho tiết hình học không gian 11 & 12, tọa độ Oxyz",
+    "createdAt": "2026-10-20",
+    "addedAt": "20/10/2026"
+  },
+  {
+    "id": "link_2",
+    "title": "PhET Mô Phỏng Sóng Cơ & Giao Thoa Sóng",
+    "url": "https://phet.colorado.edu/sims/html/wave-interference/latest/wave-interference_vi.html",
+    "category": "Vật Lý",
+    "notes": "Thí nghiệm ảo giao thoa sóng nước và sóng ánh sáng",
+    "createdAt": "2026-10-21",
+    "addedAt": "21/10/2026"
+  },
+  {
+    "id": "link_3",
+    "title": "Ptable - Bảng Tuần Hoàn Hóa Học Tương Tác",
+    "url": "https://ptable.com/?lang=vi",
+    "category": "Hóa Học",
+    "notes": "Tra cứu cấu hình electron, bán kính nguyên tử và chu kỳ",
+    "createdAt": "2026-10-22",
+    "addedAt": "22/10/2026"
+  },
+  {
+    "id": "link_4",
+    "title": "Google Earth 3D - Khám Phá Địa Cầu & Địa Mạo",
+    "url": "https://earth.google.com/web/",
+    "category": "Địa Lý",
+    "notes": "Quan sát kiến tạo mảng, đứt gãy địa chất và khí hậu",
+    "createdAt": "2026-10-23",
+    "addedAt": "23/10/2026"
+  }
+]

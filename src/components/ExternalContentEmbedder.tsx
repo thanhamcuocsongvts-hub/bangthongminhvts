@@ -77,6 +77,30 @@ export interface ParsedLinkResult {
 
 const DEFAULT_SAVED_LINKS: SavedEmbedLink[] = [
   {
+    id: 'link_user_dao_ham',
+    title: 'Đạo hàm',
+    url: 'https://youtu.be/cn7tgRAy10U?si=wEeUHiFihdLaVyfm',
+    category: 'Khác',
+    notes: 'Bài giảng video đạo hàm và ứng dụng',
+    createdAt: '2026-10-30',
+  },
+  {
+    id: 'link_user_nha_toan_hoc',
+    title: 'Nhà Toán học',
+    url: 'https://youtu.be/KLCQW6YYZMk?si=1LnjZWjTZFfh23Cv',
+    category: 'Toán Học',
+    notes: 'Video danh nhân và lịch sử toán học',
+    createdAt: '2026-10-29',
+  },
+  {
+    id: 'link_user_tiem_can_xien',
+    title: 'Tiệm cận xiên',
+    url: 'https://www.tiktok.com/@onthithptqg_good/video/7656495616289197',
+    category: 'Toán Học',
+    notes: 'Clip phương pháp tìm tiệm cận xiên đồ thị hàm số',
+    createdAt: '2026-10-29',
+  },
+  {
     id: 'link_1',
     title: 'GeoGebra Toán 3D - Hình không gian & Đồ thị mặt cong',
     url: 'https://www.geogebra.org/3d?lang=vi',
@@ -462,14 +486,16 @@ export function parseAndFormatUrl(raw: string): ParsedLinkResult {
 }
 
 export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = ({
-  initialUrl = 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&mute=0&rel=0&playsinline=1',
+  initialUrl = '',
   onClose,
   isCompact = false,
 }) => {
   const [urlInput, setUrlInput] = useState<string>('');
   const [currentUrl, setCurrentUrl] = useState<string>(initialUrl);
   const [originalUrl, setOriginalUrl] = useState<string>(initialUrl);
-  const [currentPlatform, setCurrentPlatform] = useState<LinkPlatform>('youtube');
+  const [currentPlatform, setCurrentPlatform] = useState<LinkPlatform>(
+    initialUrl ? parseAndFormatUrl(initialUrl).platform : 'generic'
+  );
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isAnnotating, setIsAnnotating] = useState<boolean>(false);
   const [embedError, setEmbedError] = useState<string | null>(null);
@@ -538,18 +564,19 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
     }
   };
 
-  // Pull from Cloud function
+  // Pull from Cloud function with bidirectional sync (guarantees PC links are uploaded to Cloud and pushed to Mobile)
   const pullLinksFromCloud = async () => {
     setIsSyncingLinks(true);
     let cloudLinks: SavedEmbedLink[] = [];
     try {
-      // 1. From Firestore
+      // 1. From Firestore dedicated document
       const snap = await getDoc(doc(db, 'global_store', 'embedded_links'));
-      if (snap.exists() && snap.data()?.links && Array.isArray(snap.data()?.links)) {
+      if (snap.exists() && snap.data()?.links && Array.isArray(snap.data()?.links) && snap.data()?.links.length > 0) {
         cloudLinks = snap.data()?.links as SavedEmbedLink[];
       } else {
+        // Fallback: smartboard_data
         const mainSnap = await getDoc(doc(db, 'global_store', 'smartboard_data'));
-        if (mainSnap.exists() && mainSnap.data()?.savedEmbedLinks && Array.isArray(mainSnap.data()?.savedEmbedLinks)) {
+        if (mainSnap.exists() && mainSnap.data()?.savedEmbedLinks && Array.isArray(mainSnap.data()?.savedEmbedLinks) && mainSnap.data()?.savedEmbedLinks.length > 0) {
           cloudLinks = mainSnap.data()?.savedEmbedLinks as SavedEmbedLink[];
         }
       }
@@ -569,32 +596,56 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
       } catch (_) {}
     }
 
-    if (cloudLinks.length > 0) {
-      setSavedLinks((prev) => {
-        const linkMap = new Map<string, SavedEmbedLink>();
-        cloudLinks.forEach((l) => {
-          if (l && (l.id || l.url)) linkMap.set(l.id || l.url, l);
-        });
-        // Preserve local links not yet on cloud
-        let localAdded = false;
-        prev.forEach((l) => {
-          const key = l.id || l.url;
-          if (!linkMap.has(key)) {
-            linkMap.set(key, l);
-            localAdded = true;
-          }
-        });
-        const merged = Array.from(linkMap.values());
-        try {
-          localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(merged));
-        } catch (_) {}
-        if (localAdded) {
-          syncLinksToCloud(merged, false);
-        }
-        return merged;
-      });
+    // Read current local storage
+    let localLinks: SavedEmbedLink[] = [];
+    try {
+      const stored = localStorage.getItem('smartboard_saved_embed_links');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) localLinks = parsed;
+      }
+    } catch (_) {}
+    if (localLinks.length === 0) {
+      localLinks = DEFAULT_SAVED_LINKS;
     }
+
+    // Bidirectional merge
+    const linkMap = new Map<string, SavedEmbedLink>();
+    const normalizeUrl = (u: string) => (u || '').trim().toLowerCase().replace(/\/+$/, '');
+
+    // Add cloud links first
+    cloudLinks.forEach((l) => {
+      if (l && (l.url || l.title)) {
+        const key = normalizeUrl(l.url) || l.id;
+        linkMap.set(key, l);
+      }
+    });
+
+    // Add local links if not present in cloud
+    let hasLocalOnly = false;
+    localLinks.forEach((l) => {
+      if (!l || (!l.url && !l.title)) return;
+      const key = normalizeUrl(l.url) || l.id;
+      if (!linkMap.has(key)) {
+        linkMap.set(key, l);
+        hasLocalOnly = true;
+      }
+    });
+
+    const merged = Array.from(linkMap.values());
+    setSavedLinks(merged);
+    try {
+      localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(merged));
+      window.dispatchEvent(new CustomEvent('saved-embed-links-updated', { detail: merged }));
+    } catch (_) {}
+
+    // CRITICAL: If local had links that were NOT on cloud (e.g. PC had 7 links), push them up immediately!
+    if (hasLocalOnly || cloudLinks.length === 0) {
+      syncLinksToCloud(merged, true);
+    }
+
     setIsSyncingLinks(false);
+    return merged;
   };
 
   // Real-time listener for multi-device sync (PC <-> Mobile)
@@ -608,14 +659,17 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
           const data = snap.data();
           if (data && Array.isArray(data.links) && data.links.length > 0) {
             const incoming = data.links as SavedEmbedLink[];
+            const norm = (u: string) => (u || '').trim().toLowerCase().replace(/\/+$/, '');
             setSavedLinks((prev) => {
               const linkMap = new Map<string, SavedEmbedLink>();
               incoming.forEach((l) => {
-                if (l && (l.id || l.url)) linkMap.set(l.id || l.url, l);
+                if (l && (l.url || l.title)) linkMap.set(norm(l.url) || l.id, l);
               });
               prev.forEach((l) => {
-                const key = l.id || l.url;
-                if (!linkMap.has(key)) linkMap.set(key, l);
+                if (l && (l.url || l.title)) {
+                  const k = norm(l.url) || l.id;
+                  if (!linkMap.has(k)) linkMap.set(k, l);
+                }
               });
               const merged = Array.from(linkMap.values());
               try {
@@ -1287,19 +1341,62 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
                 )}
               </div>
             ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-slate-400">
-                <Globe className="w-12 h-12 mb-3 text-indigo-400 opacity-60" />
-                <p className="text-sm font-bold text-slate-200">Chưa có đường link nào được nạp</p>
-                <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                  Dán bất kỳ link nào (YouTube, TikTok, Google NotebookLM, Drive, PhET) hoặc chọn từ Kho Link để chiếu cho học sinh
-                </p>
-                <button
-                  onClick={handlePasteClipboard}
-                  className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
-                >
-                  <Clipboard className="w-4 h-4" />
-                  <span>Dán Link Từ Bộ Nhớ Tạm</span>
-                </button>
+              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-slate-300 max-w-2xl mx-auto space-y-5 animate-fade-in">
+                <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-indigo-600/30 via-purple-600/20 to-amber-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-xl shadow-indigo-500/10">
+                  <Globe className="w-8 h-8 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white tracking-tight">
+                    Trung Tâm Chiếu &amp; Nhúng Học Liệu Trực Tuyến
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1.5 max-w-md mx-auto leading-relaxed">
+                    Dán nhanh link bài giảng video (YouTube, TikTok), mô phỏng tương tác (GeoGebra 3D, PhET), Google NotebookLM AI hoặc tài liệu Drive/Slides để chiếu trực tiếp lên bảng 75 inch.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap justify-center pt-1">
+                  <button
+                    type="button"
+                    onClick={handlePasteClipboard}
+                    className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/30 active:scale-95 transition-all cursor-pointer"
+                  >
+                    <Clipboard className="w-4 h-4 text-white" />
+                    <span>Dán Link Từ Bộ Nhớ Tạm (Ctrl+V)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowSavedLinksDrawer(true)}
+                    className="px-4 py-2.5 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer"
+                  >
+                    <Bookmark className="w-4 h-4 text-amber-400" />
+                    <span>Kho Link Đã Lưu ({savedLinks.length})</span>
+                  </button>
+                </div>
+
+                {/* Quick Presets recommendation */}
+                <div className="w-full pt-4 border-t border-slate-800/80">
+                  <p className="text-[11px] font-bold text-slate-400 mb-2.5 flex items-center justify-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Gợi ý học liệu mô phỏng chuẩn SGK mở nhanh:</span>
+                  </p>
+                  <div className="flex items-center justify-center gap-2 flex-wrap text-xs">
+                    {EDUCATIONAL_PRESETS.slice(0, 6).map((p, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setUrlInput(p.url);
+                          handleApplyUrl(p.url);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-indigo-600/30 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                      >
+                        <span>{p.icon}</span>
+                        <span>{p.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>

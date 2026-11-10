@@ -1184,7 +1184,16 @@ app.post("/api/links", (req, res) => {
 app.post("/api/links/sync", (req, res) => {
   const { links } = req.body;
   if (Array.isArray(links)) {
-    cloudLinksStore = links;
+    cloudLinksStore = readJsonFileSync(LINKS_FILE, cloudLinksStore);
+    const map = new Map<string, any>();
+    const norm = (u: string) => (u || '').trim().toLowerCase().replace(/\/+$/, '');
+    cloudLinksStore.forEach((l) => {
+      if (l) map.set(norm(l.url) || l.id, l);
+    });
+    links.forEach((l) => {
+      if (l) map.set(norm(l.url) || l.id, l);
+    });
+    cloudLinksStore = Array.from(map.values());
     writeJsonFileSync(LINKS_FILE, cloudLinksStore);
   }
   res.json({ success: true, links: cloudLinksStore });

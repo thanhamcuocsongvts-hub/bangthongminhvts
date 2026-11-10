@@ -253,8 +253,55 @@ export default function App() {
        console.warn('[Smartboard] Data onSnapshot notice:', err?.message);
     });
 
+    // Subscribe to realtime updates for embed links
+    const unsubEmbedLinks = onSnapshot(doc(db, 'global_store', 'embedded_links'), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().links && Array.isArray(docSnap.data().links)) {
+        try {
+          localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(docSnap.data().links));
+          window.dispatchEvent(new CustomEvent('saved-embed-links-updated', { detail: docSnap.data().links }));
+        } catch (_) {}
+      }
+    }, () => {});
+
     // Initial background pull for quizzes on startup
     pullSavedQuizzesFromCloud().catch(() => {});
+
+    // Initial background bidirectional sync for embed links across PC & Mobile
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'global_store', 'embedded_links'));
+        const stored = localStorage.getItem('smartboard_saved_embed_links');
+        const local = stored ? JSON.parse(stored) : null;
+        if (snap.exists() && snap.data()?.links && Array.isArray(snap.data()?.links) && snap.data()?.links.length > 0) {
+          const cloud = snap.data().links;
+          if (Array.isArray(local) && local.length > 0) {
+            const norm = (u: string) => (u || '').trim().toLowerCase().replace(/\/+$/, '');
+            const map = new Map<string, any>();
+            cloud.forEach((l: any) => map.set(norm(l.url) || l.id, l));
+            let added = false;
+            local.forEach((l: any) => {
+              const k = norm(l.url) || l.id;
+              if (!map.has(k)) {
+                map.set(k, l);
+                added = true;
+              }
+            });
+            const merged = Array.from(map.values());
+            localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(merged));
+            window.dispatchEvent(new CustomEvent('saved-embed-links-updated', { detail: merged }));
+            if (added) {
+              safeSetDoc(doc(db, 'global_store', 'embedded_links'), { links: merged, updatedAt: new Date().toISOString() }, { merge: true });
+            }
+          } else {
+            localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(cloud));
+            window.dispatchEvent(new CustomEvent('saved-embed-links-updated', { detail: cloud }));
+          }
+        } else if (Array.isArray(local) && local.length > 0) {
+          safeSetDoc(doc(db, 'global_store', 'embedded_links'), { links: local, updatedAt: new Date().toISOString() }, { merge: true });
+          safeSetDoc(doc(db, 'global_store', 'smartboard_data'), { savedEmbedLinks: local, updatedAt: new Date().toISOString() }, { merge: true });
+        }
+      } catch (_) {}
+    })();
 
     // 1. Listen for real-time Deletion Tombstones across all devices (Mobile & Web)
     let globalDeletedIds = new Set<string>();
@@ -390,6 +437,7 @@ export default function App() {
 
     return () => {
       unsub();
+      unsubEmbedLinks();
       unsubDeletions();
       unsubLessons();
       window.removeEventListener('online', handleOnline);

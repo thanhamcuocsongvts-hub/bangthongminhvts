@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
+  Bot,
+  Loader2,
   Award,
   ChevronRight,
   TrendingUp,
@@ -188,6 +190,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [studentCallManualInput, setStudentCallManualInput] = useState<string>('');
   const [congratsMessage, setCongratsMessage] = useState<string>('');
   const [isReadingBoardQuestion, setIsReadingBoardQuestion] = useState<boolean>(false);
+  const [boardAiSpeechState, setBoardAiSpeechState] = useState<'idle' | 'calling' | 'speaking'>('idle');
 
   // Dynamic Teacher Classes synchronized with tab "Lớp Học" and logged-in teacher profile
   const [teacherClasses, setTeacherClasses] = useState<ClassRoom[]>(() =>
@@ -304,6 +307,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
   // AI Voice State for Live Quiz Hub
   const [readingQuestionId, setReadingQuestionId] = useState<string | null>(null);
+  const [isCallingSpeech, setIsCallingSpeech] = useState<boolean>(false);
   const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[1]); // Cô giáo dịu dàng
 
   // Lưu & Mở Đề Trắc Nghiệm / Bài Tập Đã Lưu
@@ -475,11 +479,21 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     if (readingQuestionId === targetQ.id) {
       stopAllSpeech();
       setReadingQuestionId(null);
+      setIsCallingSpeech(false);
     } else {
       setReadingQuestionId(targetQ.id);
+      setIsCallingSpeech(true);
       speakQuestionContent(targetQ, {
         preset: selectedVoice,
-        onEnd: () => setReadingQuestionId(null),
+        onStart: () => setIsCallingSpeech(false),
+        onEnd: () => {
+          setReadingQuestionId(null);
+          setIsCallingSpeech(false);
+        },
+        onError: () => {
+          setReadingQuestionId(null);
+          setIsCallingSpeech(false);
+        },
       });
     }
   };
@@ -1114,18 +1128,36 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
   const handleReadBoardQuestion = () => {
     if (!currentQ) return;
-    if (isReadingBoardQuestion) {
+    if (isReadingBoardQuestion || boardAiSpeechState !== 'idle') {
       stopAllSpeech();
       setIsReadingBoardQuestion(false);
+      setBoardAiSpeechState('idle');
       return;
     }
     setIsReadingBoardQuestion(true);
+    setBoardAiSpeechState('calling');
     speakQuestionContent(currentQ, {
       preset: selectedVoice,
-      onEnd: () => setIsReadingBoardQuestion(false),
-      onError: () => setIsReadingBoardQuestion(false),
+      onStart: () => {
+        setBoardAiSpeechState('speaking');
+      },
+      onEnd: () => {
+        setIsReadingBoardQuestion(false);
+        setBoardAiSpeechState('idle');
+      },
+      onError: () => {
+        setIsReadingBoardQuestion(false);
+        setBoardAiSpeechState('idle');
+      },
     });
   };
+
+  // Reset trạng thái đọc AI khi chuyển câu hỏi
+  useEffect(() => {
+    stopAllSpeech();
+    setIsReadingBoardQuestion(false);
+    setBoardAiSpeechState('idle');
+  }, [localActiveIndex, currentQ?.id]);
 
   // Handlers cho tính năng Lưu và Mở bài tập trắc nghiệm
   const handleSaveQuizSubmit = (e: React.FormEvent) => {
@@ -2299,16 +2331,25 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         onClick={() => handleToggleSpeakCurrentQuestion()}
                         className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                           readingQuestionId === currentQ.id
-                            ? 'bg-rose-600 text-white animate-pulse shadow-md'
+                            ? isCallingSpeech
+                              ? 'bg-amber-500 text-white shadow-md animate-pulse'
+                              : 'bg-rose-600 text-white animate-pulse shadow-md'
                             : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
                         }`}
                         title="Nghe giọng AI đọc câu hỏi và 4 phương án cho cả lớp"
                       >
                         {readingQuestionId === currentQ.id ? (
-                          <>
-                            <Square className="w-3.5 h-3.5 fill-current" />
-                            <span>Dừng đọc AI</span>
-                          </>
+                          isCallingSpeech ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Đang gọi giọng AI...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Square className="w-3.5 h-3.5 fill-current" />
+                              <span>Dừng đọc AI</span>
+                            </>
+                          )
                         ) : (
                           <>
                             <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
@@ -2318,6 +2359,31 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {readingQuestionId === currentQ.id && (
+                    <div className="mb-3 px-3.5 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center justify-between gap-2 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-amber-500 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                          <Bot className="w-3.5 h-3.5" />
+                        </div>
+                        {isCallingSpeech ? (
+                          <span className="font-semibold text-amber-900 flex items-center gap-1.5">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                            Đang gọi giọng đọc AI diễn cảm, Thầy/Cô đợi một chút nhé...
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-emerald-700 flex items-center gap-1.5">
+                            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                            Trợ lý AI đang đọc đề bài và các phương án
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                        {selectedVoice.label}
+                      </span>
+                    </div>
+                  )}
+
                   <div className={`${scale.questionText} text-slate-900 font-bold`}>
                     <QuizRichContentRenderer
                       content={
@@ -2640,13 +2706,26 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               <button
                 onClick={handleReadBoardQuestion}
                 className={`px-3.5 py-2.5 rounded-2xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  isReadingBoardQuestion
+                  boardAiSpeechState === 'calling'
+                    ? 'bg-amber-950/80 border-amber-500 text-amber-200 shadow-lg shadow-amber-500/20'
+                    : isReadingBoardQuestion
                     ? 'bg-rose-950 border-rose-500 text-rose-300 animate-pulse'
                     : 'bg-indigo-950 hover:bg-indigo-900 border-indigo-700 text-indigo-300'
                 }`}
-                title="AI đọc nội dung câu hỏi và các phương án bằng tiếng Việt"
+                title={
+                  boardAiSpeechState === 'calling'
+                    ? 'Đang gọi trợ lý AI chuẩn bị giọng đọc...'
+                    : isReadingBoardQuestion
+                    ? 'Dừng đọc câu hỏi'
+                    : 'AI đọc nội dung câu hỏi và các phương án bằng tiếng Việt'
+                }
               >
-                {isReadingBoardQuestion ? (
+                {boardAiSpeechState === 'calling' ? (
+                  <>
+                    <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                    <span>Đang gọi giọng AI...</span>
+                  </>
+                ) : isReadingBoardQuestion ? (
                   <>
                     <VolumeX className="w-4 h-4 text-rose-400" />
                     <span>Dừng đọc</span>
@@ -2692,6 +2771,85 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               </div>
             ) : (
               <>
+                {/* AI Character Voice Assistant Status Banner */}
+                {boardAiSpeechState !== 'idle' && (
+                  <div className="p-3.5 md:p-4 rounded-3xl bg-gradient-to-r from-indigo-950/95 via-purple-950/90 to-slate-900 border-2 border-indigo-500/50 shadow-2xl backdrop-blur-xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
+                    <div className="flex items-center gap-3.5">
+                      <div className="relative shrink-0">
+                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-500 via-indigo-500 to-amber-400 p-0.5 shadow-lg shadow-purple-500/30">
+                          <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center text-white">
+                            {boardAiSpeechState === 'calling' ? (
+                              <Bot className="w-6 h-6 text-amber-300 animate-bounce" />
+                            ) : (
+                              <Sparkles className="w-6 h-6 text-indigo-300 animate-pulse" />
+                            )}
+                          </div>
+                        </div>
+                        <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${boardAiSpeechState === 'calling' ? 'bg-amber-400' : 'bg-emerald-400'} opacity-75`}></span>
+                          <span className={`relative inline-flex rounded-full h-3.5 w-3.5 ${boardAiSpeechState === 'calling' ? 'bg-amber-500' : 'bg-emerald-500'} border-2 border-slate-900`}></span>
+                        </span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-xs md:text-sm font-black text-white flex items-center gap-1.5">
+                            {boardAiSpeechState === 'calling' ? (
+                              <>
+                                <span>Đang Gọi Trợ Lý Giọng Đọc AI</span>
+                                <span className="inline-flex items-center gap-1 text-amber-300 text-xs font-bold">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span>Trợ Lý AI Đang Đọc Câu Hỏi</span>
+                                <span className="text-emerald-400 text-xs font-bold">● Đang phát</span>
+                              </>
+                            )}
+                          </h4>
+                          <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                            {selectedVoice.label || 'Cô giáo dịu dàng'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300 flex items-center gap-2 flex-wrap">
+                          {boardAiSpeechState === 'calling' ? (
+                            <>
+                              <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0"></span>
+                              <span className="text-amber-200 font-medium">
+                                Đang tổng hợp ngữ điệu diễn cảm &amp; công thức toán học SGK, Thầy/Cô vui lòng đợi một chút để nhận giọng đọc hay nhất...
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="flex items-center gap-0.5 h-3.5 shrink-0">
+                                <span className="w-1 h-3.5 bg-emerald-400 rounded-full animate-[bounce_0.8s_infinite]"></span>
+                                <span className="w-1 h-2.5 bg-emerald-400 rounded-full animate-[bounce_0.6s_infinite_0.1s]"></span>
+                                <span className="w-1 h-4 bg-emerald-400 rounded-full animate-[bounce_1s_infinite_0.2s]"></span>
+                                <span className="w-1 h-2 bg-emerald-400 rounded-full animate-[bounce_0.7s_infinite_0.3s]"></span>
+                                <span className="w-1 h-3 bg-emerald-400 rounded-full animate-[bounce_0.9s_infinite_0.15s]"></span>
+                              </span>
+                              <span className="text-slate-200">
+                                Đang phát âm thanh bài giảng trực tiếp qua loa phòng học
+                              </span>
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        stopAllSpeech();
+                        setIsReadingBoardQuestion(false);
+                        setBoardAiSpeechState('idle');
+                      }}
+                      className="px-3.5 py-2 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white border border-rose-500/40 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-sm active:scale-95"
+                    >
+                      <VolumeX className="w-4 h-4" />
+                      <span>Dừng Đọc</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* 1. Clear & Prominent Question Card (ĐỀ BÀI) */}
                 {(() => {
                   const presentationQuestionText =
