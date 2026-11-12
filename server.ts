@@ -36,7 +36,7 @@ app.get("/health", (req, res) => {
 const ttsAudioCache = new Map<string, Buffer>();
 
 // Natural text chunker for Google TTS (splits into natural sub-sentences <= 140 chars)
-function chunkTextForTTS(text: string, maxLen = 140): string[] {
+function chunkTextForTTS(text: string, maxLen = 180): string[] {
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
   const sentences = text.split(/(?<=[.,!?:;\n])\s+/);
@@ -70,19 +70,23 @@ function chunkTextForTTS(text: string, maxLen = 140): string[] {
 async function fetchSingleTtsAudio(chunk: string, lang: string): Promise<Buffer | null> {
   const encoded = encodeURIComponent(chunk);
   const urls = [
-    `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=${lang}&client=gtx&q=${encoded}`,
     `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=${lang}&client=tw-ob`,
+    `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=${lang}&client=gtx&q=${encoded}`,
     `https://translate.google.com.vn/translate_tts?ie=UTF-8&q=${encoded}&tl=${lang}&client=tw-ob`,
   ];
   for (const url of urls) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
       const response = await fetch(url, {
+        signal: controller.signal,
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Referer": "https://translate.google.com/",
           "Accept": "audio/mpeg, audio/*; q=0.9, */*; q=0.5",
         },
       });
+      clearTimeout(timeoutId);
       if (response.ok) {
         const arrayBuf = await response.arrayBuffer();
         if (arrayBuf.byteLength > 100) {
@@ -160,7 +164,7 @@ app.get("/api/tts", async (req, res) => {
         let response: any = null;
         try {
           response = await ai.models.generateContent({
-            model: "gemini-3.8-flash-lite-tts",
+            model: "gemini-2.5-flash",
             contents: text,
             config: {
               responseModalities: ["AUDIO"],
@@ -173,21 +177,8 @@ app.get("/api/tts", async (req, res) => {
               },
             },
           });
-        } catch {
-          response = await ai.models.generateContent({
-            model: "gemini-3.8-flash-tts",
-            contents: text,
-            config: {
-              responseModalities: ["AUDIO"],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: {
-                    voiceName: voice,
-                  },
-                },
-              },
-            },
-          });
+        } catch (_) {
+          // Model does not support AUDIO or invalid API key, fallback immediately
         }
 
         const parts = response?.candidates?.[0]?.content?.parts;
@@ -226,16 +217,11 @@ app.get("/api/tts", async (req, res) => {
       }
     }
 
-    // 2. Fallback: Google Translate TTS Stream with chunk concatenation
+    // 2. Fallback: Google Translate TTS Stream with parallel chunk fetching
     const chunks = chunkTextForTTS(text, 140);
-    const audioBuffers: Buffer[] = [];
-
-    for (const chunk of chunks) {
-      const buf = await fetchSingleTtsAudio(chunk, lang);
-      if (buf) {
-        audioBuffers.push(buf);
-      }
-    }
+    const chunkPromises = chunks.map((chunk) => fetchSingleTtsAudio(chunk, lang));
+    const chunkResults = await Promise.all(chunkPromises);
+    const audioBuffers: Buffer[] = chunkResults.filter((b): b is Buffer => b !== null);
 
     if (audioBuffers.length === 0) {
       return res.status(502).send("Không thể tạo giọng đọc tiếng Việt từ máy chủ");

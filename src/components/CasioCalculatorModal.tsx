@@ -1334,16 +1334,27 @@ interface KeypadButtonProps {
 
 const ScientificKeyButton = React.memo<KeypadButtonProps>(({ keyItem, onPress, katexLoaded }) => {
   return (
-    <div className="flex flex-col items-center select-none" style={{ touchAction: 'manipulation' }}>
+    <div className="flex flex-col items-center select-none" style={{ touchAction: 'none' }}>
       <div className="w-full h-[11px] flex items-end justify-between px-[1px] pb-[1px] text-[6.5px] font-bold leading-none whitespace-nowrap overflow-hidden pointer-events-none">
         <span className="text-[#e5b546] tracking-tighter truncate">{keyItem.shiftText}</span>
         <span className="text-[#e05368] tracking-tighter ml-auto">{keyItem.alphaText}</span>
       </div>
       <button
         type="button"
-        onPointerDown={(e) => onPress(keyItem, e)}
-        onClick={(e) => onPress(keyItem, e)}
-        style={{ touchAction: 'manipulation' }}
+        onTouchStart={(e) => {
+          e.stopPropagation();
+          onPress(keyItem, e);
+        }}
+        onPointerDown={(e) => {
+          if (e.pointerType === 'touch') return;
+          e.stopPropagation();
+          onPress(keyItem, e);
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onPress(keyItem, e);
+        }}
+        style={{ touchAction: 'none' }}
         className="w-full h-[24px] rounded-[6px] bg-gradient-to-b from-[#383d47] via-[#272b33] to-[#1c1f26] border-t border-x border-zinc-500/40 shadow-[0_2.5px_0_#0b0d11,0_3px_4px_rgba(0,0,0,0.6)] active:translate-y-[1px] active:scale-[0.96] active:brightness-125 transition-transform duration-75 flex items-center justify-center px-0.5 cursor-pointer select-none"
       >
         <KatexScreenRenderer
@@ -1363,16 +1374,27 @@ const NumpadKeyButton = React.memo<KeypadButtonProps>(({ keyItem, onPress, katex
     : 'bg-gradient-to-b from-[#f8fafc] via-[#e5e7eb] to-[#d1d5db] border-t border-x border-white text-zinc-900 shadow-[0_3px_0_#6b7280,0_4px_6px_rgba(0,0,0,0.55)]';
 
   return (
-    <div className="flex flex-col items-center select-none" style={{ touchAction: 'manipulation' }}>
+    <div className="flex flex-col items-center select-none" style={{ touchAction: 'none' }}>
       <div className="w-full h-[11px] flex items-end justify-between px-[1.5px] pb-[1px] text-[7px] font-extrabold leading-none whitespace-nowrap overflow-hidden pointer-events-none">
         <span className="text-[#e5b546] tracking-tight truncate">{keyItem.shiftText}</span>
         <span className="text-[#e05368] tracking-tight ml-auto">{keyItem.alphaText}</span>
       </div>
       <button
         type="button"
-        onPointerDown={(e) => onPress(keyItem, e)}
-        onClick={(e) => onPress(keyItem, e)}
-        style={{ touchAction: 'manipulation' }}
+        onTouchStart={(e) => {
+          e.stopPropagation();
+          onPress(keyItem, e);
+        }}
+        onPointerDown={(e) => {
+          if (e.pointerType === 'touch') return;
+          e.stopPropagation();
+          onPress(keyItem, e);
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onPress(keyItem, e);
+        }}
+        style={{ touchAction: 'none' }}
         className={`w-full h-[31px] rounded-[8px] active:translate-y-[1.5px] active:scale-[0.96] active:brightness-110 flex items-center justify-center cursor-pointer select-none transition-all duration-75 ${buttonStyle}`}
       >
         <KatexScreenRenderer
@@ -1542,7 +1564,7 @@ function ClassroomBigScreen({
   };
 
   return (
-    <div className="w-full max-w-[680px] rounded-[28px] p-4 sm:p-6 bg-black/50 backdrop-blur-xl border-2 border-emerald-400/35 shadow-[0_24px_65px_rgba(0,0,0,0.75)] text-white flex flex-col justify-between transition-all duration-300">
+    <div className="w-full max-w-[680px] rounded-[28px] p-4 sm:p-6 bg-[#0b1710] border-2 border-emerald-400/40 shadow-2xl text-white flex flex-col justify-between transition-all duration-300">
       {/* Header Màn Hình Lớn */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-4 border-b border-white/15">
         <div className="flex items-center gap-2.5">
@@ -3010,12 +3032,14 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
 
   const handleFastPress = useCallback((keyItem: any, e?: React.SyntheticEvent) => {
     if (e && typeof e.preventDefault === 'function') {
-      e.preventDefault();
+      try {
+        e.preventDefault();
+      } catch (_) {}
     }
-    const now = Date.now();
+    const now = performance.now();
     const keyId = keyItem?.id || 'unknown';
-    // Bỏ qua nếu sự kiện vừa bắn cách đây dưới 120ms trên cùng phím (tránh double firing pointerdown + click)
-    if (lastPointerPressTimeRef.current.id === keyId && now - lastPointerPressTimeRef.current.time < 120) {
+    // Bỏ qua nếu sự kiện vừa bắn cách đây dưới 65ms trên cùng phím (tránh double firing touchstart + click)
+    if (lastPointerPressTimeRef.current.id === keyId && now - lastPointerPressTimeRef.current.time < 65) {
       return;
     }
     lastPointerPressTimeRef.current = { id: keyId, time: now };
@@ -3024,11 +3048,13 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
 
   const handleFastCursor = useCallback((direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT', e?: React.SyntheticEvent) => {
     if (e && typeof e.preventDefault === 'function') {
-      e.preventDefault();
+      try {
+        e.preventDefault();
+      } catch (_) {}
     }
-    const now = Date.now();
+    const now = performance.now();
     const id = `dpad_${direction}`;
-    if (lastPointerPressTimeRef.current.id === id && now - lastPointerPressTimeRef.current.time < 120) {
+    if (lastPointerPressTimeRef.current.id === id && now - lastPointerPressTimeRef.current.time < 65) {
       return;
     }
     lastPointerPressTimeRef.current = { id, time: now };
@@ -3054,7 +3080,7 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
       {showChalk && <ChalkboardDoodles />}
 
       {/* Thanh tiêu đề & Nút Bật/Tắt Màn Hình Lớn + Phóng to */}
-      <div className="relative z-10 mb-4 flex flex-wrap items-center justify-center gap-2.5 px-4 py-2 rounded-full bg-black/50 backdrop-blur-md border border-white/15 text-white/90 text-xs shadow-lg">
+      <div className="relative z-10 mb-4 flex flex-wrap items-center justify-center gap-2.5 px-4 py-2 rounded-full bg-[#0d1c14] border border-white/20 text-white/90 text-xs shadow-lg">
         <span className="font-medium tracking-wide flex items-center gap-1.5">
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
           Casio fx-580VN X
@@ -3683,9 +3709,10 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                   <div className="h-[10px]" />
                   <button
                     type="button"
-                    onPointerDown={(e) => handleFastPress({ id: 'shift' }, e)}
+                    onTouchStart={(e) => { e.stopPropagation(); handleFastPress({ id: 'shift' }, e); }}
+                    onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastPress({ id: 'shift' }, e); }}
                     onClick={(e) => handleFastPress({ id: 'shift' }, e)}
-                    style={{ touchAction: 'manipulation' }}
+                    style={{ touchAction: 'none' }}
                     className={`w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border shadow-[0_2px_0_#0f1115] active:translate-y-[1px] active:scale-95 flex items-center justify-center cursor-pointer select-none transition-transform duration-75 ${
                       calcState.shift ? 'border-[#e5b546] ring-1 ring-[#e5b546]/60' : 'border-zinc-600/50'
                     }`}
@@ -3698,9 +3725,10 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                   <div className="h-[10px]" />
                   <button
                     type="button"
-                    onPointerDown={(e) => handleFastPress({ id: 'alpha' }, e)}
+                    onTouchStart={(e) => { e.stopPropagation(); handleFastPress({ id: 'alpha' }, e); }}
+                    onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastPress({ id: 'alpha' }, e); }}
                     onClick={(e) => handleFastPress({ id: 'alpha' }, e)}
-                    style={{ touchAction: 'manipulation' }}
+                    style={{ touchAction: 'none' }}
                     className={`w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border shadow-[0_2px_0_#0f1115] active:translate-y-[1px] active:scale-95 flex items-center justify-center cursor-pointer select-none transition-transform duration-75 ${
                       calcState.alpha ? 'border-[#e05368] ring-1 ring-[#e05368]/60' : 'border-zinc-600/50'
                     }`}
@@ -3710,7 +3738,7 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                 </div>
 
                 {/* Cụm D-Pad Phản Hồi Tức Thì 0ms */}
-                <div className="col-span-2 row-span-2 flex items-center justify-center pt-1 select-none" style={{ touchAction: 'manipulation' }}>
+                <div className="col-span-2 row-span-2 flex items-center justify-center pt-1 select-none" style={{ touchAction: 'none' }}>
                   <div
                     className="relative w-[84px] h-[64px] rounded-[32px] p-[2.5px] shadow-[0_4px_8px_rgba(0,0,0,0.75),inset_0_1px_2px_rgba(255,255,255,0.8)] border border-zinc-400"
                     style={{
@@ -3721,36 +3749,40 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                       <div className="w-[32px] h-[24px] rounded-full bg-gradient-to-b from-zinc-200 to-zinc-400 border border-zinc-500/40 shadow-inner pointer-events-none" />
                       <button
                         type="button"
-                        onPointerDown={(e) => handleFastCursor('UP', e)}
+                        onTouchStart={(e) => { e.stopPropagation(); handleFastCursor('UP', e); }}
+                        onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastCursor('UP', e); }}
                         onClick={(e) => handleFastCursor('UP', e)}
-                        style={{ touchAction: 'manipulation' }}
+                        style={{ touchAction: 'none' }}
                         className="absolute top-0.5 inset-x-4 h-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer select-none"
                       >
                         <span className="text-[7.5px] pointer-events-none">▲</span>
                       </button>
                       <button
                         type="button"
-                        onPointerDown={(e) => handleFastCursor('DOWN', e)}
+                        onTouchStart={(e) => { e.stopPropagation(); handleFastCursor('DOWN', e); }}
+                        onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastCursor('DOWN', e); }}
                         onClick={(e) => handleFastCursor('DOWN', e)}
-                        style={{ touchAction: 'manipulation' }}
+                        style={{ touchAction: 'none' }}
                         className="absolute bottom-0.5 inset-x-4 h-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer select-none"
                       >
                         <span className="text-[7.5px] pointer-events-none">▼</span>
                       </button>
                       <button
                         type="button"
-                        onPointerDown={(e) => handleFastCursor('LEFT', e)}
+                        onTouchStart={(e) => { e.stopPropagation(); handleFastCursor('LEFT', e); }}
+                        onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastCursor('LEFT', e); }}
                         onClick={(e) => handleFastCursor('LEFT', e)}
-                        style={{ touchAction: 'manipulation' }}
+                        style={{ touchAction: 'none' }}
                         className="absolute left-1 inset-y-2.5 w-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer select-none"
                       >
                         <span className="text-[7.5px] pointer-events-none">◀</span>
                       </button>
                       <button
                         type="button"
-                        onPointerDown={(e) => handleFastCursor('RIGHT', e)}
+                        onTouchStart={(e) => { e.stopPropagation(); handleFastCursor('RIGHT', e); }}
+                        onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastCursor('RIGHT', e); }}
                         onClick={(e) => handleFastCursor('RIGHT', e)}
-                        style={{ touchAction: 'manipulation' }}
+                        style={{ touchAction: 'none' }}
                         className="absolute right-1 inset-y-2.5 w-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer select-none"
                       >
                         <span className="text-[7.5px] pointer-events-none">▶</span>
@@ -3765,9 +3797,10 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                   </div>
                   <button
                     type="button"
-                    onPointerDown={(e) => handleFastPress({ id: 'menu' }, e)}
+                    onTouchStart={(e) => { e.stopPropagation(); handleFastPress({ id: 'menu' }, e); }}
+                    onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastPress({ id: 'menu' }, e); }}
                     onClick={(e) => handleFastPress({ id: 'menu' }, e)}
-                    style={{ touchAction: 'manipulation' }}
+                    style={{ touchAction: 'none' }}
                     className="w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border border-zinc-600/50 shadow-[0_2px_0_#0f1115] active:translate-y-[1px] active:scale-95 flex items-center justify-center cursor-pointer select-none transition-transform duration-75"
                   >
                     <span className="text-[9px] font-bold tracking-tight text-zinc-100 pointer-events-none">MENU</span>
@@ -3778,9 +3811,10 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                   <div className="h-[10px]" />
                   <button
                     type="button"
-                    onPointerDown={(e) => handleFastPress({ id: 'on' }, e)}
+                    onTouchStart={(e) => { e.stopPropagation(); handleFastPress({ id: 'on' }, e); }}
+                    onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastPress({ id: 'on' }, e); }}
                     onClick={(e) => handleFastPress({ id: 'on' }, e)}
-                    style={{ touchAction: 'manipulation' }}
+                    style={{ touchAction: 'none' }}
                     className="w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border border-zinc-600/50 shadow-[0_2px_0_#0f1115] active:translate-y-[1px] active:scale-95 flex items-center justify-center cursor-pointer select-none transition-transform duration-75"
                   >
                     <span className="text-[9px] font-bold tracking-tight text-zinc-100 pointer-events-none">ON</span>
@@ -3826,7 +3860,7 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
       </div>
 
       {/* Thanh chuyển nhanh chế độ */}
-      <div className="relative z-10 mt-2.5 w-[340px] sm:w-[364px] rounded-xl bg-black/45 backdrop-blur-md border border-white/15 px-3 py-2 text-white/90 shadow-lg select-none" style={{ touchAction: 'manipulation' }}>
+      <div className="relative z-10 mt-2.5 w-[340px] sm:w-[364px] rounded-xl bg-[#0d1c14] border border-white/20 px-3 py-2 text-white/90 shadow-lg select-none" style={{ touchAction: 'manipulation' }}>
         <div className="flex flex-wrap items-center justify-between gap-1 text-[10px]">
           <span className="text-emerald-300 font-semibold">Chế độ nhanh:</span>
           <div className="flex flex-wrap gap-1">
@@ -4036,7 +4070,7 @@ export const CasioCalculatorModal: React.FC<{
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200 select-none overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/90 animate-in fade-in duration-200 select-none overflow-y-auto">
       <div className="relative my-auto flex flex-col items-center">
         {/* Nút đóng nổi bật góc trên bên phải */}
         <button

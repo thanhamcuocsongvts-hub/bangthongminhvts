@@ -544,14 +544,19 @@ export async function playGeminiAudioData(
 
 // Tự động mở khóa âm thanh trình duyệt ngay khi người dùng chạm hoặc click chuột lần đầu trên web
 export function unlockWebAudio(): void {
-  if (isAudioUnlocked || typeof window === 'undefined') return;
   try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioContextClass) {
-      const ctx = new AudioContextClass();
+    const ctx = getOrCreateAudioContext();
+    if (ctx) {
       if (ctx.state === 'suspended') {
-        ctx.resume();
+        ctx.resume().catch(() => {});
       }
+      try {
+        const buffer = ctx.createBuffer(1, 1, 22050);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(0);
+      } catch (_) {}
     }
     const silent = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
     silent.volume = 0.01;
@@ -1746,45 +1751,89 @@ export async function speakWithGoogleCloudTTS(
   isSpeechCancelled = false;
   unlockWebAudio();
 
+  const ctx = getOrCreateAudioContext();
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+
+  // 1. Kiểm tra cache AudioBuffer (<1ms)
+  const cacheKey = `${lang}:::${processedText.trim()}`;
+  if (audioCache.has(cacheKey)) {
+    const cachedBuf = audioCache.get(cacheKey)!;
+    playAudioBuffer(cachedBuf, onStart, onEnd);
+    return true;
+  }
+
   const voiceName = preset.geminiVoice || (preset.gender === 'male' ? 'Charon' : 'Kore');
-  let playbackRate = preset.rate || 1.0;
+  const playbackRate = preset.rate || 1.0;
   const encoded = encodeURIComponent(processedText.trim());
+  const ttsUrl = `/api/tts?lang=${lang}&voice=${voiceName}&preset=${preset.id}&rate=${playbackRate}&text=${encoded}`;
 
   try {
-    const audio = new Audio();
-    currentAudioElement = audio;
-    try {
-      (audio as any).referrerPolicy = 'no-referrer';
-    } catch (_) {}
-    audio.playbackRate = playbackRate;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7000); // 7s timeout
 
-    audio.onplay = () => {
-      if (!isSpeechCancelled && onStart) onStart();
-    };
+    const res = await fetch(ttsUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
 
-    audio.onended = () => {
-      if (!isSpeechCancelled && onEnd) onEnd();
-      currentAudioElement = null;
-    };
+    if (res.ok && !isSpeechCancelled) {
+      const arrayBuf = await res.arrayBuffer();
+      if (arrayBuf.byteLength > 100) {
+        const arrayBufCopy = arrayBuf.slice(0);
+        if (ctx) {
+          try {
+            const decoded = await ctx.decodeAudioData(arrayBuf);
+            if (decoded && !isSpeechCancelled) {
+              audioCache.set(cacheKey, decoded);
+              await playAudioBuffer(decoded, onStart, onEnd);
+              return true;
+            }
+          } catch (_) {
+            // Fallback sang HTML5 Audio nếu trình duyệt không giải mã được
+          }
+        }
 
-    audio.onerror = () => {
-      currentAudioElement = null;
-      speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
-    };
-
-    audio.src = `/api/tts?lang=${lang}&voice=${voiceName}&preset=${preset.id}&rate=${playbackRate}&text=${encoded}`;
-    const p = audio.play();
-    if (p !== undefined) {
-      p.catch(() => {
-        currentAudioElement = null;
-        speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
-      });
+        // Fallback: HTML5 Audio Blob using cloned buffer
+        try {
+          const blob = new Blob([arrayBufCopy], { type: 'audio/mpeg' });
+          const blobUrl = URL.createObjectURL(blob);
+          const audio = new Audio(blobUrl);
+          currentAudioElement = audio;
+          audio.playbackRate = playbackRate;
+          audio.onplay = () => {
+            if (!isSpeechCancelled && onStart) onStart();
+          };
+          audio.onended = () => {
+            URL.revokeObjectURL(blobUrl);
+            currentAudioElement = null;
+            if (!isSpeechCancelled && onEnd) onEnd();
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(blobUrl);
+            currentAudioElement = null;
+            speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
+          };
+          const p = audio.play();
+          if (p !== undefined) {
+            p.catch(() => {
+              URL.revokeObjectURL(blobUrl);
+              currentAudioElement = null;
+              speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
+            });
+          }
+          return true;
+        } catch (_) {
+          speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
+          return true;
+        }
+      }
     }
-    return true;
   } catch (err) {
-    console.warn('speakWithGoogleCloudTTS error:', err);
-    return speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
+    console.warn('speakWithGoogleCloudTTS fetch notice:', err);
   }
+
+  if (isSpeechCancelled) return false;
+  return speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
 }
 
 /**

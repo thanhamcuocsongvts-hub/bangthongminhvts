@@ -2100,13 +2100,12 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       return;
     }
 
-    const canSelectExistingShape =
-      activeTool === 'select' ||
-      isFunctionGraphTool(activeTool) ||
-      (!isFreehandStrokeTool(activeTool) && activeTool !== 'text');
+    // Chỉ cho phép bấm chọn/di chuyển hình học đã có khi đang ở công cụ 'Chọn' (Select).
+    // Khi đang chọn các công cụ vẽ hình (đoạn thẳng, tia, tam giác, hình tròn, chữ nhật...) thì luôn ưu tiên vẽ nét mới liên tục.
+    const canSelectExistingShape = activeTool === 'select';
 
     if (canSelectExistingShape) {
-      // Cho phép bấm chọn hình học và đồ thị toán học khi ở công cụ Chọn hoặc bấm trực tiếp vào hình/đồ thị đã vẽ
+      // Cho phép bấm chọn hình học và đồ thị toán học khi ở công cụ Chọn
       const hitStroke = strokes.slice().reverse().find((s) => {
         // Nét viết tay bút, dạ quang, tẩy, laser không chọn bằng click thường
         if (isFreehandStrokeTool(s.tool) || s.tool === 'laser') {
@@ -2985,11 +2984,10 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       // Track session strokes for instant 1-tap mobile calligraphy selection
       calligraphySessionStrokesRef.current.push(newStroke.id);
 
-      // Automatically select function graphs and shapes so the user can easily scale and move them immediately
-      if (!isFreehandStrokeTool(activeTool) && activeTool !== 'laser' && activeTool !== 'select') {
-        setSelectedStrokeId(newStroke.id);
-        setIsStrokeToolbarExpanded(false);
-      }
+      // Giữ bảng sạch và sẵn sàng để Thầy/Cô vẽ liên tục các nét hình học tiếp theo (không tự động hiện popup làm gián đoạn)
+      // Khi cần chỉnh sửa, di chuyển hoặc đổi màu, Thầy/Cô chỉ cần bấm công cụ "Chọn" và chạm vào hình.
+      setSelectedStrokeId(null);
+      setIsStrokeToolbarExpanded(false);
     }
   };
 
