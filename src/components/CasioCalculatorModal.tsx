@@ -6,7 +6,7 @@ declare global {
   }
 }
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { X } from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
@@ -94,46 +94,63 @@ function useExternalMathLibraries() {
 }
 
 /**
- * Component render trực tiếp chuỗi LaTeX bằng KaTeX
+ * Bộ nhớ đệm (Cache) chuỗi HTML KaTeX:
+ * Lưu trữ vĩnh viễn kết quả biên dịch các ký hiệu phím bấm và biểu thức toán.
+ * Giúp bàn phím phản hồi tức thì 0ms, loại bỏ hoàn toàn độ trễ trên TV cảm ứng 75 inch.
+ */
+const katexHtmlCache = new Map<string, string>();
+
+export function getKatexHtml(latex: string, displayMode = false): string {
+  if (!latex) return '';
+  const cacheKey = `${displayMode ? 'D:' : 'T:'}${latex}`;
+  const cached = katexHtmlCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const katexEngine = (typeof window !== 'undefined' && window.katex) || katex;
+  if (!katexEngine || typeof katexEngine.renderToString !== 'function') {
+    return latex;
+  }
+
+  try {
+    const html = katexEngine.renderToString(latex, {
+      displayMode,
+      throwOnError: false,
+      strict: false,
+      trust: true,
+    });
+    katexHtmlCache.set(cacheKey, html);
+    return html;
+  } catch (err) {
+    return latex;
+  }
+}
+
+/**
+ * Component render trực tiếp chuỗi LaTeX bằng KaTeX với HTML caching và React.memo
  */
 interface KatexScreenRendererProps {
   latex: string;
   displayMode?: boolean;
   className?: string;
-  isReady: boolean;
+  isReady?: boolean;
 }
 
-const KatexScreenRenderer: React.FC<KatexScreenRendererProps> = ({
+const KatexScreenRenderer: React.FC<KatexScreenRendererProps> = React.memo(({
   latex,
   displayMode = false,
   className = '',
-  isReady,
 }) => {
-  const containerRef = useRef<HTMLSpanElement>(null);
+  const html = useMemo(() => {
+    return getKatexHtml(latex, displayMode);
+  }, [latex, displayMode]);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const katexEngine = window.katex || katex;
-    if (!isReady || !katexEngine) {
-      containerRef.current.innerHTML = '';
-      return;
-    }
-    try {
-      katexEngine.render(latex || '', containerRef.current, {
-        displayMode,
-        throwOnError: false,
-        strict: false,
-        trust: true,
-      });
-    } catch (err) {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
-      }
-    }
-  }, [latex, displayMode, isReady]);
-
-  return <span ref={containerRef} className={`select-none ${className}`} />;
-};
+  return (
+    <span
+      className={`select-none ${className}`}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+});
 
 /**
  * ============================================================================
@@ -1303,6 +1320,70 @@ const ChalkboardDoodles = () => (
     </svg>
   </div>
 );
+
+/**
+ * ============================================================================
+ * CÁC PHÍM BẤM ĐƯỢC MEMO HÓA & TỐI ƯU CẢM ỨNG 0MS CHO MÀN HÌNH TIVI 75 INCH
+ * ============================================================================
+ */
+interface KeypadButtonProps {
+  keyItem: any;
+  onPress: (keyItem: any, e?: React.SyntheticEvent) => void;
+  katexLoaded: boolean;
+}
+
+const ScientificKeyButton = React.memo<KeypadButtonProps>(({ keyItem, onPress, katexLoaded }) => {
+  return (
+    <div className="flex flex-col items-center select-none" style={{ touchAction: 'manipulation' }}>
+      <div className="w-full h-[11px] flex items-end justify-between px-[1px] pb-[1px] text-[6.5px] font-bold leading-none whitespace-nowrap overflow-hidden pointer-events-none">
+        <span className="text-[#e5b546] tracking-tighter truncate">{keyItem.shiftText}</span>
+        <span className="text-[#e05368] tracking-tighter ml-auto">{keyItem.alphaText}</span>
+      </div>
+      <button
+        type="button"
+        onPointerDown={(e) => onPress(keyItem, e)}
+        onClick={(e) => onPress(keyItem, e)}
+        style={{ touchAction: 'manipulation' }}
+        className="w-full h-[24px] rounded-[6px] bg-gradient-to-b from-[#383d47] via-[#272b33] to-[#1c1f26] border-t border-x border-zinc-500/40 shadow-[0_2.5px_0_#0b0d11,0_3px_4px_rgba(0,0,0,0.6)] active:translate-y-[1px] active:scale-[0.96] active:brightness-125 transition-transform duration-75 flex items-center justify-center px-0.5 cursor-pointer select-none"
+      >
+        <KatexScreenRenderer
+          latex={keyItem.mainLatex}
+          isReady={katexLoaded}
+          className="text-[10px] text-white leading-none pointer-events-none"
+        />
+      </button>
+    </div>
+  );
+});
+
+const NumpadKeyButton = React.memo<KeypadButtonProps>(({ keyItem, onPress, katexLoaded }) => {
+  const isBlue = keyItem.variant === 'blue';
+  const buttonStyle = isBlue
+    ? 'bg-gradient-to-b from-[#386796] via-[#285078] to-[#1d3d5e] border-t border-x border-[#6798c9]/50 text-white shadow-[0_3px_0_#0f2338,0_4px_5px_rgba(0,0,0,0.65)]'
+    : 'bg-gradient-to-b from-[#f8fafc] via-[#e5e7eb] to-[#d1d5db] border-t border-x border-white text-zinc-900 shadow-[0_3px_0_#6b7280,0_4px_6px_rgba(0,0,0,0.55)]';
+
+  return (
+    <div className="flex flex-col items-center select-none" style={{ touchAction: 'manipulation' }}>
+      <div className="w-full h-[11px] flex items-end justify-between px-[1.5px] pb-[1px] text-[7px] font-extrabold leading-none whitespace-nowrap overflow-hidden pointer-events-none">
+        <span className="text-[#e5b546] tracking-tight truncate">{keyItem.shiftText}</span>
+        <span className="text-[#e05368] tracking-tight ml-auto">{keyItem.alphaText}</span>
+      </div>
+      <button
+        type="button"
+        onPointerDown={(e) => onPress(keyItem, e)}
+        onClick={(e) => onPress(keyItem, e)}
+        style={{ touchAction: 'manipulation' }}
+        className={`w-full h-[31px] rounded-[8px] active:translate-y-[1.5px] active:scale-[0.96] active:brightness-110 flex items-center justify-center cursor-pointer select-none transition-all duration-75 ${buttonStyle}`}
+      >
+        <KatexScreenRenderer
+          latex={keyItem.mainLatex}
+          isReady={katexLoaded}
+          className={`${isBlue ? 'text-[11.5px] text-white' : 'text-[14.5px] text-zinc-900'} pointer-events-none`}
+        />
+      </button>
+    </div>
+  );
+});
 
 /**
  * ============================================================================
@@ -2924,7 +3005,40 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
     });
   }, []);
 
-  const currentLatexExpression = serializeSlotToLatex(calcState.rootSlot, calcState.cursor, true);
+  // Bộ chống rung / chống kích hoạt đúp và hỗ trợ phản hồi 0ms ngay khi chạm trên TV 75 inch
+  const lastPointerPressTimeRef = useRef<{ id: string; time: number }>({ id: '', time: 0 });
+
+  const handleFastPress = useCallback((keyItem: any, e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
+    const now = Date.now();
+    const keyId = keyItem?.id || 'unknown';
+    // Bỏ qua nếu sự kiện vừa bắn cách đây dưới 120ms trên cùng phím (tránh double firing pointerdown + click)
+    if (lastPointerPressTimeRef.current.id === keyId && now - lastPointerPressTimeRef.current.time < 120) {
+      return;
+    }
+    lastPointerPressTimeRef.current = { id: keyId, time: now };
+    handleKeyPress(keyItem);
+  }, [handleKeyPress]);
+
+  const handleFastCursor = useCallback((direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT', e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
+    const now = Date.now();
+    const id = `dpad_${direction}`;
+    if (lastPointerPressTimeRef.current.id === id && now - lastPointerPressTimeRef.current.time < 120) {
+      return;
+    }
+    lastPointerPressTimeRef.current = { id, time: now };
+    moveCursor(direction);
+  }, [moveCursor]);
+
+  const currentLatexExpression = useMemo(
+    () => serializeSlotToLatex(calcState.rootSlot, calcState.cursor, true),
+    [calcState.rootSlot, calcState.cursor]
+  );
 
   return (
     <div
@@ -3562,19 +3676,21 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                 </div>
               </div>
 
-              {/* 3. BÀN PHÍM KHOA HỌC PHÍA TRÊN + D-PAD */}
-              <div className="relative grid grid-cols-6 gap-x-[6px] gap-y-[2.5px] px-0.5 items-end">
+              {/* 3. BÀN PHÍM KHOA HỌC PHÍA TRÊN + D-PAD (TỐI ƯU CẢM ỨNG 0MS CHO TV 75 INCH) */}
+              <div className="relative grid grid-cols-6 gap-x-[6px] gap-y-[2.5px] px-0.5 items-end select-none" style={{ touchAction: 'manipulation' }}>
                 {/* Hàng 1 */}
                 <div className="flex flex-col items-center">
                   <div className="h-[10px]" />
                   <button
                     type="button"
-                    onClick={() => handleKeyPress({ id: 'shift' })}
-                    className={`w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border shadow-[0_2px_0_#0f1115] active:translate-y-[1px] flex items-center justify-center cursor-pointer ${
+                    onPointerDown={(e) => handleFastPress({ id: 'shift' }, e)}
+                    onClick={(e) => handleFastPress({ id: 'shift' }, e)}
+                    style={{ touchAction: 'manipulation' }}
+                    className={`w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border shadow-[0_2px_0_#0f1115] active:translate-y-[1px] active:scale-95 flex items-center justify-center cursor-pointer select-none transition-transform duration-75 ${
                       calcState.shift ? 'border-[#e5b546] ring-1 ring-[#e5b546]/60' : 'border-zinc-600/50'
                     }`}
                   >
-                    <span className="text-[9px] font-extrabold tracking-tight text-[#e5b546]">SHIFT</span>
+                    <span className="text-[9px] font-extrabold tracking-tight text-[#e5b546] pointer-events-none">SHIFT</span>
                   </button>
                 </div>
 
@@ -3582,17 +3698,19 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                   <div className="h-[10px]" />
                   <button
                     type="button"
-                    onClick={() => handleKeyPress({ id: 'alpha' })}
-                    className={`w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border shadow-[0_2px_0_#0f1115] active:translate-y-[1px] flex items-center justify-center cursor-pointer ${
+                    onPointerDown={(e) => handleFastPress({ id: 'alpha' }, e)}
+                    onClick={(e) => handleFastPress({ id: 'alpha' }, e)}
+                    style={{ touchAction: 'manipulation' }}
+                    className={`w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border shadow-[0_2px_0_#0f1115] active:translate-y-[1px] active:scale-95 flex items-center justify-center cursor-pointer select-none transition-transform duration-75 ${
                       calcState.alpha ? 'border-[#e05368] ring-1 ring-[#e05368]/60' : 'border-zinc-600/50'
                     }`}
                   >
-                    <span className="text-[9px] font-extrabold tracking-tight text-[#e05368]">ALPHA</span>
+                    <span className="text-[9px] font-extrabold tracking-tight text-[#e05368] pointer-events-none">ALPHA</span>
                   </button>
                 </div>
 
-                {/* Cụm D-Pad */}
-                <div className="col-span-2 row-span-2 flex items-center justify-center pt-1">
+                {/* Cụm D-Pad Phản Hồi Tức Thì 0ms */}
+                <div className="col-span-2 row-span-2 flex items-center justify-center pt-1 select-none" style={{ touchAction: 'manipulation' }}>
                   <div
                     className="relative w-[84px] h-[64px] rounded-[32px] p-[2.5px] shadow-[0_4px_8px_rgba(0,0,0,0.75),inset_0_1px_2px_rgba(255,255,255,0.8)] border border-zinc-400"
                     style={{
@@ -3603,31 +3721,39 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                       <div className="w-[32px] h-[24px] rounded-full bg-gradient-to-b from-zinc-200 to-zinc-400 border border-zinc-500/40 shadow-inner pointer-events-none" />
                       <button
                         type="button"
-                        onClick={() => moveCursor('UP')}
-                        className="absolute top-0.5 inset-x-4 h-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer"
+                        onPointerDown={(e) => handleFastCursor('UP', e)}
+                        onClick={(e) => handleFastCursor('UP', e)}
+                        style={{ touchAction: 'manipulation' }}
+                        className="absolute top-0.5 inset-x-4 h-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer select-none"
                       >
-                        <span className="text-[7.5px]">▲</span>
+                        <span className="text-[7.5px] pointer-events-none">▲</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => moveCursor('DOWN')}
-                        className="absolute bottom-0.5 inset-x-4 h-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer"
+                        onPointerDown={(e) => handleFastCursor('DOWN', e)}
+                        onClick={(e) => handleFastCursor('DOWN', e)}
+                        style={{ touchAction: 'manipulation' }}
+                        className="absolute bottom-0.5 inset-x-4 h-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer select-none"
                       >
-                        <span className="text-[7.5px]">▼</span>
+                        <span className="text-[7.5px] pointer-events-none">▼</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => moveCursor('LEFT')}
-                        className="absolute left-1 inset-y-2.5 w-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer"
+                        onPointerDown={(e) => handleFastCursor('LEFT', e)}
+                        onClick={(e) => handleFastCursor('LEFT', e)}
+                        style={{ touchAction: 'manipulation' }}
+                        className="absolute left-1 inset-y-2.5 w-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer select-none"
                       >
-                        <span className="text-[7.5px]">◀</span>
+                        <span className="text-[7.5px] pointer-events-none">◀</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => moveCursor('RIGHT')}
-                        className="absolute right-1 inset-y-2.5 w-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer"
+                        onPointerDown={(e) => handleFastCursor('RIGHT', e)}
+                        onClick={(e) => handleFastCursor('RIGHT', e)}
+                        style={{ touchAction: 'manipulation' }}
+                        className="absolute right-1 inset-y-2.5 w-4 flex items-center justify-center text-zinc-800 hover:text-black active:scale-90 cursor-pointer select-none"
                       >
-                        <span className="text-[7.5px]">▶</span>
+                        <span className="text-[7.5px] pointer-events-none">▶</span>
                       </button>
                     </div>
                   </div>
@@ -3635,14 +3761,16 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
 
                 <div className="flex flex-col items-center">
                   <div className="h-[10px] flex items-end justify-center">
-                    <span className="text-[7px] font-bold text-[#e5b546] leading-none">SETUP</span>
+                    <span className="text-[7px] font-bold text-[#e5b546] leading-none pointer-events-none">SETUP</span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleKeyPress({ id: 'menu' })}
-                    className="w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border border-zinc-600/50 shadow-[0_2px_0_#0f1115] active:translate-y-[1px] flex items-center justify-center cursor-pointer"
+                    onPointerDown={(e) => handleFastPress({ id: 'menu' }, e)}
+                    onClick={(e) => handleFastPress({ id: 'menu' }, e)}
+                    style={{ touchAction: 'manipulation' }}
+                    className="w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border border-zinc-600/50 shadow-[0_2px_0_#0f1115] active:translate-y-[1px] active:scale-95 flex items-center justify-center cursor-pointer select-none transition-transform duration-75"
                   >
-                    <span className="text-[9px] font-bold tracking-tight text-zinc-100">MENU</span>
+                    <span className="text-[9px] font-bold tracking-tight text-zinc-100 pointer-events-none">MENU</span>
                   </button>
                 </div>
 
@@ -3650,35 +3778,26 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                   <div className="h-[10px]" />
                   <button
                     type="button"
-                    onClick={() => handleKeyPress({ id: 'on' })}
-                    className="w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border border-zinc-600/50 shadow-[0_2px_0_#0f1115] active:translate-y-[1px] flex items-center justify-center cursor-pointer"
+                    onPointerDown={(e) => handleFastPress({ id: 'on' }, e)}
+                    onClick={(e) => handleFastPress({ id: 'on' }, e)}
+                    style={{ touchAction: 'manipulation' }}
+                    className="w-full h-[22px] rounded-full bg-gradient-to-b from-[#3f444e] to-[#23272e] border border-zinc-600/50 shadow-[0_2px_0_#0f1115] active:translate-y-[1px] active:scale-95 flex items-center justify-center cursor-pointer select-none transition-transform duration-75"
                   >
-                    <span className="text-[9px] font-bold tracking-tight text-zinc-100">ON</span>
+                    <span className="text-[9px] font-bold tracking-tight text-zinc-100 pointer-events-none">ON</span>
                   </button>
                 </div>
 
-                {/* Hàng 2..5 */}
+                {/* Hàng 2..5 (Memoized Các Phím Khoa Học) */}
                 {SCIENTIFIC_ROWS.map((row) =>
                   row.map((keyItem) => {
                     if (!keyItem) return null;
                     return (
-                      <div key={keyItem.id} className="flex flex-col items-center">
-                        <div className="w-full h-[11px] flex items-end justify-between px-[1px] pb-[1px] text-[6.5px] font-bold leading-none whitespace-nowrap overflow-hidden">
-                          <span className="text-[#e5b546] tracking-tighter truncate">{keyItem.shiftText}</span>
-                          <span className="text-[#e05368] tracking-tighter ml-auto">{keyItem.alphaText}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleKeyPress(keyItem)}
-                          className="w-full h-[24px] rounded-[6px] bg-gradient-to-b from-[#383d47] via-[#272b33] to-[#1c1f26] border-t border-x border-zinc-500/40 shadow-[0_2.5px_0_#0b0d11,0_3px_4px_rgba(0,0,0,0.6)] active:translate-y-[1px] flex items-center justify-center px-0.5 cursor-pointer"
-                        >
-                          <KatexScreenRenderer
-                            latex={keyItem.mainLatex}
-                            isReady={katexLoaded}
-                            className="text-[10px] text-white leading-none"
-                          />
-                        </button>
-                      </div>
+                      <ScientificKeyButton
+                        key={keyItem.id}
+                        keyItem={keyItem}
+                        onPress={handleFastPress}
+                        katexLoaded={katexLoaded}
+                      />
                     );
                   })
                 )}
@@ -3686,33 +3805,17 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
 
               <div className="my-2 h-[1px] w-full bg-gradient-to-r from-transparent via-zinc-700/50 to-transparent" />
 
-              {/* 4. BÀN PHÍM SỐ PHÍA DƯỚI */}
-              <div className="grid grid-cols-5 gap-x-[7px] gap-y-[3.5px] px-0.5">
+              {/* 4. BÀN PHÍM SỐ PHÍA DƯỚI (Memoized Các Phím Số 0-9 & Phép Tính) */}
+              <div className="grid grid-cols-5 gap-x-[7px] gap-y-[3.5px] px-0.5 select-none" style={{ touchAction: 'manipulation' }}>
                 {NUMPAD_ROWS.map((row) =>
                   row.map((keyItem) => {
-                    const isBlue = keyItem.variant === 'blue';
-                    const buttonStyle = isBlue
-                      ? 'bg-gradient-to-b from-[#386796] via-[#285078] to-[#1d3d5e] border-t border-x border-[#6798c9]/50 text-white shadow-[0_3px_0_#0f2338,0_4px_5px_rgba(0,0,0,0.65)]'
-                      : 'bg-gradient-to-b from-[#f8fafc] via-[#e5e7eb] to-[#d1d5db] border-t border-x border-white text-zinc-900 shadow-[0_3px_0_#6b7280,0_4px_6px_rgba(0,0,0,0.55)]';
-
                     return (
-                      <div key={keyItem.id} className="flex flex-col items-center">
-                        <div className="w-full h-[11px] flex items-end justify-between px-[1.5px] pb-[1px] text-[7px] font-extrabold leading-none whitespace-nowrap overflow-hidden">
-                          <span className="text-[#e5b546] tracking-tight truncate">{keyItem.shiftText}</span>
-                          <span className="text-[#e05368] tracking-tight ml-auto">{keyItem.alphaText}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleKeyPress(keyItem)}
-                          className={`w-full h-[31px] rounded-[8px] active:translate-y-[1.5px] flex items-center justify-center transition-all cursor-pointer ${buttonStyle}`}
-                        >
-                          <KatexScreenRenderer
-                            latex={keyItem.mainLatex}
-                            isReady={katexLoaded}
-                            className={isBlue ? 'text-[11.5px] text-white' : 'text-[14.5px] text-zinc-900'}
-                          />
-                        </button>
-                      </div>
+                      <NumpadKeyButton
+                        key={keyItem.id}
+                        keyItem={keyItem}
+                        onPress={handleFastPress}
+                        katexLoaded={katexLoaded}
+                      />
                     );
                   })
                 )}
@@ -3723,21 +3826,25 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
       </div>
 
       {/* Thanh chuyển nhanh chế độ */}
-      <div className="relative z-10 mt-2.5 w-[340px] sm:w-[364px] rounded-xl bg-black/45 backdrop-blur-md border border-white/15 px-3 py-2 text-white/90 shadow-lg">
+      <div className="relative z-10 mt-2.5 w-[340px] sm:w-[364px] rounded-xl bg-black/45 backdrop-blur-md border border-white/15 px-3 py-2 text-white/90 shadow-lg select-none" style={{ touchAction: 'manipulation' }}>
         <div className="flex flex-wrap items-center justify-between gap-1 text-[10px]">
           <span className="text-emerald-300 font-semibold">Chế độ nhanh:</span>
           <div className="flex flex-wrap gap-1">
             <button
               type="button"
-              onClick={() => handleKeyPress({ id: 'menu' })}
-              className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 transition cursor-pointer"
+              onPointerDown={(e) => handleFastPress({ id: 'menu' }, e)}
+              onClick={(e) => handleFastPress({ id: 'menu' }, e)}
+              style={{ touchAction: 'manipulation' }}
+              className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 active:scale-95 transition cursor-pointer select-none"
             >
               [MENU]
             </button>
             <button
               type="button"
-              onClick={() => setCalcState((p) => ({ ...p, mode: 'COMP' }))}
-              className={`px-2 py-0.5 rounded transition cursor-pointer ${
+              onPointerDown={(e) => { e.preventDefault(); setCalcState((p) => ({ ...p, mode: 'COMP' })); }}
+              onClick={(e) => { e.preventDefault(); setCalcState((p) => ({ ...p, mode: 'COMP' })); }}
+              style={{ touchAction: 'manipulation' }}
+              className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
                 calcState.mode === 'COMP' ? 'bg-emerald-500/40 border border-emerald-300/50 text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
               }`}
             >
@@ -3745,8 +3852,10 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
             </button>
             <button
               type="button"
-              onClick={() => setCalcState((p) => ({ ...p, mode: 'VCT_SELECT', resultLatex: '' }))}
-              className={`px-2 py-0.5 rounded transition cursor-pointer ${
+              onPointerDown={(e) => { e.preventDefault(); setCalcState((p) => ({ ...p, mode: 'VCT_SELECT', resultLatex: '' })); }}
+              onClick={(e) => { e.preventDefault(); setCalcState((p) => ({ ...p, mode: 'VCT_SELECT', resultLatex: '' })); }}
+              style={{ touchAction: 'manipulation' }}
+              className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
                 calcState.mode.startsWith('VCT') ? 'bg-emerald-500/40 border border-emerald-300/50 text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
               }`}
             >
@@ -3754,7 +3863,8 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
             </button>
             <button
               type="button"
-              onClick={() =>
+              onPointerDown={(e) => {
+                e.preventDefault();
                 setCalcState((p) => ({
                   ...p,
                   mode: 'STAT_INPUT',
@@ -3762,9 +3872,21 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
                   statRow: 0,
                   statCol: 0,
                   statInputBuffer: '',
-                }))
-              }
-              className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                }));
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                setCalcState((p) => ({
+                  ...p,
+                  mode: 'STAT_INPUT',
+                  statType: 'GROUPED',
+                  statRow: 0,
+                  statCol: 0,
+                  statInputBuffer: '',
+                }));
+              }}
+              style={{ touchAction: 'manipulation' }}
+              className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
                 calcState.mode.startsWith('STAT') ? 'bg-amber-500/40 border border-amber-300/60 text-amber-100 font-semibold' : 'bg-white/10 hover:bg-white/20'
               }`}
             >
@@ -3772,14 +3894,24 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
             </button>
             <button
               type="button"
-              onClick={() =>
+              onPointerDown={(e) => {
+                e.preventDefault();
                 setCalcState((p) => ({
                   ...p,
                   mode: 'TABLE_F',
                   cursor: { slotId: p.tableFSlot.id, index: p.tableFSlot.items.length },
-                }))
-              }
-              className={`px-2 py-0.5 rounded transition cursor-pointer ${
+                }));
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                setCalcState((p) => ({
+                  ...p,
+                  mode: 'TABLE_F',
+                  cursor: { slotId: p.tableFSlot.id, index: p.tableFSlot.items.length },
+                }));
+              }}
+              style={{ touchAction: 'manipulation' }}
+              className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
                 calcState.mode.startsWith('TABLE') ? 'bg-emerald-500/40 border border-emerald-300/50 text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
               }`}
             >
@@ -3787,8 +3919,10 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
             </button>
             <button
               type="button"
-              onClick={() => setCalcState((p) => ({ ...p, mode: 'EQN_SELECT' }))}
-              className={`px-2 py-0.5 rounded transition cursor-pointer ${
+              onPointerDown={(e) => { e.preventDefault(); setCalcState((p) => ({ ...p, mode: 'EQN_SELECT' })); }}
+              onClick={(e) => { e.preventDefault(); setCalcState((p) => ({ ...p, mode: 'EQN_SELECT' })); }}
+              style={{ touchAction: 'manipulation' }}
+              className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
                 calcState.mode.startsWith('EQN') ? 'bg-emerald-500/40 border border-emerald-300/50 text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
               }`}
             >
