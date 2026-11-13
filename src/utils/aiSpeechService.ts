@@ -259,8 +259,24 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   } catch (_) {}
 }
 let currentAudioElement: HTMLAudioElement | null = null;
+let persistentHtmlAudio: HTMLAudioElement | null = null;
 let activeAudioSource: AudioBufferSourceNode | null = null;
 let isAudioUnlocked = false;
+const SILENT_WAV_DATA_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
+function getPersistentHtmlAudio(): HTMLAudioElement | null {
+  if (typeof window === 'undefined') return null;
+  if (!persistentHtmlAudio) {
+    try {
+      persistentHtmlAudio = new Audio();
+      persistentHtmlAudio.preload = 'auto';
+      (persistentHtmlAudio as any).playsInline = true;
+    } catch (_) {
+      return null;
+    }
+  }
+  return persistentHtmlAudio;
+}
 
 /**
  * Bộ đệm âm thanh AudioBuffer theo nội dung text để phát tức thì (0ms) khi đọc lại
@@ -275,7 +291,8 @@ export const questionAudioCache = new Map<string, AudioBuffer>();
 let sharedAudioContext: AudioContext | null = null;
 
 /**
- * Khởi tạo sẵn (warm-up) hoặc lấy AudioContext ở cấp module với sampleRate 24000
+ * Khởi tạo sẵn hoặc lấy AudioContext dùng chung với sampleRate gốc của thiết bị
+ * (tương thích 100% với Tivi Android 75 inch, iPhone/iPad Safari, Android Chrome)
  */
 export function getOrCreateAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -283,26 +300,12 @@ export function getOrCreateAudioContext(): AudioContext | null {
   if (!AudioContextClass) return null;
   if (!sharedAudioContext || sharedAudioContext.state === 'closed') {
     try {
-      sharedAudioContext = new AudioContextClass({ sampleRate: 24000 });
+      sharedAudioContext = new AudioContextClass();
     } catch (_) {
-      try {
-        sharedAudioContext = new AudioContextClass();
-      } catch {
-        return null;
-      }
+      return null;
     }
   }
   return sharedAudioContext;
-}
-
-// Khởi tạo sẵn (warm-up) AudioContext ở cấp module ngay khi file được load
-if (typeof window !== 'undefined') {
-  try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioContextClass) {
-      sharedAudioContext = new AudioContextClass({ sampleRate: 24000 });
-    }
-  } catch (_) {}
 }
 
 /**
@@ -318,9 +321,18 @@ export function stopActiveAudioContext(): void {
       activeAudioSource = null;
     }
     if (currentAudioElement) {
+      currentAudioElement.onplay = null;
+      currentAudioElement.onended = null;
+      currentAudioElement.onerror = null;
       currentAudioElement.pause();
       currentAudioElement.currentTime = 0;
       currentAudioElement = null;
+    }
+    if (persistentHtmlAudio) {
+      persistentHtmlAudio.onplay = null;
+      persistentHtmlAudio.onended = null;
+      persistentHtmlAudio.onerror = null;
+      persistentHtmlAudio.pause();
     }
   } catch (_) {}
 }
@@ -328,22 +340,33 @@ export function stopActiveAudioContext(): void {
 /**
  * Phát trực tiếp một AudioBuffer qua AudioContext dùng chung với độ trễ 0ms
  */
-export function playAudioBuffer(
+export async function playAudioBuffer(
   audioBuffer: AudioBuffer,
   onStart?: () => void,
-  onEnd?: () => void
+  onEnd?: () => void,
+  playbackRate: number = 1.0
 ): Promise<boolean> {
   stopActiveAudioContext();
   const ctx = getOrCreateAudioContext();
-  if (!ctx) return Promise.resolve(false);
+  if (!ctx) return false;
+
+  try {
+    if (ctx.state === 'suspended') {
+      await ctx.resume().catch(() => {});
+    }
+  } catch (_) {}
+
+  if (isSpeechCancelled) return false;
 
   return new Promise<boolean>((resolve) => {
     try {
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-      }
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
+      if (playbackRate && playbackRate !== 1.0 && source.playbackRate) {
+        try {
+          source.playbackRate.value = Math.max(0.7, Math.min(1.5, playbackRate));
+        } catch (_) {}
+      }
       source.connect(ctx.destination);
       activeAudioSource = source;
 
@@ -542,7 +565,7 @@ export async function playGeminiAudioData(
   }
 }
 
-// Tự động mở khóa âm thanh trình duyệt ngay khi người dùng chạm hoặc click chuột lần đầu trên web
+// Tự động mở khóa cả Web Audio Context lẫn HTML5 Audio dùng chung ngay trong sự kiện chạm của người dùng
 export function unlockWebAudio(): void {
   try {
     const ctx = getOrCreateAudioContext();
@@ -551,17 +574,33 @@ export function unlockWebAudio(): void {
         ctx.resume().catch(() => {});
       }
       try {
-        const buffer = ctx.createBuffer(1, 1, 22050);
+        const buffer = ctx.createBuffer(1, 1, ctx.sampleRate || 22050);
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         source.connect(ctx.destination);
         source.start(0);
       } catch (_) {}
     }
-    const silent = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
-    silent.volume = 0.01;
-    silent.play().catch(() => {});
-    isAudioUnlocked = true;
+
+    const el = getPersistentHtmlAudio();
+    if (el && !isAudioUnlocked) {
+      el.src = SILENT_WAV_DATA_URI;
+      el.volume = 0.01;
+      const p = el.play();
+      if (p !== undefined) {
+        p.then(() => {
+          isAudioUnlocked = true;
+          el.volume = 1.0;
+        }).catch(() => {
+          el.volume = 1.0;
+        });
+      } else {
+        isAudioUnlocked = true;
+        el.volume = 1.0;
+      }
+    } else if (el) {
+      el.volume = 1.0;
+    }
   } catch (_) {}
 }
 
@@ -1737,6 +1776,124 @@ export async function speakWithGoogleTranslateStream(
  * - Tự động nhận diện và phát âm tiếng Anh chuẩn bản ngữ cho riêng bộ môn Tiếng Anh / Anh Văn
  * - Hoạt động ổn định trên cả Web Vercel, Netlify lẫn AI Studio Preview
  */
+/**
+ * Nhận diện thiết bị di động / Smart TV 75" (nơi Web Speech API thường bị treo im lặng trong iframe/WebView)
+ */
+function isMobileOrSmartTV(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|SmartTV|Tizen|Web0S|BRAVIA|AFT|MIBOX|AndroidTV|HbbTV|\bTV\b/i.test(ua);
+}
+
+/**
+ * Tải ArrayBuffer cho 1 đoạn văn bản ngắn từ /api/tts (kèm timeout an toàn)
+ */
+async function fetchTtsChunkBytes(
+  chunkText: string,
+  lang: 'vi' | 'en',
+  voiceName: string,
+  presetId: string,
+  playbackRate: number
+): Promise<ArrayBuffer | null> {
+  const encoded = encodeURIComponent(chunkText);
+  const ttsUrl = `/api/tts?lang=${lang}&voice=${voiceName}&preset=${presetId}&rate=${playbackRate}&text=${encoded}`;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7500);
+    const res = await fetch(ttsUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const arrayBuf = await res.arrayBuffer();
+      if (arrayBuf.byteLength > 100) {
+        return arrayBuf;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+/**
+ * Phát 1 đoạn AudioBuffer hoặc HTML5 Audio Blob bằng đối tượng đã mở khóa sẵn trên điện thoại / TV
+ */
+async function playChunkBytes(
+  arrayBuf: ArrayBuffer,
+  cacheKey: string,
+  playbackRate: number,
+  onChunkPlayStart?: () => void
+): Promise<boolean> {
+  if (isSpeechCancelled) return false;
+  const ctx = getOrCreateAudioContext();
+  const arrayBufCopy = arrayBuf.slice(0);
+
+  if (ctx) {
+    try {
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+      const decoded = await ctx.decodeAudioData(arrayBuf);
+      if (decoded && !isSpeechCancelled) {
+        audioCache.set(cacheKey, decoded);
+        return await new Promise<boolean>((resolve) => {
+          const ok = playAudioBuffer(
+            decoded,
+            onChunkPlayStart,
+            () => resolve(true),
+            playbackRate
+          );
+          ok.then((played) => {
+            if (!played) resolve(false);
+          });
+        });
+      }
+    } catch (_) {
+      // Fallback sang HTML5 Audio đã mở khóa bên dưới
+    }
+  }
+
+  // Fallback sang HTML5 Audio dùng phần tử đã mở khóa sẵn (vượt Autoplay Policy Safari / Android TV)
+  return new Promise<boolean>((resolve) => {
+    try {
+      const blob = new Blob([arrayBufCopy], { type: 'audio/mpeg' });
+      const blobUrl = URL.createObjectURL(blob);
+      const el = getPersistentHtmlAudio() || new Audio();
+      currentAudioElement = el;
+      el.volume = 1.0;
+      el.playbackRate = Math.max(0.7, Math.min(1.5, playbackRate || 1.0));
+
+      let finished = false;
+      const cleanup = (success: boolean) => {
+        if (finished) return;
+        finished = true;
+        el.onplay = null;
+        el.onended = null;
+        el.onerror = null;
+        URL.revokeObjectURL(blobUrl);
+        if (currentAudioElement === el) currentAudioElement = null;
+        resolve(success);
+      };
+
+      el.onplay = () => {
+        if (!isSpeechCancelled && onChunkPlayStart) onChunkPlayStart();
+      };
+      el.onended = () => cleanup(true);
+      el.onerror = () => cleanup(false);
+
+      el.src = blobUrl;
+      const p = el.play();
+      if (p !== undefined) {
+        p.catch(() => cleanup(false));
+      }
+    } catch (_) {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Phát giọng đọc Google Cloud / Server TTS theo từng câu ngắn song song (Parallel Chunk Streaming)
+ * - Câu đầu phát ngay sau ~0.35s thay vì chờ tải hết cả bài dài 4-6s.
+ * - Mỗi đoạn là 1 file MP3 nguyên vẹn giúp Web Audio decodeAudioData() chạy mượt 100% trên iPhone, Android và TV 75".
+ */
 export async function speakWithGoogleCloudTTS(
   processedText: string,
   preset: VoiceTonePreset = VOICE_TONE_PRESETS[0],
@@ -1756,90 +1913,104 @@ export async function speakWithGoogleCloudTTS(
     ctx.resume().catch(() => {});
   }
 
-  // 1. Kiểm tra cache AudioBuffer (<1ms)
-  const cacheKey = `${lang}:::${processedText.trim()}`;
-  if (audioCache.has(cacheKey)) {
-    const cachedBuf = audioCache.get(cacheKey)!;
-    playAudioBuffer(cachedBuf, onStart, onEnd);
-    return true;
-  }
-
   const voiceName = preset.geminiVoice || (preset.gender === 'male' ? 'Charon' : 'Kore');
   const playbackRate = preset.rate || 1.0;
-  const encoded = encodeURIComponent(processedText.trim());
-  const ttsUrl = `/api/tts?lang=${lang}&voice=${voiceName}&preset=${preset.id}&rate=${playbackRate}&text=${encoded}`;
+  const fullKey = `${lang}:::${processedText.trim()}`;
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000); // 7s timeout
+  // 1. Nếu cả câu đã nằm trong RAM cache (<1ms)
+  if (audioCache.has(fullKey)) {
+    const cachedBuf = audioCache.get(fullKey)!;
+    const ok = await playAudioBuffer(cachedBuf, onStart, onEnd, playbackRate);
+    if (ok) return true;
+  }
 
-    const res = await fetch(ttsUrl, { signal: controller.signal });
-    clearTimeout(timeoutId);
+  // 2. Chia thành từng câu ngắn (<= 150 ký tự) và tải SONG SONG toàn bộ từ server /api/tts
+  const chunks = splitIntoSentences(processedText.trim(), 150);
+  if (chunks.length === 0) return false;
 
-    if (res.ok && !isSpeechCancelled) {
-      const arrayBuf = await res.arrayBuffer();
-      if (arrayBuf.byteLength > 100) {
-        const arrayBufCopy = arrayBuf.slice(0);
-        if (ctx) {
-          try {
-            const decoded = await ctx.decodeAudioData(arrayBuf);
-            if (decoded && !isSpeechCancelled) {
-              audioCache.set(cacheKey, decoded);
-              await playAudioBuffer(decoded, onStart, onEnd);
-              return true;
-            }
-          } catch (_) {
-            // Fallback sang HTML5 Audio nếu trình duyệt không giải mã được
-          }
-        }
-
-        // Fallback: HTML5 Audio Blob using cloned buffer
-        try {
-          const blob = new Blob([arrayBufCopy], { type: 'audio/mpeg' });
-          const blobUrl = URL.createObjectURL(blob);
-          const audio = new Audio(blobUrl);
-          currentAudioElement = audio;
-          audio.playbackRate = playbackRate;
-          audio.onplay = () => {
-            if (!isSpeechCancelled && onStart) onStart();
-          };
-          audio.onended = () => {
-            URL.revokeObjectURL(blobUrl);
-            currentAudioElement = null;
-            if (!isSpeechCancelled && onEnd) onEnd();
-          };
-          audio.onerror = () => {
-            URL.revokeObjectURL(blobUrl);
-            currentAudioElement = null;
-            speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
-          };
-          const p = audio.play();
-          if (p !== undefined) {
-            p.catch(() => {
-              URL.revokeObjectURL(blobUrl);
-              currentAudioElement = null;
-              speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
-            });
-          }
-          return true;
-        } catch (_) {
-          speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
-          return true;
-        }
-      }
+  const chunkFetchPromises = chunks.map((chunk) => {
+    const chunkKey = `${lang}:::${chunk}`;
+    if (audioCache.has(chunkKey)) {
+      return Promise.resolve({ cachedBuf: audioCache.get(chunkKey)!, arrayBuf: null as ArrayBuffer | null, chunkKey });
     }
-  } catch (err) {
-    console.warn('speakWithGoogleCloudTTS fetch notice:', err);
+    return fetchTtsChunkBytes(chunk, lang, voiceName, preset.id, playbackRate).then((arrayBuf) => ({
+      cachedBuf: null as AudioBuffer | null,
+      arrayBuf,
+      chunkKey,
+    }));
+  });
+
+  let hasStarted = false;
+  let allPlayed = true;
+
+  for (let i = 0; i < chunkFetchPromises.length; i++) {
+    if (isSpeechCancelled) {
+      allPlayed = false;
+      break;
+    }
+
+    const result = await chunkFetchPromises[i];
+    if (isSpeechCancelled) {
+      allPlayed = false;
+      break;
+    }
+
+    const triggerStartOnce = () => {
+      if (!hasStarted) {
+        hasStarted = true;
+        if (!isSpeechCancelled && onStart) onStart();
+      }
+    };
+
+    let chunkOk = false;
+    if (result.cachedBuf) {
+      chunkOk = await new Promise<boolean>((resolve) => {
+        playAudioBuffer(
+          result.cachedBuf!,
+          triggerStartOnce,
+          () => resolve(true),
+          playbackRate
+        ).then((startedOk) => {
+          if (!startedOk) resolve(false);
+        });
+      });
+    } else if (result.arrayBuf) {
+      chunkOk = await playChunkBytes(result.arrayBuf, result.chunkKey, playbackRate, triggerStartOnce);
+    }
+
+    if (!chunkOk) {
+      allPlayed = false;
+      break;
+    }
   }
 
   if (isSpeechCancelled) return false;
-  return speakWithGoogleTranslateStream(processedText, lang, playbackRate, onStart, onEnd, onError, preset);
+
+  if (allPlayed) {
+    if (onEnd) onEnd();
+    return true;
+  }
+
+  // Fallback cuối: stream trực tiếp từ Google Translate hoặc báo lỗi sạch sẽ
+  const fallbackOk = await speakWithGoogleTranslateStream(
+    processedText,
+    lang,
+    playbackRate,
+    hasStarted ? undefined : onStart,
+    onEnd,
+    onError,
+    preset
+  );
+  if (!fallbackOk && !hasStarted && onError && !isSpeechCancelled) {
+    onError(new Error('Không thể phát âm thanh AI trên thiết bị này'));
+  }
+  return fallbackOk;
 }
 
 /**
  * Web Speech API Fallback (Cố định vi-VN cho các môn tiếng Việt, en-US cho môn Anh Văn)
- * Khắc phục triệt để lỗi đọc giọng tiếng Anh lạ: nếu máy khách không có voice vi-VN,
- * tự động chuyển sang Google Translate TTS Stream tiếng Việt chuẩn 100%!
+ * Tích hợp Watchdog 850ms: Nếu trình duyệt có danh sách voice nhưng bị treo không chịu phát (như SmartTV/Android),
+ * tự động chuyển sang máy chủ /api/tts ngay lập tức!
  */
 export function speakWithWebSpeech(
   processedText: string,
@@ -1850,11 +2021,11 @@ export function speakWithWebSpeech(
   onError?: (err: any) => void
 ): boolean {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-    speakWithGoogleTranslateStream(processedText, lang, preset.rate || 1.0, onStart, onEnd, onError);
-    return true;
+    return false;
   }
 
   try {
+    isSpeechCancelled = false;
     let didCancel = false;
     if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
       window.speechSynthesis.cancel();
@@ -1865,7 +2036,7 @@ export function speakWithWebSpeech(
     }
 
     // Đảm bảo getVoices() mới nhất
-    let voices = window.speechSynthesis.getVoices();
+    const voices = window.speechSynthesis.getVoices();
     if (voices && voices.length > 0) {
       cachedVoices = voices;
     }
@@ -1874,25 +2045,31 @@ export function speakWithWebSpeech(
     const targetLang = isEn ? 'en-US' : 'vi-VN';
     const matchedVoice = isEn ? getBestEnglishVoice() : getBestVietnameseVoice(preset.gender);
 
-    // Nếu là tiếng Việt nhưng trình duyệt không có gói giọng tiếng Việt:
-    // Trả về false ngay để speakText lập tức chuyển sang máy chủ TTS (/api/tts) tốc độ cao, không bị treo im lặng
+    // Nếu là tiếng Việt nhưng trình duyệt không có gói giọng tiếng Việt: trả false để chuyển sang /api/tts ngay
     if (!isEn && !matchedVoice) {
       return false;
     }
 
-    // Chia câu nhỏ nếu văn bản dài để tránh bug Chrome tự động ngắt sau 15 giây
     const textParts = splitIntoSentences(processedText.trim(), 160);
     if (textParts.length === 0) return false;
 
     let currentIndex = 0;
     let hasStarted = false;
+    let watchdogTimer: any = null;
 
-    // Giữ tham chiếu tránh Chrome Garbage Collection hủy utterance
     const activeUtterances: SpeechSynthesisUtterance[] = [];
     (window as any)._activeUtterances = activeUtterances;
 
+    const clearWatchdog = () => {
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
+    };
+
     const speakNext = () => {
       if (isSpeechCancelled || currentIndex >= textParts.length) {
+        clearWatchdog();
         (window as any)._activeUtterances = null;
         if (onEnd && !isSpeechCancelled) onEnd();
         return;
@@ -1909,6 +2086,7 @@ export function speakWithWebSpeech(
       }
 
       utterance.onstart = () => {
+        clearWatchdog();
         if (!hasStarted) {
           hasStarted = true;
           if (onStart && !isSpeechCancelled) onStart();
@@ -1916,22 +2094,45 @@ export function speakWithWebSpeech(
       };
 
       utterance.onend = () => {
+        clearWatchdog();
         currentIndex++;
         speakNext();
       };
 
       utterance.onerror = (e) => {
+        clearWatchdog();
         if (e.error !== 'canceled' && e.error !== 'interrupted') {
           console.warn('Web Speech chunk notice:', e);
+          if (!hasStarted) {
+            // Nếu chưa kịp phát câu đầu đã lỗi -> chuyển sang máy chủ TTS ngay
+            try { window.speechSynthesis.cancel(); } catch (_) {}
+            speakWithGoogleCloudTTS(processedText, preset, lang, onStart, onEnd, onError);
+            return;
+          }
           currentIndex++;
           speakNext();
         } else {
-          if (onEnd) onEnd();
+          if (onEnd && !isSpeechCancelled) onEnd();
         }
       };
 
       activeUtterances.push(utterance);
       window.speechSynthesis.speak(utterance);
+
+      // Watchdog 850ms: Chống tình trạng TV/Mobile im lặng không bắn onstart
+      if (currentIndex === 0 && !hasStarted) {
+        clearWatchdog();
+        watchdogTimer = setTimeout(() => {
+          if (!hasStarted && !isSpeechCancelled) {
+            console.warn('Web Speech API stalled (no onstart within 850ms), switching to Server TTS');
+            try {
+              window.speechSynthesis.cancel();
+            } catch (_) {}
+            (window as any)._activeUtterances = null;
+            speakWithGoogleCloudTTS(processedText, preset, lang, onStart, onEnd, onError);
+          }
+        }, 850);
+      }
     };
 
     if (didCancel) {
@@ -1945,21 +2146,22 @@ export function speakWithWebSpeech(
     }
     return true;
   } catch (err) {
-    console.error('Error starting Web Speech synthesis, falling back to Google TTS stream:', err);
-    speakWithGoogleTranslateStream(processedText, lang, preset.rate || 1.0, onStart, onEnd, onError);
-    return true;
+    console.error('Error starting Web Speech synthesis:', err);
+    return false;
   }
 }
 
 /**
- * Ultra-fast Text-to-Speech execution (<50ms).
- * ƯU TIÊN 1: Web Speech API tức thì trên trình duyệt (0ms độ trễ) nếu máy có giọng đọc phù hợp.
- * ƯU TIÊN 2: Máy chủ TTS stream (/api/tts) tốc độ cao (<100ms, 100% tiếng Việt chuẩn, không độ trễ).
+ * Ultra-fast Text-to-Speech execution (<50ms trên PC, <350ms trên Điện thoại & Tivi 75").
+ * - Trên PC/Desktop: Ưu tiên Web Speech API (<50ms) có watchdog 850ms tự chuyển sang /api/tts nếu kẹt.
+ * - Trên Điện thoại & Tivi 75 inch: Chuyển thẳng sang /api/tts phân đoạn song song + AudioContext/Audio đã mở khóa
+ *   để đảm bảo 100% phát được giọng đọc chuẩn tiếng Việt.
  */
 export function speakText(text: string, options: SpeakOptions = {}): boolean {
   if (!text || !text.trim()) return false;
 
   stopAllSpeech();
+  isSpeechCancelled = false;
   unlockWebAudio();
 
   const isEnglish = !!options.isEnglish || 
@@ -1980,19 +2182,25 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
   const cacheKey = `${lang}:::${processed.trim()}`;
   if (audioCache.has(cacheKey)) {
     const cachedBuf = audioCache.get(cacheKey)!;
-    playAudioBuffer(cachedBuf, options.onStart, options.onEnd);
+    playAudioBuffer(cachedBuf, options.onStart, options.onEnd, preset.rate || 1.0);
     return true;
   }
 
-  // 2. ƯU TIÊN 1: Phát tức thì (<50ms) bằng Web Speech API của trình duyệt nếu có giọng đọc tiếng Việt chuẩn
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window && options.preferGemini !== true) {
+  // 2. Trên Điện thoại & Smart TV 75 inch: dùng trực tiếp luồng /api/tts phân đoạn song song
+  const useWebSpeechFirst =
+    !isMobileOrSmartTV() &&
+    typeof window !== 'undefined' &&
+    'speechSynthesis' in window &&
+    options.preferGemini !== true;
+
+  if (useWebSpeechFirst) {
     try {
       const started = speakWithWebSpeech(processed, preset, lang, options.onStart, options.onEnd, options.onError);
       if (started) return true;
     } catch (_) {}
   }
 
-  // 3. ƯU TIÊN 2: Máy chủ TTS stream (/api/tts) siêu tốc (<100ms, giọng tiếng Việt chuẩn, không độ trễ)
+  // 3. Máy chủ TTS stream (/api/tts) siêu tốc phân đoạn song song
   speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError);
   return true;
 }

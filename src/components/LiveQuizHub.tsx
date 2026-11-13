@@ -195,6 +195,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [boardAiSpeechState, setBoardAiSpeechState] = useState<'idle' | 'calling' | 'speaking'>('idle');
   const [isPresentationFullScreen, setIsPresentationFullScreen] = useState<boolean>(false);
   const aiCallingTimerRef = useRef<any>(null);
+  const boardAiSpeechStateRef = useRef<'idle' | 'calling' | 'speaking'>('idle');
+  useEffect(() => {
+    boardAiSpeechStateRef.current = boardAiSpeechState;
+  }, [boardAiSpeechState]);
 
   // Dynamic Teacher Classes synchronized with tab "Lớp Học" and logged-in teacher profile
   const [teacherClasses, setTeacherClasses] = useState<ClassRoom[]>(() =>
@@ -434,6 +438,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     Math.max(0, localActiveIndex),
     Math.max(0, questions.length - 1)
   );
+  const activeIndexRef = useRef<number>(activeIndex);
+  useEffect(() => {
+    activeIndexRef.current = activeIndex;
+  }, [activeIndex]);
   const currentQ: QuizQuestion | undefined = questions[activeIndex];
 
   const currentSubmissions: StudentSubmission[] =
@@ -992,36 +1000,34 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   };
 
   const handleNextQuestion = () => {
-    setLocalActiveIndex((prev) => {
-      const maxIdx = Math.max(0, questions.length - 1);
-      if (prev < maxIdx) {
-        const nextIndex = prev + 1;
-        try {
-          if (onControlRoom) onControlRoom(nextIndex, true);
-        } catch (_) {}
-        setBoardSelectedOption(null);
-        setBoardAnswerResult(null);
-        setCongratsMessage('');
-        return nextIndex;
-      }
-      return prev;
-    });
+    const prev = activeIndexRef.current;
+    const maxIdx = Math.max(0, questions.length - 1);
+    if (prev < maxIdx) {
+      const nextIndex = prev + 1;
+      activeIndexRef.current = nextIndex;
+      setLocalActiveIndex(nextIndex);
+      setBoardSelectedOption(null);
+      setBoardAnswerResult(null);
+      setCongratsMessage('');
+      try {
+        if (onControlRoom) onControlRoom(nextIndex, true);
+      } catch (_) {}
+    }
   };
 
   const handlePrevQuestion = () => {
-    setLocalActiveIndex((prev) => {
-      if (prev > 0) {
-        const prevIndex = prev - 1;
-        try {
-          if (onControlRoom) onControlRoom(prevIndex, true);
-        } catch (_) {}
-        setBoardSelectedOption(null);
-        setBoardAnswerResult(null);
-        setCongratsMessage('');
-        return prevIndex;
-      }
-      return prev;
-    });
+    const prev = activeIndexRef.current;
+    if (prev > 0) {
+      const prevIndex = prev - 1;
+      activeIndexRef.current = prevIndex;
+      setLocalActiveIndex(prevIndex);
+      setBoardSelectedOption(null);
+      setBoardAnswerResult(null);
+      setCongratsMessage('');
+      try {
+        if (onControlRoom) onControlRoom(prevIndex, true);
+      } catch (_) {}
+    }
   };
 
   // Keyboard navigation & wireless presenter clicker support for TV presentation
@@ -1145,16 +1151,13 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     setIsReadingBoardQuestion(true);
     setBoardAiSpeechState('calling');
 
-    // Watchdog timer: Nếu sau 6.5s thiết bị TV/điện thoại hoặc mạng bị nghẽn, tự động thoát trạng thái calling
+    // Watchdog timer: Nếu sau 8s thiết bị TV/điện thoại hoặc mạng bị nghẽn, tự động thoát trạng thái calling
     aiCallingTimerRef.current = setTimeout(() => {
-      setBoardAiSpeechState((prev) => {
-        if (prev === 'calling') {
-          setIsReadingBoardQuestion(false);
-          return 'idle';
-        }
-        return prev;
-      });
-    }, 6500);
+      if (boardAiSpeechStateRef.current === 'calling') {
+        setIsReadingBoardQuestion(false);
+        setBoardAiSpeechState('idle');
+      }
+    }, 8000);
 
     speakQuestionContent(currentQ, {
       preset: selectedVoice,
@@ -2689,27 +2692,41 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         </div>
       )}
 
-      {/* VIEW: TRÌNH CHIẾU CÂU HỎI & GỌI HỌC SINH LÊN BẢNG LÀM BÀI TRỰC TIẾP TRÊN TIVI 75 INCH */}
+      {/* VIEW: TRÌNH CHIẾU CÂU HỎI & GỌI HỌC SINH LÊN BẢNG LÀM BÀI TRỰC TIẾP TRÊN TIVI 75 INCH (TÍM HOA CÀ) */}
       {activeMode === 'presentation' && (
-        <div className={`flex flex-col ${
-          isPresentationFullScreen 
-            ? 'fixed inset-0 z-[9999] bg-slate-950 overflow-y-auto text-white' 
-            : 'flex-1 overflow-hidden bg-slate-900 text-white'
-        }`}>
+        <div
+          className={`flex flex-col relative text-white ${
+            isPresentationFullScreen
+              ? 'fixed inset-0 z-[9999] overflow-y-auto'
+              : 'flex-1 overflow-hidden'
+          }`}
+          style={{
+            background: 'linear-gradient(135deg, #2d1250 0%, #4b237d 48%, #6838a6 100%)',
+          }}
+        >
+          {/* Subtle ambient lilac radial sheen (pure compositor-friendly gradient, zero blur lag on 75" TV) */}
+          <div
+            className="pointer-events-none absolute inset-0 opacity-60"
+            style={{
+              background:
+                'radial-gradient(circle at 18% 12%, rgba(216, 180, 254, 0.22) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(192, 132, 252, 0.20) 0%, transparent 48%)',
+            }}
+          />
+
           {/* Top Status & Controls Bar */}
-          <div className="flex flex-wrap items-center justify-between px-4 sm:px-6 py-3.5 bg-slate-950 border-b border-slate-800 z-20 shrink-0 gap-3 sticky top-0 shadow-xl">
+          <div className="relative flex flex-wrap items-center justify-between px-4 sm:px-6 py-3.5 bg-[#230c40]/95 border-b border-purple-300/25 z-20 shrink-0 gap-3 sticky top-0 shadow-[0_8px_28px_rgba(16,4,36,0.45)]">
             {/* Left: Question Indicator & Called Student Badge */}
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="px-4 py-2 rounded-2xl bg-amber-500/20 border border-amber-400 text-amber-300 font-mono text-base font-black flex items-center gap-2">
-                <span className="text-amber-400">CÂU</span>
+              <div className="px-4 py-2 rounded-2xl bg-[#49217a] border border-purple-300/45 text-purple-100 font-mono text-base font-black flex items-center gap-2 shadow-inner tabular-nums">
+                <span className="text-purple-200 tracking-wide">CÂU</span>
                 <span className="text-2xl text-amber-300">{activeIndex + 1}/{questions.length}</span>
               </div>
 
               {boardSelectedStudent ? (
-                <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-indigo-950/90 border border-indigo-500 text-indigo-200 font-bold text-sm shadow-md animate-fade-in">
-                  <span className="text-xl">🎒</span>
+                <div className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-[#54268c] border border-purple-200/45 text-purple-50 font-bold text-sm shadow-md">
+                  <span className="text-xl" aria-hidden="true">🎒</span>
                   <span>Học sinh lên bảng:</span>
-                  <span className="text-amber-300 font-black text-base underline decoration-amber-400 decoration-2">
+                  <span className="text-amber-300 font-black text-base underline decoration-amber-300 decoration-2 underline-offset-4">
                     {boardSelectedStudent}
                   </span>
                   <button
@@ -2719,15 +2736,15 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       setBoardAnswerResult(null);
                       setCongratsMessage('');
                     }}
-                    className="ml-1 p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
+                    className="ml-1 p-1 hover:bg-white/15 rounded-lg text-purple-200 hover:text-white cursor-pointer"
                     title="Bỏ chọn học sinh"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold bg-slate-800/80 px-3.5 py-2 rounded-2xl border border-slate-700">
-                  <span>💡 Chưa gọi học sinh. Bấm "Gọi Lên Bảng" để chọn ngẫu nhiên!</span>
+                <div className="flex items-center gap-2 text-purple-100/90 text-xs sm:text-sm font-medium bg-[#3b1966]/90 px-4 py-2 rounded-2xl border border-purple-300/25">
+                  <span>Chưa gọi học sinh · Bấm &quot;Gọi Lên Bảng&quot; để chọn ngẫu nhiên</span>
                 </div>
               )}
             </div>
@@ -2736,19 +2753,19 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             <div className="flex items-center gap-2.5 flex-wrap">
               <button
                 onClick={handleCallRandomStudent}
-                className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
+                className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-orange-400 hover:from-amber-300 hover:to-orange-300 text-slate-950 font-black text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-purple-950/40 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
                 title="Gọi ngẫu nhiên học sinh trong lớp lên bảng trả lời"
               >
-                <Dice5 className="w-4 h-4 fill-slate-950" />
+                <Dice5 className="w-4 h-4 text-slate-950" />
                 <span>Gọi Lên Bảng (Ngẫu Nhiên)</span>
               </button>
 
               <button
                 onClick={() => setShowCallStudentModal(true)}
-                className="px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                className="px-4 py-2.5 rounded-2xl bg-[#4f2485] hover:bg-[#602e9e] border border-purple-300/35 text-purple-50 font-bold text-xs md:text-sm flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0"
                 title={`Chọn học sinh cụ thể từ danh sách ${currentClassroom?.name ? (currentClassroom.name.toLowerCase().startsWith('lớp') ? currentClassroom.name : `Lớp ${currentClassroom.name}`) : 'lớp'}`}
               >
-                <Users className="w-4 h-4 text-blue-400" />
+                <Users className="w-4 h-4 text-purple-200" />
                 <span className="hidden sm:inline">
                   Danh Sách {currentClassroom?.name ? (currentClassroom.name.toLowerCase().startsWith('lớp') ? currentClassroom.name : `Lớp ${currentClassroom.name}`) : 'Lớp'}
                 </span>
@@ -2756,12 +2773,12 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
               <button
                 onClick={handleReadBoardQuestion}
-                className={`px-3.5 py-2.5 rounded-2xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`px-4 py-2.5 rounded-2xl border text-xs md:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   boardAiSpeechState === 'calling'
-                    ? 'bg-amber-950/80 border-amber-500 text-amber-200 shadow-lg shadow-amber-500/20'
+                    ? 'bg-amber-400/20 border-amber-300 text-amber-200 shadow-lg'
                     : isReadingBoardQuestion
-                    ? 'bg-rose-950 border-rose-500 text-rose-300 animate-pulse'
-                    : 'bg-indigo-950 hover:bg-indigo-900 border-indigo-700 text-indigo-300'
+                    ? 'bg-rose-600 border-rose-300 text-white shadow-lg'
+                    : 'bg-[#6d28d9] hover:bg-[#7c3aed] border-purple-200/45 text-white shadow-md'
                 }`}
                 title={
                   boardAiSpeechState === 'calling'
@@ -2773,18 +2790,18 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               >
                 {boardAiSpeechState === 'calling' ? (
                   <>
-                    <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                    <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
                     <span>Đang gọi giọng AI...</span>
                   </>
                 ) : isReadingBoardQuestion ? (
                   <>
-                    <VolumeX className="w-4 h-4 text-rose-400" />
+                    <VolumeX className="w-4 h-4 text-white" />
                     <span>Dừng đọc</span>
                   </>
                 ) : (
                   <>
-                    <Volume2 className="w-4 h-4 text-indigo-400" />
-                    <span>Đọc Đề AI 🔊</span>
+                    <Volume2 className="w-4 h-4 text-purple-100" />
+                    <span>Đọc Đề AI</span>
                   </>
                 )}
               </button>
@@ -2796,10 +2813,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     setBoardAnswerResult(null);
                     setCongratsMessage('');
                   }}
-                  className="px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="px-4 py-2.5 rounded-2xl bg-[#4f2485] hover:bg-[#602e9e] border border-amber-300/50 text-amber-200 font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0"
                   title="Xóa lựa chọn để học sinh thử lại"
                 >
-                  <RotateCcw className="w-4 h-4 text-amber-400" />
+                  <RotateCcw className="w-4 h-4 text-amber-300" />
                   <span>Làm Lại</span>
                 </button>
               )}
@@ -2823,10 +2840,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     } catch (_) {}
                   }
                 }}
-                className={`px-3.5 py-2.5 rounded-2xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`px-4 py-2.5 rounded-2xl border text-xs md:text-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   isPresentationFullScreen
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/30'
-                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-emerald-300 hover:text-emerald-200'
+                    ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-lg font-black'
+                    : 'bg-[#4f2485] hover:bg-[#602e9e] border-purple-300/35 text-emerald-200 hover:text-white'
                 }`}
                 title={isPresentationFullScreen ? 'Thoát toàn màn hình (Esc)' : 'Phóng to full màn hình TV 75 inch'}
               >
@@ -2837,7 +2854,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   </>
                 ) : (
                   <>
-                    <Maximize2 className="w-4 h-4 text-emerald-400" />
+                    <Maximize2 className="w-4 h-4 text-emerald-300" />
                     <span>Toàn Màn Hình</span>
                   </>
                 )}
@@ -2846,17 +2863,21 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
           </div>
 
           {/* Main Content Area */}
-          <div className={`flex-1 overflow-y-auto p-4 md:p-8 flex flex-col justify-between w-full space-y-6 ${
-            isPresentationFullScreen ? 'max-w-[96vw] mx-auto px-4 sm:px-8' : 'max-w-7xl mx-auto'
-          }`}>
+          <div
+            className={`relative z-10 flex-1 overflow-y-auto p-4 md:p-8 flex flex-col justify-between w-full space-y-6 ${
+              isPresentationFullScreen ? 'max-w-[95vw] mx-auto px-4 sm:px-10' : 'max-w-7xl mx-auto'
+            }`}
+          >
             {!currentQ ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-slate-400">
-                <BookOpen className="w-16 h-16 text-slate-600 mb-4" />
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-purple-200">
+                <BookOpen className="w-16 h-16 text-purple-300/70 mb-4" />
                 <h3 className="text-xl font-bold text-white mb-2">Chưa có câu hỏi nào để trình chiếu</h3>
-                <p className="text-sm max-w-md">Vui lòng chuyển sang tab "Soạn Đề AI & Ma Trận" để tạo đề hoặc nạp câu hỏi trắc nghiệm.</p>
+                <p className="text-sm max-w-md text-purple-100/80">
+                  Vui lòng chuyển sang tab &quot;Soạn Đề AI &amp; Ma Trận&quot; để tạo đề hoặc nạp câu hỏi trắc nghiệm.
+                </p>
                 <button
                   onClick={() => setActiveMode('creator')}
-                  className="mt-6 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm"
+                  className="mt-6 px-6 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm cursor-pointer shadow-lg"
                 >
                   Tạo Đề Trắc Nghiệm Ngay
                 </button>
@@ -2865,65 +2886,45 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               <>
                 {/* AI Character Voice Assistant Status Banner */}
                 {boardAiSpeechState !== 'idle' && (
-                  <div className="p-3.5 md:p-4 rounded-3xl bg-gradient-to-r from-indigo-950/95 via-purple-950/90 to-slate-900 border-2 border-indigo-500/50 shadow-2xl backdrop-blur-xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
+                  <div className="p-4 rounded-3xl bg-[#34145e]/95 border-2 border-purple-300/45 shadow-2xl flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3.5">
                       <div className="relative shrink-0">
-                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-500 via-indigo-500 to-amber-400 p-0.5 shadow-lg shadow-purple-500/30">
-                          <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center text-white">
+                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-400 via-violet-400 to-amber-300 p-0.5 shadow-lg">
+                          <div className="w-full h-full bg-[#240d42] rounded-[14px] flex items-center justify-center text-white">
                             {boardAiSpeechState === 'calling' ? (
                               <Bot className="w-6 h-6 text-amber-300 animate-bounce" />
                             ) : (
-                              <Sparkles className="w-6 h-6 text-indigo-300 animate-pulse" />
+                              <Volume2 className="w-6 h-6 text-emerald-300" />
                             )}
                           </div>
                         </div>
-                        <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${boardAiSpeechState === 'calling' ? 'bg-amber-400' : 'bg-emerald-400'} opacity-75`}></span>
-                          <span className={`relative inline-flex rounded-full h-3.5 w-3.5 ${boardAiSpeechState === 'calling' ? 'bg-amber-500' : 'bg-emerald-500'} border-2 border-slate-900`}></span>
-                        </span>
                       </div>
                       <div className="space-y-0.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-xs md:text-sm font-black text-white flex items-center gap-1.5">
+                        <div className="flex items-center gap-2 flex-wrap text-xs md:text-sm">
+                          <h4 className="font-black text-white flex items-center gap-1.5">
                             {boardAiSpeechState === 'calling' ? (
                               <>
-                                <span>Đang Gọi Trợ Lý Giọng Đọc AI</span>
-                                <span className="inline-flex items-center gap-1 text-amber-300 text-xs font-bold">
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                </span>
+                                <span>Đang kết nối giọng đọc AI</span>
+                                <Loader2 className="w-3.5 h-3.5 text-amber-300 animate-spin" />
                               </>
                             ) : (
-                              <>
-                                <span>Trợ Lý AI Đang Đọc Câu Hỏi</span>
-                                <span className="text-emerald-400 text-xs font-bold">● Đang phát</span>
-                              </>
+                              <span>Trợ lý AI đang đọc câu hỏi</span>
                             )}
                           </h4>
-                          <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                          <span className="text-purple-200/80" aria-hidden="true">·</span>
+                          <span className="text-purple-200 font-semibold">
                             {selectedVoice.label || 'Cô giáo dịu dàng'}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-300 flex items-center gap-2 flex-wrap">
+                        <p className="text-xs text-purple-100/90 flex items-center gap-2 flex-wrap">
                           {boardAiSpeechState === 'calling' ? (
-                            <>
-                              <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0"></span>
-                              <span className="text-amber-200 font-medium">
-                                Đang tổng hợp ngữ điệu diễn cảm &amp; công thức toán học SGK, Thầy/Cô vui lòng đợi một chút để nhận giọng đọc hay nhất...
-                              </span>
-                            </>
+                            <span className="text-amber-200 font-medium">
+                              Đang chuẩn bị âm thanh tiếng Việt chuẩn SGK, Thầy/Cô vui lòng chờ trong giây lát...
+                            </span>
                           ) : (
-                            <>
-                              <span className="flex items-center gap-0.5 h-3.5 shrink-0">
-                                <span className="w-1 h-3.5 bg-emerald-400 rounded-full animate-[bounce_0.8s_infinite]"></span>
-                                <span className="w-1 h-2.5 bg-emerald-400 rounded-full animate-[bounce_0.6s_infinite_0.1s]"></span>
-                                <span className="w-1 h-4 bg-emerald-400 rounded-full animate-[bounce_1s_infinite_0.2s]"></span>
-                                <span className="w-1 h-2 bg-emerald-400 rounded-full animate-[bounce_0.7s_infinite_0.3s]"></span>
-                                <span className="w-1 h-3 bg-emerald-400 rounded-full animate-[bounce_0.9s_infinite_0.15s]"></span>
-                              </span>
-                              <span className="text-slate-200">
-                                Đang phát âm thanh bài giảng trực tiếp qua loa phòng học
-                              </span>
-                            </>
+                            <span className="text-emerald-200 font-medium">
+                              Đang phát âm thanh bài giảng trực tiếp qua loa phòng học
+                            </span>
                           )}
                         </p>
                       </div>
@@ -2934,7 +2935,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         setIsReadingBoardQuestion(false);
                         setBoardAiSpeechState('idle');
                       }}
-                      className="px-3.5 py-2 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white border border-rose-500/40 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-sm active:scale-95"
+                      className="px-4 py-2 rounded-2xl bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 border border-rose-300/40 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 active:scale-95"
                     >
                       <VolumeX className="w-4 h-4" />
                       <span>Dừng Đọc</span>
@@ -2955,38 +2956,41 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     '';
 
                   return (
-                    <div className="p-5 md:p-6 rounded-3xl bg-slate-800/95 border-2 border-slate-700 shadow-2xl relative overflow-hidden shrink-0">
-                      <div className="flex items-center justify-between pb-3 mb-3.5 border-b border-slate-700/60 flex-wrap gap-2">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <span className="px-3 py-1 rounded-xl bg-amber-500 text-slate-950 font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-1.5 shadow-sm">
+                    <div className="p-6 md:p-8 rounded-3xl bg-[#381863]/95 border-2 border-purple-300/35 shadow-[0_20px_50px_rgba(16,4,36,0.42)] relative overflow-hidden shrink-0">
+                      <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-purple-300/25 flex-wrap gap-3">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="px-3.5 py-1.5 rounded-xl bg-amber-400 text-slate-950 font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-1.5 shadow-sm tabular-nums">
                             <FileText className="w-4 h-4 text-slate-950" />
                             <span>ĐỀ BÀI CÂU {activeIndex + 1}/{questions.length}</span>
                           </span>
-                          <span className="px-3 py-1 rounded-xl bg-indigo-950/80 text-indigo-300 font-bold text-xs border border-indigo-700/60">
-                            {(currentQ as any).subject || selectedSubject} • {(currentQ as any).grade || selectedGrade}
-                          </span>
-                          {currentQ.difficulty && (
-                            <span className="px-3 py-1 rounded-xl bg-slate-700/80 text-slate-300 text-xs font-bold">
-                              Độ khó: {currentQ.difficulty}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-2 text-xs md:text-sm font-semibold text-purple-100/90">
+                            <span>{(currentQ as any).subject || selectedSubject}</span>
+                            <span aria-hidden="true" className="text-purple-300/60">·</span>
+                            <span>{(currentQ as any).grade || selectedGrade}</span>
+                            {currentQ.difficulty && (
+                              <>
+                                <span aria-hidden="true" className="text-purple-300/60">·</span>
+                                <span className="text-amber-200">{currentQ.difficulty}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="text-xs text-slate-400 font-semibold hidden sm:flex items-center gap-2">
-                          <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-amber-300">
-                            📺 Trình Chiếu 75"
-                          </span>
+                        <div className="text-xs md:text-sm text-purple-200/85 font-medium hidden sm:flex items-center gap-2">
+                          <Tv className="w-4 h-4 text-amber-300" />
+                          <span>Trình Chiếu 75&quot;</span>
+                          <span aria-hidden="true" className="text-purple-300/50">·</span>
                           <span>Chạm đáp án trực tiếp để trả lời</span>
                         </div>
                       </div>
 
                       {/* Question Content & Formulas with Guaranteed High Contrast */}
-                      <div className="text-xl md:text-2xl lg:text-3xl font-black text-white leading-relaxed tracking-normal select-text">
+                      <div className="text-xl md:text-2xl lg:text-[28px] font-bold text-white leading-relaxed tracking-normal select-text">
                         <QuizRichContentRenderer
                           content={presentationQuestionText || 'Chưa có nội dung đề bài.'}
                           diagramType={currentQ.diagramType}
                           diagramData={currentQ.diagramData}
-                          textClassName="text-white font-black text-xl md:text-2xl lg:text-3xl"
+                          textClassName="text-white font-bold text-xl md:text-2xl lg:text-[28px]"
                           isPresentationMode={true}
                         />
                       </div>
@@ -2994,32 +2998,35 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   );
                 })()}
 
-                {/* 2. Interactive Options (A, B, C, D) - Nhỏ lại, gọn gàng, vừa vặn trên màn hình */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 md:gap-4 shrink-0">
+                {/* 2. Interactive Options (A, B, C, D) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
                   {currentQ.options.map((opt) => {
                     const isSelected = boardSelectedOption === opt.key;
                     const isCorrect = opt.key === currentQ.correctAnswer;
                     const hasAnswered = boardAnswerResult !== null;
 
-                    let cardClass = 'bg-slate-800/85 border-slate-700 text-white hover:bg-slate-750 hover:border-amber-400 shadow-md hover:scale-[1.005]';
-                    let badgeClass = 'bg-slate-700 text-amber-300 border-slate-600';
+                    let cardClass =
+                      'bg-[#48227a]/95 border-purple-300/35 text-white hover:bg-[#582b94] hover:border-amber-300 shadow-[0_10px_28px_rgba(16,4,36,0.3)] hover:-translate-y-0.5';
+                    let badgeClass = 'bg-[#6737ab] text-amber-200 border-purple-200/40';
 
                     if (hasAnswered) {
                       if (isSelected) {
                         if (isCorrect) {
-                          cardClass = 'bg-emerald-950/90 border-3 border-emerald-400 text-emerald-100 ring-2 ring-emerald-500/30 shadow-xl scale-[1.01]';
-                          badgeClass = 'bg-emerald-500 text-slate-950 font-black';
+                          cardClass =
+                            'bg-emerald-700/95 border-2 border-emerald-300 text-white ring-2 ring-emerald-300/40 shadow-xl scale-[1.01]';
+                          badgeClass = 'bg-emerald-300 text-slate-950 font-black border-emerald-200';
                         } else {
-                          cardClass = 'bg-rose-950/90 border-3 border-rose-500 text-rose-100 ring-2 ring-rose-500/30 shadow-lg';
-                          badgeClass = 'bg-rose-500 text-white font-black';
+                          cardClass =
+                            'bg-rose-800/95 border-2 border-rose-300 text-white ring-2 ring-rose-300/40 shadow-lg';
+                          badgeClass = 'bg-rose-300 text-slate-950 font-black border-rose-200';
                         }
                       } else if (isCorrect) {
-                        // Reveal correct answer if student picked wrong
-                        cardClass = 'bg-emerald-950/60 border-2 border-emerald-400 border-dashed text-emerald-200';
-                        badgeClass = 'bg-emerald-600 text-white font-black';
+                        cardClass =
+                          'bg-emerald-900/75 border-2 border-emerald-300 border-dashed text-emerald-50';
+                        badgeClass = 'bg-emerald-500 text-slate-950 font-black border-emerald-300';
                       } else {
-                        cardClass = 'bg-slate-850/40 border-slate-800 text-slate-500 opacity-60';
-                        badgeClass = 'bg-slate-800 text-slate-500 border-slate-700';
+                        cardClass = 'bg-[#36175e]/60 border-purple-300/20 text-purple-200/60 opacity-70';
+                        badgeClass = 'bg-[#462178] text-purple-300/70 border-purple-300/20';
                       }
                     }
 
@@ -3029,33 +3036,33 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         type="button"
                         onClick={() => handleBoardOptionClick(opt.key)}
                         disabled={hasAnswered}
-                        className={`p-3.5 md:p-4 rounded-2xl border-2 transition-all flex items-center gap-3.5 text-left cursor-pointer active:scale-98 select-none relative group min-h-[58px] md:min-h-[64px] ${cardClass}`}
+                        className={`p-4 md:p-5 rounded-2xl border-2 transition-all duration-150 flex items-center gap-4 text-left cursor-pointer active:scale-[0.985] select-none relative group min-h-[64px] md:min-h-[72px] ${cardClass}`}
                       >
                         <div
-                          className={`w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center font-black text-base md:text-lg shrink-0 border transition-all shadow-sm ${badgeClass}`}
+                          className={`w-10 h-10 md:w-11 md:h-11 rounded-xl flex items-center justify-center font-black text-lg shrink-0 border transition-all shadow-sm ${badgeClass}`}
                         >
                           {opt.key}
                         </div>
-                        <div className="flex-1 text-base md:text-lg font-bold leading-snug text-slate-100">
+                        <div className="flex-1 text-base md:text-xl font-bold leading-snug text-white">
                           <MathFormulaRenderer content={opt.text} />
                         </div>
 
                         {hasAnswered && isSelected && isCorrect && (
-                          <div className="p-1.5 px-2.5 rounded-lg bg-emerald-500 text-slate-950 font-black flex items-center gap-1 shadow-md text-xs shrink-0">
+                          <div className="p-1.5 px-3 rounded-xl bg-emerald-300 text-slate-950 font-black flex items-center gap-1 shadow-md text-xs shrink-0">
                             <CheckCircle2 className="w-4 h-4" />
                             <span>ĐÚNG</span>
                           </div>
                         )}
 
                         {hasAnswered && isSelected && !isCorrect && (
-                          <div className="p-1.5 px-2.5 rounded-lg bg-rose-500 text-white font-black flex items-center gap-1 shadow-md text-xs shrink-0">
+                          <div className="p-1.5 px-3 rounded-xl bg-rose-300 text-slate-950 font-black flex items-center gap-1 shadow-md text-xs shrink-0">
                             <X className="w-4 h-4" />
                             <span>CHƯA ĐÚNG</span>
                           </div>
                         )}
 
                         {hasAnswered && !isSelected && isCorrect && (
-                          <div className="p-1.5 px-2.5 rounded-lg bg-emerald-600 text-white font-black flex items-center gap-1 shadow-md text-xs shrink-0">
+                          <div className="p-1.5 px-3 rounded-xl bg-emerald-400 text-slate-950 font-black flex items-center gap-1 shadow-md text-xs shrink-0">
                             <CheckCircle2 className="w-4 h-4" />
                             <span>ĐÁP ÁN ĐÚNG</span>
                           </div>
@@ -3067,9 +3074,9 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
                 {/* 3. Celebration / Encouragement Feedback Card */}
                 {boardAnswerResult === 'correct' && (
-                  <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-green-700 text-white shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-2 border-emerald-400 animate-fade-in">
+                  <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-green-700 text-white shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-2 border-emerald-300 animate-fade-in">
                     <div className="flex items-center gap-5">
-                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-3xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-4xl shadow-inner shrink-0">
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-3xl bg-white/20 border border-white/30 flex items-center justify-center text-4xl shadow-inner shrink-0">
                         🎉
                       </div>
                       <div>
@@ -3079,7 +3086,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                           </h3>
                           <Award className="w-8 h-8 text-amber-300" />
                         </div>
-                        <p className="text-emerald-100 text-lg md:text-xl font-bold mt-2 leading-relaxed">
+                        <p className="text-emerald-50 text-lg md:text-xl font-bold mt-2 leading-relaxed">
                           {congratsMessage}
                         </p>
                       </div>
@@ -3094,7 +3101,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         className="px-5 py-3 rounded-2xl bg-white/20 hover:bg-white/30 text-white font-black text-sm flex items-center gap-2 transition-all cursor-pointer shadow-md"
                       >
                         <Sparkles className="w-4 h-4 text-amber-300" />
-                        <span>Bắn Pháo Hoa Thưởng ⭐</span>
+                        <span>Bắn Pháo Hoa Thưởng</span>
                       </button>
 
                       <button
@@ -3110,16 +3117,16 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 )}
 
                 {boardAnswerResult === 'wrong' && (
-                  <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-r from-amber-600 via-orange-600 to-rose-700 text-white shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-2 border-amber-400 animate-fade-in">
+                  <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-r from-amber-600 via-orange-600 to-rose-700 text-white shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-2 border-amber-300 animate-fade-in">
                     <div className="flex items-center gap-5">
-                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-3xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-4xl shadow-inner shrink-0">
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-3xl bg-white/20 border border-white/30 flex items-center justify-center text-4xl shadow-inner shrink-0">
                         💡
                       </div>
                       <div>
                         <h3 className="text-2xl md:text-3xl lg:text-4xl font-black text-white tracking-wide">
                           CHƯA CHÍNH XÁC RỒI! CỐ GẮNG LẦN SAU NHÉ!
                         </h3>
-                        <p className="text-amber-100 text-lg md:text-xl font-bold mt-2 leading-relaxed">
+                        <p className="text-amber-50 text-lg md:text-xl font-bold mt-2 leading-relaxed">
                           {congratsMessage}
                         </p>
                       </div>
@@ -3134,7 +3141,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         }}
                         className="px-5 py-3 rounded-2xl bg-white/20 hover:bg-white/30 text-white font-black text-sm flex items-center gap-2 transition-all cursor-pointer shadow-md"
                       >
-                        <RotateCcw className="w-4 h-4 text-amber-300" />
+                        <RotateCcw className="w-4 h-4 text-amber-200" />
                         <span>Thử Lại Câu Này</span>
                       </button>
 
@@ -3152,26 +3159,26 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
                 {/* 4. Detailed Explanation Card when Answered */}
                 {boardAnswerResult !== null && currentQ.explanation && (
-                  <div className="p-6 md:p-8 rounded-3xl bg-slate-800/95 border-2 border-indigo-500/40 text-slate-100 shadow-xl animate-fade-in">
-                    <div className="flex items-center gap-3 pb-3 mb-3 border-b border-slate-700">
-                      <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
-                      <h4 className="text-sm font-black uppercase tracking-wider text-indigo-300">
-                        HƯỚNG DẪN GIẢI CHI TIẾT & BÀI HỌC KINH NGHIỆM:
+                  <div className="p-6 md:p-8 rounded-3xl bg-[#381863]/95 border-2 border-purple-300/40 text-purple-50 shadow-xl animate-fade-in">
+                    <div className="flex items-center gap-3 pb-3 mb-3 border-b border-purple-300/25">
+                      <CheckCircle2 className="w-6 h-6 text-emerald-300 shrink-0" />
+                      <h4 className="text-sm font-black uppercase tracking-wider text-amber-200">
+                        HƯỚNG DẪN GIẢI CHI TIẾT &amp; BÀI HỌC KINH NGHIỆM
                       </h4>
                     </div>
-                    <div className="text-xl md:text-2xl font-medium leading-relaxed text-slate-200">
+                    <div className="text-xl md:text-2xl font-medium leading-relaxed text-white">
                       <MathFormulaRenderer content={currentQ.explanation} />
                     </div>
                   </div>
                 )}
 
                 {/* 5. Bottom Navigation & Question Picker */}
-                <div className="flex flex-wrap items-center justify-between pt-4 border-t border-slate-800 gap-4">
+                <div className="flex flex-wrap items-center justify-between pt-4 border-t border-purple-300/25 gap-4">
                   {/* Prev Button */}
                   <button
                     onClick={handlePrevQuestion}
                     disabled={activeIndex <= 0}
-                    className="px-6 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm flex items-center gap-2 border border-slate-700 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-2xl bg-[#4c2482] hover:bg-[#5e2fa0] text-white font-bold text-sm flex items-center gap-2 border border-purple-300/35 disabled:opacity-35 disabled:pointer-events-none transition-all cursor-pointer"
                   >
                     <ChevronLeft className="w-5 h-5" />
                     <span>Câu Trước</span>
@@ -3189,10 +3196,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                           setBoardAnswerResult(null);
                           setCongratsMessage('');
                         }}
-                        className={`w-10 h-10 md:w-11 md:h-11 rounded-2xl font-black text-sm transition-all cursor-pointer flex items-center justify-center border ${
+                        className={`w-10 h-10 md:w-11 md:h-11 rounded-2xl font-black text-sm transition-all cursor-pointer flex items-center justify-center border tabular-nums ${
                           activeIndex === idx
-                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg scale-110 ring-2 ring-amber-400/50'
-                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'
+                            ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-lg scale-110 ring-2 ring-amber-300/50'
+                            : 'bg-[#4c2482] text-purple-100 hover:bg-[#6030a3] border-purple-300/30'
                         }`}
                       >
                         {idx + 1}
@@ -3204,7 +3211,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   <button
                     onClick={handleNextQuestion}
                     disabled={activeIndex >= questions.length - 1}
-                    className="px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-purple-950/30 disabled:opacity-35 disabled:pointer-events-none transition-all cursor-pointer"
                   >
                     <span>Câu Kế Tiếp</span>
                     <ChevronRight className="w-5 h-5" />
