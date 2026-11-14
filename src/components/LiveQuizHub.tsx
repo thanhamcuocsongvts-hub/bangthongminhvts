@@ -55,6 +55,8 @@ import {
   Search,
   Maximize2,
   Minimize2,
+  Palette,
+  Mic,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
@@ -68,6 +70,8 @@ import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { directFastMatrixQuiz, getGeminiApiKey, saveGeminiApiKey, isGeminiConfigured } from '../utils/geminiClient';
 import {
+  getSpeechSpeedMultiplier,
+  setSpeechSpeedMultiplier,
   speakQuestionContent,
   speakStudentCalling,
   speakText,
@@ -140,6 +144,352 @@ if (typeof window !== 'undefined' && 'Worker' in window && pdfjsLib) {
   } catch (_) {}
 }
 
+interface PresentationTheme {
+  id: string;
+  name: string;
+  styleLabel: string;
+  isLight: boolean;
+  swatchGradient: string;
+  accentSwatch: string;
+  canvasBackground: string;
+  sheenBackground: string;
+  topBarClass: string;
+  counterPillClass: string;
+  counterLabelClass: string;
+  counterValueClass: string;
+  studentBadgeClass: string;
+  studentPlaceholderClass: string;
+  secondaryBtnClass: string;
+  questionCardClass: string;
+  questionDividerClass: string;
+  questionBadgeClass: string;
+  questionMetaClass: string;
+  questionTextClass: string;
+  optionDefaultClass: string;
+  optionBadgeClass: string;
+  optionTextClass: string;
+  optionDimmedClass: string;
+  optionDimmedBadgeClass: string;
+  aiBannerClass: string;
+  aiBannerIconBgClass: string;
+  aiBannerTitleClass: string;
+  aiBannerStopClass: string;
+  explanationCardClass: string;
+  explanationDividerClass: string;
+  explanationTitleClass: string;
+  explanationTextClass: string;
+  bottomBarClass: string;
+  prevBtnClass: string;
+  pageActiveClass: string;
+  pageInactiveClass: string;
+  nextBtnClass: string;
+  popoverClass: string;
+}
+
+const PRESENTATION_THEMES: PresentationTheme[] = [
+  {
+    id: 'lilac_violet',
+    name: 'Tím Hoa Cà',
+    styleLabel: 'Sư phạm truyền cảm',
+    isLight: false,
+    swatchGradient: 'linear-gradient(135deg, #2d1250 0%, #6838a6 100%)',
+    accentSwatch: '#fbbf24',
+    canvasBackground: 'linear-gradient(135deg, #2d1250 0%, #4b237d 48%, #6838a6 100%)',
+    sheenBackground:
+      'radial-gradient(circle at 18% 12%, rgba(216, 180, 254, 0.22) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(192, 132, 252, 0.20) 0%, transparent 48%)',
+    topBarClass: 'bg-[#230c40]/95 border-purple-300/25 text-white',
+    counterPillClass: 'bg-[#49217a] border-purple-300/45 text-purple-100',
+    counterLabelClass: 'text-purple-200',
+    counterValueClass: 'text-amber-300',
+    studentBadgeClass: 'bg-[#54268c] border-purple-200/45 text-purple-50',
+    studentPlaceholderClass: 'bg-[#3b1966]/90 border-purple-300/25 text-purple-100/90',
+    secondaryBtnClass: 'bg-[#4f2485] hover:bg-[#602e9e] border-purple-300/35 text-purple-50',
+    questionCardClass: 'bg-[#381863]/95 border-purple-300/35 shadow-[0_20px_50px_rgba(16,4,36,0.42)]',
+    questionDividerClass: 'border-purple-300/25',
+    questionBadgeClass: 'bg-amber-400 text-slate-950',
+    questionMetaClass: 'text-purple-100/90',
+    questionTextClass: 'text-white',
+    optionDefaultClass:
+      'bg-[#48227a]/95 border-purple-300/35 text-white hover:bg-[#582b94] hover:border-amber-300 shadow-[0_10px_28px_rgba(16,4,36,0.3)] hover:-translate-y-0.5',
+    optionBadgeClass: 'bg-[#6737ab] text-amber-200 border-purple-200/40',
+    optionTextClass: 'text-white',
+    optionDimmedClass: 'bg-[#36175e]/60 border-purple-300/20 text-purple-200/60 opacity-70',
+    optionDimmedBadgeClass: 'bg-[#462178] text-purple-300/70 border-purple-300/20',
+    aiBannerClass: 'bg-[#34145e]/95 border-purple-300/45 text-white',
+    aiBannerIconBgClass: 'bg-[#240d42]',
+    aiBannerTitleClass: 'text-white',
+    aiBannerStopClass: 'bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 border-rose-300/40',
+    explanationCardClass: 'bg-[#381863]/95 border-purple-300/40 text-purple-50',
+    explanationDividerClass: 'border-purple-300/25',
+    explanationTitleClass: 'text-amber-200',
+    explanationTextClass: 'text-white',
+    bottomBarClass: 'border-purple-300/25',
+    prevBtnClass: 'bg-[#4c2482] hover:bg-[#5e2fa0] text-white border-purple-300/35',
+    pageActiveClass: 'bg-amber-400 text-slate-950 border-amber-200 ring-amber-300/50',
+    pageInactiveClass: 'bg-[#4c2482] text-purple-100 hover:bg-[#6030a3] border-purple-300/30',
+    nextBtnClass: 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-purple-950/30',
+    popoverClass: 'bg-[#2a104a] border-purple-300/40 text-white shadow-2xl',
+  },
+  {
+    id: 'chalkboard_classic',
+    name: 'Bảng Phấn Xanh',
+    styleLabel: 'Lớp học truyền thống',
+    isLight: false,
+    swatchGradient: 'linear-gradient(135deg, #072a1e 0%, #16553e 100%)',
+    accentSwatch: '#fde047',
+    canvasBackground: 'linear-gradient(135deg, #06251b 0%, #0d3c2b 50%, #14533c 100%)',
+    sheenBackground:
+      'radial-gradient(circle at 20% 15%, rgba(110, 231, 183, 0.14) 0%, transparent 45%), radial-gradient(circle at 82% 85%, rgba(52, 211, 153, 0.12) 0%, transparent 48%)',
+    topBarClass: 'bg-[#041d15]/95 border-emerald-400/25 text-white',
+    counterPillClass: 'bg-[#0e4431] border-emerald-300/40 text-emerald-50',
+    counterLabelClass: 'text-emerald-200',
+    counterValueClass: 'text-amber-300',
+    studentBadgeClass: 'bg-[#12513a] border-emerald-300/40 text-emerald-50',
+    studentPlaceholderClass: 'bg-[#0b3828]/90 border-emerald-300/25 text-emerald-100/90',
+    secondaryBtnClass: 'bg-[#114834] hover:bg-[#175e44] border-emerald-300/35 text-emerald-50',
+    questionCardClass: 'bg-[#093224]/95 border-emerald-300/30 shadow-[0_20px_50px_rgba(2,20,14,0.45)]',
+    questionDividerClass: 'border-emerald-300/25',
+    questionBadgeClass: 'bg-amber-300 text-slate-950',
+    questionMetaClass: 'text-emerald-100/90',
+    questionTextClass: 'text-white',
+    optionDefaultClass:
+      'bg-[#0f4532]/95 border-emerald-300/30 text-white hover:bg-[#155941] hover:border-amber-300 shadow-[0_10px_28px_rgba(2,20,14,0.3)] hover:-translate-y-0.5',
+    optionBadgeClass: 'bg-[#176349] text-amber-200 border-emerald-200/35',
+    optionTextClass: 'text-white',
+    optionDimmedClass: 'bg-[#093022]/60 border-emerald-300/15 text-emerald-200/60 opacity-70',
+    optionDimmedBadgeClass: 'bg-[#0e4230] text-emerald-200/70 border-emerald-300/20',
+    aiBannerClass: 'bg-[#082c20]/95 border-emerald-300/40 text-white',
+    aiBannerIconBgClass: 'bg-[#041d15]',
+    aiBannerTitleClass: 'text-white',
+    aiBannerStopClass: 'bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 border-rose-300/40',
+    explanationCardClass: 'bg-[#093224]/95 border-emerald-300/35 text-emerald-50',
+    explanationDividerClass: 'border-emerald-300/25',
+    explanationTitleClass: 'text-amber-300',
+    explanationTextClass: 'text-white',
+    bottomBarClass: 'border-emerald-300/25',
+    prevBtnClass: 'bg-[#114834] hover:bg-[#175e44] text-white border-emerald-300/35',
+    pageActiveClass: 'bg-amber-300 text-slate-950 border-amber-200 ring-amber-300/50',
+    pageInactiveClass: 'bg-[#114834] text-emerald-100 hover:bg-[#175e44] border-emerald-300/30',
+    nextBtnClass: 'bg-amber-300 hover:bg-amber-200 text-slate-950 shadow-emerald-950/30',
+    popoverClass: 'bg-[#06251b] border-emerald-300/35 text-white shadow-2xl',
+  },
+  {
+    id: 'sapphire_tech',
+    name: 'Xanh Lam Ngọc',
+    styleLabel: 'Hiện đại & sắc nét',
+    isLight: false,
+    swatchGradient: 'linear-gradient(135deg, #071e3d 0%, #134e94 100%)',
+    accentSwatch: '#38bdf8',
+    canvasBackground: 'linear-gradient(135deg, #071e3d 0%, #0c356a 50%, #14539c 100%)',
+    sheenBackground:
+      'radial-gradient(circle at 18% 12%, rgba(56, 189, 248, 0.20) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(96, 165, 250, 0.18) 0%, transparent 48%)',
+    topBarClass: 'bg-[#05162e]/95 border-sky-300/25 text-white',
+    counterPillClass: 'bg-[#0f3f7a] border-sky-300/40 text-sky-50',
+    counterLabelClass: 'text-sky-200',
+    counterValueClass: 'text-amber-300',
+    studentBadgeClass: 'bg-[#144c91] border-sky-300/40 text-sky-50',
+    studentPlaceholderClass: 'bg-[#0b3161]/90 border-sky-300/25 text-sky-100/90',
+    secondaryBtnClass: 'bg-[#124380] hover:bg-[#1956a3] border-sky-300/35 text-sky-50',
+    questionCardClass: 'bg-[#092952]/95 border-sky-300/35 shadow-[0_20px_50px_rgba(3,14,34,0.45)]',
+    questionDividerClass: 'border-sky-300/25',
+    questionBadgeClass: 'bg-amber-400 text-slate-950',
+    questionMetaClass: 'text-sky-100/90',
+    questionTextClass: 'text-white',
+    optionDefaultClass:
+      'bg-[#103b73]/95 border-sky-300/35 text-white hover:bg-[#174d94] hover:border-amber-300 shadow-[0_10px_28px_rgba(3,14,34,0.3)] hover:-translate-y-0.5',
+    optionBadgeClass: 'bg-[#1a56a3] text-amber-200 border-sky-200/40',
+    optionTextClass: 'text-white',
+    optionDimmedClass: 'bg-[#09274f]/60 border-sky-300/15 text-sky-200/60 opacity-70',
+    optionDimmedBadgeClass: 'bg-[#0f386e] text-sky-200/70 border-sky-300/20',
+    aiBannerClass: 'bg-[#072347]/95 border-sky-300/40 text-white',
+    aiBannerIconBgClass: 'bg-[#04152b]',
+    aiBannerTitleClass: 'text-white',
+    aiBannerStopClass: 'bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 border-rose-300/40',
+    explanationCardClass: 'bg-[#092952]/95 border-sky-300/35 text-sky-50',
+    explanationDividerClass: 'border-sky-300/25',
+    explanationTitleClass: 'text-amber-300',
+    explanationTextClass: 'text-white',
+    bottomBarClass: 'border-sky-300/25',
+    prevBtnClass: 'bg-[#124380] hover:bg-[#1956a3] text-white border-sky-300/35',
+    pageActiveClass: 'bg-amber-400 text-slate-950 border-amber-200 ring-amber-300/50',
+    pageInactiveClass: 'bg-[#124380] text-sky-100 hover:bg-[#1956a3] border-sky-300/30',
+    nextBtnClass: 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-sky-950/30',
+    popoverClass: 'bg-[#061d3d] border-sky-300/40 text-white shadow-2xl',
+  },
+  {
+    id: 'midnight_gold',
+    name: 'Đêm Vũ Trụ Gold',
+    styleLabel: 'Gameshow sang trọng',
+    isLight: false,
+    swatchGradient: 'linear-gradient(135deg, #090d16 0%, #1e293b 100%)',
+    accentSwatch: '#f59e0b',
+    canvasBackground: 'linear-gradient(135deg, #090d16 0%, #131b2e 50%, #1e293b 100%)',
+    sheenBackground:
+      'radial-gradient(circle at 20% 15%, rgba(251, 191, 36, 0.14) 0%, transparent 45%), radial-gradient(circle at 82% 85%, rgba(99, 102, 241, 0.16) 0%, transparent 48%)',
+    topBarClass: 'bg-[#070a12]/95 border-amber-300/25 text-white',
+    counterPillClass: 'bg-slate-800 border-amber-400/40 text-slate-100',
+    counterLabelClass: 'text-slate-300',
+    counterValueClass: 'text-amber-400',
+    studentBadgeClass: 'bg-slate-800 border-amber-400/40 text-white',
+    studentPlaceholderClass: 'bg-slate-900/90 border-slate-600/60 text-slate-300',
+    secondaryBtnClass: 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-100',
+    questionCardClass: 'bg-[#111827]/95 border-amber-300/30 shadow-[0_20px_50px_rgba(0,0,0,0.5)]',
+    questionDividerClass: 'border-slate-700',
+    questionBadgeClass: 'bg-amber-400 text-slate-950',
+    questionMetaClass: 'text-slate-300',
+    questionTextClass: 'text-white',
+    optionDefaultClass:
+      'bg-slate-800/95 border-slate-600/80 text-white hover:bg-slate-700 hover:border-amber-400 shadow-[0_10px_28px_rgba(0,0,0,0.35)] hover:-translate-y-0.5',
+    optionBadgeClass: 'bg-slate-700 text-amber-300 border-amber-300/30',
+    optionTextClass: 'text-white',
+    optionDimmedClass: 'bg-slate-900/60 border-slate-800 text-slate-400 opacity-65',
+    optionDimmedBadgeClass: 'bg-slate-800 text-slate-500 border-slate-700',
+    aiBannerClass: 'bg-slate-900/95 border-amber-400/40 text-white',
+    aiBannerIconBgClass: 'bg-slate-950',
+    aiBannerTitleClass: 'text-white',
+    aiBannerStopClass: 'bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 border-rose-300/40',
+    explanationCardClass: 'bg-[#111827]/95 border-amber-400/35 text-slate-100',
+    explanationDividerClass: 'border-slate-700',
+    explanationTitleClass: 'text-amber-300',
+    explanationTextClass: 'text-white',
+    bottomBarClass: 'border-slate-700/70',
+    prevBtnClass: 'bg-slate-800 hover:bg-slate-700 text-white border-slate-600',
+    pageActiveClass: 'bg-amber-400 text-slate-950 border-amber-200 ring-amber-300/50',
+    pageInactiveClass: 'bg-slate-800 text-slate-200 hover:bg-slate-700 border-slate-600',
+    nextBtnClass: 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-black/40',
+    popoverClass: 'bg-slate-900 border-slate-700 text-white shadow-2xl',
+  },
+  {
+    id: 'crimson_sunset',
+    name: 'Hoàng Hôn Đỏ Đô',
+    styleLabel: 'Ấm áp & nổi bật',
+    isLight: false,
+    swatchGradient: 'linear-gradient(135deg, #3b0a22 0%, #881b49 100%)',
+    accentSwatch: '#fcd34d',
+    canvasBackground: 'linear-gradient(135deg, #3b0a22 0%, #631237 50%, #881b49 100%)',
+    sheenBackground:
+      'radial-gradient(circle at 18% 12%, rgba(251, 113, 133, 0.22) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(251, 191, 36, 0.16) 0%, transparent 48%)',
+    topBarClass: 'bg-[#2b0718]/95 border-rose-300/25 text-white',
+    counterPillClass: 'bg-[#5c1134] border-rose-300/40 text-rose-50',
+    counterLabelClass: 'text-rose-200',
+    counterValueClass: 'text-amber-300',
+    studentBadgeClass: 'bg-[#6e153e] border-rose-200/40 text-rose-50',
+    studentPlaceholderClass: 'bg-[#4a0d29]/90 border-rose-300/25 text-rose-100/90',
+    secondaryBtnClass: 'bg-[#661439] hover:bg-[#7d1946] border-rose-300/35 text-rose-50',
+    questionCardClass: 'bg-[#450c27]/95 border-rose-300/35 shadow-[0_20px_50px_rgba(32,4,18,0.45)]',
+    questionDividerClass: 'border-rose-300/25',
+    questionBadgeClass: 'bg-amber-300 text-slate-950',
+    questionMetaClass: 'text-rose-100/90',
+    questionTextClass: 'text-white',
+    optionDefaultClass:
+      'bg-[#5e1234]/95 border-rose-300/35 text-white hover:bg-[#751842] hover:border-amber-300 shadow-[0_10px_28px_rgba(32,4,18,0.3)] hover:-translate-y-0.5',
+    optionBadgeClass: 'bg-[#821b49] text-amber-200 border-rose-200/40',
+    optionTextClass: 'text-white',
+    optionDimmedClass: 'bg-[#3d0b22]/60 border-rose-300/15 text-rose-200/60 opacity-70',
+    optionDimmedBadgeClass: 'bg-[#54102f] text-rose-200/70 border-rose-300/20',
+    aiBannerClass: 'bg-[#3d0a22]/95 border-rose-300/40 text-white',
+    aiBannerIconBgClass: 'bg-[#290616]',
+    aiBannerTitleClass: 'text-white',
+    aiBannerStopClass: 'bg-rose-500/30 hover:bg-rose-500/45 text-rose-100 border-rose-300/40',
+    explanationCardClass: 'bg-[#450c27]/95 border-rose-300/35 text-rose-50',
+    explanationDividerClass: 'border-rose-300/25',
+    explanationTitleClass: 'text-amber-200',
+    explanationTextClass: 'text-white',
+    bottomBarClass: 'border-rose-300/25',
+    prevBtnClass: 'bg-[#661439] hover:bg-[#7d1946] text-white border-rose-300/35',
+    pageActiveClass: 'bg-amber-300 text-slate-950 border-amber-200 ring-amber-300/50',
+    pageInactiveClass: 'bg-[#661439] text-rose-100 hover:bg-[#7d1946] border-rose-300/30',
+    nextBtnClass: 'bg-amber-300 hover:bg-amber-200 text-slate-950 shadow-rose-950/30',
+    popoverClass: 'bg-[#36091f] border-rose-300/40 text-white shadow-2xl',
+  },
+  {
+    id: 'emerald_forest',
+    name: 'Ngọc Lục Bảo',
+    styleLabel: 'Dịu mắt tiết học dài',
+    isLight: false,
+    swatchGradient: 'linear-gradient(135deg, #042926 0%, #106059 100%)',
+    accentSwatch: '#5eead4',
+    canvasBackground: 'linear-gradient(135deg, #042926 0%, #0a4641 50%, #106059 100%)',
+    sheenBackground:
+      'radial-gradient(circle at 18% 12%, rgba(94, 234, 212, 0.16) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(45, 212, 191, 0.14) 0%, transparent 48%)',
+    topBarClass: 'bg-[#031f1c]/95 border-teal-300/25 text-white',
+    counterPillClass: 'bg-[#0c524c] border-teal-300/40 text-teal-50',
+    counterLabelClass: 'text-teal-200',
+    counterValueClass: 'text-amber-300',
+    studentBadgeClass: 'bg-[#0f615a] border-teal-200/40 text-teal-50',
+    studentPlaceholderClass: 'bg-[#08403b]/90 border-teal-300/25 text-teal-100/90',
+    secondaryBtnClass: 'bg-[#0d5750] hover:bg-[#126e65] border-teal-300/35 text-teal-50',
+    questionCardClass: 'bg-[#063833]/95 border-teal-300/35 shadow-[0_20px_50px_rgba(2,22,20,0.45)]',
+    questionDividerClass: 'border-teal-300/25',
+    questionBadgeClass: 'bg-amber-300 text-slate-950',
+    questionMetaClass: 'text-teal-100/90',
+    questionTextClass: 'text-white',
+    optionDefaultClass:
+      'bg-[#0c4f49]/95 border-teal-300/35 text-white hover:bg-[#11665e] hover:border-amber-300 shadow-[0_10px_28px_rgba(2,22,20,0.3)] hover:-translate-y-0.5',
+    optionBadgeClass: 'bg-[#147068] text-amber-200 border-teal-200/40',
+    optionTextClass: 'text-white',
+    optionDimmedClass: 'bg-[#06332f]/60 border-teal-300/15 text-teal-200/60 opacity-70',
+    optionDimmedBadgeClass: 'bg-[#0b4742] text-teal-200/70 border-teal-300/20',
+    aiBannerClass: 'bg-[#052e2a]/95 border-teal-300/40 text-white',
+    aiBannerIconBgClass: 'bg-[#031c1a]',
+    aiBannerTitleClass: 'text-white',
+    aiBannerStopClass: 'bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 border-rose-300/40',
+    explanationCardClass: 'bg-[#063833]/95 border-teal-300/35 text-teal-50',
+    explanationDividerClass: 'border-teal-300/25',
+    explanationTitleClass: 'text-amber-300',
+    explanationTextClass: 'text-white',
+    bottomBarClass: 'border-teal-300/25',
+    prevBtnClass: 'bg-[#0d5750] hover:bg-[#126e65] text-white border-teal-300/35',
+    pageActiveClass: 'bg-amber-300 text-slate-950 border-amber-200 ring-amber-300/50',
+    pageInactiveClass: 'bg-[#0d5750] text-teal-100 hover:bg-[#126e65] border-teal-300/30',
+    nextBtnClass: 'bg-amber-300 hover:bg-amber-200 text-slate-950 shadow-teal-950/30',
+    popoverClass: 'bg-[#042421] border-teal-300/40 text-white shadow-2xl',
+  },
+  {
+    id: 'daylight_minimal',
+    name: 'Sáng Tối Giản',
+    styleLabel: 'Phòng nhiều ánh sáng',
+    isLight: true,
+    swatchGradient: 'linear-gradient(135deg, #f8fafc 0%, #e0e7ff 100%)',
+    accentSwatch: '#4f46e5',
+    canvasBackground: 'linear-gradient(135deg, #f8fafc 0%, #eef2ff 50%, #e2e8f0 100%)',
+    sheenBackground:
+      'radial-gradient(circle at 18% 12%, rgba(99, 102, 241, 0.12) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.12) 0%, transparent 48%)',
+    topBarClass: 'bg-white/95 border-slate-200 text-slate-900 shadow-sm',
+    counterPillClass: 'bg-indigo-50 border-indigo-200 text-indigo-900',
+    counterLabelClass: 'text-indigo-700',
+    counterValueClass: 'text-indigo-700',
+    studentBadgeClass: 'bg-amber-50 border-amber-300 text-slate-900',
+    studentPlaceholderClass: 'bg-slate-100 border-slate-200 text-slate-600',
+    secondaryBtnClass: 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800',
+    questionCardClass: 'bg-white border-indigo-200/90 shadow-[0_16px_40px_rgba(15,23,42,0.08)]',
+    questionDividerClass: 'border-slate-200',
+    questionBadgeClass: 'bg-indigo-600 text-white',
+    questionMetaClass: 'text-slate-600',
+    questionTextClass: 'text-slate-900',
+    optionDefaultClass:
+      'bg-white border-slate-200 text-slate-900 hover:bg-indigo-50 hover:border-indigo-400 shadow-[0_6px_18px_rgba(15,23,42,0.06)] hover:-translate-y-0.5',
+    optionBadgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+    optionTextClass: 'text-slate-900',
+    optionDimmedClass: 'bg-slate-100/80 border-slate-200 text-slate-400 opacity-75',
+    optionDimmedBadgeClass: 'bg-slate-200 text-slate-500 border-slate-300',
+    aiBannerClass: 'bg-amber-50 border-amber-300 text-slate-900',
+    aiBannerIconBgClass: 'bg-slate-900',
+    aiBannerTitleClass: 'text-slate-900',
+    aiBannerStopClass: 'bg-rose-600 hover:bg-rose-700 text-white border-rose-500',
+    explanationCardClass: 'bg-white border-emerald-300 text-slate-800',
+    explanationDividerClass: 'border-slate-200',
+    explanationTitleClass: 'text-emerald-700',
+    explanationTextClass: 'text-slate-800',
+    bottomBarClass: 'border-slate-300',
+    prevBtnClass: 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300',
+    pageActiveClass: 'bg-indigo-600 text-white border-indigo-500 ring-indigo-300',
+    pageInactiveClass: 'bg-white text-slate-700 hover:bg-slate-100 border-slate-300',
+    nextBtnClass: 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-900/15',
+    popoverClass: 'bg-white border-slate-200 text-slate-900 shadow-2xl',
+  },
+];
+
 interface LiveQuizHubProps {
   roomState: RoomState | null;
   textScale: TextScale;
@@ -194,7 +544,35 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [isReadingBoardQuestion, setIsReadingBoardQuestion] = useState<boolean>(false);
   const [boardAiSpeechState, setBoardAiSpeechState] = useState<'idle' | 'calling' | 'speaking'>('idle');
   const [isPresentationFullScreen, setIsPresentationFullScreen] = useState<boolean>(false);
+  const [boardThemeId, setBoardThemeId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('smartboard_presentation_theme') || 'lilac_violet';
+    } catch {
+      return 'lilac_violet';
+    }
+  });
+  const [showBoardThemeMenu, setShowBoardThemeMenu] = useState<boolean>(false);
+  const [showBoardVoiceMenu, setShowBoardVoiceMenu] = useState<boolean>(false);
+  const [activeQuizTitle, setActiveQuizTitle] = useState<string>(() => {
+    try {
+      return localStorage.getItem('smartboard_live_exam_title') || '';
+    } catch {
+      return '';
+    }
+  });
+  const currentBoardTheme = useMemo(
+    () => PRESENTATION_THEMES.find((t) => t.id === boardThemeId) || PRESENTATION_THEMES[0],
+    [boardThemeId]
+  );
+  const handleSelectBoardTheme = (themeId: string) => {
+    setBoardThemeId(themeId);
+    setShowBoardThemeMenu(false);
+    try {
+      localStorage.setItem('smartboard_presentation_theme', themeId);
+    } catch (_) {}
+  };
   const aiCallingTimerRef = useRef<any>(null);
+  const lastManualQuizLaunchAtRef = useRef<number>(0);
   const boardAiSpeechStateRef = useRef<'idle' | 'calling' | 'speaking'>('idle');
   useEffect(() => {
     boardAiSpeechStateRef.current = boardAiSpeechState;
@@ -316,7 +694,27 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   // AI Voice State for Live Quiz Hub
   const [readingQuestionId, setReadingQuestionId] = useState<string | null>(null);
   const [isCallingSpeech, setIsCallingSpeech] = useState<boolean>(false);
-  const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[1]); // Cô giáo dịu dàng
+  const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(() => {
+    try {
+      const savedVoiceId = localStorage.getItem('smartboard_ai_voice_preset');
+      if (savedVoiceId) {
+        const found = VOICE_TONE_PRESETS.find((v) => v.id === savedVoiceId);
+        if (found) return found;
+      }
+    } catch (_) {}
+    return VOICE_TONE_PRESETS[0]; // Cô giáo Kore dịu dàng chuẩn SGK
+  });
+  const [speechSpeed, setSpeechSpeed] = useState<number>(() => getSpeechSpeedMultiplier());
+  const handleSelectVoicePreset = (preset: VoiceTonePreset) => {
+    setSelectedVoice(preset);
+    try {
+      localStorage.setItem('smartboard_ai_voice_preset', preset.id);
+    } catch (_) {}
+  };
+  const handleSelectSpeechSpeed = (nextSpeed: number) => {
+    const updated = setSpeechSpeedMultiplier(nextSpeed);
+    setSpeechSpeed(updated);
+  };
 
   // Lưu & Mở Đề Trắc Nghiệm / Bài Tập Đã Lưu
   const [savedQuizzesList, setSavedQuizzesList] = useState<SavedEducationalItem[]>(() =>
@@ -382,8 +780,17 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     }
   };
 
-  // State chung lưu trữ câu hỏi phòng thi trực tiếp (ưu tiên từ roomState, sau đó localStorage, hoặc currentLesson)
+  // State chung lưu trữ câu hỏi phòng thi trực tiếp (ưu tiên localStorage nếu teacher vừa chọn đề tùy chỉnh, sau đó roomState hoặc currentLesson)
   const [liveExamQuestions, setLiveExamQuestions] = useState<QuizQuestion[]>(() => {
+    try {
+      const saved = localStorage.getItem('smartboard_live_exam_questions');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.id !== 'q_sample_1') {
+          return parsed;
+        }
+      }
+    } catch (_) {}
     if (roomState?.questions && roomState.questions.length > 0) return roomState.questions;
     try {
       const saved = localStorage.getItem('smartboard_live_exam_questions');
@@ -395,15 +802,27 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     return currentLesson?.quizzes || [];
   });
 
-  // Tự động đồng bộ liveExamQuestions mỗi khi roomState.questions cập nhật từ server/firestore
+  // Tự động đồng bộ liveExamQuestions mỗi khi roomState.questions cập nhật từ server/firestore (tránh ghi đè lúc vừa nạp bộ đề mới)
   useEffect(() => {
     if (roomState?.questions && roomState.questions.length > 0) {
+      const timeSinceManualLaunch = Date.now() - lastManualQuizLaunchAtRef.current;
+      const isIncomingDefaultSample =
+        roomState.questions.length === 4 && roomState.questions[0]?.id === 'q_sample_1';
+      if (timeSinceManualLaunch < 4500 && isIncomingDefaultSample) {
+        return;
+      }
       setLiveExamQuestions(roomState.questions);
+      if (roomState.title) {
+        setActiveQuizTitle(roomState.title);
+      }
       try {
         localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(roomState.questions));
+        if (roomState.title) {
+          localStorage.setItem('smartboard_live_exam_title', roomState.title);
+        }
       } catch (_) {}
     }
-  }, [roomState?.questions]);
+  }, [roomState?.questions, roomState?.title]);
 
   // Bộ câu hỏi phòng thi: đọc trực tiếp ngay lập tức, không bao giờ bị rỗng nếu vừa tạo câu hỏi
   const questions: QuizQuestion[] = (
@@ -473,17 +892,18 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       setIsRevealed(false);
       setIsTimerRunning(true);
     }
-    // Pre-warm question audio in background so button click speaks instantly (0ms)
+    // Pre-warm question audio in background with current voice so button click speaks immediately
     if (currentQ) {
       try {
         const cleanQ = (currentQ.question || '').replace(/^câu\s*\d*\s*[:.]\s*/i, '').trim();
         if (cleanQ) {
-          const prefetchUrl = `/api/tts?lang=vi&text=${encodeURIComponent(`Câu hỏi: ${cleanQ}.`)}`;
+          const vName = selectedVoice.geminiVoice || 'Kore';
+          const prefetchUrl = `/api/tts?lang=vi&voice=${encodeURIComponent(vName)}&preset=${encodeURIComponent(selectedVoice.id)}&text=${encodeURIComponent(`Câu hỏi: ${cleanQ}.`)}`;
           fetch(prefetchUrl, { cache: 'force-cache' }).catch(() => {});
         }
       } catch (_) {}
     }
-  }, [activeIndex, currentQ?.id, activeMode]);
+  }, [activeIndex, currentQ?.id, activeMode, selectedVoice.id]);
 
   const handleToggleSpeakCurrentQuestion = (q?: QuizQuestion) => {
     const targetQ = q || currentQ;
@@ -1241,54 +1661,54 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     setTimeout(() => setQuizToast(null), 4500);
   };
 
-  const handleLaunchSavedQuizPresentation = (item: SavedEducationalItem) => {
+  const applySelectedSavedQuiz = async (item: SavedEducationalItem, targetMode: 'presentation' | 'live' | 'exam' | 'creator') => {
+    lastManualQuizLaunchAtRef.current = Date.now();
     setLiveExamQuestions(item.questions);
-    try {
-      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
-    } catch (_) {}
+    setGeneratedQuestions(item.questions);
+    setActiveQuizTitle(item.title);
+    setPromptTopic(item.title);
+    if (item.subject) setSelectedSubject(item.subject);
+    if (item.grade) setSelectedGrade(item.grade);
     setLocalActiveIndex(0);
-    onControlRoom(0, true);
-    setActiveMode('presentation');
     setBoardSelectedOption(null);
     setBoardAnswerResult(null);
     setCongratsMessage('');
     setShowSavedQuizzesModal(false);
+
+    try {
+      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
+      localStorage.setItem('smartboard_live_exam_title', item.title);
+    } catch (_) {}
+
+    if (onApplyQuestions) {
+      await onApplyQuestions(item.questions, item.title);
+    }
+    onControlRoom(0, true);
+    setActiveMode(targetMode);
     gameSounds.playCorrectChime();
+  };
+
+  const handleLaunchSavedQuizPresentation = async (item: SavedEducationalItem) => {
+    await applySelectedSavedQuiz(item, 'presentation');
     setQuizToast(`Đã nạp bài tập "${item.title}" (${item.questions.length} câu) vào chế độ Trình Chiếu Lên Bảng!`);
     setTimeout(() => setQuizToast(null), 3500);
   };
 
-  const handleLaunchSavedQuizLive = (item: SavedEducationalItem) => {
-    setLiveExamQuestions(item.questions);
-    try {
-      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
-    } catch (_) {}
-    onControlRoom(0, true);
-    setActiveMode('live');
-    setShowSavedQuizzesModal(false);
-    gameSounds.playCorrectChime();
+  const handleLaunchSavedQuizLive = async (item: SavedEducationalItem) => {
+    await applySelectedSavedQuiz(item, 'live');
     setQuizToast(`Đã phát bài tập "${item.title}" (${item.questions.length} câu) vào phòng thi trực tiếp!`);
     setTimeout(() => setQuizToast(null), 3500);
   };
 
-  const handleLaunchSavedQuizExam = (item: SavedEducationalItem) => {
-    setLiveExamQuestions(item.questions);
-    try {
-      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
-    } catch (_) {}
-    onControlRoom(0, true);
-    setActiveMode('exam');
-    setShowSavedQuizzesModal(false);
-    gameSounds.playCorrectChime();
+  const handleLaunchSavedQuizExam = async (item: SavedEducationalItem) => {
+    await applySelectedSavedQuiz(item, 'exam');
     setQuizToast(`Đã nạp bài tập "${item.title}" vào chế độ Phòng Thi Khóa Màn Hình!`);
     setTimeout(() => setQuizToast(null), 3500);
   };
 
-  const handleLaunchSavedQuizCreator = (item: SavedEducationalItem) => {
-    setGeneratedQuestions(item.questions);
-    setActiveMode('creator');
-    setShowSavedQuizzesModal(false);
-    setQuizToast(`Đã nạp bài tập "${item.title}" vào mục Soạn Đề AI để chỉnh sửa!`);
+  const handleLaunchSavedQuizCreator = async (item: SavedEducationalItem) => {
+    await applySelectedSavedQuiz(item, 'creator');
+    setQuizToast(`Đã nạp bài tập "${item.title}" vào mục Soạn Đề AI để chỉnh sửa & trình chiếu!`);
     setTimeout(() => setQuizToast(null), 3500);
   };
 
@@ -2365,7 +2785,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         value={selectedVoice.id}
                         onChange={(e) => {
                           const found = VOICE_TONE_PRESETS.find((p) => p.id === e.target.value);
-                          if (found) setSelectedVoice(found);
+                          if (found) handleSelectVoicePreset(found);
                         }}
                         className="text-[11px] font-bold text-slate-700 bg-white border border-slate-300 rounded-lg px-2 py-1 focus:outline-none"
                       >
@@ -2692,41 +3112,50 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         </div>
       )}
 
-      {/* VIEW: TRÌNH CHIẾU CÂU HỎI & GỌI HỌC SINH LÊN BẢNG LÀM BÀI TRỰC TIẾP TRÊN TIVI 75 INCH (TÍM HOA CÀ) */}
+      {/* VIEW: TRÌNH CHIẾU CÂU HỎI & GỌI HỌC SINH LÊN BẢNG TRÊN TIVI 75 INCH (ĐA PHONG CÁCH NỀN) */}
       {activeMode === 'presentation' && (
         <div
-          className={`flex flex-col relative text-white ${
+          className={`flex flex-col relative transition-colors duration-300 ${
+            currentBoardTheme.isLight ? 'text-slate-900' : 'text-white'
+          } ${
             isPresentationFullScreen
               ? 'fixed inset-0 z-[9999] overflow-y-auto'
               : 'flex-1 overflow-hidden'
           }`}
           style={{
-            background: 'linear-gradient(135deg, #2d1250 0%, #4b237d 48%, #6838a6 100%)',
+            background: currentBoardTheme.canvasBackground,
           }}
         >
-          {/* Subtle ambient lilac radial sheen (pure compositor-friendly gradient, zero blur lag on 75" TV) */}
+          {/* Ambient radial sheen (compositor-friendly gradient, 60fps on 75" TV) */}
           <div
-            className="pointer-events-none absolute inset-0 opacity-60"
+            className="pointer-events-none absolute inset-0 opacity-70"
             style={{
-              background:
-                'radial-gradient(circle at 18% 12%, rgba(216, 180, 254, 0.22) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(192, 132, 252, 0.20) 0%, transparent 48%)',
+              background: currentBoardTheme.sheenBackground,
             }}
           />
 
           {/* Top Status & Controls Bar */}
-          <div className="relative flex flex-wrap items-center justify-between px-4 sm:px-6 py-3.5 bg-[#230c40]/95 border-b border-purple-300/25 z-20 shrink-0 gap-3 sticky top-0 shadow-[0_8px_28px_rgba(16,4,36,0.45)]">
-            {/* Left: Question Indicator & Called Student Badge */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="px-4 py-2 rounded-2xl bg-[#49217a] border border-purple-300/45 text-purple-100 font-mono text-base font-black flex items-center gap-2 shadow-inner tabular-nums">
-                <span className="text-purple-200 tracking-wide">CÂU</span>
-                <span className="text-2xl text-amber-300">{activeIndex + 1}/{questions.length}</span>
+          <div
+            className={`relative flex flex-wrap items-center justify-between px-4 sm:px-6 py-3.5 border-b z-30 shrink-0 gap-3 sticky top-0 shadow-[0_8px_28px_rgba(15,23,42,0.18)] ${currentBoardTheme.topBarClass}`}
+          >
+            {/* Left: Question Indicator, Quiz Title & Called Student */}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div
+                className={`px-4 py-2 rounded-2xl border font-mono text-base font-black flex items-center gap-2 shadow-inner tabular-nums ${currentBoardTheme.counterPillClass}`}
+              >
+                <span className={`tracking-wide ${currentBoardTheme.counterLabelClass}`}>CÂU</span>
+                <span className={`text-2xl ${currentBoardTheme.counterValueClass}`}>
+                  {activeIndex + 1}/{questions.length}
+                </span>
               </div>
 
               {boardSelectedStudent ? (
-                <div className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-[#54268c] border border-purple-200/45 text-purple-50 font-bold text-sm shadow-md">
+                <div
+                  className={`flex items-center gap-2.5 px-4 py-2 rounded-2xl border font-bold text-sm shadow-md ${currentBoardTheme.studentBadgeClass}`}
+                >
                   <span className="text-xl" aria-hidden="true">🎒</span>
                   <span>Học sinh lên bảng:</span>
-                  <span className="text-amber-300 font-black text-base underline decoration-amber-300 decoration-2 underline-offset-4">
+                  <span className={`font-black text-base underline decoration-2 underline-offset-4 ${currentBoardTheme.isLight ? 'text-indigo-700 decoration-indigo-500' : 'text-amber-300 decoration-amber-300'}`}>
                     {boardSelectedStudent}
                   </span>
                   <button
@@ -2736,24 +3165,28 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       setBoardAnswerResult(null);
                       setCongratsMessage('');
                     }}
-                    className="ml-1 p-1 hover:bg-white/15 rounded-lg text-purple-200 hover:text-white cursor-pointer"
+                    className="ml-1 p-1 hover:bg-black/15 rounded-lg opacity-80 hover:opacity-100 cursor-pointer"
                     title="Bỏ chọn học sinh"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 text-purple-100/90 text-xs sm:text-sm font-medium bg-[#3b1966]/90 px-4 py-2 rounded-2xl border border-purple-300/25">
-                  <span>Chưa gọi học sinh · Bấm &quot;Gọi Lên Bảng&quot; để chọn ngẫu nhiên</span>
+                <div
+                  className={`flex items-center gap-2 text-xs sm:text-sm font-medium px-4 py-2 rounded-2xl border ${currentBoardTheme.studentPlaceholderClass}`}
+                >
+                  <span className="truncate max-w-[260px] sm:max-w-xs">
+                    {activeQuizTitle ? `Đề: ${activeQuizTitle}` : 'Bấm "Gọi Lên Bảng" để chọn học sinh'}
+                  </span>
                 </div>
               )}
             </div>
 
             {/* Right: Quick Action Controls */}
-            <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={handleCallRandomStudent}
-                className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-orange-400 hover:from-amber-300 hover:to-orange-300 text-slate-950 font-black text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-purple-950/40 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+                className="px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-orange-400 hover:from-amber-300 hover:to-orange-300 text-slate-950 font-black text-xs md:text-sm flex items-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
                 title="Gọi ngẫu nhiên học sinh trong lớp lên bảng trả lời"
               >
                 <Dice5 className="w-4 h-4 text-slate-950" />
@@ -2762,20 +3195,116 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
               <button
                 onClick={() => setShowCallStudentModal(true)}
-                className="px-4 py-2.5 rounded-2xl bg-[#4f2485] hover:bg-[#602e9e] border border-purple-300/35 text-purple-50 font-bold text-xs md:text-sm flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0"
+                className={`px-3.5 py-2.5 rounded-2xl border font-bold text-xs md:text-sm flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${currentBoardTheme.secondaryBtnClass}`}
                 title={`Chọn học sinh cụ thể từ danh sách ${currentClassroom?.name ? (currentClassroom.name.toLowerCase().startsWith('lớp') ? currentClassroom.name : `Lớp ${currentClassroom.name}`) : 'lớp'}`}
               >
-                <Users className="w-4 h-4 text-purple-200" />
+                <Users className="w-4 h-4" />
                 <span className="hidden sm:inline">
                   Danh Sách {currentClassroom?.name ? (currentClassroom.name.toLowerCase().startsWith('lớp') ? currentClassroom.name : `Lớp ${currentClassroom.name}`) : 'Lớp'}
                 </span>
               </button>
 
+              {/* Chọn Giọng Đọc AI */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBoardVoiceMenu((v) => !v);
+                    setShowBoardThemeMenu(false);
+                  }}
+                  className={`px-3.5 py-2.5 rounded-2xl border font-bold text-xs md:text-sm flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${currentBoardTheme.secondaryBtnClass}`}
+                  title={`Chọn giọng đọc AI (${selectedVoice.name})`}
+                >
+                  <Mic className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="hidden md:inline max-w-[140px] truncate">{selectedVoice.label}</span>
+                  <span className="md:hidden">Giọng AI</span>
+                  <ChevronDown className="w-3.5 h-3.5 opacity-80" />
+                </button>
+
+                {showBoardVoiceMenu && (
+                  <div
+                    className={`absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border p-3 z-50 space-y-1.5 ${currentBoardTheme.popoverClass}`}
+                  >
+                    <div className="flex items-center justify-between px-2 py-1.5 border-b border-current/10">
+                      <span className="text-xs font-black uppercase tracking-wider opacity-85">
+                        Chọn Giọng Đọc AI Truyền Cảm
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowBoardVoiceMenu(false)}
+                        className="p-1 rounded-lg hover:bg-black/15 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto space-y-1 pr-1">
+                      {VOICE_TONE_PRESETS.slice(0, 8).map((preset) => {
+                        const isSel = selectedVoice.id === preset.id;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => {
+                              handleSelectVoicePreset(preset);
+                              setShowBoardVoiceMenu(false);
+                            }}
+                            className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                              isSel
+                                ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-sm'
+                                : currentBoardTheme.isLight
+                                ? 'bg-slate-50 hover:bg-indigo-50 border-slate-200 text-slate-800'
+                                : 'bg-white/5 hover:bg-white/15 border-white/10 text-white'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-xs font-black truncate">{preset.label}</div>
+                              <div className={`text-[11px] truncate ${isSel ? 'text-slate-800' : 'opacity-75'}`}>
+                                {preset.sub}
+                              </div>
+                            </div>
+                            {isSel && <Check className="w-4 h-4 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="pt-2 border-t border-current/10 flex items-center justify-between gap-2 px-1">
+                      <span className="text-[11px] font-bold opacity-80 whitespace-nowrap">Tốc độ đọc:</span>
+                      <div className="flex items-center gap-1">
+                        {[
+                          { val: 0.9, label: 'Chậm' },
+                          { val: 1.0, label: 'Chuẩn' },
+                          { val: 1.15, label: 'Nhanh' },
+                          { val: 1.3, label: 'Rất nhanh' },
+                        ].map((sp) => {
+                          const active = Math.abs(speechSpeed - sp.val) < 0.04;
+                          return (
+                            <button
+                              key={sp.val}
+                              type="button"
+                              onClick={() => handleSelectSpeechSpeed(sp.val)}
+                              className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer whitespace-nowrap ${
+                                active
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-xs'
+                                  : currentBoardTheme.isLight
+                                  ? 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                                  : 'bg-white/10 border-white/15 text-white/90 hover:bg-white/20'
+                              }`}
+                            >
+                              {sp.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={handleReadBoardQuestion}
-                className={`px-4 py-2.5 rounded-2xl border text-xs md:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`px-3.5 py-2.5 rounded-2xl border text-xs md:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   boardAiSpeechState === 'calling'
-                    ? 'bg-amber-400/20 border-amber-300 text-amber-200 shadow-lg'
+                    ? 'bg-amber-400/20 border-amber-300 text-amber-300 shadow-lg'
                     : isReadingBoardQuestion
                     ? 'bg-rose-600 border-rose-300 text-white shadow-lg'
                     : 'bg-[#6d28d9] hover:bg-[#7c3aed] border-purple-200/45 text-white shadow-md'
@@ -2785,7 +3314,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     ? 'Đang gọi trợ lý AI chuẩn bị giọng đọc...'
                     : isReadingBoardQuestion
                     ? 'Dừng đọc câu hỏi'
-                    : 'AI đọc nội dung câu hỏi và các phương án bằng tiếng Việt'
+                    : `AI đọc câu hỏi bằng ${selectedVoice.label}`
                 }
               >
                 {boardAiSpeechState === 'calling' ? (
@@ -2806,6 +3335,85 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 )}
               </button>
 
+              {/* Chọn Phong Cách & Màu Nền Trình Chiếu */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBoardThemeMenu((v) => !v);
+                    setShowBoardVoiceMenu(false);
+                  }}
+                  className={`px-3.5 py-2.5 rounded-2xl border font-bold text-xs md:text-sm flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${currentBoardTheme.secondaryBtnClass}`}
+                  title="Đổi màu sắc & phong cách hình nền trình chiếu"
+                >
+                  <span
+                    className="w-4 h-4 rounded-full border border-white/60 shrink-0 shadow-xs"
+                    style={{ background: currentBoardTheme.swatchGradient }}
+                  />
+                  <Palette className="w-4 h-4 shrink-0 hidden sm:inline" />
+                  <span className="hidden lg:inline">{currentBoardTheme.name}</span>
+                  <span className="lg:hidden">Nền</span>
+                  <ChevronDown className="w-3.5 h-3.5 opacity-80" />
+                </button>
+
+                {showBoardThemeMenu && (
+                  <div
+                    className={`absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border p-3.5 z-50 space-y-2.5 ${currentBoardTheme.popoverClass}`}
+                  >
+                    <div className="flex items-center justify-between pb-2 border-b border-current/15">
+                      <span className="text-xs font-black uppercase tracking-wider opacity-85">
+                        Phong Cách &amp; Hình Nền Trình Chiếu
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowBoardThemeMenu(false)}
+                        className="p-1 rounded-lg hover:bg-black/15 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1.5 max-h-80 overflow-y-auto pr-1">
+                      {PRESENTATION_THEMES.map((theme) => {
+                        const isSel = currentBoardTheme.id === theme.id;
+                        return (
+                          <button
+                            key={theme.id}
+                            type="button"
+                            onClick={() => handleSelectBoardTheme(theme.id)}
+                            className={`w-full text-left p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                              isSel
+                                ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-sm'
+                                : currentBoardTheme.isLight
+                                ? 'bg-slate-50 hover:bg-indigo-50 border-slate-200 text-slate-800'
+                                : 'bg-white/5 hover:bg-white/15 border-white/15 text-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div
+                                className="w-9 h-9 rounded-xl border border-white/40 shrink-0 flex items-center justify-center shadow-inner"
+                                style={{ background: theme.swatchGradient }}
+                              >
+                                <span
+                                  className="w-3 h-3 rounded-full border border-white/60"
+                                  style={{ backgroundColor: theme.accentSwatch }}
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-black truncate">{theme.name}</div>
+                                <div className={`text-[11px] truncate ${isSel ? 'text-slate-800' : 'opacity-75'}`}>
+                                  {theme.styleLabel}
+                                </div>
+                              </div>
+                            </div>
+                            {isSel && <Check className="w-4 h-4 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {(boardSelectedOption !== null || boardAnswerResult !== null) && (
                 <button
                   onClick={() => {
@@ -2813,10 +3421,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     setBoardAnswerResult(null);
                     setCongratsMessage('');
                   }}
-                  className="px-4 py-2.5 rounded-2xl bg-[#4f2485] hover:bg-[#602e9e] border border-amber-300/50 text-amber-200 font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0"
+                  className={`px-3.5 py-2.5 rounded-2xl border font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${currentBoardTheme.secondaryBtnClass}`}
                   title="Xóa lựa chọn để học sinh thử lại"
                 >
-                  <RotateCcw className="w-4 h-4 text-amber-300" />
+                  <RotateCcw className="w-4 h-4 text-amber-400" />
                   <span>Làm Lại</span>
                 </button>
               )}
@@ -2826,6 +3434,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 onClick={() => {
                   const nextVal = !isPresentationFullScreen;
                   setIsPresentationFullScreen(nextVal);
+                  setShowBoardThemeMenu(false);
+                  setShowBoardVoiceMenu(false);
                   if (nextVal) {
                     try {
                       if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
@@ -2840,10 +3450,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     } catch (_) {}
                   }
                 }}
-                className={`px-4 py-2.5 rounded-2xl border text-xs md:text-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`px-3.5 py-2.5 rounded-2xl border text-xs md:text-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   isPresentationFullScreen
                     ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-lg font-black'
-                    : 'bg-[#4f2485] hover:bg-[#602e9e] border-purple-300/35 text-emerald-200 hover:text-white'
+                    : currentBoardTheme.secondaryBtnClass
                 }`}
                 title={isPresentationFullScreen ? 'Thoát toàn màn hình (Esc)' : 'Phóng to full màn hình TV 75 inch'}
               >
@@ -2854,7 +3464,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   </>
                 ) : (
                   <>
-                    <Maximize2 className="w-4 h-4 text-emerald-300" />
+                    <Maximize2 className="w-4 h-4 text-emerald-400" />
                     <span>Toàn Màn Hình</span>
                   </>
                 )}
@@ -2869,11 +3479,13 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             }`}
           >
             {!currentQ ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-purple-200">
-                <BookOpen className="w-16 h-16 text-purple-300/70 mb-4" />
-                <h3 className="text-xl font-bold text-white mb-2">Chưa có câu hỏi nào để trình chiếu</h3>
-                <p className="text-sm max-w-md text-purple-100/80">
-                  Vui lòng chuyển sang tab &quot;Soạn Đề AI &amp; Ma Trận&quot; để tạo đề hoặc nạp câu hỏi trắc nghiệm.
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-12">
+                <BookOpen className="w-16 h-16 opacity-60 mb-4" />
+                <h3 className={`text-xl font-bold mb-2 ${currentBoardTheme.questionTextClass}`}>
+                  Chưa có câu hỏi nào để trình chiếu
+                </h3>
+                <p className="text-sm max-w-md opacity-80">
+                  Vui lòng chọn từ &quot;Kho Đề Đã Lưu&quot; hoặc chuyển sang tab &quot;Soạn Đề AI &amp; Ma Trận&quot; để nạp câu hỏi.
                 </p>
                 <button
                   onClick={() => setActiveMode('creator')}
@@ -2886,11 +3498,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               <>
                 {/* AI Character Voice Assistant Status Banner */}
                 {boardAiSpeechState !== 'idle' && (
-                  <div className="p-4 rounded-3xl bg-[#34145e]/95 border-2 border-purple-300/45 shadow-2xl flex items-center justify-between gap-4">
+                  <div className={`p-4 rounded-3xl border-2 shadow-2xl flex items-center justify-between gap-4 ${currentBoardTheme.aiBannerClass}`}>
                     <div className="flex items-center gap-3.5">
                       <div className="relative shrink-0">
                         <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-400 via-violet-400 to-amber-300 p-0.5 shadow-lg">
-                          <div className="w-full h-full bg-[#240d42] rounded-[14px] flex items-center justify-center text-white">
+                          <div className={`w-full h-full rounded-[14px] flex items-center justify-center text-white ${currentBoardTheme.aiBannerIconBgClass}`}>
                             {boardAiSpeechState === 'calling' ? (
                               <Bot className="w-6 h-6 text-amber-300 animate-bounce" />
                             ) : (
@@ -2901,28 +3513,28 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       </div>
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2 flex-wrap text-xs md:text-sm">
-                          <h4 className="font-black text-white flex items-center gap-1.5">
+                          <h4 className={`font-black flex items-center gap-1.5 ${currentBoardTheme.aiBannerTitleClass}`}>
                             {boardAiSpeechState === 'calling' ? (
                               <>
                                 <span>Đang kết nối giọng đọc AI</span>
-                                <Loader2 className="w-3.5 h-3.5 text-amber-300 animate-spin" />
+                                <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin" />
                               </>
                             ) : (
                               <span>Trợ lý AI đang đọc câu hỏi</span>
                             )}
                           </h4>
-                          <span className="text-purple-200/80" aria-hidden="true">·</span>
-                          <span className="text-purple-200 font-semibold">
+                          <span className="opacity-60" aria-hidden="true">·</span>
+                          <span className="font-semibold opacity-90">
                             {selectedVoice.label || 'Cô giáo dịu dàng'}
                           </span>
                         </div>
-                        <p className="text-xs text-purple-100/90 flex items-center gap-2 flex-wrap">
+                        <p className="text-xs opacity-90 flex items-center gap-2 flex-wrap">
                           {boardAiSpeechState === 'calling' ? (
-                            <span className="text-amber-200 font-medium">
+                            <span className="font-medium">
                               Đang chuẩn bị âm thanh tiếng Việt chuẩn SGK, Thầy/Cô vui lòng chờ trong giây lát...
                             </span>
                           ) : (
-                            <span className="text-emerald-200 font-medium">
+                            <span className="font-medium">
                               Đang phát âm thanh bài giảng trực tiếp qua loa phòng học
                             </span>
                           )}
@@ -2935,7 +3547,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         setIsReadingBoardQuestion(false);
                         setBoardAiSpeechState('idle');
                       }}
-                      className="px-4 py-2 rounded-2xl bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 border border-rose-300/40 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 active:scale-95"
+                      className={`px-4 py-2 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 active:scale-95 ${currentBoardTheme.aiBannerStopClass}`}
                     >
                       <VolumeX className="w-4 h-4" />
                       <span>Dừng Đọc</span>
@@ -2956,41 +3568,43 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     '';
 
                   return (
-                    <div className="p-6 md:p-8 rounded-3xl bg-[#381863]/95 border-2 border-purple-300/35 shadow-[0_20px_50px_rgba(16,4,36,0.42)] relative overflow-hidden shrink-0">
-                      <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-purple-300/25 flex-wrap gap-3">
+                    <div className={`p-6 md:p-8 rounded-3xl border-2 relative overflow-hidden shrink-0 ${currentBoardTheme.questionCardClass}`}>
+                      <div className={`flex items-center justify-between pb-3.5 mb-4 border-b flex-wrap gap-3 ${currentBoardTheme.questionDividerClass}`}>
                         <div className="flex items-center gap-3 flex-wrap">
-                          <span className="px-3.5 py-1.5 rounded-xl bg-amber-400 text-slate-950 font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-1.5 shadow-sm tabular-nums">
-                            <FileText className="w-4 h-4 text-slate-950" />
+                          <span className={`px-3.5 py-1.5 rounded-xl font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-1.5 shadow-sm tabular-nums ${currentBoardTheme.questionBadgeClass}`}>
+                            <FileText className="w-4 h-4" />
                             <span>ĐỀ BÀI CÂU {activeIndex + 1}/{questions.length}</span>
                           </span>
-                          <div className="flex items-center gap-2 text-xs md:text-sm font-semibold text-purple-100/90">
+                          <div className={`flex items-center gap-2 text-xs md:text-sm font-semibold ${currentBoardTheme.questionMetaClass}`}>
                             <span>{(currentQ as any).subject || selectedSubject}</span>
-                            <span aria-hidden="true" className="text-purple-300/60">·</span>
+                            <span aria-hidden="true" className="opacity-50">·</span>
                             <span>{(currentQ as any).grade || selectedGrade}</span>
                             {currentQ.difficulty && (
                               <>
-                                <span aria-hidden="true" className="text-purple-300/60">·</span>
-                                <span className="text-amber-200">{currentQ.difficulty}</span>
+                                <span aria-hidden="true" className="opacity-50">·</span>
+                                <span className={currentBoardTheme.isLight ? 'text-indigo-700 font-bold' : 'text-amber-200'}>
+                                  {currentQ.difficulty}
+                                </span>
                               </>
                             )}
                           </div>
                         </div>
 
-                        <div className="text-xs md:text-sm text-purple-200/85 font-medium hidden sm:flex items-center gap-2">
-                          <Tv className="w-4 h-4 text-amber-300" />
+                        <div className={`text-xs md:text-sm font-medium hidden sm:flex items-center gap-2 ${currentBoardTheme.questionMetaClass}`}>
+                          <Tv className={`w-4 h-4 ${currentBoardTheme.isLight ? 'text-indigo-600' : 'text-amber-300'}`} />
                           <span>Trình Chiếu 75&quot;</span>
-                          <span aria-hidden="true" className="text-purple-300/50">·</span>
+                          <span aria-hidden="true" className="opacity-45">·</span>
                           <span>Chạm đáp án trực tiếp để trả lời</span>
                         </div>
                       </div>
 
                       {/* Question Content & Formulas with Guaranteed High Contrast */}
-                      <div className="text-xl md:text-2xl lg:text-[28px] font-bold text-white leading-relaxed tracking-normal select-text">
+                      <div className={`text-xl md:text-2xl lg:text-[28px] font-bold leading-relaxed tracking-normal select-text ${currentBoardTheme.questionTextClass}`}>
                         <QuizRichContentRenderer
                           content={presentationQuestionText || 'Chưa có nội dung đề bài.'}
                           diagramType={currentQ.diagramType}
                           diagramData={currentQ.diagramData}
-                          textClassName="text-white font-bold text-xl md:text-2xl lg:text-[28px]"
+                          textClassName={`${currentBoardTheme.questionTextClass} font-bold text-xl md:text-2xl lg:text-[28px]`}
                           isPresentationMode={true}
                         />
                       </div>
@@ -3005,28 +3619,31 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     const isCorrect = opt.key === currentQ.correctAnswer;
                     const hasAnswered = boardAnswerResult !== null;
 
-                    let cardClass =
-                      'bg-[#48227a]/95 border-purple-300/35 text-white hover:bg-[#582b94] hover:border-amber-300 shadow-[0_10px_28px_rgba(16,4,36,0.3)] hover:-translate-y-0.5';
-                    let badgeClass = 'bg-[#6737ab] text-amber-200 border-purple-200/40';
+                    let cardClass = currentBoardTheme.optionDefaultClass;
+                    let badgeClass = currentBoardTheme.optionBadgeClass;
+                    let optTextClass = currentBoardTheme.optionTextClass;
 
                     if (hasAnswered) {
                       if (isSelected) {
                         if (isCorrect) {
                           cardClass =
-                            'bg-emerald-700/95 border-2 border-emerald-300 text-white ring-2 ring-emerald-300/40 shadow-xl scale-[1.01]';
+                            'bg-emerald-700 border-2 border-emerald-300 text-white ring-2 ring-emerald-300/40 shadow-xl scale-[1.01]';
                           badgeClass = 'bg-emerald-300 text-slate-950 font-black border-emerald-200';
+                          optTextClass = 'text-white';
                         } else {
                           cardClass =
-                            'bg-rose-800/95 border-2 border-rose-300 text-white ring-2 ring-rose-300/40 shadow-lg';
+                            'bg-rose-800 border-2 border-rose-300 text-white ring-2 ring-rose-300/40 shadow-lg';
                           badgeClass = 'bg-rose-300 text-slate-950 font-black border-rose-200';
+                          optTextClass = 'text-white';
                         }
                       } else if (isCorrect) {
                         cardClass =
-                          'bg-emerald-900/75 border-2 border-emerald-300 border-dashed text-emerald-50';
-                        badgeClass = 'bg-emerald-500 text-slate-950 font-black border-emerald-300';
+                          'bg-emerald-900/90 border-2 border-emerald-300 border-dashed text-emerald-50';
+                        badgeClass = 'bg-emerald-400 text-slate-950 font-black border-emerald-300';
+                        optTextClass = 'text-white';
                       } else {
-                        cardClass = 'bg-[#36175e]/60 border-purple-300/20 text-purple-200/60 opacity-70';
-                        badgeClass = 'bg-[#462178] text-purple-300/70 border-purple-300/20';
+                        cardClass = currentBoardTheme.optionDimmedClass;
+                        badgeClass = currentBoardTheme.optionDimmedBadgeClass;
                       }
                     }
 
@@ -3043,7 +3660,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         >
                           {opt.key}
                         </div>
-                        <div className="flex-1 text-base md:text-xl font-bold leading-snug text-white">
+                        <div className={`flex-1 text-base md:text-xl font-bold leading-snug ${optTextClass}`}>
                           <MathFormulaRenderer content={opt.text} />
                         </div>
 
@@ -3159,26 +3776,26 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
                 {/* 4. Detailed Explanation Card when Answered */}
                 {boardAnswerResult !== null && currentQ.explanation && (
-                  <div className="p-6 md:p-8 rounded-3xl bg-[#381863]/95 border-2 border-purple-300/40 text-purple-50 shadow-xl animate-fade-in">
-                    <div className="flex items-center gap-3 pb-3 mb-3 border-b border-purple-300/25">
-                      <CheckCircle2 className="w-6 h-6 text-emerald-300 shrink-0" />
-                      <h4 className="text-sm font-black uppercase tracking-wider text-amber-200">
+                  <div className={`p-6 md:p-8 rounded-3xl border-2 shadow-xl animate-fade-in ${currentBoardTheme.explanationCardClass}`}>
+                    <div className={`flex items-center gap-3 pb-3 mb-3 border-b ${currentBoardTheme.explanationDividerClass}`}>
+                      <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                      <h4 className={`text-sm font-black uppercase tracking-wider ${currentBoardTheme.explanationTitleClass}`}>
                         HƯỚNG DẪN GIẢI CHI TIẾT &amp; BÀI HỌC KINH NGHIỆM
                       </h4>
                     </div>
-                    <div className="text-xl md:text-2xl font-medium leading-relaxed text-white">
+                    <div className={`text-xl md:text-2xl font-medium leading-relaxed ${currentBoardTheme.explanationTextClass}`}>
                       <MathFormulaRenderer content={currentQ.explanation} />
                     </div>
                   </div>
                 )}
 
                 {/* 5. Bottom Navigation & Question Picker */}
-                <div className="flex flex-wrap items-center justify-between pt-4 border-t border-purple-300/25 gap-4">
+                <div className={`flex flex-wrap items-center justify-between pt-4 border-t gap-4 ${currentBoardTheme.bottomBarClass}`}>
                   {/* Prev Button */}
                   <button
                     onClick={handlePrevQuestion}
                     disabled={activeIndex <= 0}
-                    className="px-6 py-3 rounded-2xl bg-[#4c2482] hover:bg-[#5e2fa0] text-white font-bold text-sm flex items-center gap-2 border border-purple-300/35 disabled:opacity-35 disabled:pointer-events-none transition-all cursor-pointer"
+                    className={`px-6 py-3 rounded-2xl font-bold text-sm flex items-center gap-2 border disabled:opacity-35 disabled:pointer-events-none transition-all cursor-pointer ${currentBoardTheme.prevBtnClass}`}
                   >
                     <ChevronLeft className="w-5 h-5" />
                     <span>Câu Trước</span>
@@ -3198,8 +3815,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         }}
                         className={`w-10 h-10 md:w-11 md:h-11 rounded-2xl font-black text-sm transition-all cursor-pointer flex items-center justify-center border tabular-nums ${
                           activeIndex === idx
-                            ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-lg scale-110 ring-2 ring-amber-300/50'
-                            : 'bg-[#4c2482] text-purple-100 hover:bg-[#6030a3] border-purple-300/30'
+                            ? `shadow-lg scale-110 ring-2 ${currentBoardTheme.pageActiveClass}`
+                            : currentBoardTheme.pageInactiveClass
                         }`}
                       >
                         {idx + 1}
@@ -3211,7 +3828,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   <button
                     onClick={handleNextQuestion}
                     disabled={activeIndex >= questions.length - 1}
-                    className="px-6 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-purple-950/30 disabled:opacity-35 disabled:pointer-events-none transition-all cursor-pointer"
+                    className={`px-6 py-3 rounded-2xl font-black text-sm flex items-center gap-2 shadow-lg disabled:opacity-35 disabled:pointer-events-none transition-all cursor-pointer ${currentBoardTheme.nextBtnClass}`}
                   >
                     <span>Câu Kế Tiếp</span>
                     <ChevronRight className="w-5 h-5" />

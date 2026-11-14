@@ -525,6 +525,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('whiteboard');
   const [textScale, setTextScale] = useState<TextScale>('large'); // Default 125% for 75" TV
   const [roomState, setRoomState] = useState<RoomState | null>(null);
+  const lastRoomMutationAtRef = useRef<number>(0);
+  const prevSyncedLessonIdRef = useRef<string>('');
+  const hasRecoveredLocalQuizRef = useRef<boolean>(false);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
@@ -595,6 +598,21 @@ export default function App() {
   const handleOpenTemporaryLesson = useCallback((lesson: LessonDoc) => {
     setActiveOpenedLesson(lesson);
     setActiveLessonId(lesson.id);
+    try {
+      localStorage.setItem('smartboard_active_lesson', lesson.id);
+      localStorage.setItem('smartboard_active_lesson_obj', JSON.stringify({
+        id: lesson.id,
+        title: lesson.title,
+        fileName: lesson.fileName,
+        fileUrl: lesson.fileUrl,
+        fileType: lesson.fileType,
+        subject: lesson.subject,
+        grade: lesson.grade,
+        slides: lesson.slides,
+        rawText: lesson.rawText,
+        quizzes: lesson.quizzes,
+      }));
+    } catch {}
   }, []);
 
   // Explicitly Save Lesson to Document Library (Kho bài giảng)
@@ -618,6 +636,7 @@ export default function App() {
         grade: docWithAuthor.grade,
         slides: docWithAuthor.slides,
         rawText: docWithAuthor.rawText,
+        quizzes: docWithAuthor.quizzes,
       }));
     } catch {}
     setLessons((prev) => {
@@ -743,6 +762,7 @@ export default function App() {
         sheetData: lesson.sheetData,
         htmlContent: lesson.htmlContent,
         extractedSummary: lesson.extractedSummary,
+        quizzes: lesson.quizzes,
       }));
     } catch {}
   }, []);
@@ -762,14 +782,60 @@ export default function App() {
     localStorage.setItem('smartboard_active_teacher', activeTeacherId);
   }, [activeTeacherId, isGuestMode]);
 
-  // Fetch Room State from backend periodically
+  // Fetch Room State from backend periodically (ignoring stale responses that raced a recent quiz change)
   const fetchRoom = useCallback(async (pin: string = '758899') => {
+    const startedAt = Date.now();
     try {
       const res = await fetch(`/api/rooms/${pin}`);
-      if (res.ok) {
-        const data = await res.json();
-        setRoomState(data);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (lastRoomMutationAtRef.current > startedAt - 200) {
+        return;
       }
+
+      // If server restarted and only holds default sample questions while teacher already chose a custom quiz locally, restore it once
+      const isServerDefaultSample =
+        Array.isArray(data?.questions) &&
+        data.questions.length === 4 &&
+        data.questions[0]?.id === 'q_sample_1';
+
+      if (!hasRecoveredLocalQuizRef.current) {
+        hasRecoveredLocalQuizRef.current = true;
+        if (isServerDefaultSample) {
+          try {
+            const savedQsRaw = localStorage.getItem('smartboard_live_exam_questions');
+            const savedTitle = localStorage.getItem('smartboard_live_exam_title') || '';
+            if (savedQsRaw) {
+              const parsedQs = JSON.parse(savedQsRaw);
+              if (
+                Array.isArray(parsedQs) &&
+                parsedQs.length > 0 &&
+                parsedQs[0]?.id !== 'q_sample_1'
+              ) {
+                lastRoomMutationAtRef.current = Date.now();
+                const syncRes = await fetch('/api/rooms', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    pin,
+                    title: savedTitle || data.title || 'Bài tập đã chọn',
+                    questions: parsedQs,
+                  }),
+                });
+                if (syncRes.ok) {
+                  const synced = await syncRes.json();
+                  if (synced?.room) {
+                    setRoomState(synced.room);
+                    return;
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      setRoomState(data);
     } catch (e) {
       console.warn('Could not fetch room', e);
     }
@@ -812,9 +878,19 @@ export default function App() {
     }
   };
 
-  // Sync Room with active lesson questions when switching lesson
+  // Sync Room with active lesson questions ONLY when switching to a genuinely different lesson that has quizzes
   useEffect(() => {
+    const lessonId = currentLesson?.id || '';
+    if (!lessonId || lessonId === prevSyncedLessonIdRef.current) return;
+    prevSyncedLessonIdRef.current = lessonId;
+
     if (currentLesson && currentLesson.quizzes?.length > 0) {
+      lastRoomMutationAtRef.current = Date.now();
+      try {
+        localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(currentLesson.quizzes));
+        localStorage.setItem('smartboard_live_exam_title', currentLesson.title || '');
+      } catch (_) {}
+
       fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1480,6 +1556,7 @@ export default function App() {
                 classroom={activeTeacher?.classes?.[0]}
                 teacher={activeTeacher}
                 onControlRoom={async (idx, isLive) => {
+                  lastRoomMutationAtRef.current = Date.now();
                   setRoomState((prev) => {
                     if (!prev) {
                       return {
@@ -1498,12 +1575,13 @@ export default function App() {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ activeQuestionIndex: idx, isLive }),
                     });
-                    fetchRoom(roomState?.pin || '758899');
+                    lastRoomMutationAtRef.current = Date.now();
                   } catch (e) {
                     console.warn('Room control fetch notice:', e);
                   }
                 }}
                 onResetRoom={async () => {
+                  lastRoomMutationAtRef.current = Date.now();
                   await fetch(`/api/rooms/${roomState?.pin || '758899'}/reset`, {
                     method: 'POST',
                   });
@@ -1513,11 +1591,14 @@ export default function App() {
                 isLoadingAIQuiz={isGeneratingAIQuiz}
                 currentLesson={currentLesson}
                 onApplyQuestions={async (newQuestions, quizTitle) => {
+                  lastRoomMutationAtRef.current = Date.now();
+                  const resolvedTitle = quizTitle || currentLesson.title;
+
                   const updatedLessons = lessons.map((l) =>
                     l.id === currentLesson.id
                       ? {
                           ...l,
-                          title: quizTitle || l.title,
+                          title: resolvedTitle,
                           quizzes: newQuestions,
                           lastModified: new Date().toISOString(),
                         }
@@ -1525,11 +1606,24 @@ export default function App() {
                   );
                   setLessons(updatedLessons);
 
+                  if (activeOpenedLesson && activeOpenedLesson.id === currentLesson.id) {
+                    const updatedActive = {
+                      ...activeOpenedLesson,
+                      title: resolvedTitle,
+                      quizzes: newQuestions,
+                      lastModified: new Date().toISOString(),
+                    };
+                    setActiveOpenedLesson(updatedActive);
+                    try {
+                      localStorage.setItem('smartboard_active_lesson_obj', JSON.stringify(updatedActive));
+                    } catch (_) {}
+                  }
+
                   // Cập nhật ngay lập tức vào roomState React state không có độ trễ
                   setRoomState((prev) => ({
                     ...(prev || {
                       pin: '758899',
-                      title: quizTitle || currentLesson.title,
+                      title: resolvedTitle,
                       submissions: {},
                       isLive: true,
                       activeQuestionIndex: 0,
@@ -1537,7 +1631,7 @@ export default function App() {
                       activeStudents: [],
                       questions: [],
                     }),
-                    title: quizTitle || currentLesson.title,
+                    title: resolvedTitle,
                     questions: newQuestions,
                     activeQuestionIndex: 0,
                     isLive: true,
@@ -1546,6 +1640,7 @@ export default function App() {
                   // Lưu ngay vào localStorage
                   try {
                     localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(newQuestions));
+                    localStorage.setItem('smartboard_live_exam_title', resolvedTitle);
                   } catch (_) {}
 
                   // Đồng bộ an toàn vào Firestore
@@ -1554,7 +1649,7 @@ export default function App() {
                     const roomRef = doc(db, 'rooms', roomPin);
                     safeSetDoc(roomRef, {
                       pin: roomPin,
-                      title: quizTitle || currentLesson.title,
+                      title: resolvedTitle,
                       questions: newQuestions,
                       activeQuestionIndex: 0,
                       isLive: true,
@@ -1562,17 +1657,26 @@ export default function App() {
                     }, { merge: true }).catch(() => {});
                   } catch (_) {}
 
-                  await fetch('/api/rooms', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      pin: roomState?.pin || '758899',
-                      title: quizTitle || currentLesson.title,
-                      questions: newQuestions,
-                    }),
-                  }).catch((e) => console.warn('Sync room error', e));
-
-                  await fetchRoom(roomState?.pin || '758899');
+                  try {
+                    const postRes = await fetch('/api/rooms', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        pin: roomState?.pin || '758899',
+                        title: resolvedTitle,
+                        questions: newQuestions,
+                      }),
+                    });
+                    if (postRes.ok) {
+                      const postData = await postRes.json();
+                      if (postData?.room) {
+                        lastRoomMutationAtRef.current = Date.now();
+                        setRoomState(postData.room);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('Sync room error', e);
+                  }
                 }}
               />
             )}
@@ -1800,12 +1904,15 @@ export default function App() {
           onClose={() => setShowAIQuizModal(false)}
           onApplyQuestions={async (newQuestions, quizTitle, replace) => {
             if (!newQuestions || newQuestions.length === 0) return;
+            lastRoomMutationAtRef.current = Date.now();
             const updatedQuizzes = replace ? newQuestions : [...(currentLesson.quizzes || []), ...newQuestions];
+            const resolvedTitle = quizTitle || currentLesson.title;
+
             const updatedLessons = lessons.map((l) =>
               l.id === currentLesson.id
                 ? {
                     ...l,
-                    title: quizTitle || l.title,
+                    title: resolvedTitle,
                     quizzes: updatedQuizzes,
                     lastModified: new Date().toISOString(),
                   }
@@ -1813,17 +1920,62 @@ export default function App() {
             );
             setLessons(updatedLessons);
 
-            await fetch('/api/rooms', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                pin: '758899',
-                title: quizTitle || currentLesson.title,
-                questions: updatedQuizzes,
-              }),
-            }).catch((e) => console.warn('Sync room error', e));
+            if (activeOpenedLesson && activeOpenedLesson.id === currentLesson.id) {
+              const updatedActive = {
+                ...activeOpenedLesson,
+                title: resolvedTitle,
+                quizzes: updatedQuizzes,
+                lastModified: new Date().toISOString(),
+              };
+              setActiveOpenedLesson(updatedActive);
+              try {
+                localStorage.setItem('smartboard_active_lesson_obj', JSON.stringify(updatedActive));
+              } catch (_) {}
+            }
 
-            await fetchRoom('758899');
+            try {
+              localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(updatedQuizzes));
+              localStorage.setItem('smartboard_live_exam_title', resolvedTitle);
+            } catch (_) {}
+
+            setRoomState((prev) => ({
+              ...(prev || {
+                pin: '758899',
+                title: resolvedTitle,
+                submissions: {},
+                isLive: true,
+                activeQuestionIndex: 0,
+                startedAt: new Date().toISOString(),
+                activeStudents: [],
+                questions: [],
+              }),
+              title: resolvedTitle,
+              questions: updatedQuizzes,
+              activeQuestionIndex: 0,
+              isLive: true,
+            }));
+
+            try {
+              const postRes = await fetch('/api/rooms', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  pin: '758899',
+                  title: resolvedTitle,
+                  questions: updatedQuizzes,
+                }),
+              });
+              if (postRes.ok) {
+                const postData = await postRes.json();
+                if (postData?.room) {
+                  lastRoomMutationAtRef.current = Date.now();
+                  setRoomState(postData.room);
+                }
+              }
+            } catch (e) {
+              console.warn('Sync room error', e);
+            }
+
             setShowAIQuizModal(false);
             if (activeTab !== 'games') {
               setActiveTab('quiz');

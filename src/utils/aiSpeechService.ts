@@ -16,11 +16,12 @@
  *    - 🎙️ Phát thanh viên chuẩn
  */
 
-import { GoogleGenAI } from '@google/genai';
 import { getGeminiApiKey, isGeminiConfigured } from './geminiClient';
 import { cleanPdfVietnameseText } from './pdfTextExtractor';
 
 export { cleanPdfVietnameseText };
+
+let detectedServerTtsEngine: 'gemini-3.8' | 'google-translate' | null = null;
 
 /**
  * Đồng bộ API Key trên môi trường Web thực tế (Vercel) và AI Studio Preview:
@@ -99,68 +100,91 @@ export interface VoiceTonePreset {
   geminiVoice?: string;
 }
 
+const SPEECH_SPEED_STORAGE_KEY = 'smartboard_ai_speech_speed';
+
+export function getSpeechSpeedMultiplier(): number {
+  if (typeof window === 'undefined' || !window.localStorage) return 1.0;
+  try {
+    const raw = parseFloat(localStorage.getItem(SPEECH_SPEED_STORAGE_KEY) || '1.0');
+    if (!isNaN(raw) && raw >= 0.8 && raw <= 1.45) {
+      return raw;
+    }
+  } catch (_) {}
+  return 1.0;
+}
+
+export function setSpeechSpeedMultiplier(speed: number): number {
+  const clamped = Math.max(0.8, Math.min(1.45, Number(speed) || 1.0));
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      localStorage.setItem(SPEECH_SPEED_STORAGE_KEY, String(clamped));
+    } catch (_) {}
+  }
+  return clamped;
+}
+
 export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
   {
     id: 'nu_truyen_cam',
-    name: 'Cô giáo Kore (Giọng cô giáo dịu dàng, sư phạm, chuẩn mực)',
-    label: '👩‍🏫 Cô giáo (Dịu dàng - Sư phạm)',
-    sub: 'Chuẩn mực • Truyền cảm • Tự nhiên như thật',
-    description: 'Giọng đọc AI cao cấp Kore âm điệu sư phạm dịu dàng, truyền cảm hứng, phát âm tròn vành rõ chữ chuẩn sách giáo khoa',
+    name: 'Cô giáo Kore (Giọng cô giáo tươi sáng, nhanh nhẹn, truyền cảm)',
+    label: '👩‍🏫 Cô giáo (Tươi sáng - Sư phạm)',
+    sub: 'Tươi sáng • Nhanh nhẹn • Chuẩn mực SGK',
+    description: 'Giọng đọc AI cao cấp Kore âm điệu sư phạm tươi sáng, tiết tấu vừa phải lôi cuốn, phát âm tròn vành rõ chữ',
     icon: '👩‍🏫',
-    pitch: 1.05,
-    rate: 1.0,
+    pitch: 1.03,
+    rate: 1.18,
     volume: 1.0,
     gender: 'female',
     geminiVoice: 'Kore',
   },
   {
-    id: 'nu_am_ap',
-    name: 'Giọng Podcast Aoede (Trầm lắng, sâu sắc, truyền cảm xúc)',
-    label: '🎙️ Podcast (Sâu lắng - Truyền cảm)',
-    sub: 'Ấm áp • Sâu lắng • Phong cách Podcast & Radio',
-    description: 'Giọng đọc Podcast ấm áp, nhẹ nhàng, giàu cảm xúc, âm sắc ngân vang truyền cảm hứng học tập',
-    icon: '🎙️',
-    pitch: 0.94,
-    rate: 0.94,
-    volume: 1.0,
-    gender: 'female',
-    geminiVoice: 'Aoede',
-  },
-  {
     id: 'nam_nang_dong',
     name: 'MC Sôi Động Puck (Hào hứng, cuốn hút, bùng nổ năng lượng)',
     label: '⚡ MC Sôi Động (Năng lượng - Bùng nổ)',
-    sub: 'Hào hứng • Cuốn hút • Khuấy động không khí',
-    description: 'Phong cách MC trẻ trung, bùng nổ, vui tươi, tốc độ nhanh nhẹn, khơi dậy tinh thần thi đua sôi nổi',
+    sub: 'Hào hứng • Nhanh nhạy • Khuấy động lớp học',
+    description: 'Phong cách MC trẻ trung, bùng nổ, vui tươi, tiết tấu nhanh nhẹn, khơi dậy tinh thần thi đua sôi nổi',
     icon: '⚡',
-    pitch: 1.18,
-    rate: 1.14,
+    pitch: 1.06,
+    rate: 1.24,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Puck',
   },
   {
     id: 'nam_tram_am',
-    name: 'Thầy giáo Charon (Nam trầm ấm, đĩnh đạc, uy nghiêm)',
+    name: 'Thầy giáo Charon (Nam trầm ấm, đĩnh đạc, rõ nét)',
     label: '👨‍🏫 Thầy giáo (Trầm ấm - Đĩnh đạc)',
-    sub: 'Trầm ấm • Đĩnh đạc • Giọng thầy giáo chuẩn',
-    description: 'Giọng thầy giáo trầm ấm, dứt khoát, điềm đạm, phong thái chuẩn mực giúp học sinh tập trung cao độ',
+    sub: 'Trầm ấm • Dứt khoát • Giọng thầy giáo chuẩn',
+    description: 'Giọng thầy giáo nam tính, đĩnh đạc, tiết tấu gãy gọn truyền cảm giúp học sinh tập trung cao độ',
     icon: '👨‍🏫',
-    pitch: 0.82,
-    rate: 0.95,
+    pitch: 0.94,
+    rate: 1.15,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Charon',
   },
   {
+    id: 'nu_am_ap',
+    name: 'Giọng Kể Chuyện Zephyr (Sâu sắc, lôi cuốn, giàu cảm xúc)',
+    label: '🎙️ Kể Chuyện (Ấm áp - Lôi cuốn)',
+    sub: 'Ấm áp • Tự nhiên • Phong cách Podcast & Radio',
+    description: 'Giọng đọc Podcast ấm áp, giàu cảm xúc với nhịp điệu mạch lạc truyền cảm hứng học tập',
+    icon: '🎙️',
+    pitch: 1.0,
+    rate: 1.13,
+    volume: 1.0,
+    gender: 'female',
+    geminiVoice: 'Zephyr',
+  },
+  {
     id: 'nam_dut_khoat',
     name: 'Phát thanh viên Fenrir (Chuẩn mực, sắc bén, dứt khoát)',
-    label: '📻 Phát thanh viên (Chuẩn mực - Dứt khoát)',
-    sub: 'Sắc nét • Dứt khoát • Phong cách thời sự',
+    label: '📻 Phát thanh viên (Chuẩn mực - Sắc bén)',
+    sub: 'Sắc nét • Nhanh gọn • Phong cách thời sự',
     description: 'Giọng phát thanh viên truyền hình chuẩn mực, ngữ điệu rõ nét, dứt khoát từng câu chữ',
     icon: '📻',
-    pitch: 1.0,
-    rate: 1.08,
+    pitch: 1.01,
+    rate: 1.21,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Fenrir',
@@ -168,13 +192,13 @@ export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
   // Các preset tương thích ngược cho giao diện và cấu hình đã lưu
   {
     id: 'nu_diu_dang',
-    name: 'Giọng Nữ (Cô giáo dịu dàng, truyền cảm)',
+    name: 'Giọng Nữ (Cô giáo tươi sáng, truyền cảm)',
     label: '👩‍🏫 Giọng Nữ (Cô giáo)',
-    sub: 'Dịu dàng • Truyền cảm • Chuẩn mực',
-    description: 'Giọng cô giáo dịu dàng, êm ái, truyền cảm hứng, phát âm chuẩn xác sư phạm',
+    sub: 'Tươi sáng • Truyền cảm • Chuẩn mực',
+    description: 'Giọng cô giáo tươi sáng, êm ái, truyền cảm hứng, phát âm chuẩn xác sư phạm',
     icon: '👩‍🏫',
-    pitch: 1.05,
-    rate: 1.0,
+    pitch: 1.03,
+    rate: 1.18,
     volume: 1.0,
     gender: 'female',
     geminiVoice: 'Kore',
@@ -186,8 +210,8 @@ export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
     sub: 'Nhiệt huyết • Sôi động • Cuốn hút',
     description: 'Giọng MC dẫn gameshow truyền hình cực kỳ hào hứng, bùng nổ năng lượng, khuấy động không khí lớp học',
     icon: '⚡',
-    pitch: 1.15,
-    rate: 1.14,
+    pitch: 1.06,
+    rate: 1.24,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Puck',
@@ -199,8 +223,8 @@ export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
     sub: 'Hồi hộp • Đanh thép • Gay cấn',
     description: 'Phong cách người dẫn chương trình Ai Là Triệu Phú huyền thoại: kịch tính, nhấn nhá sắc sảo, dồn dập quyết định',
     icon: '🏆',
-    pitch: 1.05,
-    rate: 1.12,
+    pitch: 1.01,
+    rate: 1.21,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Fenrir',
@@ -212,8 +236,8 @@ export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
     sub: 'Sôi nổi • Hào hứng • Bứt phá',
     description: 'Phong cách MC Đường Lên Đỉnh Olympia: hào hứng, đĩnh đạc, truyền động lực bứt phá điểm số tối đa',
     icon: '🌟',
-    pitch: 1.18,
-    rate: 1.16,
+    pitch: 1.05,
+    rate: 1.25,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Puck',
@@ -225,21 +249,21 @@ export const VOICE_TONE_PRESETS: VoiceTonePreset[] = [
     sub: 'Hào hứng • Cổ vũ • Tươi vui',
     description: 'Giọng nữ MC hoạt náo tươi vui, rộn ràng, cổ vũ học sinh đua tài và trả lời nhanh như chớp',
     icon: '🎉',
-    pitch: 1.22,
-    rate: 1.14,
+    pitch: 1.06,
+    rate: 1.22,
     volume: 1.0,
     gender: 'female',
-    geminiVoice: 'Aoede',
+    geminiVoice: 'Zephyr',
   },
   {
     id: 'podcast',
     name: 'Giọng Đọc Podcast (Sâu lắng, tự sự, truyền cảm)',
     label: '🎙️ Giọng Đọc Podcast',
-    sub: 'Sâu lắng • Truyền cảm hứng • Nhấn nhá',
-    description: 'Giọng đọc Podcast Radio nghệ thuật, nhịp điệu thư thái, giàu cảm xúc và tự sự',
+    sub: 'Mạch lạc • Truyền cảm hứng • Nhấn nhá',
+    description: 'Giọng đọc Podcast Radio nghệ thuật, nhịp điệu mạch lạc, giàu cảm xúc và tự sự',
     icon: '🎙️',
-    pitch: 0.94,
-    rate: 0.90,
+    pitch: 0.96,
+    rate: 1.12,
     volume: 1.0,
     gender: 'male',
     geminiVoice: 'Charon',
@@ -262,7 +286,10 @@ let currentAudioElement: HTMLAudioElement | null = null;
 let persistentHtmlAudio: HTMLAudioElement | null = null;
 let activeAudioSource: AudioBufferSourceNode | null = null;
 let isAudioUnlocked = false;
-const SILENT_WAV_DATA_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+let isUnlockingHtmlAudio = false;
+// Valid 50ms silent 8kHz 8-bit PCM WAV so mobile/TV browsers reliably grant user-activation
+const SILENT_WAV_DATA_URI =
+  'data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
 
 function getPersistentHtmlAudio(): HTMLAudioElement | null {
   if (typeof window === 'undefined') return null;
@@ -279,9 +306,14 @@ function getPersistentHtmlAudio(): HTMLAudioElement | null {
 }
 
 /**
+ * Bộ đệm dữ liệu âm thanh thô (MP3/WAV ArrayBuffer) để phát lại 0ms qua <audio> hoặc Web Audio trên mọi thiết bị
+ */
+export const rawChunkBytesCache = new Map<string, { bytes: ArrayBuffer; mime: string; engine?: string }>();
+
+/**
  * Bộ đệm âm thanh AudioBuffer theo nội dung text để phát tức thì (0ms) khi đọc lại
  */
-export const audioCache = new Map<string, AudioBuffer>();
+export const audioCache = new Map<string, { buffer: AudioBuffer; engine?: string }>();
 
 /**
  * Bộ đệm âm thanh AudioBuffer theo ID câu hỏi để bấm lần 2 phát ngay lập tức (0ms)
@@ -316,58 +348,122 @@ export function stopActiveAudioContext(): void {
   try {
     if (activeAudioSource) {
       activeAudioSource.onended = null;
-      activeAudioSource.stop();
-      activeAudioSource.disconnect();
+      try {
+        activeAudioSource.stop();
+        activeAudioSource.disconnect();
+      } catch (_) {}
       activeAudioSource = null;
     }
-    if (currentAudioElement) {
+    if (currentAudioElement && currentAudioElement !== persistentHtmlAudio) {
       currentAudioElement.onplay = null;
+      currentAudioElement.onplaying = null;
       currentAudioElement.onended = null;
       currentAudioElement.onerror = null;
       currentAudioElement.pause();
       currentAudioElement.currentTime = 0;
       currentAudioElement = null;
     }
-    if (persistentHtmlAudio) {
+    if (persistentHtmlAudio && !isUnlockingHtmlAudio) {
       persistentHtmlAudio.onplay = null;
+      persistentHtmlAudio.onplaying = null;
       persistentHtmlAudio.onended = null;
       persistentHtmlAudio.onerror = null;
       persistentHtmlAudio.pause();
+      // Không xóa persistentHtmlAudio.src = '' để giữ nguyên quyền Autoplay đã mở khóa trên iOS/Android TV
+      if (currentAudioElement === persistentHtmlAudio) {
+        currentAudioElement = null;
+      }
     }
   } catch (_) {}
 }
 
 /**
- * Phát trực tiếp một AudioBuffer qua AudioContext dùng chung với độ trễ 0ms
+ * Phát trực tiếp một AudioBuffer qua AudioContext dùng chung (chỉ phát khi AudioContext thực sự running)
  */
 export async function playAudioBuffer(
   audioBuffer: AudioBuffer,
   onStart?: () => void,
   onEnd?: () => void,
-  playbackRate: number = 1.0
+  playbackRate: number = 1.0,
+  detuneCents: number = 0
 ): Promise<boolean> {
   stopActiveAudioContext();
   const ctx = getOrCreateAudioContext();
   if (!ctx) return false;
 
   try {
-    if (ctx.state === 'suspended') {
-      await ctx.resume().catch(() => {});
+    if (ctx.state !== 'running') {
+      await Promise.race([
+        ctx.resume(),
+        new Promise((r) => setTimeout(r, 400)),
+      ]);
     }
   } catch (_) {}
 
-  if (isSpeechCancelled) return false;
+  if ((ctx.state as string) !== 'running' || isSpeechCancelled) {
+    return false;
+  }
 
   return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let safetyTimer: any = null;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+        safetyTimer = null;
+      }
+      resolve(ok);
+    };
+
     try {
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
-      if (playbackRate && playbackRate !== 1.0 && source.playbackRate) {
+      const effectiveRate = playbackRate ? Math.max(0.78, Math.min(1.35, playbackRate)) : 1.0;
+      if (effectiveRate !== 1.0 && source.playbackRate) {
         try {
-          source.playbackRate.value = Math.max(0.7, Math.min(1.5, playbackRate));
+          source.playbackRate.value = effectiveRate;
         } catch (_) {}
       }
-      source.connect(ctx.destination);
+      if (detuneCents !== 0 && source.detune) {
+        try {
+          source.detune.value = Math.max(-350, Math.min(350, detuneCents));
+        } catch (_) {}
+      }
+
+      // Crisp broadcast studio EQ + loudness compressor for clear classroom TV & laptop playback
+      try {
+        const highPass = ctx.createBiquadFilter();
+        highPass.type = 'highpass';
+        highPass.frequency.value = 85;
+
+        const presence = ctx.createBiquadFilter();
+        presence.type = 'peaking';
+        presence.frequency.value = 2850;
+        presence.Q.value = 1.0;
+        presence.gain.value = 2.4;
+
+        const air = ctx.createBiquadFilter();
+        air.type = 'highshelf';
+        air.frequency.value = 6000;
+        air.gain.value = 1.5;
+
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.value = -18;
+        compressor.knee.value = 16;
+        compressor.ratio.value = 3.2;
+        compressor.attack.value = 0.004;
+        compressor.release.value = 0.16;
+
+        source.connect(highPass);
+        highPass.connect(presence);
+        presence.connect(air);
+        air.connect(compressor);
+        compressor.connect(ctx.destination);
+      } catch (_) {
+        source.connect(ctx.destination);
+      }
       activeAudioSource = source;
 
       source.onended = () => {
@@ -375,14 +471,23 @@ export async function playAudioBuffer(
           activeAudioSource = null;
         }
         if (!isSpeechCancelled && onEnd) onEnd();
-        resolve(true);
+        finish(true);
       };
+
+      const maxWaitMs = (Math.max(2, (audioBuffer.duration || 5) / effectiveRate) + 3) * 1000;
+      safetyTimer = setTimeout(() => {
+        if (activeAudioSource === source) {
+          activeAudioSource = null;
+        }
+        if (!isSpeechCancelled && onEnd) onEnd();
+        finish(true);
+      }, maxWaitMs);
 
       if (!isSpeechCancelled && onStart) onStart();
       source.start(0);
     } catch (err) {
       console.warn('playAudioBuffer error:', err);
-      resolve(false);
+      finish(false);
     }
   });
 }
@@ -427,80 +532,38 @@ export function createAudioBufferFromPcmBytes(
 export async function fetchGeminiAudioBuffer(
   text: string,
   voiceName: string = 'Kore',
-  apiKey: string
+  apiKey?: string
 ): Promise<AudioBuffer | null> {
   const trimmed = text.trim();
-  if (!trimmed || !apiKey) return null;
+  if (!trimmed) return null;
 
   const cacheKey = `${voiceName}:::${trimmed}`;
   if (audioCache.has(cacheKey)) {
-    return audioCache.get(cacheKey)!;
+    return audioCache.get(cacheKey)!.buffer;
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    let response: any = null;
-    try {
-      response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash-lite-tts',
-        contents: trimmed,
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: voiceName,
-              },
-            },
-          },
-        },
-      });
-    } catch {
-      // Dự phòng sang gemini-3.8-flash-tts
-      response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash-tts',
-        contents: trimmed,
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: voiceName,
-              },
-            },
-          },
-        },
-      });
+    const customKey = isValidGeminiApiKey(apiKey) ? apiKey!.trim() : '';
+    const ttsUrl = `/api/tts?lang=vi&voice=${encodeURIComponent(voiceName)}&preset=${encodeURIComponent(voiceName)}&text=${encodeURIComponent(trimmed)}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7500);
+    const res = await fetch(ttsUrl, {
+      signal: controller.signal,
+      headers: customKey ? { 'x-gemini-api-key': customKey } : undefined,
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) return null;
+    const engineHeader = res.headers.get('X-TTS-Engine');
+    if (engineHeader === 'gemini-3.8' || engineHeader === 'google-translate') {
+      detectedServerTtsEngine = engineHeader;
     }
-
-    const parts = response?.candidates?.[0]?.content?.parts;
-    let audioBase64 = '';
-    let mimeType = 'audio/wav';
-
-    if (parts) {
-      for (const part of parts) {
-        if ((part as any).inlineData?.data) {
-          audioBase64 = (part as any).inlineData.data;
-          if ((part as any).inlineData.mimeType) {
-            mimeType = (part as any).inlineData.mimeType;
-          }
-          break;
-        }
-      }
-    }
-
-    if (!audioBase64) return null;
-
-    const binary = atob(audioBase64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-
-    const buffer = createAudioBufferFromPcmBytes(bytes, mimeType);
-    if (buffer) {
-      audioCache.set(cacheKey, buffer);
-      return buffer;
+    const arrayBuf = await res.arrayBuffer();
+    const ctx = getOrCreateAudioContext();
+    if (!ctx || arrayBuf.byteLength < 100) return null;
+    const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+    if (decoded) {
+      audioCache.set(cacheKey, { buffer: decoded, engine: engineHeader || undefined });
+      return decoded;
     }
     return null;
   } catch (err) {
@@ -583,22 +646,28 @@ export function unlockWebAudio(): void {
     }
 
     const el = getPersistentHtmlAudio();
-    if (el && !isAudioUnlocked) {
-      el.src = SILENT_WAV_DATA_URI;
+    if (el && !isAudioUnlocked && !isUnlockingHtmlAudio) {
+      isUnlockingHtmlAudio = true;
+      el.muted = false;
       el.volume = 0.01;
+      el.src = SILENT_WAV_DATA_URI;
       const p = el.play();
       if (p !== undefined) {
         p.then(() => {
           isAudioUnlocked = true;
+          isUnlockingHtmlAudio = false;
           el.volume = 1.0;
         }).catch(() => {
+          isUnlockingHtmlAudio = false;
           el.volume = 1.0;
         });
       } else {
         isAudioUnlocked = true;
+        isUnlockingHtmlAudio = false;
         el.volume = 1.0;
       }
-    } else if (el) {
+    } else if (el && !isUnlockingHtmlAudio) {
+      el.muted = false;
       el.volume = 1.0;
     }
   } catch (_) {}
@@ -854,16 +923,83 @@ function numberToVietnameseWords(numStr: string): string {
  * - Sinh học: Di truyền (ADN, ARN, mARN, tARN, rARN, NST, gen Aa, Bb, F1, F2, P), Năng lượng (ATP), Tế bào...
  * - Tin học: Ngôn ngữ (C++, C#, Python, Java, JS, HTML, CSS, SQL), Đơn vị (bit, byte, KB, MB, GB, RAM, CPU), Toán tử (==, !=, <=, >=, &&, ||)...
  */
+/**
+ * Chuẩn hóa toàn bộ ký hiệu ĐỘ (góc độ, nhiệt độ) và tên hình học trước khi xử lý dấu mũ `^` hoặc xóa `\`
+ * Ví dụ: $60^\circ$, 60^{\circ}, 60\circ, 60^o, 60° -> "sáu mươi độ"
+ */
+function normalizeDegreesAndGeometry(input: string): string {
+  if (!input) return '';
+  let s = input;
+
+  // 1. Bảo vệ đơn vị nhiệt độ (°C, ^\circ C, °F) trước
+  s = s.replace(
+    /(-\s*)?(\d+)[.,](\d+)\s*(?:°|\^\s*\{?\s*(?:\\circ|\\degree|\\mathrm\{o\}|\\text\{o\}|[oO])?\s*\}?|\\(?:circ|degree)|[º˚])\s*([CF])\b/gi,
+    (_, neg, a, b, unit) => `${neg ? ' âm ' : ' '}${numberToVietnameseWords(a)} phẩy ${numberToVietnameseWords(b)} độ ${unit.toUpperCase()} `
+  );
+  s = s.replace(
+    /(-\s*)?(\d+)\s*(?:°|\^\s*\{?\s*(?:\\circ|\\degree|\\mathrm\{o\}|\\text\{o\}|[oO])?\s*\}?|\\(?:circ|degree)|[º˚])\s*([CF])\b/gi,
+    (_, neg, num, unit) => `${neg ? ' âm ' : ' '}${numberToVietnameseWords(num)} độ ${unit.toUpperCase()} `
+  );
+
+  // 2. Gom mọi ký hiệu góc độ LaTeX / Unicode về ký tự '°' thống nhất
+  s = s.replace(/\^\s*\{\s*(?:\\circ|\\degree|\\mathrm\{o\}|\\text\{o\}|\\rm\s*o|[oO])\s*\}/gi, '°');
+  s = s.replace(/\^\s*\\(?:circ|degree)\b/gi, '°');
+  s = s.replace(/\\(?:circ|degree)\b/gi, '°');
+  s = s.replace(/([0-9\)\}a-zA-Z])\s*\^\s*[oO](?![a-zA-Z0-9])/g, '$1°');
+  s = s.replace(/([0-9\)])\s*[º˚]/g, '$1°');
+
+  // 3. Đọc độ - phút - giây (60°30'15'')
+  s = s.replace(
+    /(-\s*)?(\d+)\s*°\s*(\d+)\s*['′]\s*(\d+)\s*(?:''|"|″)/g,
+    (_, neg, deg, min, sec) =>
+      `${neg ? ' âm ' : ' '}${numberToVietnameseWords(deg)} độ ${numberToVietnameseWords(min)} phút ${numberToVietnameseWords(sec)} giây `
+  );
+  s = s.replace(
+    /(-\s*)?(\d+)\s*°\s*(\d+)\s*['′]/g,
+    (_, neg, deg, min) =>
+      `${neg ? ' âm ' : ' '}${numberToVietnameseWords(deg)} độ ${numberToVietnameseWords(min)} phút `
+  );
+
+  // 4. Đọc số đo góc thập phân & số nguyên (âm, dương, 1-3+ chữ số): "60°" -> "sáu mươi độ", "120°" -> "một trăm hai mươi độ"
+  s = s.replace(
+    /(-\s*)?(\d+)[.,](\d+)\s*°/g,
+    (_, neg, a, b) => `${neg ? ' âm ' : ' '}${numberToVietnameseWords(a)} phẩy ${numberToVietnameseWords(b)} độ `
+  );
+  s = s.replace(
+    /(-\s*)?(\d+)\s*°/g,
+    (_, neg, num) => `${neg ? ' âm ' : ' '}${numberToVietnameseWords(num)} độ `
+  );
+  // Trường hợp biến số hoặc biểu thức gắn độ: \alpha°, (a+b)°, x°
+  s = s.replace(/°/g, ' độ ');
+
+  // 5. Ký hiệu góc có mũ (\widehat{ABC}, \hat{A}) và tách điểm hình học (chỉ tách chữ IN HOA thuần túy)
+  s = s.replace(/\\widehat\s*\{([^}]+)\}/g, (_, pts) => ` góc ${pts.replace(/[^A-Za-z0-9']/g, '').split('').join(' ')} `);
+  s = s.replace(/\\hat\s*\{([^}]+)\}/g, (_, pts) => ` góc ${pts.replace(/[^A-Za-z0-9']/g, '').split('').join(' ')} `);
+  s = s.replace(
+    /\b(tam giác|tứ giác|tứ diện|hình vuông|hình chữ nhật|hình thang|hình bình hành|hình thoi|hình chóp|lăng trụ|góc|cạnh|đoạn thẳng|đường thẳng|đường cao|trung tuyến)\s+([A-Z]{2,4})\b/gi,
+    (full, kw, pts) => (/^[A-Z]{2,4}$/.test(pts) ? `${kw} ${pts.split('').join(' ')}` : full)
+  );
+
+  return s;
+}
+
 export function expandStemFormulasAndTerms(text: string): string {
   if (!text) return '';
-  let s = text;
+  let s = normalizeDegreesAndGeometry(text);
 
-  // ===== 1. TOÁN HỌC: VÉC-TƠ, TẬP HỢP & HÌNH HỌC =====
-  s = s.replace(/\\vec\{0\}|\\vec\s*0/g, ' véc-tơ không ');
-  s = s.replace(/\\vec\{([a-zA-Z0-9]+)\}/g, ' véc-tơ $1 ');
-  s = s.replace(/\\vec\s*([a-zA-Z0-9])/g, ' véc-tơ $1 ');
-  s = s.replace(/\\overrightarrow\{([A-Za-z0-9]+)\}/g, ' véc-tơ $1 ');
-  s = s.replace(/\|\\vec\{([a-zA-Z0-9]+)\}\|/g, ' độ dài véc-tơ $1 ');
+  // ===== 1. TOÁN HỌC: VÉC TƠ, TẬP HỢP & HÌNH HỌC =====
+  // Độ dài véc tơ xử lý trước để không bị tách rời dấu trị tuyệt đối
+  s = s.replace(/\|\\(?:vec|overrightarrow)\{([A-Z])([A-Z])\}\|/g, ' độ dài véc tơ $1 $2 ');
+  s = s.replace(/\|\\(?:vec|overrightarrow)\{([a-zA-Z0-9]+)\}\|/g, ' độ dài véc tơ $1 ');
+  s = s.replace(/\\vec\{0\}|\\vec\s*0/g, ' véc tơ không ');
+  s = s.replace(/\\(?:vec|overrightarrow)\{([A-Z])([A-Z])\}/g, ' véc tơ $1 $2 ');
+  s = s.replace(/\\(?:vec|overrightarrow)\{([a-zA-Z0-9]+)\}/g, ' véc tơ $1 ');
+  s = s.replace(/\\vec\s*([a-zA-Z0-9])/g, ' véc tơ $1 ');
+  // Chuẩn hóa mọi dạng viết tiếng Việt / Anh của từ véc tơ để không bao giờ bị đọc thành "vec trừ tơ"
+  s = s.replace(/(?<!\p{L})(?:véc|vec)\s*[-–—]?\s*(?:tơ|tor)(?!\p{L})/giu, ' véc tơ ');
+  s = s.replace(/(?<!\p{L})vector(?!\p{L})/giu, ' véc tơ ');
+  s = s.replace(/(?:véc\s+tơ\s+){2,}/gi, 'véc tơ ');
+  s = s.replace(/độ dài\s+độ dài/gi, 'độ dài');
   s = s.replace(/\\perp|⊥/g, ' vuông góc với ');
   s = s.replace(/\\parallel|∥/g, ' song song với ');
   s = s.replace(/\\mathbb\{N\}\^\*|ℕ\*/g, ' tập hợp số tự nhiên N sao ');
@@ -1146,7 +1282,8 @@ export function cleanMathForVietnameseTTS(text: string, isEnglishSubject: boolea
   s = s.replace(/([A-Z])\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' điểm $1 tọa độ $2, $3 ');
   s = s.replace(/([A-Z])\s*\(\s*([a-zA-Z]\d*)\s*[;,]\s*([a-zA-Z]\d*)\s*\)/g, ' điểm $1 tọa độ $2, $3 ');
   s = s.replace(/\b(điểm)\s+điểm\b/g, 'điểm');
-  s = s.replace(/(véc-tơ\s+[a-zA-Z0-9]+|\b\\vec\{?[a-zA-Z0-9]+\}?)\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' $1 tọa độ $2, $3 ');
+  s = s.replace(/(véc[\s-]*tơ\s+[a-zA-Z0-9\s]{1,4}|\\vec\{?[a-zA-Z0-9]+\}?)\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' $1 tọa độ $2, $3, $4 ');
+  s = s.replace(/(véc[\s-]*tơ\s+[a-zA-Z0-9\s]{1,4}|\\vec\{?[a-zA-Z0-9]+\}?)\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' $1 tọa độ $2, $3 ');
   s = s.replace(/(tọa độ|toạ độ|tọa độ cực đại|tọa độ cực tiểu|tọa độ cực trị|điểm cực đại|điểm cực tiểu|điểm cực trị|cực đại|cực tiểu|cực trị|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|điểm uốn|tại điểm)\s*(?:của\s+đồ\s+thị\s+hàm\s+số)?\s*(?:là|=)?\s*\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/gi, ' $1 tọa độ $2, $3 ');
 
   // 4b. Khoảng trong ngữ cảnh xét tính đơn điệu và giải tích:
@@ -1201,11 +1338,13 @@ export function cleanMathForVietnameseTTS(text: string, isEnglishSubject: boolea
   s = s.replace(/\\times\b/g, ' nhân ');
   s = s.replace(/\\div\b/g, ' chia ');
 
-  // 10. Phân biệt dấu '-' đứng trước số là "âm", đứng giữa phép tính là "trừ"
+  // 10. Phân biệt dấu '-' đứng trước số là "âm", đứng giữa phép tính là "trừ" (TUYỆT ĐỐI không chạm vào dấu nối trong từ ghép tiếng Việt)
+  s = s.replace(/(?<=\d|\)|(?<!\p{L})[a-zA-Z])\s*-\s*(?=\d|\(|[a-zA-Z](?!\p{L}))/gu, ' trừ ');
+  s = s.replace(/(?<![(=;,\[])\s+-\s+(?=\d|\(|[a-zA-Z](?!\p{L}))/gu, ' trừ ');
+  s = s.replace(/(khoảng|đoạn|nửa khoảng|từ|đến|bằng)\s+trừ\s+(\d+)/gi, '$1 âm $2');
   s = s.replace(/(khoảng|đoạn|nửa khoảng)\s*-\s*(\d+)/gi, '$1 âm $2');
   s = s.replace(/,\s*-\s*(\d+)/g, ', âm $1');
   s = s.replace(/(^|[\s(=;,\[])-\s*(\d+)/g, '$1âm $2');
-  s = s.replace(/(\d|[a-zA-Z])\s*-\s*(\d|[a-zA-Z])/g, '$1 trừ $2');
 
   // 11. Ký hiệu góc và tam giác
   s = s.replace(/\\angle\s*([A-Za-z0-9]+)/g, ' góc $1 ');
@@ -1326,9 +1465,9 @@ export function convertDigitsAndMathToVietnamese(raw: string): string {
   s = s.replace(/\b(Trang|trang)\s*(\d+)\b/g, (_, prefix, num) => `${prefix} ${numberToVietnameseWords(num)}`);
   s = s.replace(/\b(Phần|phần)\s*(\d+)\b/g, (_, prefix, num) => `${prefix} ${numberToVietnameseWords(num)}`);
 
-  // 2b. Số thập phân, phần trăm và góc độ
-  s = s.replace(/(\d+)[.,](\d+)\s*°/g, (_, a, b) => `${numberToVietnameseWords(a)} phẩy ${numberToVietnameseWords(b)} độ`);
-  s = s.replace(/(\d+)\s*°/g, (_, num) => `${numberToVietnameseWords(num)} độ`);
+  // 2b. Số thập phân, phần trăm và góc độ (phòng ngừa nếu còn sót ký hiệu °)
+  s = s.replace(/(-\s*)?(\d+)[.,](\d+)\s*°/g, (_, neg, a, b) => `${neg ? 'âm ' : ''}${numberToVietnameseWords(a)} phẩy ${numberToVietnameseWords(b)} độ`);
+  s = s.replace(/(-\s*)?(\d+)\s*°/g, (_, neg, num) => `${neg ? 'âm ' : ''}${numberToVietnameseWords(num)} độ`);
   s = s.replace(/(\d+)\s*%/g, (_, num) => `${numberToVietnameseWords(num)} phần trăm`);
   s = s.replace(/(\d+)[.,](\d+)/g, (_, a, b) => `${numberToVietnameseWords(a)} phẩy ${numberToVietnameseWords(b)}`);
 
@@ -1341,7 +1480,8 @@ export function convertDigitsAndMathToVietnamese(raw: string): string {
   s = s.replace(/\s*!=\s*/g, ' khác ');
   s = s.replace(/\s*≠\s*/g, ' khác ');
   s = s.replace(/\s*\+\s*/g, ' cộng ');
-  s = s.replace(/\s*-\s*(?=[\d\w])/g, ' trừ ');
+  s = s.replace(/(?<=\d|\)|(?<!\p{L})[a-zA-Z])\s*-\s*(?=\d|\(|[a-zA-Z](?!\p{L}))/gu, ' trừ ');
+  s = s.replace(/\s+-\s+(?=\d|\(|[a-zA-Z](?!\p{L}))/gu, ' trừ ');
   s = s.replace(/\s*[*×•]\s*/g, ' nhân ');
   // Ký hiệu phép chia toán học: ÷ hoặc dấu hai chấm chia giữa 2 số (ví dụ 6 : 2 = 3)
   s = s.replace(/\s*÷\s*/g, ' chia cho ');
@@ -1439,6 +1579,9 @@ export function preprocessSpeechText(rawText: string, isEnglishSubject: boolean 
   t = t.replace(/\$([^\$]+)\$/g, ' $1 ');
   t = t.replace(/\\\((.+?)\\\)/g, ' $1 ');
   t = t.replace(/\\\[(.+?)\\\]/gs, ' $1 ');
+
+  // 1b. Chuẩn hóa ngay độ (^\circ, ^{\circ}, \degree, °) và hình học TRƯỚC khi xử lý dấu mũ ^
+  t = normalizeDegreesAndGeometry(t);
 
   // 2. Clean common LaTeX formatting commands
   t = t.replace(/\\displaystyle/g, ' ');
@@ -1615,7 +1758,7 @@ export function stopAllSpeech(): void {
       }
     } catch (_) {}
   }
-  if (currentAudioElement) {
+  if (currentAudioElement && currentAudioElement !== persistentHtmlAudio) {
     try {
       currentAudioElement.pause();
       currentAudioElement.currentTime = 0;
@@ -1712,15 +1855,33 @@ export async function speakWithGoogleTranslateStream(
     for (const streamUrl of candidateUrls) {
       if (isSpeechCancelled) break;
       played = await new Promise<boolean>((resolve) => {
+        let settled = false;
+        let safetyTimer: any = null;
+        const finish = (ok: boolean) => {
+          if (settled) return;
+          settled = true;
+          if (safetyTimer) {
+            clearTimeout(safetyTimer);
+            safetyTimer = null;
+          }
+          resolve(ok);
+        };
         try {
-          const audio = new Audio();
+          const audio = getPersistentHtmlAudio() || new Audio();
           currentAudioElement = audio;
+          audio.muted = false;
+          audio.volume = 1.0;
           try {
-            (audio as any).referrerPolicy = 'no-referrer';
+            (audio as any).preservesPitch = true;
+            (audio as any).webkitPreservesPitch = true;
+            (audio as any).mozPreservesPitch = true;
           } catch (_) {}
-          audio.playbackRate = playbackRate || 1.08;
+          const effRate = Math.max(0.85, Math.min(1.42, (playbackRate || 1.15) * getSpeechSpeedMultiplier()));
+          try {
+            audio.playbackRate = effRate;
+          } catch (_) {}
 
-          audio.onplay = () => {
+          audio.onplaying = () => {
             if (!started) {
               started = true;
               if (onStart && !isSpeechCancelled) onStart();
@@ -1728,25 +1889,30 @@ export async function speakWithGoogleTranslateStream(
           };
 
           audio.onended = () => {
-            currentAudioElement = null;
-            resolve(true);
+            if (currentAudioElement === audio) currentAudioElement = null;
+            finish(true);
           };
 
           audio.onerror = () => {
-            currentAudioElement = null;
-            resolve(false);
+            if (currentAudioElement === audio) currentAudioElement = null;
+            finish(false);
           };
+
+          safetyTimer = setTimeout(() => {
+            if (currentAudioElement === audio) currentAudioElement = null;
+            finish(started);
+          }, 15000);
 
           audio.src = streamUrl;
           const p = audio.play();
           if (p !== undefined) {
             p.catch(() => {
-              currentAudioElement = null;
-              resolve(false);
+              if (currentAudioElement === audio) currentAudioElement = null;
+              finish(false);
             });
           }
         } catch (_) {
-          resolve(false);
+          finish(false);
         }
       });
 
@@ -1771,18 +1937,38 @@ export async function speakWithGoogleTranslateStream(
 }
 
 /**
- * Phát giọng đọc Google Cloud Text-To-Speech / Audio Stream
- * - Hỗ trợ 100% Tiếng Việt chuẩn ngữ âm sư phạm cho tất cả các môn (Toán, Lý, Hóa, Sinh, Văn, Sử, Địa, v.v.)
- * - Tự động nhận diện và phát âm tiếng Anh chuẩn bản ngữ cho riêng bộ môn Tiếng Anh / Anh Văn
- * - Hoạt động ổn định trên cả Web Vercel, Netlify lẫn AI Studio Preview
- */
-/**
- * Nhận diện thiết bị di động / Smart TV 75" (nơi Web Speech API thường bị treo im lặng trong iframe/WebView)
+ * Nhận diện thiết bị di động / iPad / Smart TV 75" (nơi Web Speech API thường bị treo hoặc câm tiếng)
  */
 function isMobileOrSmartTV(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|SmartTV|Tizen|Web0S|BRAVIA|AFT|MIBOX|AndroidTV|HbbTV|\bTV\b/i.test(ua);
+  const isUaMobileOrTv =
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|SmartTV|Tizen|Web0S|WebOS|BRAVIA|AFT|MIBOX|AndroidTV|HbbTV|CrKey|NetCast|Viera|Hisense|TCL|Skyworth|Linux arm|Linux aarch64|\bTV\b/i.test(
+      ua
+    );
+  const isIpadOs = navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1;
+  return isUaMobileOrTv || isIpadOs;
+}
+
+function detectAudioMimeFromBytes(arrayBuf: ArrayBuffer): string {
+  const bytes = new Uint8Array(arrayBuf);
+  const isWav =
+    bytes.length > 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46;
+  return isWav ? 'audio/wav' : 'audio/mpeg';
+}
+
+function arrayBufferToBase64(arrayBuf: ArrayBuffer): string {
+  const bytes = new Uint8Array(arrayBuf);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+  }
+  return btoa(binary);
 }
 
 /**
@@ -1794,105 +1980,214 @@ async function fetchTtsChunkBytes(
   voiceName: string,
   presetId: string,
   playbackRate: number
-): Promise<ArrayBuffer | null> {
+): Promise<{ arrayBuf: ArrayBuffer; engine: string } | null> {
   const encoded = encodeURIComponent(chunkText);
   const ttsUrl = `/api/tts?lang=${lang}&voice=${voiceName}&preset=${presetId}&rate=${playbackRate}&text=${encoded}`;
+  const customKey = getEffectiveGeminiApiKey();
+  const headers: Record<string, string> = {};
+  if (isValidGeminiApiKey(customKey)) {
+    headers['x-gemini-api-key'] = customKey;
+  }
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 7500);
-    const res = await fetch(ttsUrl, { signal: controller.signal });
+    const res = await fetch(ttsUrl, { signal: controller.signal, headers });
     clearTimeout(timeoutId);
     if (res.ok) {
+      const engineHeader = res.headers.get('X-TTS-Engine') || 'google-translate';
+      if (engineHeader === 'gemini-3.8' || engineHeader === 'google-translate') {
+        detectedServerTtsEngine = engineHeader;
+      }
       const arrayBuf = await res.arrayBuffer();
       if (arrayBuf.byteLength > 100) {
-        return arrayBuf;
+        return { arrayBuf, engine: engineHeader };
       }
     }
   } catch (_) {}
   return null;
 }
 
-/**
- * Phát 1 đoạn AudioBuffer hoặc HTML5 Audio Blob bằng đối tượng đã mở khóa sẵn trên điện thoại / TV
- */
-async function playChunkBytes(
-  arrayBuf: ArrayBuffer,
-  cacheKey: string,
-  playbackRate: number,
-  onChunkPlayStart?: () => void
-): Promise<boolean> {
-  if (isSpeechCancelled) return false;
-  const ctx = getOrCreateAudioContext();
-  const arrayBufCopy = arrayBuf.slice(0);
+function getFallbackPresetAudioTuning(preset: VoiceTonePreset, engine?: string): { rate: number; detune: number; preferHtmlPreservesPitch: boolean } {
+  const speedMult = getSpeechSpeedMultiplier();
+  if (engine === 'gemini-3.8') {
+    // Gemini 3.8 Neural TTS already delivers energetic style via speechMetadata; keep native timbre cleanly paced
+    const baseRate = preset.rate || 1.16;
+    const rate = Math.max(0.9, Math.min(1.32, 1.0 + (baseRate * speedMult - 1.16) * 0.55));
+    return { rate, detune: 0, preferHtmlPreservesPitch: false };
+  }
+  // Google Translate raw stream is sluggish (~105 WPM): boost playbackRate via HTML5 <audio> with preservesPitch=true (no chipmunk distortion!)
+  const rate = Math.max(1.0, Math.min(1.45, (preset.rate || 1.18) * speedMult));
+  return { rate, detune: 0, preferHtmlPreservesPitch: true };
+}
 
-  if (ctx) {
-    try {
-      if (ctx.state === 'suspended') {
-        await ctx.resume().catch(() => {});
-      }
-      const decoded = await ctx.decodeAudioData(arrayBuf);
-      if (decoded && !isSpeechCancelled) {
-        audioCache.set(cacheKey, decoded);
-        return await new Promise<boolean>((resolve) => {
-          const ok = playAudioBuffer(
-            decoded,
-            onChunkPlayStart,
-            () => resolve(true),
-            playbackRate
-          );
-          ok.then((played) => {
-            if (!played) resolve(false);
-          });
-        });
-      }
-    } catch (_) {
-      // Fallback sang HTML5 Audio đã mở khóa bên dưới
-    }
+/**
+ * Phát URL (Blob hoặc Data URI) qua HTMLAudioElement đã được mở khóa theo tương tác chạm.
+ * Đảm bảo nghe tiếng rõ ràng trên cả iPhone (kể cả khi bật gạt rung im lặng), Android và Smart TV 75".
+ */
+async function playUrlWithPersistentAudio(
+  srcUrl: string,
+  playbackRate: number,
+  onChunkPlayStart?: () => void,
+  revokeOnCleanup: boolean = false
+): Promise<boolean> {
+  if (isSpeechCancelled) {
+    if (revokeOnCleanup) URL.revokeObjectURL(srcUrl);
+    return false;
   }
 
-  // Fallback sang HTML5 Audio dùng phần tử đã mở khóa sẵn (vượt Autoplay Policy Safari / Android TV)
   return new Promise<boolean>((resolve) => {
-    try {
-      const blob = new Blob([arrayBufCopy], { type: 'audio/mpeg' });
-      const blobUrl = URL.createObjectURL(blob);
-      const el = getPersistentHtmlAudio() || new Audio();
-      currentAudioElement = el;
-      el.volume = 1.0;
-      el.playbackRate = Math.max(0.7, Math.min(1.5, playbackRate || 1.0));
+    let finished = false;
+    let playStarted = false;
+    let safetyTimer: any = null;
+    const el = getPersistentHtmlAudio() || new Audio();
 
-      let finished = false;
-      const cleanup = (success: boolean) => {
-        if (finished) return;
-        finished = true;
-        el.onplay = null;
-        el.onended = null;
-        el.onerror = null;
-        URL.revokeObjectURL(blobUrl);
-        if (currentAudioElement === el) currentAudioElement = null;
-        resolve(success);
+    const cleanup = (success: boolean) => {
+      if (finished) return;
+      finished = true;
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+        safetyTimer = null;
+      }
+      el.onplay = null;
+      el.onplaying = null;
+      el.onended = null;
+      el.onerror = null;
+      if (revokeOnCleanup) {
+        try {
+          URL.revokeObjectURL(srcUrl);
+        } catch (_) {}
+      }
+      if (currentAudioElement === el) currentAudioElement = null;
+      resolve(success);
+    };
+
+    try {
+      currentAudioElement = el;
+      el.muted = false;
+      el.volume = 1.0;
+
+      const markPlaying = () => {
+        if (playStarted || isSpeechCancelled) return;
+        playStarted = true;
+        if (onChunkPlayStart) onChunkPlayStart();
       };
 
+      el.onplaying = markPlaying;
       el.onplay = () => {
-        if (!isSpeechCancelled && onChunkPlayStart) onChunkPlayStart();
+        // Fallback cho một số Smart TV WebView chỉ bắn onplay mà không bắn onplaying
+        setTimeout(() => {
+          if (!finished && !el.paused && !isSpeechCancelled) {
+            markPlaying();
+          }
+        }, 60);
       };
       el.onended = () => cleanup(true);
       el.onerror = () => cleanup(false);
 
-      el.src = blobUrl;
+      safetyTimer = setTimeout(() => {
+        cleanup(playStarted);
+      }, 18000);
+
+      el.src = srcUrl;
+      try {
+        (el as any).preservesPitch = true;
+        (el as any).webkitPreservesPitch = true;
+        (el as any).mozPreservesPitch = true;
+      } catch (_) {}
+      const targetRate = Math.max(0.85, Math.min(1.45, playbackRate || 1.15));
+      try {
+        el.playbackRate = targetRate;
+      } catch (_) {}
+
       const p = el.play();
       if (p !== undefined) {
-        p.catch(() => cleanup(false));
+        p.then(() => {
+          isAudioUnlocked = true;
+          markPlaying();
+        }).catch(() => {
+          cleanup(false);
+        });
       }
     } catch (_) {
-      resolve(false);
+      cleanup(false);
     }
   });
 }
 
 /**
- * Phát giọng đọc Google Cloud / Server TTS theo từng câu ngắn song song (Parallel Chunk Streaming)
- * - Câu đầu phát ngay sau ~0.35s thay vì chờ tải hết cả bài dài 4-6s.
- * - Mỗi đoạn là 1 file MP3 nguyên vẹn giúp Web Audio decodeAudioData() chạy mượt 100% trên iPhone, Android và TV 75".
+ * Phát 1 đoạn âm thanh MP3/WAV đáng tin cậy trên mọi thiết bị:
+ * - Với giọng dự phòng Google Translate hoặc trên Điện thoại/TV: Ưu tiên HTML5 <audio> bật preservesPitch=true để tăng tốc mượt mà không bị méo giọng.
+ * - Với Gemini 3.8 Neural TTS trên Máy tính: Ưu tiên Web Audio 0ms qua Studio EQ sáng rõ.
+ */
+async function playChunkBytes(
+  arrayBuf: ArrayBuffer,
+  cacheKey: string,
+  preset: VoiceTonePreset,
+  onChunkPlayStart?: () => void,
+  preferHtmlAudio: boolean = isMobileOrSmartTV(),
+  engine?: string
+): Promise<boolean> {
+  if (isSpeechCancelled) return false;
+
+  const mime = detectAudioMimeFromBytes(arrayBuf);
+  const tuning = getFallbackPresetAudioTuning(preset, engine);
+  if (rawChunkBytesCache.size > 150) {
+    const firstKey = rawChunkBytesCache.keys().next().value;
+    if (firstKey) rawChunkBytesCache.delete(firstKey);
+  }
+  rawChunkBytesCache.set(cacheKey, { bytes: arrayBuf.slice(0), mime, engine });
+
+  const tryWebAudio = async (): Promise<boolean> => {
+    const ctx = getOrCreateAudioContext();
+    if (!ctx) return false;
+    try {
+      if (ctx.state !== 'running') {
+        await Promise.race([
+          ctx.resume(),
+          new Promise((r) => setTimeout(r, 400)),
+        ]);
+      }
+      if ((ctx.state as string) !== 'running') return false;
+      const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+      if (decoded && !isSpeechCancelled) {
+        audioCache.set(cacheKey, { buffer: decoded, engine });
+        return await playAudioBuffer(decoded, onChunkPlayStart, undefined, tuning.rate, tuning.detune);
+      }
+    } catch (_) {}
+    return false;
+  };
+
+  const tryHtmlAudioBlobThenDataUri = async (): Promise<boolean> => {
+    try {
+      const blob = new Blob([arrayBuf.slice(0)], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      const blobOk = await playUrlWithPersistentAudio(blobUrl, tuning.rate, onChunkPlayStart, true);
+      if (blobOk || isSpeechCancelled) return blobOk;
+    } catch (_) {}
+
+    try {
+      const dataUri = `data:${mime};base64,${arrayBufferToBase64(arrayBuf)}`;
+      return await playUrlWithPersistentAudio(dataUri, tuning.rate, onChunkPlayStart, false);
+    } catch (_) {
+      return false;
+    }
+  };
+
+  if (preferHtmlAudio || tuning.preferHtmlPreservesPitch) {
+    const htmlOk = await tryHtmlAudioBlobThenDataUri();
+    if (htmlOk || isSpeechCancelled) return htmlOk;
+    return await tryWebAudio();
+  } else {
+    const webOk = await tryWebAudio();
+    if (webOk || isSpeechCancelled) return webOk;
+    return await tryHtmlAudioBlobThenDataUri();
+  }
+}
+
+/**
+ * Phát giọng đọc Gemini 3.8 Neural / Google Cloud TTS theo từng câu ngắn song song (Parallel Chunk Streaming)
+ * - Câu đầu phát ngay sau ~0.3s thay vì chờ tải hết cả bài dài 4-6s.
+ * - Trên Điện thoại & TV 75" ưu tiên phát qua HTML5 Audio kênh Media để luôn phát ra loa to, rõ ràng.
  */
 export async function speakWithGoogleCloudTTS(
   processedText: string,
@@ -1900,42 +2195,74 @@ export async function speakWithGoogleCloudTTS(
   lang: 'vi' | 'en' = 'vi',
   onStart?: () => void,
   onEnd?: () => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  skipStopAndUnlock: boolean = false
 ): Promise<boolean> {
   if (!processedText || !processedText.trim()) return false;
 
-  stopAllSpeech();
-  isSpeechCancelled = false;
-  unlockWebAudio();
-
-  const ctx = getOrCreateAudioContext();
-  if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
+  if (!skipStopAndUnlock) {
+    stopAllSpeech();
+    isSpeechCancelled = false;
+    unlockWebAudio();
   }
 
+  const preferHtml = isMobileOrSmartTV();
   const voiceName = preset.geminiVoice || (preset.gender === 'male' ? 'Charon' : 'Kore');
-  const playbackRate = preset.rate || 1.0;
-  const fullKey = `${lang}:::${processedText.trim()}`;
+  const playbackRate = preset.rate || 1.18;
+  const fullKey = `${preset.id}:::${voiceName}:::${lang}:::${processedText.trim()}`;
 
-  // 1. Nếu cả câu đã nằm trong RAM cache (<1ms)
-  if (audioCache.has(fullKey)) {
-    const cachedBuf = audioCache.get(fullKey)!;
-    const ok = await playAudioBuffer(cachedBuf, onStart, onEnd, playbackRate);
-    if (ok) return true;
+  // 1. Nếu cả câu đã nằm trong RAM cache
+  if (rawChunkBytesCache.has(fullKey)) {
+    const cachedRaw = rawChunkBytesCache.get(fullKey)!;
+    const cachedTuning = getFallbackPresetAudioTuning(preset, cachedRaw.engine);
+    if (preferHtml || cachedTuning.preferHtmlPreservesPitch) {
+      const ok = await playChunkBytes(cachedRaw.bytes, fullKey, preset, onStart, true, cachedRaw.engine);
+      if (ok) {
+        if (!isSpeechCancelled && onEnd) onEnd();
+        return true;
+      }
+    }
+  }
+  if (!preferHtml && audioCache.has(fullKey)) {
+    const cachedEntry = audioCache.get(fullKey)!;
+    const tuning = getFallbackPresetAudioTuning(preset, cachedEntry.engine);
+    if (!tuning.preferHtmlPreservesPitch) {
+      const ok = await playAudioBuffer(cachedEntry.buffer, onStart, onEnd, tuning.rate, tuning.detune);
+      if (ok) return true;
+    }
   }
 
-  // 2. Chia thành từng câu ngắn (<= 150 ký tự) và tải SONG SONG toàn bộ từ server /api/tts
-  const chunks = splitIntoSentences(processedText.trim(), 150);
+  // 2. Gửi cả câu hỏi + đáp án (<= 420 ký tự) trong 1 luồng liền mạch để đọc mượt, không ngắt quãng giữa các đáp án
+  const chunks = splitIntoSentences(processedText.trim(), 420);
   if (chunks.length === 0) return false;
 
   const chunkFetchPromises = chunks.map((chunk) => {
-    const chunkKey = `${lang}:::${chunk}`;
-    if (audioCache.has(chunkKey)) {
-      return Promise.resolve({ cachedBuf: audioCache.get(chunkKey)!, arrayBuf: null as ArrayBuffer | null, chunkKey });
+    const chunkKey = `${preset.id}:::${voiceName}:::${lang}:::${chunk}`;
+    if (rawChunkBytesCache.has(chunkKey)) {
+      const c = rawChunkBytesCache.get(chunkKey)!;
+      return Promise.resolve({
+        rawBytes: c.bytes,
+        cachedEntry: null as { buffer: AudioBuffer; engine?: string } | null,
+        arrayBuf: null as ArrayBuffer | null,
+        engine: c.engine,
+        chunkKey,
+      });
     }
-    return fetchTtsChunkBytes(chunk, lang, voiceName, preset.id, playbackRate).then((arrayBuf) => ({
-      cachedBuf: null as AudioBuffer | null,
-      arrayBuf,
+    if (!preferHtml && audioCache.has(chunkKey)) {
+      const c = audioCache.get(chunkKey)!;
+      return Promise.resolve({
+        rawBytes: null as ArrayBuffer | null,
+        cachedEntry: c,
+        arrayBuf: null as ArrayBuffer | null,
+        engine: c.engine,
+        chunkKey,
+      });
+    }
+    return fetchTtsChunkBytes(chunk, lang, voiceName, preset.id, playbackRate).then((res) => ({
+      rawBytes: null as ArrayBuffer | null,
+      cachedEntry: null as { buffer: AudioBuffer; engine?: string } | null,
+      arrayBuf: res ? res.arrayBuf : null,
+      engine: res ? res.engine : undefined,
       chunkKey,
     }));
   });
@@ -1963,19 +2290,13 @@ export async function speakWithGoogleCloudTTS(
     };
 
     let chunkOk = false;
-    if (result.cachedBuf) {
-      chunkOk = await new Promise<boolean>((resolve) => {
-        playAudioBuffer(
-          result.cachedBuf!,
-          triggerStartOnce,
-          () => resolve(true),
-          playbackRate
-        ).then((startedOk) => {
-          if (!startedOk) resolve(false);
-        });
-      });
+    if (result.rawBytes) {
+      chunkOk = await playChunkBytes(result.rawBytes, result.chunkKey, preset, triggerStartOnce, preferHtml, result.engine);
+    } else if (result.cachedEntry) {
+      const tuning = getFallbackPresetAudioTuning(preset, result.engine);
+      chunkOk = await playAudioBuffer(result.cachedEntry.buffer, triggerStartOnce, undefined, tuning.rate, tuning.detune);
     } else if (result.arrayBuf) {
-      chunkOk = await playChunkBytes(result.arrayBuf, result.chunkKey, playbackRate, triggerStartOnce);
+      chunkOk = await playChunkBytes(result.arrayBuf, result.chunkKey, preset, triggerStartOnce, preferHtml, result.engine);
     }
 
     if (!chunkOk) {
@@ -1991,7 +2312,7 @@ export async function speakWithGoogleCloudTTS(
     return true;
   }
 
-  // Fallback cuối: stream trực tiếp từ Google Translate hoặc báo lỗi sạch sẽ
+  // Fallback cuối: stream trực tiếp qua HTMLAudioElement đã mở khóa hoặc báo lỗi sạch sẽ
   const fallbackOk = await speakWithGoogleTranslateStream(
     processedText,
     lang,
@@ -2078,8 +2399,8 @@ export function speakWithWebSpeech(
       const part = textParts[currentIndex];
       const utterance = new SpeechSynthesisUtterance(part);
       utterance.lang = targetLang;
-      utterance.pitch = preset.pitch || 1.0;
-      utterance.rate = preset.rate || 1.05;
+      utterance.pitch = Math.max(0.92, Math.min(1.12, preset.pitch || 1.0));
+      utterance.rate = Math.max(0.9, Math.min(1.45, (preset.rate || 1.18) * getSpeechSpeedMultiplier()));
       utterance.volume = 1.0;
       if (matchedVoice) {
         utterance.voice = matchedVoice;
@@ -2157,6 +2478,16 @@ export function speakWithWebSpeech(
  * - Trên Điện thoại & Tivi 75 inch: Chuyển thẳng sang /api/tts phân đoạn song song + AudioContext/Audio đã mở khóa
  *   để đảm bảo 100% phát được giọng đọc chuẩn tiếng Việt.
  */
+function hasLocalNaturalVietnameseVoice(gender: 'female' | 'male' | 'neutral'): boolean {
+  const best = getBestVietnameseVoice(gender);
+  if (!best) return false;
+  const n = (best.name || '').toLowerCase();
+  const isMicrosoftNatural = (n.includes('hoaimy') || n.includes('namminh')) && (n.includes('natural') || n.includes('online'));
+  const isGoogleVi = n.includes('google') && (n.includes('tiếng việt') || n.includes('vietnam'));
+  const isAppleQuality = n.includes('linh') && (n.includes('enhanced') || n.includes('premium') || n.includes('natural'));
+  return isMicrosoftNatural || isGoogleVi || isAppleQuality;
+}
+
 export function speakText(text: string, options: SpeakOptions = {}): boolean {
   if (!text || !text.trim()) return false;
 
@@ -2164,9 +2495,9 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
   isSpeechCancelled = false;
   unlockWebAudio();
 
-  const isEnglish = !!options.isEnglish || 
+  const isEnglish = !!options.isEnglish ||
     (typeof options.subject === 'string' && (
-      options.subject.toLowerCase().includes('tiếng anh') || 
+      options.subject.toLowerCase().includes('tiếng anh') ||
       options.subject.toLowerCase().includes('english') ||
       options.subject.toLowerCase().includes('anh văn') ||
       options.subject.toLowerCase().includes('ngoại ngữ')
@@ -2174,24 +2505,66 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
 
   const lang: 'vi' | 'en' = isEnglish ? 'en' : 'vi';
   const preset = options.preset || VOICE_TONE_PRESETS[0];
+  const voiceName = preset.geminiVoice || (preset.gender === 'male' ? 'Charon' : 'Kore');
   const processed = isEnglish ? cleanMathForVietnameseTTS(text, true) : preprocessSpeechText(text, false);
 
   if (!processed) return false;
 
-  // 1. Kiểm tra audioCache nếu đã có sẵn thì phát tức thì 0ms
-  const cacheKey = `${lang}:::${processed.trim()}`;
-  if (audioCache.has(cacheKey)) {
-    const cachedBuf = audioCache.get(cacheKey)!;
-    playAudioBuffer(cachedBuf, options.onStart, options.onEnd, preset.rate || 1.0);
+  // 1. Kiểm tra RAM cache theo đúng sắc thái giọng (preset.id + voiceName + lang)
+  const cacheKey = `${preset.id}:::${voiceName}:::${lang}:::${processed.trim()}`;
+  const preferHtml = isMobileOrSmartTV();
+
+  if (rawChunkBytesCache.has(cacheKey)) {
+    const cachedRaw = rawChunkBytesCache.get(cacheKey)!;
+    const cachedTuning = getFallbackPresetAudioTuning(preset, cachedRaw.engine);
+    if (preferHtml || cachedTuning.preferHtmlPreservesPitch) {
+      playChunkBytes(cachedRaw.bytes, cacheKey, preset, options.onStart, true, cachedRaw.engine).then((ok) => {
+        if (ok && !isSpeechCancelled && options.onEnd) {
+          options.onEnd();
+        } else if (!ok && !isSpeechCancelled) {
+          speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError, true);
+        }
+      });
+      return true;
+    }
+  }
+
+  if (!preferHtml && audioCache.has(cacheKey)) {
+    const cachedEntry = audioCache.get(cacheKey)!;
+    const tuning = getFallbackPresetAudioTuning(preset, cachedEntry.engine);
+    if (!tuning.preferHtmlPreservesPitch) {
+      playAudioBuffer(cachedEntry.buffer, options.onStart, options.onEnd, tuning.rate, tuning.detune).then((ok) => {
+        if (!ok && !isSpeechCancelled) {
+          speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError, true);
+        }
+      });
+      return true;
+    }
+  }
+
+  // 2. Ưu tiên giọng Neural chất lượng cao nhất trên từng nền tảng:
+  //    - Nếu trình duyệt có giọng chất lượng cao (HoaiMy/NamMinh Natural, Google Tiếng Việt) và chưa bật Gemini: dùng ngay (<50ms) với tốc độ nhanh nhẹn
+  //    - Nếu máy chủ có Gemini 3.8 Neural TTS: dùng /api/tts để phát 5 giọng AI truyền cảm chuẩn studio
+  //    - Tránh hoàn toàn giọng Microsoft An cũ kỹ; nếu không có giọng Local hay, dùng /api/tts phát HTML5 preservesPitch tốc độ 1.18x-1.25x
+  const hasNaturalLocal = !isEnglish && hasLocalNaturalVietnameseVoice(preset.gender);
+  const customGeminiKey = getEffectiveGeminiApiKey();
+  const hasGeminiKeyHint = isValidGeminiApiKey(customGeminiKey);
+  const preferServerNeural =
+    !preferHtml &&
+    options.preferWebSpeech !== true &&
+    (hasGeminiKeyHint || detectedServerTtsEngine === 'gemini-3.8' || (!hasNaturalLocal && detectedServerTtsEngine === null));
+
+  if (preferServerNeural) {
+    speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError, true);
     return true;
   }
 
-  // 2. Trên Điện thoại & Smart TV 75 inch: dùng trực tiếp luồng /api/tts phân đoạn song song
   const useWebSpeechFirst =
-    !isMobileOrSmartTV() &&
+    !preferHtml &&
     typeof window !== 'undefined' &&
     'speechSynthesis' in window &&
-    options.preferGemini !== true;
+    options.preferGemini !== true &&
+    (isEnglish || hasNaturalLocal);
 
   if (useWebSpeechFirst) {
     try {
@@ -2201,19 +2574,10 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
   }
 
   // 3. Máy chủ TTS stream (/api/tts) siêu tốc phân đoạn song song
-  speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError);
+  speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError, true);
   return true;
 }
 
-/**
- * Generate highly expressive Gemini Audio stream/blob if Gemini API key is configured.
- * Hỗ trợ chuẩn xác:
- * - Nếu môn học là Tiếng Anh -> đọc chuẩn phát âm Tiếng Anh.
- * - Tất cả các môn khác (Toán học, Vật lí, Hóa học, Sinh học, Tin học...) -> đọc 100% bằng Tiếng Việt chuẩn mực.
- * - 5 sắc thái giọng AI cao cấp: Kore, Aoede, Puck, Charon, Fenrir.
- * - Có audioCache lưu đệm AudioBuffer theo text (0ms khi đọc lại).
- * - Bọc trong try-catch có timeout 4.5s (quá 4.5s hoặc lỗi là tự động đọc bằng Google Cloud/Translate TTS stream ngay).
- */
 export async function speakWithGeminiAudio(
   text: string,
   preset: VoiceTonePreset = VOICE_TONE_PRESETS[0],
@@ -2223,9 +2587,8 @@ export async function speakWithGeminiAudio(
   subject?: string,
   onError?: (err: any) => void
 ): Promise<boolean> {
-  const apiKey = getEffectiveGeminiApiKey();
   const isEn = isEnglish || (typeof subject === 'string' && (
-    subject.toLowerCase().includes('tiếng anh') || 
+    subject.toLowerCase().includes('tiếng anh') ||
     subject.toLowerCase().includes('english') ||
     subject.toLowerCase().includes('anh văn') ||
     subject.toLowerCase().includes('ngoại ngữ')
@@ -2238,43 +2601,7 @@ export async function speakWithGeminiAudio(
   isSpeechCancelled = false;
   unlockWebAudio();
 
-  const ctx = getOrCreateAudioContext();
-  if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
-  }
-
-  const validVoices = ['Kore', 'Aoede', 'Puck', 'Charon', 'Fenrir'];
-  let voiceName = preset.geminiVoice || 'Kore';
-  if (!validVoices.includes(voiceName)) {
-    voiceName = 'Kore';
-  }
-
-  // 1. Kiểm tra audioCache: nếu có sẵn thì phát tức thì 0ms qua AudioContext
-  const cacheKey = `${voiceName}:::${processed.trim()}`;
-  if (audioCache.has(cacheKey)) {
-    const cachedBuf = audioCache.get(cacheKey)!;
-    return playAudioBuffer(cachedBuf, onStart, onEnd);
-  }
-
-  // 2. Nếu có apiKey, gọi Gemini TTS để phát âm thanh AI truyền cảm tự nhiên chuẩn mực
-  if (apiKey) {
-    try {
-      const bufferPromise = fetchGeminiAudioBuffer(processed, voiceName, apiKey);
-      const timeoutPromise = new Promise<null>((res) => setTimeout(() => res(null), 4500));
-      const buffer = await Promise.race([bufferPromise, timeoutPromise]);
-      if (buffer && !isSpeechCancelled) {
-        audioCache.set(cacheKey, buffer);
-        return playAudioBuffer(buffer, onStart, onEnd);
-      }
-    } catch (err) {
-      console.warn('Gemini Audio fetch failed, falling back to TTS stream:', err);
-    }
-  }
-
-  if (isSpeechCancelled) return false;
-
-  // 3. Fallback sang Google Cloud / Google Translate TTS stream tiếng Việt chuẩn 100%
-  return speakWithGoogleCloudTTS(processed, preset, isEn ? 'en' : 'vi', onStart, onEnd, onError);
+  return speakWithGoogleCloudTTS(processed, preset, isEn ? 'en' : 'vi', onStart, onEnd, onError, true);
 }
 
 /**
@@ -2359,6 +2686,7 @@ export function speakQuestionContent(
     let cleanQ = qText.trim()
       .replace(/\\begin\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}[\s\S]*?\\end\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}/gi, ' ')
       .replace(/^câu\s*\d*\s*[:.]\s*/i, '')
+      .replace(/[:;.,]+\s*$/, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
     rawScript = `Câu hỏi: ${cleanQ}. `;

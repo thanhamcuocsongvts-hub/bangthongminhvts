@@ -40,9 +40,9 @@ export function cleanPdfVietnameseText(rawText: string): string {
   // Bảo vệ ranh giới từ thật sự (khi khoảng cách giữa các từ >= 2 khoảng trắng hoặc xuống dòng)
   text = text.replace(/\s{2,}/g, ' ___WORD_GAP___ ');
 
-  // Bảo vệ các từ bình thường đã hoàn chỉnh (>= 2 ký tự tiếng Việt) không bị dính vào nhau
-  text = text.replace(/([a-zA-ZÀ-ỹ]{2,})\s+(?=[a-zA-ZÀ-ỹ]{2,})/g, '$1___WORD_GAP___');
-  text = text.replace(/([a-zA-ZÀ-ỹ]{2,})\s+(?=\d|[a-zA-ZÀ-ỹ]\s+___WORD_GAP___)/g, '$1___WORD_GAP___');
+  // Bảo vệ các từ bình thường đã hoàn chỉnh (>= 2 ký tự chữ cái) không bị dính vào biến toán học 1 chữ cái hoặc từ kế tiếp
+  text = text.replace(/(\p{L}{2,})\s+(?=\p{L}{2,})/gu, '$1___WORD_GAP___');
+  text = text.replace(/(\p{L}{2,})\s+(?=\d|\p{L}(?:$|\s|\p{P}|\p{S}))/gu, '$1___WORD_GAP___');
 
   // 2. Nối các từ tiếng Việt bị tách rời từng ký tự (Ví dụ: "N h ậ n   b i ế t" -> "Nhận biết")
   for (let i = 0; i < 3; i++) {

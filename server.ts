@@ -14,7 +14,8 @@ const PORT = 3000;
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-filename");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-filename, x-gemini-api-key");
+  res.header("Access-Control-Expose-Headers", "X-TTS-Engine");
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
@@ -33,9 +34,42 @@ app.get("/health", (req, res) => {
 });
 
 // In-memory cache for high-frequency TTS audio buffers (0ms instantaneous response)
-const ttsAudioCache = new Map<string, Buffer>();
+const ttsAudioCache = new Map<string, { buffer: Buffer; mime: string; engine: string }>();
 
-// Natural text chunker for Google TTS (splits into natural sub-sentences <= 140 chars)
+const VOICE_STYLE_HINTS: Record<string, { geminiVoice: string; fallbackVoice: string; style: string }> = {
+  Kore: {
+    geminiVoice: "Kore",
+    fallbackVoice: "Kore",
+    style: "Bright, cheerful, energetic Vietnamese female teacher speaking at a brisk, lively, engaging classroom pace with crisp articulation",
+  },
+  Aoede: {
+    geminiVoice: "Zephyr",
+    fallbackVoice: "Kore",
+    style: "Engaging, expressive, dynamic Vietnamese narrator speaking at a lively, natural pace with warm vocal energy",
+  },
+  Zephyr: {
+    geminiVoice: "Zephyr",
+    fallbackVoice: "Kore",
+    style: "Upbeat, warm, bright Vietnamese narrator speaking at a brisk, clear, captivating pace",
+  },
+  Puck: {
+    geminiVoice: "Puck",
+    fallbackVoice: "Fenrir",
+    style: "High-energy, enthusiastic, vibrant Vietnamese quiz show host speaking at a brisk, punchy, exciting pace",
+  },
+  Charon: {
+    geminiVoice: "Charon",
+    fallbackVoice: "Fenrir",
+    style: "Confident, resonant, authoritative Vietnamese male lecturer speaking at a crisp, brisk, engaging classroom pace",
+  },
+  Fenrir: {
+    geminiVoice: "Fenrir",
+    fallbackVoice: "Charon",
+    style: "Sharp, dynamic, professional Vietnamese television anchor speaking at a brisk, decisive, captivating pace",
+  },
+};
+
+// Natural text chunker for Google TTS (splits into natural sub-sentences <= 180 chars)
 function chunkTextForTTS(text: string, maxLen = 180): string[] {
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
@@ -126,7 +160,7 @@ function pcmToWavBuffer(
   return Buffer.concat([header, pcmBuffer]);
 }
 
-// High-Fidelity Multi-Voice AI Text-To-Speech Route with Gemini Audio & Google TTS Fallback
+// High-Fidelity Multi-Voice AI Text-To-Speech Route with Gemini 3.8 Neural TTS & Google TTS Fallback
 app.get("/api/tts", async (req, res) => {
   try {
     const text = String(req.query.text || "").trim();
@@ -137,48 +171,90 @@ app.get("/api/tts", async (req, res) => {
     const requestedLang = (req.query.lang as string) || "vi";
     const lang = requestedLang.toLowerCase().startsWith("en") ? "en" : "vi";
     const requestedVoice = String(req.query.voice || req.query.preset || "").trim();
-    const validVoices = ["Kore", "Aoede", "Puck", "Charon", "Fenrir"];
+    const validVoices = ["Kore", "Aoede", "Zephyr", "Puck", "Charon", "Fenrir"];
     const voice = validVoices.includes(requestedVoice) ? requestedVoice : "Kore";
-    const cacheKey = `${voice}:${lang}:${text}`;
+    const presetId = String(req.query.preset || voice).trim();
 
-    if (ttsAudioCache.has(cacheKey)) {
-      const cached = ttsAudioCache.get(cacheKey)!;
-      const isWav = cached.length > 12 && cached.toString("ascii", 0, 4) === "RIFF";
-      res.setHeader("Content-Type", isWav ? "audio/wav" : "audio/mpeg");
-      res.setHeader("Cache-Control", "public, max-age=86400");
-      res.setHeader("Content-Length", cached.length);
-      return res.send(cached);
-    }
-
-    // 1. Try Gemini TTS for natural, expressive human-like voice synthesis
     const apiKey =
+      (req.headers["x-gemini-api-key"] as string) ||
       process.env.GEMINI_API_KEY ||
       process.env.VITE_GEMINI_API_KEY ||
       process.env.API_KEY ||
       process.env.VITE_API_KEY ||
       process.env.GOOGLE_API_KEY;
 
-    if (apiKey) {
+    const allowGemini = Boolean(apiKey) && req.query.useGemini !== "0";
+    const cacheKey = `${allowGemini ? "g38" : "gt"}:${voice}:${presetId}:${lang}:${text}`;
+
+    if (ttsAudioCache.has(cacheKey)) {
+      const cached = ttsAudioCache.get(cacheKey)!;
+      res.setHeader("Content-Type", cached.mime);
+      res.setHeader("X-TTS-Engine", cached.engine);
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Content-Length", cached.buffer.length);
+      return res.send(cached.buffer);
+    }
+
+    // 1. Gemini 3.8 Neural TTS (expressive multi-voice speechMetadata) when API key is configured
+    if (allowGemini && apiKey) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
-        let response: any = null;
-        try {
-          response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: text,
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build",
+            },
+          },
+        });
+        const voiceSpec = VOICE_STYLE_HINTS[voice] || VOICE_STYLE_HINTS.Kore;
+        const langStylePrefix =
+          lang === "en"
+            ? "Natural English pronunciation. "
+            : "Natural standard Vietnamese pronunciation (miền Bắc/chuẩn SGK). ";
+        const speechStyle = `${langStylePrefix}${voiceSpec.style}`;
+
+        const tryGenerateGeminiTts = async (modelName: string, targetVoice: string) => {
+          return ai.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text,
+                    speechMetadata: {
+                      style: speechStyle,
+                    },
+                  } as any,
+                ],
+              },
+            ],
             config: {
               responseModalities: ["AUDIO"],
               speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: {
-                    voiceName: voice,
+                    voiceName: targetVoice,
                   },
                 },
               },
             },
           });
-        } catch (_) {
-          // Model does not support AUDIO or invalid API key, fallback immediately
+        };
+
+        let response: any = null;
+        try {
+          response = await Promise.race([
+            tryGenerateGeminiTts("gemini-3.8-flash-lite-tts", voiceSpec.geminiVoice),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini TTS timeout")), 5500)),
+          ]);
+        } catch {
+          try {
+            response = await Promise.race([
+              tryGenerateGeminiTts("gemini-3.8-flash-tts", voiceSpec.fallbackVoice),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini flash TTS timeout")), 5000)),
+            ]);
+          } catch (_) {}
         }
 
         const parts = response?.candidates?.[0]?.content?.parts;
@@ -195,30 +271,34 @@ app.get("/api/tts", async (req, res) => {
         }
 
         if (audioBase64) {
-          const rawPcm = Buffer.from(audioBase64, "base64");
-          let wavBuffer = rawPcm;
-          if (mimeType.includes("pcm") || mimeType.includes("raw") || !rawPcm.toString("ascii", 0, 4).startsWith("RIFF")) {
-            wavBuffer = pcmToWavBuffer(rawPcm, 24000);
+          const rawBytes = Buffer.from(audioBase64, "base64");
+          const hasRiffHeader = rawBytes.length > 12 && rawBytes.toString("ascii", 0, 4) === "RIFF";
+          let wavBuffer = rawBytes;
+          if (!hasRiffHeader && (mimeType.includes("pcm") || mimeType.includes("raw") || mimeType.includes("l16"))) {
+            wavBuffer = pcmToWavBuffer(rawBytes, 24000);
+            mimeType = "audio/wav";
+          } else if (hasRiffHeader) {
             mimeType = "audio/wav";
           }
           if (ttsAudioCache.size > 200) {
             const firstKey = ttsAudioCache.keys().next().value;
             if (firstKey) ttsAudioCache.delete(firstKey);
           }
-          ttsAudioCache.set(cacheKey, wavBuffer);
+          ttsAudioCache.set(cacheKey, { buffer: wavBuffer, mime: mimeType, engine: "gemini-3.8" });
 
           res.setHeader("Content-Type", mimeType);
+          res.setHeader("X-TTS-Engine", "gemini-3.8");
           res.setHeader("Cache-Control", "public, max-age=86400");
           res.setHeader("Content-Length", wavBuffer.length);
           return res.send(wavBuffer);
         }
       } catch (geminiErr) {
-        console.warn("[Local Server] Gemini TTS error, falling back to Google TTS:", geminiErr);
+        console.warn("[Local Server] Gemini 3.8 TTS error, falling back to Google TTS:", geminiErr);
       }
     }
 
-    // 2. Fallback: Google Translate TTS Stream with parallel chunk fetching
-    const chunks = chunkTextForTTS(text, 140);
+    // 2. Fast Google Translate TTS Stream with parallel chunk fetching
+    const chunks = chunkTextForTTS(text, 180);
     const chunkPromises = chunks.map((chunk) => fetchSingleTtsAudio(chunk, lang));
     const chunkResults = await Promise.all(chunkPromises);
     const audioBuffers: Buffer[] = chunkResults.filter((b): b is Buffer => b !== null);
@@ -233,9 +313,10 @@ app.get("/api/tts", async (req, res) => {
       const firstKey = ttsAudioCache.keys().next().value;
       if (firstKey) ttsAudioCache.delete(firstKey);
     }
-    ttsAudioCache.set(cacheKey, combinedBuffer);
+    ttsAudioCache.set(cacheKey, { buffer: combinedBuffer, mime: "audio/mpeg", engine: "google-translate" });
 
     res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("X-TTS-Engine", "google-translate");
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.setHeader("Content-Length", combinedBuffer.length);
     res.send(combinedBuffer);
@@ -3376,6 +3457,7 @@ ${rawText ? rawText.slice(0, 15000) : "Chưa có nội dung"}`;
 app.post("/api/rooms", (req, res) => {
   const { pin, title, questions } = req.body;
   const roomPin = pin || Math.floor(100000 + Math.random() * 900000).toString();
+  const prevRoom = rooms[roomPin];
 
   rooms[roomPin] = {
     pin: roomPin,
@@ -3385,7 +3467,16 @@ app.post("/api/rooms", (req, res) => {
     startedAt: new Date().toISOString(),
     questions: questions || [],
     submissions: {},
-    activeStudents: rooms[roomPin]?.activeStudents || [],
+    activeStudents: prevRoom?.activeStudents || [],
+    examSettings: prevRoom?.examSettings || {
+      isExamMode: false,
+      totalDurationMinutes: 45,
+      startedAtTimestamp: null,
+      endsAtTimestamp: null,
+      isScreenLocked: false,
+      isTeacherLocked: false,
+      allowReview: true,
+    },
   };
 
   res.json({ success: true, room: rooms[roomPin] });
