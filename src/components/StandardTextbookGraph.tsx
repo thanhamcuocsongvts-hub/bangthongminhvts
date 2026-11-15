@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
+import React, { useId } from 'react';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
-import { Eye, Compass } from 'lucide-react';
+import { analyzeAndSampleSgkGraph } from '../utils/sgkGraphMath';
 
 export interface StandardTextbookGraphProps {
   latex?: string;
-  graphType?: 'rational' | 'cubic' | 'biquadratic' | 'quadratic' | 'rational_21' | 'sine' | 'linear' | string;
+  graphType?: 'rational' | 'cubic' | 'biquadratic' | 'quadratic' | 'rational_21' | 'sine' | 'linear' | 'exp' | 'log' | string;
   title?: string;
   width?: number | string;
   height?: number;
   className?: string;
-  // Custom coefficients if known
+  questionText?: string;
   coefficients?: {
     a?: number;
     b?: number;
@@ -23,74 +23,54 @@ export interface StandardTextbookGraphProps {
 }
 
 /**
- * StandardTextbookGraph: Component vẽ đồ thị hàm số chuẩn xác theo phong cách Sách Giáo Khoa
- * Toán học Việt Nam (GDPT 2018 - Kết nối tri thức, Chân trời sáng tạo, Cánh diều).
- * - Trục tọa độ Oxy sắc nét, mũi tên chuẩn, gốc O.
- * - Đường cong trơn mượt, màu sắc sư phạm trang nhã (#2563eb).
- * - Đường tiệm cận đứng, tiệm cận ngang / xiên vẽ nét đứt (dashed) rõ ràng.
- * - Điểm cực đại, cực tiểu, giao điểm với trục tọa độ có đường gióng vuông góc nét đứt xuống 2 trục.
- * - Hoạt động độc lập bằng SVG vector thuần, 0ms độ trễ, không phụ thuộc internet/Desmos.
+ * StandardTextbookGraph: Đồ thị hàm số chuẩn mực Sách Giáo Khoa Toán học Việt Nam (GDPT 2018).
+ * - Nền trắng tinh khiết chuẩn giấy in SGK (không lưới tọa độ rườm rà).
+ * - Phân tích và vẽ CHÍNH XÁC biểu thức hàm số (tiệm cận, cực trị, giao điểm trục).
+ * - Chỉ ghi các giá trị tọa độ quan trọng & đặt nhãn tự động né đường gióng (như SGK Kết nối tri thức / Cánh diều).
  */
 export const StandardTextbookGraph: React.FC<StandardTextbookGraphProps> = ({
   latex = '',
-  graphType: initialGraphType,
+  graphType,
   title,
-  height = 300,
+  height = 290,
   className = '',
+  questionText = '',
   coefficients,
-  asymptoteX: initialAsymX,
-  asymptoteY: initialAsymY,
+  asymptoteX,
+  asymptoteY,
   isPresentationMode = false,
 }) => {
-  // Xác định loại hàm số dựa trên latex hoặc graphType
-  const cleanLatex = (latex || '').replace(/\$/g, '').trim();
-  let type = initialGraphType || 'cubic';
+  const clipUid = useId().replace(/:/g, '_');
+  const analysis = analyzeAndSampleSgkGraph({
+    latex,
+    questionText,
+    graphType,
+    title,
+    coefficients,
+    asymptoteX,
+    asymptoteY,
+  });
 
-  if (!initialGraphType && cleanLatex) {
-    if (cleanLatex.includes('\\frac') || cleanLatex.includes('/') || /(?:ax\+b|cx\+d)/i.test(cleanLatex)) {
-      type = 'rational';
-    } else if (cleanLatex.includes('x^4') || cleanLatex.includes('x^{4}')) {
-      type = 'biquadratic';
-    } else if (cleanLatex.includes('x^3') || cleanLatex.includes('x^{3}')) {
-      type = 'cubic';
-    } else if (cleanLatex.includes('x^2') || cleanLatex.includes('x^{2}')) {
-      type = 'quadratic';
-    } else if (/cos|sin/i.test(cleanLatex)) {
-      type = 'sine';
-    }
-  }
+  const svgW = isPresentationMode ? 480 : 410;
+  const svgH = isPresentationMode ? 330 : height;
 
-  // Kích thước khung vẽ SVG
-  const svgW = isPresentationMode ? 520 : 440;
-  const svgH = isPresentationMode ? 360 : height;
+  const padLeft = 26;
+  const padRight = 26;
+  const padTop = 24;
+  const padBot = 24;
+  const plotW = svgW - padLeft - padRight;
+  const plotH = svgH - padTop - padBot;
 
-  // Gốc tọa độ O (220, 150)
-  const originX = svgW / 2;
-  const originY = svgH / 2;
-  const unitScale = isPresentationMode ? 36 : 32; // pixel trên 1 đơn vị
+  const spanX = Math.max(1e-4, analysis.maxX - analysis.minX);
+  const spanY = Math.max(1e-4, analysis.maxY - analysis.minY);
 
-  const toSvgX = (x: number) => originX + x * unitScale;
-  const toSvgY = (y: number) => originY - y * unitScale;
+  const toSvgX = (x: number) => padLeft + ((x - analysis.minX) / spanX) * plotW;
+  const toSvgY = (y: number) => padTop + ((analysis.maxY - y) / spanY) * plotH;
 
-  // Giới hạn hiển thị trên trục
-  const minX = -Math.floor((originX - 25) / unitScale);
-  const maxX = Math.floor((svgW - originX - 25) / unitScale);
-  const minY = -Math.floor((svgH - originY - 25) / unitScale);
-  const maxY = Math.floor((originY - 25) / unitScale);
+  const originX = toSvgX(0);
+  const originY = toSvgY(0);
 
-  // Sinh danh sách số nguyên trên trục Ox và Oy
-  const xTicks: number[] = [];
-  for (let x = minX; x <= maxX; x++) {
-    if (x !== 0) xTicks.push(x);
-  }
-
-  const yTicks: number[] = [];
-  for (let y = minY; y <= maxY; y++) {
-    if (y !== 0) yTicks.push(y);
-  }
-
-  // Hàm sinh chuỗi path SVG từ mảng điểm
-  const pointsToPath = (pts: Array<{ x: number; y: number }>) => {
+  const pointsToSmoothPath = (pts: Array<{ x: number; y: number }>) => {
     if (pts.length === 0) return '';
     return pts.reduce((acc, p, idx) => {
       const sx = toSvgX(p.x).toFixed(1);
@@ -99,426 +79,315 @@ export const StandardTextbookGraph: React.FC<StandardTextbookGraphProps> = ({
     }, '');
   };
 
-  // =========================================================================
-  // 1. DỮ LIỆU ĐỒ THỊ THEO TỪNG LOẠI HÀM SỐ CHUẨN SGK TOÁN
-  // =========================================================================
+  // Helper: xác định phía tránh đường gióng cho nhãn trên trục Ox
+  const isProjectionBelowOx = (xVal: number): boolean => {
+    return analysis.keyPoints.some(
+      (pt) => pt.showProjections && Math.abs(pt.x - xVal) < 0.15 && pt.y < -0.1
+    );
+  };
 
-  let curvePaths: string[] = [];
-  let asymptotes: Array<{ x1: number; y1: number; x2: number; y2: number; label: string; lx: number; ly: number }> = [];
-  let keyPoints: Array<{ x: number; y: number; label?: string; showProjections?: boolean }> = [];
-  let displayTitle = title;
-  let formulaText = cleanLatex;
+  // Helper: xác định phía tránh đường gióng cho nhãn trên trục Oy
+  const isProjectionLeftOfOy = (yVal: number): boolean => {
+    return analysis.keyPoints.some(
+      (pt) => pt.showProjections && Math.abs(pt.y - yVal) < 0.15 && pt.x < -0.1
+    );
+  };
 
-  // --- LOẠI 1: HÀM PHÂN THỨC BẬC NHẤT / BẬC NHẤT y = (ax+b)/(cx+d) ---
-  if (type === 'rational') {
-    // Giá trị tiệm cận mặc định chuẩn SGK: ví dụ x = 1, y = 2 hoặc x = 2, y = 1
-    const asymX = initialAsymX !== undefined ? initialAsymX : (cleanLatex.includes('x-2') ? 2 : 1);
-    const asymY = initialAsymY !== undefined ? initialAsymY : (cleanLatex.includes('2x') ? 2 : 1);
-    
-    // Nếu là đồ thị nhận dạng tổng quát dạng y = (ax+b)/(cx+d) (như Câu 9)
-    if (!formulaText || /(?:ax\+b|cx\+d)/i.test(formulaText)) {
-      formulaText = 'y = \\frac{ax+b}{cx+d} \\ (ad - bc > 0)';
-      if (!displayTitle) displayTitle = 'Đồ thị hàm số nhất biến y = (ax+b)/(cx+d)';
-    }
-
-    // Tiệm cận đứng x = asymX
-    asymptotes.push({
-      x1: toSvgX(asymX),
-      y1: 15,
-      x2: toSvgX(asymX),
-      y2: svgH - 15,
-      label: `x = ${asymX}`,
-      lx: toSvgX(asymX) + 6,
-      ly: 30,
-    });
-
-    // Tiệm cận ngang y = asymY
-    asymptotes.push({
-      x1: 15,
-      y1: toSvgY(asymY),
-      x2: svgW - 15,
-      y2: toSvgY(asymY),
-      label: `y = ${asymY}`,
-      lx: svgW - 45,
-      ly: toSvgY(asymY) - 6,
-    });
-
-    // Hàm toán học mẫu: f(x) = asymY - k / (x - asymX) với k = 1 hoặc 2 (đồng biến)
-    const k = cleanLatex.includes('x+1') && cleanLatex.includes('x-2') ? -3 : -1.8;
-    const f = (x: number) => asymY + k / (x - asymX);
-
-    // Nhánh 1 (trái tiệm cận đứng)
-    const pts1: Array<{ x: number; y: number }> = [];
-    for (let x = -6.5; x <= asymX - 0.15; x += 0.08) {
-      const y = f(x);
-      if (Math.abs(y) <= 8) pts1.push({ x, y });
-    }
-    curvePaths.push(pointsToPath(pts1));
-
-    // Nhánh 2 (phải tiệm cận đứng)
-    const pts2: Array<{ x: number; y: number }> = [];
-    for (let x = asymX + 0.15; x <= 6.5; x += 0.08) {
-      const y = f(x);
-      if (Math.abs(y) <= 8) pts2.push({ x, y });
-    }
-    curvePaths.push(pointsToPath(pts2));
-
-    // Giao điểm với trục tung Oy: x = 0 -> y = f(0)
-    const y0 = Number(f(0).toFixed(1));
-    if (Math.abs(y0) <= maxY) {
-      keyPoints.push({ x: 0, y: y0, label: `${y0}`, showProjections: true });
-    }
-
-    // Giao điểm với trục hoành Ox: f(x) = 0 -> x = asymX - k / asymY
-    const x0 = Number((asymX - k / asymY).toFixed(1));
-    if (Math.abs(x0) <= maxX) {
-      keyPoints.push({ x: x0, y: 0, label: `${x0}`, showProjections: true });
-    }
-
-    // Tâm đối xứng I(asymX, asymY)
-    keyPoints.push({ x: asymX, y: asymY, label: 'I' });
-  }
-
-  // --- LOẠI 2: HÀM SỐ BẬC BA y = ax^3 + bx^2 + cx + d ---
-  else if (type === 'cubic') {
-    if (!formulaText) formulaText = 'y = x^3 - 3x^2 + 2';
-    if (!displayTitle) displayTitle = 'Đồ thị hàm số bậc ba';
-
-    // Hàm bậc ba mẫu: y = x^3 - 3x + 1 (cực đại (-1, 3), cực tiểu (1, -1))
-    const isStandard = !cleanLatex.includes('x^3 - 3x^2');
-    const f = isStandard
-      ? (x: number) => x * x * x - 3 * x + 1
-      : (x: number) => x * x * x - 3 * x * x + 2;
-
-    const pts: Array<{ x: number; y: number }> = [];
-    for (let x = -3.2; x <= 3.4; x += 0.06) {
-      const y = f(x);
-      if (y >= -5 && y <= 5.5) pts.push({ x, y });
-    }
-    curvePaths.push(pointsToPath(pts));
-
-    // Cực trị chuẩn
-    if (isStandard) {
-      keyPoints.push({ x: -1, y: 3, label: '(-1; 3)', showProjections: true });
-      keyPoints.push({ x: 1, y: -1, label: '(1; -1)', showProjections: true });
-      keyPoints.push({ x: 0, y: 1, label: '1' });
-    } else {
-      keyPoints.push({ x: 0, y: 2, label: '2' });
-      keyPoints.push({ x: 2, y: -2, label: '(2; -2)', showProjections: true });
-    }
-  }
-
-  // --- LOẠI 3: HÀM SỐ BẬC BỐN TRÙNG PHƯƠNG y = ax^4 + bx^2 + c ---
-  else if (type === 'biquadratic') {
-    if (!formulaText) formulaText = 'y = x^4 - 2x^2 - 1';
-    if (!displayTitle) displayTitle = 'Đồ thị hàm số bậc bốn trùng phương';
-
-    const f = (x: number) => x * x * x * x - 2 * x * x - 1;
-    const pts: Array<{ x: number; y: number }> = [];
-    for (let x = -2.2; x <= 2.2; x += 0.05) {
-      const y = f(x);
-      if (y >= -4 && y <= 4.5) pts.push({ x, y });
-    }
-    curvePaths.push(pointsToPath(pts));
-
-    // 3 điểm cực trị
-    keyPoints.push({ x: -1, y: -2, label: '(-1; -2)', showProjections: true });
-    keyPoints.push({ x: 0, y: -1, label: '-1' });
-    keyPoints.push({ x: 1, y: -2, label: '(1; -2)', showProjections: true });
-  }
-
-  // --- LOẠI 4: HÀM PARABOL BẬC HAI y = ax^2 + bx + c ---
-  else if (type === 'quadratic') {
-    if (!formulaText) formulaText = 'y = x^2 - 4x + 3';
-    if (!displayTitle) displayTitle = 'Đồ thị hàm số bậc hai (Parabol)';
-
-    const f = (x: number) => x * x - 4 * x + 3;
-    const pts: Array<{ x: number; y: number }> = [];
-    for (let x = -0.8; x <= 4.8; x += 0.06) {
-      const y = f(x);
-      if (y >= -2.5 && y <= 5.5) pts.push({ x, y });
-    }
-    curvePaths.push(pointsToPath(pts));
-
-    // Đỉnh Parabol I(2; -1)
-    keyPoints.push({ x: 2, y: -1, label: 'I(2; -1)', showProjections: true });
-    // Trục đối xứng x = 2
-    asymptotes.push({
-      x1: toSvgX(2),
-      y1: 20,
-      x2: toSvgX(2),
-      y2: svgH - 20,
-      label: 'x = 2',
-      lx: toSvgX(2) + 5,
-      ly: 35,
-    });
-  }
-
-  // --- LOẠI 5: DAO ĐỘNG ĐIỀU HÒA / LƯỢNG GIÁC y = A*cos(omega*x) ---
-  else {
-    if (!formulaText) formulaText = 'y = 2\\sin(x)';
-    if (!displayTitle) displayTitle = 'Đồ thị hàm số';
-
-    const f = (x: number) => 2 * Math.sin(x);
-    const pts: Array<{ x: number; y: number }> = [];
-    for (let x = -5.5; x <= 5.5; x += 0.08) {
-      pts.push({ x, y: f(x) });
-    }
-    curvePaths.push(pointsToPath(pts));
-    keyPoints.push({ x: 1.57, y: 2, label: '(\\pi/2; 2)', showProjections: true });
-  }
+  const markerId = `sgkArrow_${clipUid}`;
+  const clipId = `sgkPlotClip_${clipUid}`;
 
   return (
-    <div className={`w-full max-w-lg mx-auto bg-white rounded-2xl border-2 border-slate-300 shadow-md overflow-hidden select-none font-sans ${className}`}>
-      {/* Tiêu đề đồ thị chuẩn SGK */}
-      <div className="px-4 py-2.5 bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100 border-b border-slate-200 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
-          <span className="text-xs font-bold text-slate-800 tracking-wide">
-            {displayTitle || 'ĐỒ THỊ HÀM SỐ CHUẨN SGK'}
-          </span>
-        </div>
-        {formulaText && (
-          <div className="text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-200/80">
-            <MathFormulaRenderer content={`$${formulaText.startsWith('$') ? formulaText.slice(1, -1) : formulaText}$`} />
+    <div className={`w-full max-w-md mx-auto bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden select-none ${className}`}>
+      {/* Header tiêu đề & công thức */}
+      <div className="px-4 py-2 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between gap-2">
+        <span className="text-xs font-bold text-slate-700 tracking-tight truncate">
+          {analysis.title}
+        </span>
+        {analysis.formulaLatex && (
+          <div className="text-xs font-semibold text-blue-700 bg-blue-50/80 px-2 py-0.5 rounded border border-blue-200/70 shrink-0">
+            <MathFormulaRenderer content={`$${analysis.formulaLatex}$`} />
           </div>
         )}
       </div>
 
-      {/* SVG Canvas vẽ đồ thị tọa độ Oxy */}
-      <div className="p-3 bg-white flex flex-col items-center justify-center">
+      {/* SVG Canvas chuẩn SGK trắng tinh khiết */}
+      <div className="p-2.5 bg-white flex flex-col items-center justify-center">
         <svg
           width={svgW}
           height={svgH}
           viewBox={`0 0 ${svgW} ${svgH}`}
-          className="overflow-visible bg-white"
+          className="bg-white overflow-visible"
         >
-          {/* 1. Lưới tọa độ mảnh nhẹ chuẩn sách giáo khoa (grid) */}
-          <g className="grid-lines" stroke="#f1f5f9" strokeWidth="0.8">
-            {xTicks.map((x) => (
-              <line key={`gx-${x}`} x1={toSvgX(x)} y1={15} x2={toSvgX(x)} y2={svgH - 15} />
-            ))}
-            {yTicks.map((y) => (
-              <line key={`gy-${y}`} x1={15} y1={toSvgY(y)} x2={svgW - 15} y2={toSvgY(y)} />
+          <defs>
+            <marker
+              id={markerId}
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6.5"
+              markerHeight="6.5"
+              orient="auto"
+            >
+              <path d="M 0 1.5 L 10 5 L 0 8.5 L 2.2 5 z" fill="#0f172a" />
+            </marker>
+            <clipPath id={clipId}>
+              <rect x={padLeft - 4} y={padTop - 4} width={plotW + 8} height={plotH + 8} />
+            </clipPath>
+          </defs>
+
+          {/* 1. Đường tiệm cận nét đứt (ẩn trong vùng vẽ) */}
+          <g clipPath={`url(#${clipId})`}>
+            {analysis.asymptotes.map((asym, idx) => {
+              if (asym.kind === 'vertical' && asym.x !== undefined) {
+                const sx = toSvgX(asym.x);
+                return (
+                  <g key={`asym-v-${idx}`}>
+                    <line
+                      x1={sx}
+                      y1={padTop}
+                      x2={sx}
+                      y2={svgH - padBot}
+                      stroke="#dc2626"
+                      strokeWidth="1.25"
+                      strokeDasharray="5 3.5"
+                      opacity="0.88"
+                    />
+                  </g>
+                );
+              }
+              if (asym.kind === 'horizontal' && asym.y !== undefined) {
+                const sy = toSvgY(asym.y);
+                return (
+                  <g key={`asym-h-${idx}`}>
+                    <line
+                      x1={padLeft}
+                      y1={sy}
+                      x2={svgW - padRight}
+                      y2={sy}
+                      stroke="#dc2626"
+                      strokeWidth="1.25"
+                      strokeDasharray="5 3.5"
+                      opacity="0.88"
+                    />
+                  </g>
+                );
+              }
+              if (asym.kind === 'oblique' && asym.m !== undefined && asym.q !== undefined) {
+                const y1 = asym.m * analysis.minX + asym.q;
+                const y2 = asym.m * analysis.maxX + asym.q;
+                return (
+                  <line
+                    key={`asym-o-${idx}`}
+                    x1={toSvgX(analysis.minX)}
+                    y1={toSvgY(y1)}
+                    x2={toSvgX(analysis.maxX)}
+                    y2={toSvgY(y2)}
+                    stroke="#dc2626"
+                    strokeWidth="1.25"
+                    strokeDasharray="5 3.5"
+                    opacity="0.88"
+                  />
+                );
+              }
+              return null;
+            })}
+
+            {/* 2. Đường gióng vuông góc nét đứt từ điểm cực trị xuống Ox, Oy */}
+            {analysis.keyPoints.map((pt, idx) => {
+              if (!pt.showProjections) return null;
+              const sx = toSvgX(pt.x);
+              const sy = toSvgY(pt.y);
+              return (
+                <g key={`proj-${idx}`}>
+                  {Math.abs(pt.y) > 0.08 && (
+                    <line
+                      x1={sx}
+                      y1={sy}
+                      x2={sx}
+                      y2={originY}
+                      stroke="#334155"
+                      strokeWidth="1.2"
+                      strokeDasharray="3.5 2.5"
+                    />
+                  )}
+                  {Math.abs(pt.x) > 0.08 && (
+                    <line
+                      x1={sx}
+                      y1={sy}
+                      x2={originX}
+                      y2={sy}
+                      stroke="#334155"
+                      strokeWidth="1.2"
+                      strokeDasharray="3.5 2.5"
+                    />
+                  )}
+                </g>
+              );
+            })}
+
+            {/* 3. Đường cong đồ thị hàm số */}
+            {analysis.branches.map((pts, bIdx) => (
+              <path
+                key={`curve-${bIdx}`}
+                d={pointsToSmoothPath(pts)}
+                fill="none"
+                stroke="#1d4ed8"
+                strokeWidth={isPresentationMode ? '2.6' : '2.25'}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             ))}
           </g>
 
-          {/* 2. Đường tiệm cận nét đứt (nếu có) */}
-          {asymptotes.map((asym, aIdx) => (
-            <g key={`asym-${aIdx}`}>
-              <line
-                x1={asym.x1}
-                y1={asym.y1}
-                x2={asym.x2}
-                y2={asym.y2}
-                stroke="#e11d48"
-                strokeWidth="1.5"
-                strokeDasharray="4 3"
-              />
-              <text
-                x={asym.lx}
-                y={asym.ly}
-                fontSize="11"
-                fontWeight="bold"
-                fill="#e11d48"
-                fontStyle="italic"
-              >
-                {asym.label}
-              </text>
-            </g>
-          ))}
-
-          {/* 3. Đường gióng vuông góc nét đứt từ điểm đặc biệt tới 2 trục */}
-          {keyPoints.map((pt, pIdx) => {
-            if (!pt.showProjections) return null;
-            const sx = toSvgX(pt.x);
-            const sy = toSvgY(pt.y);
-            return (
-              <g key={`proj-${pIdx}`}>
-                {/* Gióng xuống Ox */}
-                {Math.abs(pt.y) > 0.05 && (
-                  <line
-                    x1={sx}
-                    y1={sy}
-                    x2={sx}
-                    y2={originY}
-                    stroke="#94a3b8"
-                    strokeWidth="1.2"
-                    strokeDasharray="3 2"
-                  />
-                )}
-                {/* Gióng sang Oy */}
-                {Math.abs(pt.x) > 0.05 && (
-                  <line
-                    x1={sx}
-                    y1={sy}
-                    x2={originX}
-                    y2={sy}
-                    stroke="#94a3b8"
-                    strokeWidth="1.2"
-                    strokeDasharray="3 2"
-                  />
-                )}
-              </g>
-            );
-          })}
-
-          {/* 4. Trục tọa độ Ox và Oy chính với mũi tên nhọn */}
-          <defs>
-            <marker
-              id="axisArrow"
-              viewBox="0 0 10 10"
-              refX="6"
-              refY="5"
-              markerWidth="6"
-              markerHeight="6"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 1 L 10 5 L 0 9 z" fill="#1e293b" />
-            </marker>
-          </defs>
-
-          {/* Trục Ox */}
+          {/* 4. Trục tọa độ Ox & Oy với mũi tên nhọn chuẩn SGK */}
           <line
-            x1="20"
+            x1={padLeft - 6}
             y1={originY}
-            x2={svgW - 15}
+            x2={svgW - padRight + 10}
             y2={originY}
-            stroke="#1e293b"
-            strokeWidth="1.8"
-            markerEnd="url(#axisArrow)"
+            stroke="#0f172a"
+            strokeWidth="1.6"
+            markerEnd={`url(#${markerId})`}
           />
-          {/* Trục Oy */}
           <line
             x1={originX}
-            y1={svgH - 18}
+            y1={svgH - padBot + 6}
             x2={originX}
-            y2="15"
-            stroke="#1e293b"
-            strokeWidth="1.8"
-            markerEnd="url(#axisArrow)"
+            y2={padTop - 10}
+            stroke="#0f172a"
+            strokeWidth="1.6"
+            markerEnd={`url(#${markerId})`}
           />
 
-          {/* Nhãn trục x, y và gốc O */}
+          {/* 5. Nhãn x, y, O theo font Times New Roman nghiêng chuẩn SGK */}
           <text
-            x={svgW - 12}
-            y={originY - 8}
-            fontSize="14"
+            x={svgW - padRight + 8}
+            y={originY + 16}
+            fontFamily="'Times New Roman', Times, serif"
+            fontSize="15"
             fontStyle="italic"
             fontWeight="bold"
             fill="#0f172a"
+            textAnchor="middle"
           >
             x
           </text>
           <text
-            x={originX + 8}
-            y="18"
-            fontSize="14"
+            x={originX - 13}
+            y={padTop + 2}
+            fontFamily="'Times New Roman', Times, serif"
+            fontSize="15"
             fontStyle="italic"
             fontWeight="bold"
             fill="#0f172a"
+            textAnchor="middle"
           >
             y
           </text>
           <text
-            x={originX - 14}
-            y={originY + 16}
-            fontSize="13"
+            x={originX - 11}
+            y={originY + 14}
+            fontFamily="'Times New Roman', Times, serif"
+            fontSize="14"
             fontStyle="italic"
-            fontWeight="bold"
             fill="#0f172a"
+            textAnchor="middle"
+            stroke="#ffffff"
+            strokeWidth="3"
+            paintOrder="stroke"
           >
             O
           </text>
 
-          {/* Vạch chia số (ticks) trên trục Ox */}
-          {xTicks.map((x) => {
-            const sx = toSvgX(x);
+          {/* 6. Vạch chia và số liệu tại các điểm tọa độ quan trọng trên Ox */}
+          {analysis.xTicks.map((t, idx) => {
+            const sx = toSvgX(t.val);
+            const placeAbove = isProjectionBelowOx(t.val);
             return (
-              <g key={`tick-x-${x}`}>
-                <line x1={sx} y1={originY - 3} x2={sx} y2={originY + 3} stroke="#1e293b" strokeWidth="1.2" />
+              <g key={`xt-${idx}`}>
+                <line x1={sx} y1={originY - 2.8} x2={sx} y2={originY + 2.8} stroke="#0f172a" strokeWidth="1.3" />
                 <text
                   x={sx}
-                  y={originY + 15}
-                  fontSize="11"
-                  fill="#475569"
+                  y={placeAbove ? originY - 7 : originY + 15}
+                  fontFamily="'Times New Roman', Times, serif"
+                  fontSize="13"
+                  fill="#0f172a"
                   textAnchor="middle"
-                  fontWeight="500"
+                  stroke="#ffffff"
+                  strokeWidth="3.5"
+                  paintOrder="stroke"
                 >
-                  {x}
+                  {t.label}
                 </text>
               </g>
             );
           })}
 
-          {/* Vạch chia số (ticks) trên trục Oy */}
-          {yTicks.map((y) => {
-            const sy = toSvgY(y);
+          {/* 7. Vạch chia và số liệu tại các điểm tọa độ quan trọng trên Oy */}
+          {analysis.yTicks.map((t, idx) => {
+            const sy = toSvgY(t.val);
+            const placeRight = isProjectionLeftOfOy(t.val);
             return (
-              <g key={`tick-y-${y}`}>
-                <line x1={originX - 3} y1={sy} x2={originX + 3} stroke="#1e293b" strokeWidth="1.2" />
+              <g key={`yt-${idx}`}>
+                <line x1={originX - 2.8} y1={sy} x2={originX + 2.8} y2={sy} stroke="#0f172a" strokeWidth="1.3" />
                 <text
-                  x={originX - 8}
+                  x={placeRight ? originX + 7 : originX - 7}
                   y={sy + 4}
-                  fontSize="11"
-                  fill="#475569"
-                  textAnchor="end"
-                  fontWeight="500"
+                  fontFamily="'Times New Roman', Times, serif"
+                  fontSize="13"
+                  fill="#0f172a"
+                  textAnchor={placeRight ? 'start' : 'end'}
+                  stroke="#ffffff"
+                  strokeWidth="3.5"
+                  paintOrder="stroke"
                 >
-                  {y}
+                  {t.label}
                 </text>
               </g>
             );
           })}
 
-          {/* 5. Đường cong đồ thị (Curve) trơn mượt màu xanh đậm */}
-          {curvePaths.map((dStr, cIdx) => (
-            <path
-              key={`curve-${cIdx}`}
-              d={dStr}
-              fill="none"
-              stroke="#2563eb"
-              strokeWidth={isPresentationMode ? '3.2' : '2.4'}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          ))}
-
-          {/* 6. Các điểm đặc biệt (cực trị, giao điểm, tâm đối xứng) */}
-          {keyPoints.map((pt, pIdx) => {
+          {/* 8. Điểm đặc biệt (chấm tròn đặc chuẩn SGK & tâm đối xứng I) */}
+          {analysis.keyPoints.map((pt, idx) => {
             const sx = toSvgX(pt.x);
             const sy = toSvgY(pt.y);
-            const isCenterI = pt.label === 'I';
-            return (
-              <g key={`pt-${pIdx}`}>
-                <circle
-                  cx={sx}
-                  cy={sy}
-                  r={isCenterI ? 4 : 3.5}
-                  fill={isCenterI ? '#e11d48' : '#2563eb'}
-                  stroke="#ffffff"
-                  strokeWidth="1.5"
-                />
-                {pt.label && (
+            if (pt.isCenter) {
+              return (
+                <g key={`kp-${idx}`}>
+                  <circle cx={sx} cy={sy} r="3.2" fill="#dc2626" stroke="#ffffff" strokeWidth="1.2" />
                   <text
-                    x={sx + (pt.x >= 0 ? 6 : -6)}
+                    x={sx + 8}
                     y={sy - 6}
-                    fontSize="11"
+                    fontFamily="'Times New Roman', Times, serif"
+                    fontSize="13"
+                    fontStyle="italic"
                     fontWeight="bold"
-                    fill={isCenterI ? '#e11d48' : '#1e3a8a'}
-                    textAnchor={pt.x >= 0 ? 'start' : 'end'}
+                    fill="#dc2626"
+                    stroke="#ffffff"
+                    strokeWidth="3"
+                    paintOrder="stroke"
                   >
-                    {pt.label}
+                    {pt.label || 'I'}
                   </text>
-                )}
-              </g>
+                </g>
+              );
+            }
+            return (
+              <circle
+                key={`kp-${idx}`}
+                cx={sx}
+                cy={sy}
+                r={pt.isExtremum ? 3.2 : 2.6}
+                fill="#0f172a"
+                stroke="#ffffff"
+                strokeWidth="1"
+              />
             );
           })}
         </svg>
 
-        {/* Chú thích chân hình chuẩn SGK */}
-        <div className="mt-2 text-center text-xs font-medium text-slate-600 italic">
-          Hình vẽ: Đồ thị hàm số trên mặt phẳng tọa độ Oxy
+        <div className="mt-1 text-center text-[11px] font-medium text-slate-500 italic">
+          Đồ thị hàm số trên hệ trục tọa độ Oxy
         </div>
       </div>
     </div>

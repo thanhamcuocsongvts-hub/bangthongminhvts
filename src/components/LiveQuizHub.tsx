@@ -71,11 +71,13 @@ import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { directFastMatrixQuiz, getGeminiApiKey, saveGeminiApiKey, isGeminiConfigured } from '../utils/geminiClient';
 import {
   getSpeechSpeedMultiplier,
+  prefetchQuestionSpeech,
   setSpeechSpeedMultiplier,
   speakQuestionContent,
   speakStudentCalling,
   speakText,
   stopAllSpeech,
+  unlockWebAudio,
   VOICE_TONE_PRESETS,
   VoiceTonePreset,
 } from '../utils/aiSpeechService';
@@ -694,6 +696,9 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   // AI Voice State for Live Quiz Hub
   const [readingQuestionId, setReadingQuestionId] = useState<string | null>(null);
   const [isCallingSpeech, setIsCallingSpeech] = useState<boolean>(false);
+  const liveCallingTimerRef = useRef<any>(null);
+  const prevLiveSpeechKeyRef = useRef<string>('');
+  const prevBoardSpeechKeyRef = useRef<string>('');
   const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(() => {
     try {
       const savedVoiceId = localStorage.getItem('smartboard_ai_voice_preset');
@@ -883,31 +888,47 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     }
   }, [questions.length]);
 
-  // Reset timer whenever question changes in Live mode & pre-warm TTS audio
+  // Reset timer whenever question changes in Live mode & pre-warm TTS audio safely
   useEffect(() => {
-    stopAllSpeech();
-    setReadingQuestionId(null);
+    const speechKey = `${activeMode}:${activeIndex}:${currentQ?.id || ''}:${selectedVoice.id}`;
+    if (prevLiveSpeechKeyRef.current && prevLiveSpeechKeyRef.current !== speechKey) {
+      if (liveCallingTimerRef.current) {
+        clearTimeout(liveCallingTimerRef.current);
+        liveCallingTimerRef.current = null;
+      }
+      stopAllSpeech();
+      setReadingQuestionId(null);
+      setIsCallingSpeech(false);
+    }
+    prevLiveSpeechKeyRef.current = speechKey;
+
     if (currentQ && activeMode === 'live') {
       setTimeLeft(currentQ.timeLimit || 30);
       setIsRevealed(false);
       setIsTimerRunning(true);
     }
-    // Pre-warm question audio in background with current voice so button click speaks immediately
-    if (currentQ) {
-      try {
-        const cleanQ = (currentQ.question || '').replace(/^câu\s*\d*\s*[:.]\s*/i, '').trim();
-        if (cleanQ) {
-          const vName = selectedVoice.geminiVoice || 'Kore';
-          const prefetchUrl = `/api/tts?lang=vi&voice=${encodeURIComponent(vName)}&preset=${encodeURIComponent(selectedVoice.id)}&text=${encodeURIComponent(`Câu hỏi: ${cleanQ}.`)}`;
-          fetch(prefetchUrl, { cache: 'force-cache' }).catch(() => {});
-        }
-      } catch (_) {}
+    // Pre-warm preprocessed first chunk in RAM cache (only POST/cache match, no wasted GET URLs)
+    if (currentQ && (activeMode === 'live' || activeMode === 'presentation')) {
+      prefetchQuestionSpeech(
+        {
+          id: currentQ.id,
+          question: currentQ.question,
+          options: currentQ.options || [],
+          subject: currentQ.subject,
+        },
+        selectedVoice
+      ).catch(() => {});
     }
   }, [activeIndex, currentQ?.id, activeMode, selectedVoice.id]);
 
   const handleToggleSpeakCurrentQuestion = (q?: QuizQuestion) => {
+    unlockWebAudio();
     const targetQ = q || currentQ;
     if (!targetQ) return;
+    if (liveCallingTimerRef.current) {
+      clearTimeout(liveCallingTimerRef.current);
+      liveCallingTimerRef.current = null;
+    }
     if (readingQuestionId === targetQ.id) {
       stopAllSpeech();
       setReadingQuestionId(null);
@@ -915,14 +936,32 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     } else {
       setReadingQuestionId(targetQ.id);
       setIsCallingSpeech(true);
+      liveCallingTimerRef.current = setTimeout(() => {
+        setIsCallingSpeech(false);
+        setReadingQuestionId((prev) => (prev === targetQ.id ? null : prev));
+      }, 12000);
       speakQuestionContent(targetQ, {
         preset: selectedVoice,
-        onStart: () => setIsCallingSpeech(false),
+        onStart: () => {
+          if (liveCallingTimerRef.current) {
+            clearTimeout(liveCallingTimerRef.current);
+            liveCallingTimerRef.current = null;
+          }
+          setIsCallingSpeech(false);
+        },
         onEnd: () => {
+          if (liveCallingTimerRef.current) {
+            clearTimeout(liveCallingTimerRef.current);
+            liveCallingTimerRef.current = null;
+          }
           setReadingQuestionId(null);
           setIsCallingSpeech(false);
         },
         onError: () => {
+          if (liveCallingTimerRef.current) {
+            clearTimeout(liveCallingTimerRef.current);
+            liveCallingTimerRef.current = null;
+          }
           setReadingQuestionId(null);
           setIsCallingSpeech(false);
         },
@@ -1471,6 +1510,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
   // Trình Chiếu & Gọi Học Sinh Lên Bảng Handlers
   const handleBoardOptionClick = (key: string) => {
+    unlockWebAudio();
     if (!currentQ) return;
     if (boardAnswerResult !== null) return; // Đã trả lời, tránh bấm liên tục
 
@@ -1533,6 +1573,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   };
 
   const handleCallRandomStudent = () => {
+    unlockWebAudio();
     let candidateList: string[] = currentClassStudents.map((s) => s.name);
 
     if (candidateList.length === 0 && roomState?.activeStudents && roomState.activeStudents.length > 0) {
@@ -1557,6 +1598,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   };
 
   const handleReadBoardQuestion = () => {
+    unlockWebAudio();
     if (!currentQ) return;
     if (aiCallingTimerRef.current) {
       clearTimeout(aiCallingTimerRef.current);
@@ -1571,13 +1613,13 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     setIsReadingBoardQuestion(true);
     setBoardAiSpeechState('calling');
 
-    // Watchdog timer: Nếu sau 8s thiết bị TV/điện thoại hoặc mạng bị nghẽn, tự động thoát trạng thái calling
+    // Watchdog timer: Nếu sau 12s thiết bị TV/điện thoại hoặc mạng bị nghẽn, tự động thoát trạng thái calling
     aiCallingTimerRef.current = setTimeout(() => {
       if (boardAiSpeechStateRef.current === 'calling') {
         setIsReadingBoardQuestion(false);
         setBoardAiSpeechState('idle');
       }
-    }, 8000);
+    }, 12000);
 
     speakQuestionContent(currentQ, {
       preset: selectedVoice,
@@ -1607,15 +1649,19 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     });
   };
 
-  // Reset trạng thái đọc AI khi chuyển câu hỏi
+  // Reset trạng thái đọc AI chỉ khi thực sự chuyển câu hỏi (tránh re-render ngắt âm đang phát)
   useEffect(() => {
-    if (aiCallingTimerRef.current) {
-      clearTimeout(aiCallingTimerRef.current);
-      aiCallingTimerRef.current = null;
+    const boardKey = `${localActiveIndex}:${currentQ?.id || ''}`;
+    if (prevBoardSpeechKeyRef.current && prevBoardSpeechKeyRef.current !== boardKey) {
+      if (aiCallingTimerRef.current) {
+        clearTimeout(aiCallingTimerRef.current);
+        aiCallingTimerRef.current = null;
+      }
+      stopAllSpeech();
+      setIsReadingBoardQuestion(false);
+      setBoardAiSpeechState('idle');
     }
-    stopAllSpeech();
-    setIsReadingBoardQuestion(false);
-    setBoardAiSpeechState('idle');
+    prevBoardSpeechKeyRef.current = boardKey;
   }, [localActiveIndex, currentQ?.id]);
 
   // Phím Escape để thoát chế độ Toàn Màn Hình Trình Chiếu
@@ -3889,6 +3935,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       setCongratsMessage('');
                       setShowCallStudentModal(false);
                       setStudentCallManualInput('');
+                      unlockWebAudio();
                       speakStudentCalling(name, 'call', [], { preset: selectedVoice });
                     }
                   }}
@@ -3905,6 +3952,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       setCongratsMessage('');
                       setShowCallStudentModal(false);
                       setStudentCallManualInput('');
+                      unlockWebAudio();
                       speakStudentCalling(name, 'call', [], { preset: selectedVoice });
                     }
                   }}
@@ -3977,6 +4025,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                         setBoardAnswerResult(null);
                         setCongratsMessage('');
                         setShowCallStudentModal(false);
+                        unlockWebAudio();
                         speakStudentCalling(st.name, 'call', [], { preset: selectedVoice });
                       }}
                       className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 hover:border-amber-400 border border-slate-700 text-left text-xs font-bold text-slate-200 truncate transition-all cursor-pointer flex items-center gap-2 group"

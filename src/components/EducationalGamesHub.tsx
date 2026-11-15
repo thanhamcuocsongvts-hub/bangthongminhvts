@@ -53,6 +53,7 @@ import {
   speakQuestionContent,
   speakGameVoiceEvent,
   stopAllSpeech,
+  unlockWebAudio,
   VOICE_TONE_PRESETS,
   VoiceTonePreset,
 } from '../utils/aiSpeechService';
@@ -231,6 +232,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   const [readingQId, setReadingQId] = useState<string | null>(null);
 
   const handleSpeakQuestion = (q: QuizQuestion) => {
+    unlockWebAudio();
     if (readingQId === q.id) {
       stopAllSpeech();
       setReadingQId(null);
@@ -248,12 +250,14 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 
   const handleCheerAnswer = (isCorrect: boolean) => {
     if (voiceEnabled) {
+      unlockWebAudio();
       speakGameVoiceEvent(isCorrect ? 'correct' : 'wrong', undefined, { preset: selectedVoice });
     }
   };
 
   const handleAnnounceWinner = (winnerName?: string) => {
     if (voiceEnabled) {
+      unlockWebAudio();
       speakGameVoiceEvent(
         'winner',
         winnerName ? `Nhiệt liệt chúc mừng ${winnerName} đã giành chiến thắng chung cuộc xuất sắc!` : undefined,

@@ -34,6 +34,7 @@ import { ClassRoom, ClassStudent } from '../types';
 import {
   speakStudentCalling,
   stopAllSpeech,
+  unlockWebAudio,
   VOICE_TONE_PRESETS,
   VoiceTonePreset,
 } from '../utils/aiSpeechService';
@@ -416,6 +417,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   }, [activeGame, currentRotation, validStudents]);
 
   const handleSpinWheel = () => {
+    unlockWebAudio();
     if (isSpinning || validStudents.length === 0) return;
     setIsSpinning(true);
     setSelectedStudent(null);
@@ -505,6 +507,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 2: MYSTERY BOXES
   // ==========================================
   const handleOpenBox = (boxId: number) => {
+    unlockWebAudio();
     if (isShufflingBoxes) return;
     const box = boxes.find((b) => b.id === boxId);
     if (!box || box.isOpen) return;
@@ -541,6 +544,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 3: SPACE ROCKET LAUNCH
   // ==========================================
   const handleLaunchRocket = () => {
+    unlockWebAudio();
     if (rocketStage === 'countdown' || rocketStage === 'launching' || validStudents.length === 0) return;
     setSelectedStudent(null);
     setRocketStage('countdown');
@@ -583,6 +587,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 4: ⚡ ĐẤU TRƯỜNG SINH TỒN (BATTLE ROYALE LASER)
   // ==========================================
   const handleStartBattleRoyale = () => {
+    unlockWebAudio();
     if (battleStage === 'scanning' || battleStage === 'eliminating' || validStudents.length === 0) return;
     setSelectedStudent(null);
     setBattleStage('scanning');
@@ -629,6 +634,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 5: 💣 TRUYỀN BOM HẸN GIỜ (TICKING TIME BOMB)
   // ==========================================
   const handleStartBomb = () => {
+    unlockWebAudio();
     if (bombStage === 'ticking' || validStudents.length === 0) return;
     setSelectedStudent(null);
     setBombStage('ticking');
@@ -663,6 +669,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 6: 🎰 SỔ XỐ JACKPOT (6s HỒI HỘP CHỌN HỌC SINH)
   // ==========================================
   const handleRollJackpot = () => {
+    unlockWebAudio();
     if (jackpotStage === 'rolling' || validStudents.length === 0) return;
     setSelectedStudent(null);
     setSelectedGroup([]);
@@ -734,6 +741,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 7: ⚽ SÚT PENALTY WORLD CUP
   // ==========================================
   const handleShootPenalty = (corner: 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right') => {
+    unlockWebAudio();
     if (penaltyStage === 'shooting' || validStudents.length === 0) return;
     setSelectedStudent(null);
     setGoalCorner(corner);
@@ -764,6 +772,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 8: 🕹️ MÁY GẮP THÚ BÔNG ARCADE (CLAW MACHINE)
   // ==========================================
   const handleDropClaw = () => {
+    unlockWebAudio();
     if (clawStage !== 'idle' || validStudents.length === 0) return;
     setSelectedStudent(null);
     setClawStage('moving');
@@ -797,6 +806,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 9: 🎯 PHI TIÊU CAO THỦ HỒNG TÂM (DART MASTER)
   // ==========================================
   const handleThrowDart = () => {
+    unlockWebAudio();
     if (dartStage !== 'idle' || validStudents.length === 0) return;
     setSelectedStudent(null);
     setDartStage('thrown');
@@ -817,6 +827,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   // GAME 10: 🌌 CHIẾN HẠM KHÔNG GIAN HYPERSPACE
   // ==========================================
   const handleTriggerWarp = () => {
+    unlockWebAudio();
     if (warpStage !== 'idle' || validStudents.length === 0) return;
     setSelectedStudent(null);
     setWarpStage('charging');
@@ -976,9 +987,10 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                     {/* AI Calling Replay Button */}
                     <button
                       type="button"
-                      onClick={() =>
-                        speakStudentCalling(selectedStudent.name, 'call', [], { preset: selectedVoice })
-                      }
+                      onClick={() => {
+                        unlockWebAudio();
+                        speakStudentCalling(selectedStudent.name, 'call', [], { preset: selectedVoice });
+                      }}
                       className="text-[11px] font-black px-2.5 py-0.5 rounded-lg bg-white text-rose-700 hover:bg-rose-50 flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
                       title="Bấm để AI gọi tên học sinh to rõ bằng tiếng Việt"
                     >
@@ -1000,6 +1012,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                     <button
                       type="button"
                       onClick={() => {
+                        unlockWebAudio();
                         const names = selectedGroup.map((s) => s.name);
                         speakStudentCalling(names[0], 'group', names.slice(1), { preset: selectedVoice });
                       }}

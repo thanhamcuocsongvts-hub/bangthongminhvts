@@ -287,20 +287,67 @@ let persistentHtmlAudio: HTMLAudioElement | null = null;
 let activeAudioSource: AudioBufferSourceNode | null = null;
 let isAudioUnlocked = false;
 let isUnlockingHtmlAudio = false;
-// Valid 50ms silent 8kHz 8-bit PCM WAV so mobile/TV browsers reliably grant user-activation
-const SILENT_WAV_DATA_URI =
-  'data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
+let unlockPromise: Promise<void> | null = null;
+
+// Build a 100% spec-compliant 60ms silent 16-bit 24kHz PCM WAV Data URI (44-byte RIFF header)
+const SILENT_WAV_DATA_URI = (() => {
+  try {
+    const sampleCount = 1440; // 60ms at 24kHz
+    const dataSize = sampleCount * 2;
+    const totalSize = 44 + dataSize;
+    const buf = new Uint8Array(totalSize);
+    const view = new DataView(buf.buffer);
+    const writeStr = (offset: number, s: string) => {
+      for (let i = 0; i < s.length; i++) buf[offset + i] = s.charCodeAt(i);
+    };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // mono
+    view.setUint32(24, 24000, true);
+    view.setUint32(28, 48000, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);
+    let binary = '';
+    for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
+    return `data:audio/wav;base64,${btoa(binary)}`;
+  } catch (_) {
+    return 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+  }
+})();
 
 function getPersistentHtmlAudio(): HTMLAudioElement | null {
   if (typeof window === 'undefined') return null;
   if (!persistentHtmlAudio) {
     try {
-      persistentHtmlAudio = new Audio();
-      persistentHtmlAudio.preload = 'auto';
-      (persistentHtmlAudio as any).playsInline = true;
+      const el = document.createElement('audio');
+      el.preload = 'auto';
+      (el as any).playsInline = true;
+      el.setAttribute('playsinline', '');
+      el.setAttribute('webkit-playsinline', '');
+      el.style.display = 'none';
+      if (document.body) {
+        document.body.appendChild(el);
+      }
+      persistentHtmlAudio = el;
     } catch (_) {
-      return null;
+      try {
+        persistentHtmlAudio = new Audio();
+        persistentHtmlAudio.preload = 'auto';
+        (persistentHtmlAudio as any).playsInline = true;
+      } catch (__) {
+        return null;
+      }
     }
+  } else if (persistentHtmlAudio.parentNode === null && typeof document !== 'undefined' && document.body) {
+    try {
+      document.body.appendChild(persistentHtmlAudio);
+    } catch (_) {}
   }
   return persistentHtmlAudio;
 }
@@ -646,21 +693,26 @@ export function unlockWebAudio(): void {
     }
 
     const el = getPersistentHtmlAudio();
-    if (el && !isAudioUnlocked && !isUnlockingHtmlAudio) {
+    if (el && !isAudioUnlocked && !isUnlockingHtmlAudio && !currentAudioElement) {
       isUnlockingHtmlAudio = true;
       el.muted = false;
       el.volume = 0.01;
       el.src = SILENT_WAV_DATA_URI;
       const p = el.play();
       if (p !== undefined) {
-        p.then(() => {
-          isAudioUnlocked = true;
-          isUnlockingHtmlAudio = false;
-          el.volume = 1.0;
-        }).catch(() => {
-          isUnlockingHtmlAudio = false;
-          el.volume = 1.0;
-        });
+        unlockPromise = p
+          .then(() => {
+            isAudioUnlocked = true;
+            isUnlockingHtmlAudio = false;
+            el.volume = 1.0;
+          })
+          .catch(() => {
+            isUnlockingHtmlAudio = false;
+            el.volume = 1.0;
+          })
+          .finally(() => {
+            unlockPromise = null;
+          });
       } else {
         isAudioUnlocked = true;
         isUnlockingHtmlAudio = false;
@@ -670,18 +722,25 @@ export function unlockWebAudio(): void {
       el.muted = false;
       el.volume = 1.0;
     }
-  } catch (_) {}
+  } catch (_) {
+    isUnlockingHtmlAudio = false;
+  }
 }
 
 if (typeof window !== 'undefined') {
   const handleFirstInteraction = () => {
     unlockWebAudio();
-    window.removeEventListener('click', handleFirstInteraction, true);
-    window.removeEventListener('touchstart', handleFirstInteraction, true);
-    window.removeEventListener('keydown', handleFirstInteraction, true);
+    const ctxOk = !sharedAudioContext || sharedAudioContext.state === 'running';
+    if (isAudioUnlocked && ctxOk) {
+      window.removeEventListener('click', handleFirstInteraction, true);
+      window.removeEventListener('touchend', handleFirstInteraction, true);
+      window.removeEventListener('pointerup', handleFirstInteraction, true);
+      window.removeEventListener('keydown', handleFirstInteraction, true);
+    }
   };
   window.addEventListener('click', handleFirstInteraction, true);
-  window.addEventListener('touchstart', handleFirstInteraction, true);
+  window.addEventListener('touchend', handleFirstInteraction, true);
+  window.addEventListener('pointerup', handleFirstInteraction, true);
   window.addEventListener('keydown', handleFirstInteraction, true);
 }
 
@@ -780,7 +839,7 @@ export function getBestVietnameseVoice(gender: 'female' | 'male' | 'neutral' = '
   }
 
   if (gender === 'male') {
-    // 1. Ưu tiên cao nhất: Microsoft NamMinh Online (Natural)
+    // 1. Ưu tiên cao nhất: Microsoft NamMinh Online (Natural) hoặc voice nam thật sự
     const namMinhNatural = viVoices.find((v) => {
       const n = v.name.toLowerCase();
       return (n.includes('namminh') || n.includes('nam minh')) && (n.includes('natural') || n.includes('online'));
@@ -793,12 +852,9 @@ export function getBestVietnameseVoice(gender: 'female' | 'male' | 'neutral' = '
     });
     if (namMinh) return namMinh;
 
-    const googleVi = viVoices.find((v) => v.name.toLowerCase().includes('google'));
-    if (googleVi) return googleVi;
-
     const maleVi = viVoices.find((v) => {
       const n = v.name.toLowerCase();
-      return n.includes('male') || n.includes('nam') || n.includes('khoi') || n.includes('khôi');
+      return n.includes('male') || /\bnam\b/.test(n) || n.includes('khoi') || n.includes('khôi');
     });
     if (maleVi) return maleVi;
 
@@ -1303,11 +1359,30 @@ export function cleanMathForVietnameseTTS(text: string, isEnglishSubject: boolea
   s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\]/g, ' nửa khoảng từ $1 đến $2 ');
   s = s.replace(/\(\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)/g, ' $1, $2 ');
 
-  // 5. Phân số \frac{([^}]+)}{([^}]+)} -> "$1 phần $2"
+  // 5. Phân số \frac{A}{B} -> "$1 trên $2" (hỗ trợ ngoặc lồng nhau)
   for (let iter = 0; iter < 5; iter++) {
     if (!s.includes('frac')) break;
-    s = s.replace(/\\(?:d?frac)\{([^}]+)\}\{([^}]+)\}/g, ' $1 phần $2 ');
+    s = s.replace(/\\(?:d|t|c)?frac\{([^{}]*|\{[^{}]*\})\}\{([^{}]*|\{[^{}]*\})\}/g, ' $1 trên $2 ');
+    s = s.replace(/\\(?:d|t|c)?frac\{([^}]+)\}\{([^}]+)\}/g, ' $1 trên $2 ');
   }
+
+  // 5b. Phân thức đại số viết dạng A/B (ví dụ: 2x-1/3x+2, (x+1)/(x-2)) -> "$1 trên $2"
+  // Bắt trọn token hai bên dấu '/' (tránh cắt giữa chữ có dấu như "nam/nữ" hay "km/h")
+  s = s.replace(
+    /(^|[\s=;,:(\[])(\([^)=;,\n]+\)|[^\s()=;,\n/]+)\s*\/\s*(\([^)=;,\n]+\)|[^\s()=;,\n/]+)(?=$|[\s.,;!?\n)\]])/g,
+    (full, pre, num, den) => {
+      if (/[^\x00-\x7F]/.test(num) || /[^\x00-\x7F]/.test(den)) return full;
+      if (/^(?:km|m|cm|mm|g|kg|mol|rad|bit|byte|l|ml)$/i.test(num) && /^(?:h|s|l|ml|mol)$/i.test(den)) return full;
+      const isPureIntegerPair = /^-?\d+$/.test(num) && /^\d+$/.test(den);
+      if (isPureIntegerPair) return full;
+      const combined = `${num}${den}`;
+      if (!/[a-zA-Z]/.test(combined) && !/[+\-*^()]/.test(combined)) return full;
+      if (/^[a-zA-Z]{2,}$/.test(num) && /^[a-zA-Z]+$/.test(den) && !/^[xytabc]$/.test(num)) return full;
+      const cleanNum = num.replace(/^\(([^()]+)\)$/, '$1').trim();
+      const cleanDen = den.replace(/^\(([^()]+)\)$/, '$1').trim();
+      return `${pre} ${cleanNum} trên ${cleanDen} `;
+    }
+  );
 
   // 6. Căn bậc hai \sqrt{([^}]+)} -> "căn bậc hai của $1"
   for (let iter = 0; iter < 4; iter++) {
@@ -1611,8 +1686,12 @@ export function preprocessSpeechText(rawText: string, isEnglishSubject: boolean 
   t = t.replace(/\bg\s*\(([a-zA-Z])\)/g, ' g $1 ');
   t = t.replace(/\bh\s*\(([a-zA-Z])\)/g, ' h $1 ');
 
-  // 3. Fractions: \frac{a}{b} -> phân số a trên b
-  t = t.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, ' phân số $1 trên $2, ');
+  // 3. Fractions: \frac{a}{b} -> "a trên b" (không thêm chữ "phân số" rườm rà)
+  for (let iter = 0; iter < 4; iter++) {
+    if (!t.includes('frac')) break;
+    t = t.replace(/\\(?:d|t|c)?frac\{([^{}]*|\{[^{}]*\})\}\{([^{}]*|\{[^{}]*\})\}/g, ' $1 trên $2 ');
+    t = t.replace(/\\(?:d|t|c)?frac\{([^}]+)\}\{([^}]+)\}/g, ' $1 trên $2 ');
+  }
 
   // 4. Square roots: \sqrt{x}, \sqrt[3]{x}
   t = t.replace(/\\sqrt\[3\]\{([^}]+)\}/g, ' căn bậc ba của $1, ');
@@ -1745,11 +1824,13 @@ export function preprocessSpeechText(rawText: string, isEnglishSubject: boolean 
 }
 
 let isSpeechCancelled = false;
+let activeSpeechSessionId = 0;
 
 /**
  * Immediate stop of any active speech synthesis or Google Cloud / Gemini audio
  */
 export function stopAllSpeech(): void {
+  activeSpeechSessionId++;
   isSpeechCancelled = true;
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
@@ -1786,20 +1867,52 @@ export interface SpeakOptions {
 }
 
 /**
- * Chia văn bản thành các câu hoặc phân đoạn tự nhiên (tối đa ~220 ký tự) để đọc liền mạch
+ * Chia văn bản thành các câu/cụm tự nhiên ngắn (tối đa ~160 ký tự, không dùng regex lookbehind để tương thích mọi Smart TV WebView)
  */
-function splitIntoSentences(text: string, maxLen: number = 220): string[] {
+function splitIntoSentences(text: string, maxLen: number = 160): string[] {
+  const normalized = (text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxLen) return [normalized];
+
   const parts: string[] = [];
-  const rawSentences = text.split(/(?<=[.!?:;\n])\s+/);
+  const rawSentences = normalized.match(/[^.!?:;\n]+[.!?:;\n]?/g) || [normalized];
   let current = '';
 
-  for (const s of rawSentences) {
-    if (!s.trim()) continue;
-    if (current && (current.length + s.length + 1) > maxLen) {
+  const pushOversized = (clause: string) => {
+    const subClauses = clause.match(/[^,]+,?/g) || [clause];
+    for (const subRaw of subClauses) {
+      const sub = subRaw.trim();
+      if (!sub) continue;
+      if (sub.length > maxLen) {
+        const words = sub.split(/\s+/);
+        for (const w of words) {
+          if (!w) continue;
+          if (current && current.length + w.length + 1 > maxLen) {
+            parts.push(current.trim());
+            current = w;
+          } else {
+            current = current ? `${current} ${w}` : w;
+          }
+        }
+      } else if (current && current.length + sub.length + 1 > maxLen) {
+        parts.push(current.trim());
+        current = sub;
+      } else {
+        current = current ? `${current} ${sub}` : sub;
+      }
+    }
+  };
+
+  for (const rawS of rawSentences) {
+    const s = rawS.trim();
+    if (!s) continue;
+    if (s.length > maxLen) {
+      pushOversized(s);
+    } else if (current && current.length + s.length + 1 > maxLen) {
       parts.push(current.trim());
       current = s;
     } else {
-      current = current ? current + ' ' + s : s;
+      current = current ? `${current} ${s}` : s;
     }
   }
   if (current.trim()) {
@@ -1947,7 +2060,11 @@ function isMobileOrSmartTV(): boolean {
       ua
     );
   const isIpadOs = navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1;
-  return isUaMobileOrTv || isIpadOs;
+  const isTouchScreenBoard =
+    typeof window !== 'undefined' &&
+    window.matchMedia &&
+    (window.matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0 && /Linux/i.test(ua));
+  return isUaMobileOrTv || isIpadOs || Boolean(isTouchScreenBoard);
 }
 
 function detectAudioMimeFromBytes(arrayBuf: ArrayBuffer): string {
@@ -1961,6 +2078,50 @@ function detectAudioMimeFromBytes(arrayBuf: ArrayBuffer): string {
   return isWav ? 'audio/wav' : 'audio/mpeg';
 }
 
+function decodeWavToAudioBuffer(ctx: AudioContext, arrayBuf: ArrayBuffer): AudioBuffer | null {
+  try {
+    const bytes = new Uint8Array(arrayBuf);
+    if (bytes.length < 44 || bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[2] !== 0x46 || bytes[3] !== 0x46) {
+      return null;
+    }
+    const view = new DataView(arrayBuf);
+    const numChannels = Math.max(1, Math.min(2, view.getUint16(22, true)));
+    const sampleRate = view.getUint32(24, true) || 24000;
+    const bitsPerSample = view.getUint16(34, true) || 16;
+    if (bitsPerSample !== 16) return null;
+
+    let offset = 12;
+    let dataOffset = 44;
+    let dataSize = bytes.length - 44;
+    while (offset + 8 <= bytes.length) {
+      const id = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+      const sz = view.getUint32(offset + 4, true);
+      if (id === 'data') {
+        dataOffset = offset + 8;
+        dataSize = Math.min(sz, bytes.length - dataOffset);
+        break;
+      }
+      offset += 8 + sz;
+    }
+
+    const numFrames = Math.floor(dataSize / (numChannels * 2));
+    if (numFrames <= 0) return null;
+    const audioBuffer = ctx.createBuffer(numChannels, numFrames, sampleRate);
+    for (let ch = 0; ch < numChannels; ch++) {
+      const chData = audioBuffer.getChannelData(ch);
+      for (let f = 0; f < numFrames; f++) {
+        const sampleOffset = dataOffset + (f * numChannels + ch) * 2;
+        if (sampleOffset + 2 <= bytes.length) {
+          chData[f] = view.getInt16(sampleOffset, true) / 32768.0;
+        }
+      }
+    }
+    return audioBuffer;
+  } catch (_) {
+    return null;
+  }
+}
+
 function arrayBufferToBase64(arrayBuf: ArrayBuffer): string {
   const bytes = new Uint8Array(arrayBuf);
   const chunkSize = 0x8000;
@@ -1972,7 +2133,7 @@ function arrayBufferToBase64(arrayBuf: ArrayBuffer): string {
 }
 
 /**
- * Tải ArrayBuffer cho 1 đoạn văn bản ngắn từ /api/tts (kèm timeout an toàn)
+ * Tải ArrayBuffer cho 1 đoạn văn bản ngắn từ /api/tts qua POST JSON (không giới hạn độ dài URL, kèm GET fallback)
  */
 async function fetchTtsChunkBytes(
   chunkText: string,
@@ -1981,17 +2142,26 @@ async function fetchTtsChunkBytes(
   presetId: string,
   playbackRate: number
 ): Promise<{ arrayBuf: ArrayBuffer; engine: string } | null> {
-  const encoded = encodeURIComponent(chunkText);
-  const ttsUrl = `/api/tts?lang=${lang}&voice=${voiceName}&preset=${presetId}&rate=${playbackRate}&text=${encoded}`;
   const customKey = getEffectiveGeminiApiKey();
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (isValidGeminiApiKey(customKey)) {
     headers['x-gemini-api-key'] = customKey;
   }
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7500);
-    const res = await fetch(ttsUrl, { signal: controller.signal, headers });
+    const timeoutId = setTimeout(() => controller.abort(), 9500);
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      signal: controller.signal,
+      headers,
+      body: JSON.stringify({
+        text: chunkText,
+        lang,
+        voice: voiceName,
+        preset: presetId,
+        rate: playbackRate,
+      }),
+    });
     clearTimeout(timeoutId);
     if (res.ok) {
       const engineHeader = res.headers.get('X-TTS-Engine') || 'google-translate';
@@ -2004,33 +2174,340 @@ async function fetchTtsChunkBytes(
       }
     }
   } catch (_) {}
+
+  // Fallback GET for cached proxy routes if POST failed
+  try {
+    const encoded = encodeURIComponent(chunkText);
+    const ttsUrl = `/api/tts?lang=${lang}&voice=${voiceName}&preset=${presetId}&rate=${playbackRate}&text=${encoded}`;
+    const getHeaders: Record<string, string> = {};
+    if (isValidGeminiApiKey(customKey)) {
+      getHeaders['x-gemini-api-key'] = customKey;
+    }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8500);
+    const res = await fetch(ttsUrl, { signal: controller.signal, headers: getHeaders });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const engineHeader = res.headers.get('X-TTS-Engine') || 'google-translate';
+      if (engineHeader === 'gemini-3.8' || engineHeader === 'google-translate') {
+        detectedServerTtsEngine = engineHeader;
+      }
+      const arrayBuf = await res.arrayBuffer();
+      if (arrayBuf.byteLength > 100) {
+        return { arrayBuf, engine: engineHeader };
+      }
+    }
+  } catch (_) {}
+
   return null;
+}
+
+interface FallbackVoiceDspProfile {
+  semitones: number;
+  rate: number;
+  lowShelfGainDb: number;
+  lowShelfFreq: number;
+  presenceGainDb: number;
+  highShelfGainDb: number;
+}
+
+function getFallbackVoiceDspProfile(preset: VoiceTonePreset): FallbackVoiceDspProfile {
+  switch (preset.id) {
+    case 'nam_tram_am':
+      return { semitones: -4.9, rate: 1.13, lowShelfGainDb: 5.2, lowShelfFreq: 130, presenceGainDb: 1.6, highShelfGainDb: -2.0 };
+    case 'nam_dut_khoat':
+    case 'mc_ai_la_trieu_phu':
+      return { semitones: -3.9, rate: 1.20, lowShelfGainDb: 4.2, lowShelfFreq: 145, presenceGainDb: 2.8, highShelfGainDb: -0.4 };
+    case 'nam_nang_dong':
+    case 'mc_chuyen_nghiep':
+    case 'mc_olympia':
+      return { semitones: -3.1, rate: 1.24, lowShelfGainDb: 3.4, lowShelfFreq: 160, presenceGainDb: 3.2, highShelfGainDb: 0.6 };
+    case 'nu_am_ap':
+    case 'podcast':
+      return { semitones: -1.4, rate: 1.12, lowShelfGainDb: 2.4, lowShelfFreq: 195, presenceGainDb: 0.8, highShelfGainDb: -2.5 };
+    case 'mc_nu_nang_dong':
+      return { semitones: 1.2, rate: 1.22, lowShelfGainDb: -1.8, lowShelfFreq: 170, presenceGainDb: 3.0, highShelfGainDb: 1.8 };
+    case 'nu_truyen_cam':
+    case 'nu_diu_dang':
+    default:
+      if (preset.gender === 'male') {
+        return { semitones: -4.0, rate: 1.18, lowShelfGainDb: 4.0, lowShelfFreq: 145, presenceGainDb: 2.4, highShelfGainDb: -0.6 };
+      }
+      return { semitones: 0.6, rate: 1.17, lowShelfGainDb: -1.2, lowShelfFreq: 160, presenceGainDb: 2.2, highShelfGainDb: 1.4 };
+  }
+}
+
+function applyBiquadFilterInPlace(
+  samples: Float32Array,
+  sampleRate: number,
+  type: 'lowshelf' | 'peaking' | 'highshelf',
+  freq: number,
+  gainDb: number,
+  qOrSlope: number = 0.8
+): void {
+  if (Math.abs(gainDb) < 0.05 || samples.length === 0) return;
+  const A = Math.pow(10, gainDb / 40);
+  const w0 = (2 * Math.PI * Math.min(freq, sampleRate * 0.45)) / sampleRate;
+  const cosW0 = Math.cos(w0);
+  const sinW0 = Math.sin(w0);
+
+  let b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
+  if (type === 'peaking') {
+    const alpha = sinW0 / (2 * qOrSlope);
+    b0 = 1 + alpha * A;
+    b1 = -2 * cosW0;
+    b2 = 1 - alpha * A;
+    a0 = 1 + alpha / A;
+    a1 = -2 * cosW0;
+    a2 = 1 - alpha / A;
+  } else {
+    const alpha = (sinW0 / 2) * Math.sqrt((A + 1 / A) * (1 / qOrSlope - 1) + 2);
+    const twoSqrtAAlpha = 2 * Math.sqrt(A) * alpha;
+    if (type === 'lowshelf') {
+      b0 = A * ((A + 1) - (A - 1) * cosW0 + twoSqrtAAlpha);
+      b1 = 2 * A * ((A - 1) - (A + 1) * cosW0);
+      b2 = A * ((A + 1) - (A - 1) * cosW0 - twoSqrtAAlpha);
+      a0 = (A + 1) + (A - 1) * cosW0 + twoSqrtAAlpha;
+      a1 = -2 * ((A - 1) + (A + 1) * cosW0);
+      a2 = (A + 1) + (A - 1) * cosW0 - twoSqrtAAlpha;
+    } else {
+      b0 = A * ((A + 1) + (A - 1) * cosW0 + twoSqrtAAlpha);
+      b1 = -2 * A * ((A - 1) + (A + 1) * cosW0);
+      b2 = A * ((A + 1) + (A - 1) * cosW0 - twoSqrtAAlpha);
+      a0 = (A + 1) - (A - 1) * cosW0 + twoSqrtAAlpha;
+      a1 = 2 * ((A - 1) - (A + 1) * cosW0);
+      a2 = (A + 1) - (A - 1) * cosW0 - twoSqrtAAlpha;
+    }
+  }
+
+  const nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0;
+  const na1 = a1 / a0, na2 = a2 / a0;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const x0 = samples[i];
+    const y0 = nb0 * x0 + nb1 * x1 + nb2 * x2 - na1 * y1 - na2 * y2;
+    x2 = x1; x1 = x0;
+    y2 = y1; y1 = y0;
+    samples[i] = y0;
+  }
+}
+
+/**
+ * Thuật toán WSOLA + nội suy đổi cao độ & âm sắc (formant/EQ) không làm biến dạng tốc độ nói.
+ * Giúp tạo ra giọng Thầy giáo, MC, Phát thanh viên, Kể chuyện khác biệt rõ ràng ngay cả khi không có Gemini Key.
+ */
+export function morphMonoSpeechSamples(
+  src: Float32Array,
+  sampleRate: number,
+  profile: FallbackVoiceDspProfile
+): Float32Array {
+  const N = src.length;
+  if (N < 512) return src;
+
+  const pitchRatio = Math.pow(2, profile.semitones / 12);
+  let morphed: Float32Array;
+
+  if (Math.abs(profile.semitones) < 0.08) {
+    morphed = new Float32Array(src);
+  } else {
+    // 1. WSOLA time-scale to length midLen = N * pitchRatio at original pitch
+    const midLen = Math.max(512, Math.round(N * pitchRatio));
+    const winEven = Math.max(256, (Math.round(0.03 * sampleRate) >> 1) << 1);
+    const hs = winEven >> 1;
+    const seek = Math.max(32, Math.round(0.008 * sampleRate));
+    const ha = hs / pitchRatio;
+
+    const hann = new Float32Array(winEven);
+    for (let i = 0; i < winEven; i++) {
+      hann[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / winEven));
+    }
+
+    const mid = new Float32Array(midLen + winEven);
+    // Initial frame overlap
+    const firstCopy = Math.min(winEven, N, mid.length);
+    for (let i = 0; i < firstCopy; i++) {
+      mid[i] = src[i] * hann[i];
+    }
+
+    let lastInPos = 0;
+    let frameIdx = 1;
+    for (let outPos = hs; outPos < midLen; outPos += hs, frameIdx++) {
+      const targetIn = Math.round(frameIdx * ha);
+      if (targetIn >= N - winEven) break;
+
+      const natStart = Math.min(N - winEven, lastInPos + hs);
+      const searchStart = Math.max(0, targetIn - seek);
+      const searchEnd = Math.min(N - winEven, targetIn + seek);
+
+      // Coarse + fine phase similarity search on overlap region [0..hs]
+      let bestOffset = targetIn;
+      let bestCorr = -Infinity;
+      const cmpLen = hs;
+
+      for (let cand = searchStart; cand <= searchEnd; cand += 4) {
+        let dot = 0;
+        let normC = 1e-8;
+        for (let k = 0; k < cmpLen; k += 2) {
+          const sC = src[cand + k];
+          dot += sC * src[natStart + k];
+          normC += sC * sC;
+        }
+        const score = dot / Math.sqrt(normC);
+        if (score > bestCorr) {
+          bestCorr = score;
+          bestOffset = cand;
+        }
+      }
+
+      const fineStart = Math.max(searchStart, bestOffset - 3);
+      const fineEnd = Math.min(searchEnd, bestOffset + 3);
+      for (let cand = fineStart; cand <= fineEnd; cand++) {
+        let dot = 0;
+        let normC = 1e-8;
+        for (let k = 0; k < cmpLen; k += 2) {
+          const sC = src[cand + k];
+          dot += sC * src[natStart + k];
+          normC += sC * sC;
+        }
+        const score = dot / Math.sqrt(normC);
+        if (score > bestCorr) {
+          bestCorr = score;
+          bestOffset = cand;
+        }
+      }
+
+      for (let i = 0; i < winEven; i++) {
+        mid[outPos + i] += src[bestOffset + i] * hann[i];
+      }
+      lastInPos = bestOffset;
+    }
+
+    // 2. Resample mid back to length N at step pitchRatio
+    morphed = new Float32Array(N);
+    const maxIdx = midLen - 2;
+    for (let i = 0; i < N; i++) {
+      const fPos = i * pitchRatio;
+      if (fPos >= maxIdx) break;
+      const idx0 = Math.floor(fPos);
+      const frac = fPos - idx0;
+      morphed[i] = mid[idx0] * (1 - frac) + mid[idx0 + 1] * frac;
+    }
+  }
+
+  // 3. Apply chest resonance & crisp studio EQ
+  applyBiquadFilterInPlace(morphed, sampleRate, 'lowshelf', profile.lowShelfFreq, profile.lowShelfGainDb, 0.75);
+  applyBiquadFilterInPlace(morphed, sampleRate, 'peaking', 2600, profile.presenceGainDb, 1.0);
+  applyBiquadFilterInPlace(morphed, sampleRate, 'highshelf', 5200, profile.highShelfGainDb, 0.75);
+
+  // Soft peak protection
+  for (let i = 0; i < morphed.length; i++) {
+    const v = morphed[i];
+    if (v > 0.92 || v < -0.92) {
+      morphed[i] = Math.tanh(v);
+    }
+  }
+  return morphed;
+}
+
+export function encodeMonoFloat32ToWavArrayBuffer(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  const numFrames = samples.length;
+  const buf = new ArrayBuffer(44 + numFrames * 2);
+  const view = new DataView(buf);
+  const writeStr = (off: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i));
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + numFrames * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM chunk size
+  view.setUint16(20, 1, true);  // PCM format
+  view.setUint16(22, 1, true);  // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, numFrames * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < numFrames; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? Math.round(s * 32768) : Math.round(s * 32767), true);
+    offset += 2;
+  }
+  return buf;
+}
+
+let sharedOfflineDecodeCtx: OfflineAudioContext | null = null;
+function getDecodeAudioContext(): AudioContext | OfflineAudioContext | null {
+  const mainCtx = getOrCreateAudioContext();
+  if (mainCtx) return mainCtx;
+  if (typeof window === 'undefined') return null;
+  const OfflineCtx = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+  if (!OfflineCtx) return null;
+  if (!sharedOfflineDecodeCtx) {
+    try {
+      sharedOfflineDecodeCtx = new OfflineCtx(1, 1, 24000);
+    } catch (_) {
+      return null;
+    }
+  }
+  return sharedOfflineDecodeCtx;
+}
+
+async function transformChunkBytesForPreset(
+  rawBuf: ArrayBuffer,
+  preset: VoiceTonePreset,
+  engine?: string
+): Promise<ArrayBuffer> {
+  if (engine === 'gemini-3.8') return rawBuf;
+  try {
+    const decodeCtx = getDecodeAudioContext();
+    if (!decodeCtx) return rawBuf;
+    const decoded = await decodeCtx.decodeAudioData(rawBuf.slice(0));
+    if (!decoded || decoded.length < 512) return rawBuf;
+    const profile = getFallbackVoiceDspProfile(preset);
+    const monoSrc = decoded.getChannelData(0);
+    const morphed = morphMonoSpeechSamples(monoSrc, decoded.sampleRate, profile);
+    return encodeMonoFloat32ToWavArrayBuffer(morphed, decoded.sampleRate);
+  } catch (_) {
+    return rawBuf;
+  }
 }
 
 function getFallbackPresetAudioTuning(preset: VoiceTonePreset, engine?: string): { rate: number; detune: number; preferHtmlPreservesPitch: boolean } {
   const speedMult = getSpeechSpeedMultiplier();
   if (engine === 'gemini-3.8') {
-    // Gemini 3.8 Neural TTS already delivers energetic style via speechMetadata; keep native timbre cleanly paced
     const baseRate = preset.rate || 1.16;
-    const rate = Math.max(0.9, Math.min(1.32, 1.0 + (baseRate * speedMult - 1.16) * 0.55));
+    const rate = Math.max(0.92, Math.min(1.32, 1.0 + (baseRate * speedMult - 1.16) * 0.55));
     return { rate, detune: 0, preferHtmlPreservesPitch: false };
   }
-  // Google Translate raw stream is sluggish (~105 WPM): boost playbackRate via HTML5 <audio> with preservesPitch=true (no chipmunk distortion!)
-  const rate = Math.max(1.0, Math.min(1.45, (preset.rate || 1.18) * speedMult));
+  const dsp = getFallbackVoiceDspProfile(preset);
+  const rate = Math.max(0.98, Math.min(1.42, dsp.rate * speedMult));
   return { rate, detune: 0, preferHtmlPreservesPitch: true };
 }
 
 /**
  * Phát URL (Blob hoặc Data URI) qua HTMLAudioElement đã được mở khóa theo tương tác chạm.
- * Đảm bảo nghe tiếng rõ ràng trên cả iPhone (kể cả khi bật gạt rung im lặng), Android và Smart TV 75".
+ * Chờ unlockPromise hoàn tất an toàn để tránh AbortError trên Điện thoại và Smart TV 75".
  */
 async function playUrlWithPersistentAudio(
   srcUrl: string,
   playbackRate: number,
   onChunkPlayStart?: () => void,
-  revokeOnCleanup: boolean = false
+  revokeOnCleanup: boolean = false,
+  sessionId: number = activeSpeechSessionId
 ): Promise<boolean> {
-  if (isSpeechCancelled) {
+  if (isSpeechCancelled || sessionId !== activeSpeechSessionId) {
+    if (revokeOnCleanup) URL.revokeObjectURL(srcUrl);
+    return false;
+  }
+
+  if (unlockPromise) {
+    await Promise.race([unlockPromise, new Promise<void>((r) => setTimeout(r, 160))]);
+  }
+  if (isSpeechCancelled || sessionId !== activeSpeechSessionId) {
     if (revokeOnCleanup) URL.revokeObjectURL(srcUrl);
     return false;
   }
@@ -2052,6 +2529,7 @@ async function playUrlWithPersistentAudio(
       el.onplaying = null;
       el.onended = null;
       el.onerror = null;
+      el.onloadedmetadata = null;
       if (revokeOnCleanup) {
         try {
           URL.revokeObjectURL(srcUrl);
@@ -2063,32 +2541,48 @@ async function playUrlWithPersistentAudio(
 
     try {
       currentAudioElement = el;
+      try {
+        el.pause();
+      } catch (_) {}
       el.muted = false;
       el.volume = 1.0;
 
       const markPlaying = () => {
-        if (playStarted || isSpeechCancelled) return;
+        if (playStarted || isSpeechCancelled || sessionId !== activeSpeechSessionId) return;
         playStarted = true;
         if (onChunkPlayStart) onChunkPlayStart();
       };
 
+      const armSafetyTimer = (ms: number) => {
+        if (safetyTimer) clearTimeout(safetyTimer);
+        safetyTimer = setTimeout(() => {
+          cleanup(playStarted);
+        }, ms);
+      };
+
       el.onplaying = markPlaying;
       el.onplay = () => {
-        // Fallback cho một số Smart TV WebView chỉ bắn onplay mà không bắn onplaying
         setTimeout(() => {
-          if (!finished && !el.paused && !isSpeechCancelled) {
+          if (!finished && !el.paused && !isSpeechCancelled && sessionId === activeSpeechSessionId) {
             markPlaying();
           }
-        }, 60);
+        }, 50);
+      };
+      el.onloadedmetadata = () => {
+        if (el.duration && isFinite(el.duration) && el.duration > 0) {
+          const effRate = Math.max(0.85, playbackRate || 1.15);
+          armSafetyTimer(Math.max(12000, Math.ceil((el.duration / effRate) * 1000) + 5000));
+        }
       };
       el.onended = () => cleanup(true);
       el.onerror = () => cleanup(false);
 
-      safetyTimer = setTimeout(() => {
-        cleanup(playStarted);
-      }, 18000);
+      armSafetyTimer(28000);
 
       el.src = srcUrl;
+      try {
+        el.load();
+      } catch (_) {}
       try {
         (el as any).preservesPitch = true;
         (el as any).webkitPreservesPitch = true;
@@ -2116,8 +2610,7 @@ async function playUrlWithPersistentAudio(
 
 /**
  * Phát 1 đoạn âm thanh MP3/WAV đáng tin cậy trên mọi thiết bị:
- * - Với giọng dự phòng Google Translate hoặc trên Điện thoại/TV: Ưu tiên HTML5 <audio> bật preservesPitch=true để tăng tốc mượt mà không bị méo giọng.
- * - Với Gemini 3.8 Neural TTS trên Máy tính: Ưu tiên Web Audio 0ms qua Studio EQ sáng rõ.
+ * Hỗ trợ đa tầng: HTML5 <audio> (Blob -> Data URI) <-> Web Audio API (decodeAudioData + WAV PCM parser).
  */
 async function playChunkBytes(
   arrayBuf: ArrayBuffer,
@@ -2125,31 +2618,48 @@ async function playChunkBytes(
   preset: VoiceTonePreset,
   onChunkPlayStart?: () => void,
   preferHtmlAudio: boolean = isMobileOrSmartTV(),
-  engine?: string
+  engine?: string,
+  sessionId: number = activeSpeechSessionId,
+  alreadyMorphed: boolean = false
 ): Promise<boolean> {
-  if (isSpeechCancelled) return false;
+  if (isSpeechCancelled || sessionId !== activeSpeechSessionId) return false;
 
-  const mime = detectAudioMimeFromBytes(arrayBuf);
+  const processedBuf =
+    alreadyMorphed || engine === 'gemini-3.8'
+      ? arrayBuf
+      : await transformChunkBytesForPreset(arrayBuf, preset, engine);
+
+  if (isSpeechCancelled || sessionId !== activeSpeechSessionId) return false;
+
+  const mime = detectAudioMimeFromBytes(processedBuf);
   const tuning = getFallbackPresetAudioTuning(preset, engine);
-  if (rawChunkBytesCache.size > 150) {
+  if (rawChunkBytesCache.size > 180) {
     const firstKey = rawChunkBytesCache.keys().next().value;
     if (firstKey) rawChunkBytesCache.delete(firstKey);
   }
-  rawChunkBytesCache.set(cacheKey, { bytes: arrayBuf.slice(0), mime, engine });
+  rawChunkBytesCache.set(cacheKey, { bytes: processedBuf.slice(0), mime, engine });
 
   const tryWebAudio = async (): Promise<boolean> => {
+    if (isSpeechCancelled || sessionId !== activeSpeechSessionId) return false;
     const ctx = getOrCreateAudioContext();
     if (!ctx) return false;
     try {
       if (ctx.state !== 'running') {
         await Promise.race([
           ctx.resume(),
-          new Promise((r) => setTimeout(r, 400)),
+          new Promise((r) => setTimeout(r, 450)),
         ]);
       }
       if ((ctx.state as string) !== 'running') return false;
-      const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
-      if (decoded && !isSpeechCancelled) {
+      let decoded: AudioBuffer | null = null;
+      try {
+        decoded = await ctx.decodeAudioData(processedBuf.slice(0));
+      } catch (_) {
+        if (mime === 'audio/wav') {
+          decoded = decodeWavToAudioBuffer(ctx, processedBuf);
+        }
+      }
+      if (decoded && !isSpeechCancelled && sessionId === activeSpeechSessionId) {
         audioCache.set(cacheKey, { buffer: decoded, engine });
         return await playAudioBuffer(decoded, onChunkPlayStart, undefined, tuning.rate, tuning.detune);
       }
@@ -2158,16 +2668,18 @@ async function playChunkBytes(
   };
 
   const tryHtmlAudioBlobThenDataUri = async (): Promise<boolean> => {
+    if (isSpeechCancelled || sessionId !== activeSpeechSessionId) return false;
     try {
-      const blob = new Blob([arrayBuf.slice(0)], { type: mime });
+      const blob = new Blob([processedBuf.slice(0)], { type: mime });
       const blobUrl = URL.createObjectURL(blob);
-      const blobOk = await playUrlWithPersistentAudio(blobUrl, tuning.rate, onChunkPlayStart, true);
-      if (blobOk || isSpeechCancelled) return blobOk;
+      const blobOk = await playUrlWithPersistentAudio(blobUrl, tuning.rate, onChunkPlayStart, true, sessionId);
+      if (blobOk || isSpeechCancelled || sessionId !== activeSpeechSessionId) return blobOk;
     } catch (_) {}
 
+    if (isSpeechCancelled || sessionId !== activeSpeechSessionId) return false;
     try {
-      const dataUri = `data:${mime};base64,${arrayBufferToBase64(arrayBuf)}`;
-      return await playUrlWithPersistentAudio(dataUri, tuning.rate, onChunkPlayStart, false);
+      const dataUri = `data:${mime};base64,${arrayBufferToBase64(processedBuf)}`;
+      return await playUrlWithPersistentAudio(dataUri, tuning.rate, onChunkPlayStart, false, sessionId);
     } catch (_) {
       return false;
     }
@@ -2175,19 +2687,18 @@ async function playChunkBytes(
 
   if (preferHtmlAudio || tuning.preferHtmlPreservesPitch) {
     const htmlOk = await tryHtmlAudioBlobThenDataUri();
-    if (htmlOk || isSpeechCancelled) return htmlOk;
+    if (htmlOk || isSpeechCancelled || sessionId !== activeSpeechSessionId) return htmlOk;
     return await tryWebAudio();
   } else {
     const webOk = await tryWebAudio();
-    if (webOk || isSpeechCancelled) return webOk;
+    if (webOk || isSpeechCancelled || sessionId !== activeSpeechSessionId) return webOk;
     return await tryHtmlAudioBlobThenDataUri();
   }
 }
 
 /**
  * Phát giọng đọc Gemini 3.8 Neural / Google Cloud TTS theo từng câu ngắn song song (Parallel Chunk Streaming)
- * - Câu đầu phát ngay sau ~0.3s thay vì chờ tải hết cả bài dài 4-6s.
- * - Trên Điện thoại & TV 75" ưu tiên phát qua HTML5 Audio kênh Media để luôn phát ra loa to, rõ ràng.
+ * - Phân đoạn tối đa 160 ký tự giúp câu đầu phát siêu nhanh (~0.25s) và ổn định 100% trên Điện thoại & Tivi 75".
  */
 export async function speakWithGoogleCloudTTS(
   processedText: string,
@@ -2201,10 +2712,11 @@ export async function speakWithGoogleCloudTTS(
   if (!processedText || !processedText.trim()) return false;
 
   if (!skipStopAndUnlock) {
+    unlockWebAudio();
     stopAllSpeech();
     isSpeechCancelled = false;
-    unlockWebAudio();
   }
+  const mySession = activeSpeechSessionId;
 
   const preferHtml = isMobileOrSmartTV();
   const voiceName = preset.geminiVoice || (preset.gender === 'male' ? 'Charon' : 'Kore');
@@ -2216,9 +2728,9 @@ export async function speakWithGoogleCloudTTS(
     const cachedRaw = rawChunkBytesCache.get(fullKey)!;
     const cachedTuning = getFallbackPresetAudioTuning(preset, cachedRaw.engine);
     if (preferHtml || cachedTuning.preferHtmlPreservesPitch) {
-      const ok = await playChunkBytes(cachedRaw.bytes, fullKey, preset, onStart, true, cachedRaw.engine);
-      if (ok) {
-        if (!isSpeechCancelled && onEnd) onEnd();
+      const ok = await playChunkBytes(cachedRaw.bytes, fullKey, preset, onStart, true, cachedRaw.engine, mySession);
+      if (ok && mySession === activeSpeechSessionId && !isSpeechCancelled) {
+        if (onEnd) onEnd();
         return true;
       }
     }
@@ -2228,12 +2740,12 @@ export async function speakWithGoogleCloudTTS(
     const tuning = getFallbackPresetAudioTuning(preset, cachedEntry.engine);
     if (!tuning.preferHtmlPreservesPitch) {
       const ok = await playAudioBuffer(cachedEntry.buffer, onStart, onEnd, tuning.rate, tuning.detune);
-      if (ok) return true;
+      if (ok && mySession === activeSpeechSessionId && !isSpeechCancelled) return true;
     }
   }
 
-  // 2. Gửi cả câu hỏi + đáp án (<= 420 ký tự) trong 1 luồng liền mạch để đọc mượt, không ngắt quãng giữa các đáp án
-  const chunks = splitIntoSentences(processedText.trim(), 420);
+  // 2. Chia nhỏ thành câu ngắn <= 160 ký tự & tải song song toàn bộ các đoạn
+  const chunks = splitIntoSentences(processedText.trim(), 160);
   if (chunks.length === 0) return false;
 
   const chunkFetchPromises = chunks.map((chunk) => {
@@ -2271,32 +2783,32 @@ export async function speakWithGoogleCloudTTS(
   let allPlayed = true;
 
   for (let i = 0; i < chunkFetchPromises.length; i++) {
-    if (isSpeechCancelled) {
+    if (isSpeechCancelled || mySession !== activeSpeechSessionId) {
       allPlayed = false;
       break;
     }
 
     const result = await chunkFetchPromises[i];
-    if (isSpeechCancelled) {
+    if (isSpeechCancelled || mySession !== activeSpeechSessionId) {
       allPlayed = false;
       break;
     }
 
     const triggerStartOnce = () => {
-      if (!hasStarted) {
+      if (!hasStarted && mySession === activeSpeechSessionId && !isSpeechCancelled) {
         hasStarted = true;
-        if (!isSpeechCancelled && onStart) onStart();
+        if (onStart) onStart();
       }
     };
 
     let chunkOk = false;
     if (result.rawBytes) {
-      chunkOk = await playChunkBytes(result.rawBytes, result.chunkKey, preset, triggerStartOnce, preferHtml, result.engine);
+      chunkOk = await playChunkBytes(result.rawBytes, result.chunkKey, preset, triggerStartOnce, preferHtml, result.engine, mySession, true);
     } else if (result.cachedEntry) {
       const tuning = getFallbackPresetAudioTuning(preset, result.engine);
       chunkOk = await playAudioBuffer(result.cachedEntry.buffer, triggerStartOnce, undefined, tuning.rate, tuning.detune);
     } else if (result.arrayBuf) {
-      chunkOk = await playChunkBytes(result.arrayBuf, result.chunkKey, preset, triggerStartOnce, preferHtml, result.engine);
+      chunkOk = await playChunkBytes(result.arrayBuf, result.chunkKey, preset, triggerStartOnce, preferHtml, result.engine, mySession);
     }
 
     if (!chunkOk) {
@@ -2305,27 +2817,33 @@ export async function speakWithGoogleCloudTTS(
     }
   }
 
-  if (isSpeechCancelled) return false;
+  if (isSpeechCancelled || mySession !== activeSpeechSessionId) return false;
 
   if (allPlayed) {
     if (onEnd) onEnd();
     return true;
   }
 
-  // Fallback cuối: stream trực tiếp qua HTMLAudioElement đã mở khóa hoặc báo lỗi sạch sẽ
+  // Fallback cuối: stream trực tiếp qua HTMLAudioElement hoặc Web Speech trước khi báo lỗi sạch sẽ
   const fallbackOk = await speakWithGoogleTranslateStream(
     processedText,
     lang,
     playbackRate,
     hasStarted ? undefined : onStart,
     onEnd,
-    onError,
+    undefined,
     preset
   );
-  if (!fallbackOk && !hasStarted && onError && !isSpeechCancelled) {
-    onError(new Error('Không thể phát âm thanh AI trên thiết bị này'));
+  if (fallbackOk) return true;
+
+  if (mySession === activeSpeechSessionId && !isSpeechCancelled) {
+    const wsOk = speakWithWebSpeech(processedText, preset, lang, hasStarted ? undefined : onStart, onEnd, onError);
+    if (wsOk) return true;
+    if (onError) {
+      onError(new Error('Không thể phát âm thanh AI trên thiết bị này'));
+    }
   }
-  return fallbackOk;
+  return false;
 }
 
 /**
@@ -2482,6 +3000,9 @@ function hasLocalNaturalVietnameseVoice(gender: 'female' | 'male' | 'neutral'): 
   const best = getBestVietnameseVoice(gender);
   if (!best) return false;
   const n = (best.name || '').toLowerCase();
+  const isMaleMatch = n.includes('namminh') || n.includes('nam minh') || n.includes('male') || /\bnam\b/.test(n) || n.includes('khoi') || n.includes('khôi');
+  // Không bao giờ dùng nhầm giọng nữ địa phương khi người dùng đang chọn Thầy giáo / MC nam
+  if (gender === 'male' && !isMaleMatch) return false;
   const isMicrosoftNatural = (n.includes('hoaimy') || n.includes('namminh')) && (n.includes('natural') || n.includes('online'));
   const isGoogleVi = n.includes('google') && (n.includes('tiếng việt') || n.includes('vietnam'));
   const isAppleQuality = n.includes('linh') && (n.includes('enhanced') || n.includes('premium') || n.includes('natural'));
@@ -2491,9 +3012,10 @@ function hasLocalNaturalVietnameseVoice(gender: 'female' | 'male' | 'neutral'): 
 export function speakText(text: string, options: SpeakOptions = {}): boolean {
   if (!text || !text.trim()) return false;
 
+  unlockWebAudio();
   stopAllSpeech();
   isSpeechCancelled = false;
-  unlockWebAudio();
+  const mySession = activeSpeechSessionId;
 
   const isEnglish = !!options.isEnglish ||
     (typeof options.subject === 'string' && (
@@ -2518,10 +3040,10 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
     const cachedRaw = rawChunkBytesCache.get(cacheKey)!;
     const cachedTuning = getFallbackPresetAudioTuning(preset, cachedRaw.engine);
     if (preferHtml || cachedTuning.preferHtmlPreservesPitch) {
-      playChunkBytes(cachedRaw.bytes, cacheKey, preset, options.onStart, true, cachedRaw.engine).then((ok) => {
-        if (ok && !isSpeechCancelled && options.onEnd) {
+      playChunkBytes(cachedRaw.bytes, cacheKey, preset, options.onStart, true, cachedRaw.engine, mySession, true).then((ok) => {
+        if (ok && !isSpeechCancelled && mySession === activeSpeechSessionId && options.onEnd) {
           options.onEnd();
-        } else if (!ok && !isSpeechCancelled) {
+        } else if (!ok && !isSpeechCancelled && mySession === activeSpeechSessionId) {
           speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError, true);
         }
       });
@@ -2534,7 +3056,7 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
     const tuning = getFallbackPresetAudioTuning(preset, cachedEntry.engine);
     if (!tuning.preferHtmlPreservesPitch) {
       playAudioBuffer(cachedEntry.buffer, options.onStart, options.onEnd, tuning.rate, tuning.detune).then((ok) => {
-        if (!ok && !isSpeechCancelled) {
+        if (!ok && !isSpeechCancelled && mySession === activeSpeechSessionId) {
           speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError, true);
         }
       });
@@ -2542,25 +3064,15 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
     }
   }
 
-  // 2. Ưu tiên giọng Neural chất lượng cao nhất trên từng nền tảng:
-  //    - Nếu trình duyệt có giọng chất lượng cao (HoaiMy/NamMinh Natural, Google Tiếng Việt) và chưa bật Gemini: dùng ngay (<50ms) với tốc độ nhanh nhẹn
-  //    - Nếu máy chủ có Gemini 3.8 Neural TTS: dùng /api/tts để phát 5 giọng AI truyền cảm chuẩn studio
-  //    - Tránh hoàn toàn giọng Microsoft An cũ kỹ; nếu không có giọng Local hay, dùng /api/tts phát HTML5 preservesPitch tốc độ 1.18x-1.25x
   const hasNaturalLocal = !isEnglish && hasLocalNaturalVietnameseVoice(preset.gender);
   const customGeminiKey = getEffectiveGeminiApiKey();
   const hasGeminiKeyHint = isValidGeminiApiKey(customGeminiKey);
-  const preferServerNeural =
-    !preferHtml &&
-    options.preferWebSpeech !== true &&
-    (hasGeminiKeyHint || detectedServerTtsEngine === 'gemini-3.8' || (!hasNaturalLocal && detectedServerTtsEngine === null));
 
-  if (preferServerNeural) {
-    speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError, true);
-    return true;
-  }
-
+  // Luôn ưu tiên /api/tts + bộ xử lý WSOLA âm sắc đa giọng (Cô giáo / Thầy giáo / MC / Phát thanh viên / Kể chuyện)
+  // trừ trường hợp dùng trực tiếp Web Speech theo yêu cầu riêng hoặc môn Tiếng Anh có giọng bản ngữ.
   const useWebSpeechFirst =
     !preferHtml &&
+    options.preferWebSpeech === true &&
     typeof window !== 'undefined' &&
     'speechSynthesis' in window &&
     options.preferGemini !== true &&
@@ -2573,9 +3085,123 @@ export function speakText(text: string, options: SpeakOptions = {}): boolean {
     } catch (_) {}
   }
 
-  // 3. Máy chủ TTS stream (/api/tts) siêu tốc phân đoạn song song
+  if (isEnglish && !preferHtml && !hasGeminiKeyHint && detectedServerTtsEngine !== 'gemini-3.8') {
+    try {
+      const started = speakWithWebSpeech(processed, preset, lang, options.onStart, options.onEnd, options.onError);
+      if (started) return true;
+    } catch (_) {}
+  }
+
+  // Máy chủ TTS stream (/api/tts) + DSP tách biệt rõ ràng từng giọng đọc
   speakWithGoogleCloudTTS(processed, preset, lang, options.onStart, options.onEnd, options.onError, true);
   return true;
+}
+
+/**
+ * Tạo kịch bản lời đọc chuẩn cho 1 câu hỏi trắc nghiệm (dùng chung cho phát trực tiếp & tải trước RAM)
+ */
+export function buildQuestionSpeechScript(
+  question: {
+    id?: string;
+    question: string;
+    options?: Array<{ key: string; text: string }>;
+    subject?: string;
+  },
+  isEnglish: boolean = false
+): string {
+  const qText = question.question || (question as any).content || '';
+  let rawScript = '';
+  const opts = Array.isArray(question.options) ? question.options : [];
+
+  if (isEnglish) {
+    const cleanQ = qText.trim().replace(/^Question\s*\d*\s*[:.]\s*/i, '').trim();
+    rawScript = `Question: ${cleanQ}. `;
+    opts.forEach((opt, idx) => {
+      const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
+      const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
+      if (text) {
+        const cleanText = text.replace(/^[A-Da-d][.:)\-\/]\s*/, '').replace(/^[:\-–—]\s*/, '').trim();
+        rawScript += `Option ${key}: ${cleanText}. `;
+      }
+    });
+  } else {
+    const cleanQ = qText.trim()
+      .replace(/\\begin\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}[\s\S]*?\\end\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}/gi, ' ')
+      .replace(/^câu\s*\d*\s*[:.]\s*/i, '')
+      .replace(/[:;.,]+\s*$/, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    rawScript = `Câu hỏi: ${cleanQ}. `;
+
+    const isCoordinateContext = /(tọa độ|toạ độ|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|cực trị của đồ thị|cực đại của đồ thị|cực tiểu của đồ thị|điểm uốn|vectơ|véc-tơ|Oxy|Oxyz|mặt phẳng|không gian)/i.test(cleanQ);
+    const isIntervalContext = /(đồng biến|nghịch biến|đơn điệu|liên tục|khoảng biến thiên|khoảng nghịch biến|khoảng đồng biến|trên khoảng)/i.test(cleanQ);
+
+    opts.forEach((opt, idx) => {
+      const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
+      const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
+      if (text) {
+        const keyPhonetic = key === 'A' ? 'A' : key === 'B' ? 'Bê' : key === 'C' ? 'Xê' : key === 'D' ? 'Dê' : key;
+        let cleanText = text
+          .replace(/^[A-Da-d][.:)\-\/]\s*/, '')
+          .replace(/^[:\-–—/]\s*/, '')
+          .replace(/^chia cho\s*/i, '')
+          .trim();
+
+        const tripletMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)?$/i);
+        const pairMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?|âm vô cùng|-\s*∞|\\-?\\infty)\s*[;,]\s*(-?\d+(?:[.,]\d+)?|dương vô cùng|\+\s*∞|\\\+?\\infty)\s*\)?$/i);
+
+        if (tripletMatch) {
+          cleanText = `tọa độ ${tripletMatch[1]}, ${tripletMatch[2]}, ${tripletMatch[3]}`;
+        } else if (pairMatch) {
+          const val1 = pairMatch[1].replace(/\\?-\s*(?:\\infty|∞)/g, 'âm vô cùng');
+          const val2 = pairMatch[2].replace(/\\?\+?\s*(?:\\infty|∞)/g, 'dương vô cùng');
+          const hasInf = /vô cùng/i.test(val1) || /vô cùng/i.test(val2);
+          if (hasInf || isIntervalContext) {
+            cleanText = `khoảng từ ${val1} đến ${val2}`;
+          } else if (isCoordinateContext) {
+            cleanText = `tọa độ ${val1}, ${val2}`;
+          } else {
+            cleanText = `${val1}, ${val2}`;
+          }
+        }
+        rawScript += `Đáp án ${keyPhonetic}: ${cleanText}. `;
+      }
+    });
+  }
+  return rawScript;
+}
+
+/**
+ * Tải trước đoạn âm thanh đầu tiên của câu hỏi vào RAM cache để bấm Đọc Đề AI phát ngay 0ms
+ */
+export async function prefetchQuestionSpeech(
+  question: { id?: string; question: string; options?: Array<{ key: string; text: string }>; subject?: string },
+  preset: VoiceTonePreset = VOICE_TONE_PRESETS[0]
+): Promise<void> {
+  if (!question || !question.question) return;
+  try {
+    const rawSubject = question.subject || '';
+    const isEnglish = typeof rawSubject === 'string' && /tiếng anh|english|anh văn|ngoại ngữ/i.test(rawSubject);
+    const lang: 'vi' | 'en' = isEnglish ? 'en' : 'vi';
+    const rawScript = buildQuestionSpeechScript(question, isEnglish);
+    const processed = isEnglish ? cleanMathForVietnameseTTS(rawScript, true) : preprocessSpeechText(rawScript, false);
+    if (!processed) return;
+    const chunks = splitIntoSentences(processed.trim(), 160);
+    if (chunks.length === 0) return;
+    const voiceName = preset.geminiVoice || (preset.gender === 'male' ? 'Charon' : 'Kore');
+    const firstChunk = chunks[0];
+    const chunkKey = `${preset.id}:::${voiceName}:::${lang}:::${firstChunk}`;
+    if (rawChunkBytesCache.has(chunkKey)) return;
+    const res = await fetchTtsChunkBytes(firstChunk, lang, voiceName, preset.id, preset.rate || 1.18);
+    if (res && res.arrayBuf.byteLength > 100) {
+      const processedBuf = await transformChunkBytesForPreset(res.arrayBuf, preset, res.engine);
+      rawChunkBytesCache.set(chunkKey, {
+        bytes: processedBuf,
+        mime: detectAudioMimeFromBytes(processedBuf),
+        engine: res.engine,
+      });
+    }
+  } catch (_) {}
 }
 
 export async function speakWithGeminiAudio(
@@ -2597,9 +3223,9 @@ export async function speakWithGeminiAudio(
   const processed = isEn ? cleanMathForVietnameseTTS(text, true) : preprocessSpeechText(text, false);
   if (!processed) return false;
 
+  unlockWebAudio();
   stopAllSpeech();
   isSpeechCancelled = false;
-  unlockWebAudio();
 
   return speakWithGoogleCloudTTS(processed, preset, isEn ? 'en' : 'vi', onStart, onEnd, onError, true);
 }
@@ -2609,9 +3235,7 @@ export async function speakWithGeminiAudio(
  */
 export function cleanHtmlAndLatex(raw: string, isEnglish: boolean = false): string {
   if (!raw) return '';
-  // 1. Loại bỏ toàn bộ thẻ HTML (<p>, <span>, <div>, <br>, v.v.)
   let t = raw.replace(/<[^>]*>/g, ' ');
-  // Giải mã các entity HTML thông dụng
   t = t
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, ' và ')
@@ -2620,22 +3244,11 @@ export function cleanHtmlAndLatex(raw: string, isEnglish: boolean = false): stri
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&quot;/gi, '"');
 
-  // 2. Chuyển đổi công thức toán, STEM và ký hiệu LaTeX sang lời đọc tiếng Việt chuẩn
   t = isEnglish ? cleanMathForVietnameseTTS(t, true) : preprocessSpeechText(t, false);
-
-  // 3. Dọn dẹp khoảng trắng
   t = t.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
   return t;
 }
 
-/**
- * Đọc toàn bộ nội dung câu hỏi trắc nghiệm kèm 4 đáp án A, B, C, D bằng giọng đọc AI tiếng Việt chuẩn mực:
- * - Chuẩn hóa toàn diện ký hiệu Toán, Lý, Hóa, Sinh, Tin học theo SGK GDPT 2018.
- * - Ưu tiên 1: AudioBuffer cache (0ms phát lại tức thì).
- * - Ưu tiên 2: Gemini TTS Audio với 5 giọng đọc AI cao cấp (Kore, Aoede, Puck, Charon, Fenrir).
- * - Ưu tiên 3: Google TTS Audio Stream đa endpoint (chạy 100% trên cả Web Vercel lẫn AI Studio Preview).
- * - Tuyệt đối không dùng Web Speech nếu máy khách không có voice vi-VN (tránh lỗi giọng đọc tiếng Anh lạ).
- */
 export function speakQuestionContent(
   question: {
     id?: string;
@@ -2663,76 +3276,8 @@ export function speakQuestionContent(
       rawSubject.toLowerCase().includes('ngoại ngữ')
     ));
 
-  let rawScript = '';
-  const qText = question.question || (question as any).content || '';
+  const rawScript = buildQuestionSpeechScript(question, isEnglish);
 
-  if (isEnglish) {
-    const cleanQ = qText.trim().replace(/^Question\s*\d*\s*[:.]\s*/i, '').trim();
-    rawScript = `Question: ${cleanQ}. `;
-    if (Array.isArray(question.options) && question.options.length > 0) {
-      question.options.forEach((opt, idx) => {
-        const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
-        const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
-        if (text) {
-          const cleanText = text
-            .replace(/^[A-Da-d][.:)\-\/]\s*/, '')
-            .replace(/^[:\-–—]\s*/, '')
-            .trim();
-          rawScript += `Option ${key}: ${cleanText}. `;
-        }
-      });
-    }
-  } else {
-    let cleanQ = qText.trim()
-      .replace(/\\begin\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}[\s\S]*?\\end\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}/gi, ' ')
-      .replace(/^câu\s*\d*\s*[:.]\s*/i, '')
-      .replace(/[:;.,]+\s*$/, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-    rawScript = `Câu hỏi: ${cleanQ}. `;
-
-    // Nhận diện ngữ cảnh đề bài: TỌA ĐỘ hay KHOẢNG ĐƠN ĐIỆU để hướng dẫn AI đọc chính xác
-    const isCoordinateContext = /(tọa độ|toạ độ|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|cực trị của đồ thị|cực đại của đồ thị|cực tiểu của đồ thị|điểm uốn|vectơ|véc-tơ|Oxy|Oxyz|mặt phẳng|không gian)/i.test(cleanQ);
-    const isIntervalContext = /(đồng biến|nghịch biến|đơn điệu|liên tục|khoảng biến thiên|khoảng nghịch biến|khoảng đồng biến|trên khoảng)/i.test(cleanQ);
-
-    if (Array.isArray(question.options) && question.options.length > 0) {
-      question.options.forEach((opt, idx) => {
-        const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
-        const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
-        if (text) {
-          const keyPhonetic = key === 'A' ? 'A' : key === 'B' ? 'Bê' : key === 'C' ? 'Xê' : key === 'D' ? 'Dê' : key;
-          let cleanText = text
-            .replace(/^[A-Da-d][.:)\-\/]\s*/, '')
-            .replace(/^[:\-–—/]\s*/, '')
-            .replace(/^chia cho\s*/i, '')
-            .trim();
-
-          // Xử lý thông minh dạng ngoặc (a; b) hoặc (a; b; c) trong phương án trắc nghiệm:
-          const tripletMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)?$/i);
-          const pairMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?|âm vô cùng|-\s*∞|\\-?\\infty)\s*[;,]\s*(-?\d+(?:[.,]\d+)?|dương vô cùng|\+\s*∞|\\\+?\\infty)\s*\)?$/i);
-
-          if (tripletMatch) {
-            cleanText = `tọa độ ${tripletMatch[1]}, ${tripletMatch[2]}, ${tripletMatch[3]}`;
-          } else if (pairMatch) {
-            const val1 = pairMatch[1].replace(/\\?-\s*(?:\\infty|∞)/g, 'âm vô cùng');
-            const val2 = pairMatch[2].replace(/\\?\+?\s*(?:\\infty|∞)/g, 'dương vô cùng');
-            const hasInf = /vô cùng/i.test(val1) || /vô cùng/i.test(val2);
-            if (hasInf || isIntervalContext) {
-              cleanText = `khoảng từ ${val1} đến ${val2}`;
-            } else if (isCoordinateContext) {
-              cleanText = `tọa độ ${val1}, ${val2}`;
-            } else {
-              cleanText = `${val1}, ${val2}`;
-            }
-          }
-
-          rawScript += `Đáp án ${keyPhonetic}: ${cleanText}. `;
-        }
-      });
-    }
-  }
-
-  // 1. Kiểm tra questionAudioCache theo question.id để phát ngay lập tức 0ms
   const qId = question.id;
   const preset = options.preset || VOICE_TONE_PRESETS[0];
   const voiceName = preset.geminiVoice || 'Kore';
@@ -2744,7 +3289,6 @@ export function speakQuestionContent(
     return true;
   }
 
-  // 2. Chuyển sang speakText để phát tiếng Việt truyền cảm, giàu ngữ điệu
   return speakText(rawScript, {
     ...options,
     subject: rawSubject,

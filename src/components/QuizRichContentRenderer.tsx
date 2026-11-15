@@ -689,9 +689,10 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                   latex={targetLatex}
                   graphType={diagramData.graphType}
                   title={diagramData.title}
+                  questionText={content}
                   asymptoteX={diagramData.asymptoteX}
                   asymptoteY={diagramData.asymptoteY}
-                  height={isPresentationMode ? 340 : 290}
+                  height={isPresentationMode ? 330 : 290}
                   isPresentationMode={isPresentationMode}
                 />
               </div>

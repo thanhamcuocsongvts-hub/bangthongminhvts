@@ -78,6 +78,7 @@ import {
   speakText,
   stopAllSpeech,
   speakWithGeminiAudio,
+  unlockWebAudio,
 } from '../utils/aiSpeechService';
 import { FloatingSelectionToolbar } from './FloatingSelectionToolbar';
 import { cropCanvasRegion, recognizeHandwritingFast } from '../utils/textRecognitionService';
@@ -1698,6 +1699,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
   // Text-To-Speech (TTS): Phát âm văn bản hoặc chữ viết tay trên bảng xanh với bộ lọc giọng tự nhiên & tiền xử lý toán học
   const speakTextWithWebSpeech = useCallback((text: string, preset: VoiceTonePreset) => {
+    unlockWebAudio();
     stopAllSpeech();
     setIsSpeakingTTS(true);
 
@@ -1709,14 +1711,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         setCalligraphyStatusBanner(null);
       },
       onError: (err) => {
-        console.warn('SpeechSynthesis error:', err);
+        console.warn('TTS playback error:', err);
         setIsSpeakingTTS(false);
         setCalligraphyStatusBanner(null);
       },
     });
 
-    if (!ok && !('speechSynthesis' in window)) {
-      alert('Trình duyệt không hỗ trợ Web Speech Synthesis API');
+    if (!ok) {
       setIsSpeakingTTS(false);
     }
   }, []);
@@ -1728,6 +1729,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   }, []);
 
   const handleSpeakSweptContent = useCallback(async (overridePreset?: VoiceTonePreset) => {
+    unlockWebAudio();
     const preset = overridePreset || ttsVoicePreset;
     const canvas = canvasRef.current;
     if (!canvas) return;

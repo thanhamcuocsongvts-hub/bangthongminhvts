@@ -35,7 +35,7 @@ import {
   Info,
   RefreshCw,
 } from 'lucide-react';
-import { speakText, stopAllSpeech } from '../utils/aiSpeechService';
+import { speakText, stopAllSpeech, unlockWebAudio } from '../utils/aiSpeechService';
 import { createDirectGeminiClient, getGeminiApiKey } from '../utils/geminiClient';
 
 export type GradeLevel = 'primary' | 'secondary' | 'highschool';
@@ -2816,6 +2816,7 @@ Khi giáo viên yêu cầu tạo một bài dựng hình hoặc thí nghiệm �
                     <button
                       key={k}
                       onClick={() => {
+                        unlockWebAudio();
                         setActiveLetter(k);
                         stepProgressRef.current = 0.05;
                         audioEngine.playWhooshDraw();
@@ -2832,6 +2833,7 @@ Khi giáo viên yêu cầu tạo một bài dựng hình hoặc thí nghiệm �
                   ))}
                   <button
                     onClick={() => {
+                      unlockWebAudio();
                       const phonics = PRIMARY_LETTERS[activeLetter]?.phonics || 'A';
                       speakText(phonics);
                       audioEngine.playClick();
@@ -2905,6 +2907,7 @@ Khi giáo viên yêu cầu tạo một bài dựng hình hoặc thí nghiệm �
                   <button
                     disabled={currentStepIndex === 0}
                     onClick={() => {
+                      unlockWebAudio();
                       setCurrentStepIndex((prev) => Math.max(0, prev - 1));
                       audioEngine.playClick();
                     }}
@@ -2915,6 +2918,7 @@ Khi giáo viên yêu cầu tạo một bài dựng hình hoặc thí nghiệm �
 
                   <button
                     onClick={() => {
+                      unlockWebAudio();
                       setIsPlaying(!isPlaying);
                       audioEngine.playClick();
                     }}
@@ -2927,6 +2931,7 @@ Khi giáo viên yêu cầu tạo một bài dựng hình hoặc thí nghiệm �
                   <button
                     disabled={currentStepIndex >= activeSimulation.steps.length - 1}
                     onClick={() => {
+                      unlockWebAudio();
                       setCurrentStepIndex((prev) => Math.min(activeSimulation.steps.length - 1, prev + 1));
                       audioEngine.playClick();
                     }}

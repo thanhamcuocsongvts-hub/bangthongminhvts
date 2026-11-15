@@ -69,19 +69,24 @@ const VOICE_STYLE_HINTS: Record<string, { geminiVoice: string; fallbackVoice: st
   },
 };
 
-// Natural text chunker for Google TTS (splits into natural sub-sentences <= 180 chars)
-function chunkTextForTTS(text: string, maxLen = 180): string[] {
-  if (text.length <= maxLen) return [text];
+// Natural text chunker for Google TTS (splits into natural sub-sentences <= 160 chars, lookbehind-free)
+function chunkTextForTTS(text: string, maxLen = 160): string[] {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return [];
+  if (cleaned.length <= maxLen) return [cleaned];
+
   const chunks: string[] = [];
-  const sentences = text.split(/(?<=[.,!?:;\n])\s+/);
+  const rawTokens = cleaned.match(/[^.,!?:;\n]+[.,!?:;\n]?/g) || [cleaned];
   let cur = "";
-  for (const s of sentences) {
-    if (!s.trim()) continue;
+
+  for (const raw of rawTokens) {
+    const s = raw.trim();
+    if (!s) continue;
     if (s.length > maxLen) {
       const words = s.split(/\s+/);
       for (const w of words) {
         if (!w.trim()) continue;
-        if (cur && (cur.length + w.length + 1) > maxLen) {
+        if (cur && cur.length + w.length + 1 > maxLen) {
           chunks.push(cur.trim());
           cur = w;
         } else {
@@ -89,7 +94,7 @@ function chunkTextForTTS(text: string, maxLen = 180): string[] {
         }
       }
     } else {
-      if (cur && (cur.length + s.length + 1) > maxLen) {
+      if (cur && cur.length + s.length + 1 > maxLen) {
         chunks.push(cur.trim());
         cur = s;
       } else {
@@ -98,7 +103,7 @@ function chunkTextForTTS(text: string, maxLen = 180): string[] {
     }
   }
   if (cur.trim()) chunks.push(cur.trim());
-  return chunks.length > 0 ? chunks : [text.slice(0, maxLen)];
+  return chunks.length > 0 ? chunks : [cleaned.slice(0, maxLen)];
 }
 
 async function fetchSingleTtsAudio(chunk: string, lang: string): Promise<Buffer | null> {
@@ -111,7 +116,7 @@ async function fetchSingleTtsAudio(chunk: string, lang: string): Promise<Buffer 
   for (const url of urls) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const timeoutId = setTimeout(() => controller.abort(), 2800);
       const response = await fetch(url, {
         signal: controller.signal,
         headers: {
@@ -160,20 +165,24 @@ function pcmToWavBuffer(
   return Buffer.concat([header, pcmBuffer]);
 }
 
-// High-Fidelity Multi-Voice AI Text-To-Speech Route with Gemini 3.8 Neural TTS & Google TTS Fallback
-app.get("/api/tts", async (req, res) => {
+async function handleTtsRequest(req: express.Request, res: express.Response) {
   try {
-    const text = String(req.query.text || "").trim();
+    const src: Record<string, any> =
+      req.method === "POST" && req.body && typeof req.body === "object"
+        ? { ...req.query, ...req.body }
+        : req.query;
+
+    const text = String(src.text || "").trim();
     if (!text) {
       return res.status(400).send("Text is required");
     }
 
-    const requestedLang = (req.query.lang as string) || "vi";
+    const requestedLang = String(src.lang || "vi");
     const lang = requestedLang.toLowerCase().startsWith("en") ? "en" : "vi";
-    const requestedVoice = String(req.query.voice || req.query.preset || "").trim();
+    const requestedVoice = String(src.voice || src.preset || "").trim();
     const validVoices = ["Kore", "Aoede", "Zephyr", "Puck", "Charon", "Fenrir"];
     const voice = validVoices.includes(requestedVoice) ? requestedVoice : "Kore";
-    const presetId = String(req.query.preset || voice).trim();
+    const presetId = String(src.preset || voice).trim();
 
     const apiKey =
       (req.headers["x-gemini-api-key"] as string) ||
@@ -183,7 +192,7 @@ app.get("/api/tts", async (req, res) => {
       process.env.VITE_API_KEY ||
       process.env.GOOGLE_API_KEY;
 
-    const allowGemini = Boolean(apiKey) && req.query.useGemini !== "0";
+    const allowGemini = Boolean(apiKey) && String(src.useGemini ?? "1") !== "0";
     const cacheKey = `${allowGemini ? "g38" : "gt"}:${voice}:${presetId}:${lang}:${text}`;
 
     if (ttsAudioCache.has(cacheKey)) {
@@ -246,13 +255,13 @@ app.get("/api/tts", async (req, res) => {
         try {
           response = await Promise.race([
             tryGenerateGeminiTts("gemini-3.8-flash-lite-tts", voiceSpec.geminiVoice),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini TTS timeout")), 5500)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini TTS timeout")), 4200)),
           ]);
         } catch {
           try {
             response = await Promise.race([
               tryGenerateGeminiTts("gemini-3.8-flash-tts", voiceSpec.fallbackVoice),
-              new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini flash TTS timeout")), 5000)),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini flash TTS timeout")), 3600)),
             ]);
           } catch (_) {}
         }
@@ -280,7 +289,7 @@ app.get("/api/tts", async (req, res) => {
           } else if (hasRiffHeader) {
             mimeType = "audio/wav";
           }
-          if (ttsAudioCache.size > 200) {
+          if (ttsAudioCache.size > 250) {
             const firstKey = ttsAudioCache.keys().next().value;
             if (firstKey) ttsAudioCache.delete(firstKey);
           }
@@ -298,7 +307,7 @@ app.get("/api/tts", async (req, res) => {
     }
 
     // 2. Fast Google Translate TTS Stream with parallel chunk fetching
-    const chunks = chunkTextForTTS(text, 180);
+    const chunks = chunkTextForTTS(text, 160);
     const chunkPromises = chunks.map((chunk) => fetchSingleTtsAudio(chunk, lang));
     const chunkResults = await Promise.all(chunkPromises);
     const audioBuffers: Buffer[] = chunkResults.filter((b): b is Buffer => b !== null);
@@ -309,7 +318,7 @@ app.get("/api/tts", async (req, res) => {
 
     const combinedBuffer = Buffer.concat(audioBuffers);
 
-    if (ttsAudioCache.size > 200) {
+    if (ttsAudioCache.size > 250) {
       const firstKey = ttsAudioCache.keys().next().value;
       if (firstKey) ttsAudioCache.delete(firstKey);
     }
@@ -324,7 +333,11 @@ app.get("/api/tts", async (req, res) => {
     console.error("TTS endpoint error:", err);
     res.status(500).json({ error: err.message });
   }
-});
+}
+
+// High-Fidelity Multi-Voice AI Text-To-Speech Routes (both GET & POST to avoid URL length limits on long quiz questions)
+app.get("/api/tts", handleTtsRequest);
+app.post("/api/tts", handleTtsRequest);
 
 // Persistent Cloud Storage Directories
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");

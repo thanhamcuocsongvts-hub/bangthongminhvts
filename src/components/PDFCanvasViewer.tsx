@@ -26,7 +26,7 @@ import {
 import { TouchWhiteboard } from './TouchWhiteboard';
 import { RandomStudentPickerModal } from './RandomStudentPickerModal';
 import { ClassRoom } from '../types';
-import { speakText, stopAllSpeech, VOICE_TONE_PRESETS, VoiceTonePreset } from '../utils/aiSpeechService';
+import { speakText, stopAllSpeech, unlockWebAudio, VOICE_TONE_PRESETS, VoiceTonePreset } from '../utils/aiSpeechService';
 import { cleanPdfVietnameseText, extractCleanPdfText } from '../utils/pdfTextExtractor';
 import 'pdfjs-dist/web/pdf_viewer.css';
 
@@ -179,6 +179,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
       return;
     }
     if (!pdfDoc) return;
+    unlockWebAudio();
     try {
       const page = await pdfDoc.getPage(currentPage);
       const textContent = await page.getTextContent();
@@ -204,6 +205,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
 
   const handleReadWithVoice = useCallback(async (preset: VoiceTonePreset) => {
     if (!pdfDoc) return;
+    unlockWebAudio();
     try {
       const page = await pdfDoc.getPage(currentPage);
       const textContent = await page.getTextContent();
