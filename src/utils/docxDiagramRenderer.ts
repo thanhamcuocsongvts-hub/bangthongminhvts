@@ -561,8 +561,43 @@ export function extractEmbeddedDiagramAndCleanText(content: string): ExtractedDi
   return { cleanContent: content };
 }
 
+function normalizeSgkRowSignsDocx(
+  rawList: string[],
+  xCount: number,
+  fallbackDirs?: Array<{ dir?: string }>
+): { roots: string[]; intervals: string[] } {
+  const n = Math.max(2, xCount);
+  const list = Array.isArray(rawList) ? rawList.map((s) => (s ?? '').toString().trim()) : [];
+  const roots: string[] = [];
+  const intervals: string[] = [];
+
+  if (list.length === 2 * n - 3) {
+    for (let i = 0; i < n - 1; i++) {
+      intervals.push(list[i * 2] || (fallbackDirs?.[i]?.dir === 'up' ? '+' : '-'));
+    }
+    for (let i = 1; i < n - 1; i++) {
+      roots.push(list[i * 2 - 1] || '0');
+    }
+  } else if (list.length >= 2 * n - 2) {
+    for (let i = 0; i < n - 1; i++) {
+      intervals.push(list[i * 2 + 1] || list[i * 2] || (fallbackDirs?.[i]?.dir === 'up' ? '+' : '-'));
+    }
+    for (let i = 1; i < n - 1; i++) {
+      roots.push(list[i * 2] || '0');
+    }
+  } else {
+    for (let i = 0; i < n - 1; i++) {
+      intervals.push(list[i] || (fallbackDirs?.[i]?.dir === 'up' ? '+' : '-'));
+    }
+    for (let i = 1; i < n - 1; i++) {
+      roots.push('0');
+    }
+  }
+  return { roots, intervals };
+}
+
 /**
- * 1. Render Bảng Biến Thiên chuẩn SGK GDPT 2018 thành ảnh PNG sắc nét
+ * 1. Render Bảng Biến Thiên chuẩn SGK GDPT 2018 thành ảnh PNG sắc nét (không tiêu đề thừa)
  */
 export function renderVariationTablePng(data: QuizDiagramData): RenderedDocxPng | null {
   const xVals: string[] = Array.isArray(data?.x) && data.x.length >= 2 ? data.x : ['-\\infty', '-1', '2', '+\\infty'];
@@ -576,23 +611,23 @@ export function renderVariationTablePng(data: QuizDiagramData): RenderedDocxPng 
           { start: '-2', end: '+\\infty', dir: 'up' },
         ];
   const yPrimeList: string[] = Array.isArray(data?.yPrime) && data.yPrime.length > 0 ? data.yPrime : ['+', '0', '-', '0', '+'];
+  const { roots: yPrimeRoots, intervals: yPrimeIntervals } = normalizeSgkRowSignsDocx(yPrimeList, n, rawArrows);
 
-  const W = 540;
-  const H = 226;
+  const W = 520;
+  const H = 194;
 
   return renderOnCanvas(
     W,
     H,
     2.5,
     (ctx) => {
-      const margin = 10;
-      const titleH = 26;
-      const leftColW = 54;
+      const margin = 8;
+      const leftColW = 50;
       const boxX = margin;
-      const boxY = margin + titleH;
+      const boxY = margin;
       const boxW = W - 2 * margin;
-      const row1H = 34;
-      const row2H = 34;
+      const row1H = 32;
+      const row2H = 32;
       const row3H = H - boxY - row1H - row2H - margin;
       const areaX = boxX + leftColW;
       const areaW = boxW - leftColW;
@@ -600,23 +635,12 @@ export function renderVariationTablePng(data: QuizDiagramData): RenderedDocxPng 
       const getX = (idx: number) =>
         n <= 1 ? areaX + areaW / 2 : areaX + padX + (idx * (areaW - 2 * padX)) / (n - 1);
 
-      // Caption header
-      ctx.font = 'bold 12px Arial, sans-serif';
-      ctx.fillStyle = '#1e3a8a';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText((data?.title || 'BẢNG BIẾN THIÊN CỦA HÀM SỐ').toUpperCase(), W / 2, margin + 12);
-
-      // Background shading for header column and x row
-      ctx.fillStyle = '#f1f5f9';
-      ctx.fillRect(boxX, boxY, boxW, row1H);
-      ctx.fillRect(boxX, boxY, leftColW, row1H + row2H + row3H);
-
-      // Row dividers & outer border
+      // Outer border & clean SGK table dividers
       ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = 1.5;
       ctx.strokeRect(boxX, boxY, boxW, row1H + row2H + row3H);
 
+      ctx.lineWidth = 1.25;
       ctx.beginPath();
       ctx.moveTo(areaX, boxY);
       ctx.lineTo(areaX, boxY + row1H + row2H + row3H);
@@ -626,7 +650,7 @@ export function renderVariationTablePng(data: QuizDiagramData): RenderedDocxPng 
       ctx.lineTo(boxX + boxW, boxY + row1H + row2H);
       ctx.stroke();
 
-      // Left column labels: x, y', y
+      // Left column labels: x, y', y (Times New Roman italic chuẩn SGK)
       ctx.font = 'bold italic 14px "Times New Roman", serif';
       ctx.fillStyle = '#0f172a';
       ctx.textAlign = 'center';
@@ -637,7 +661,7 @@ export function renderVariationTablePng(data: QuizDiagramData): RenderedDocxPng 
 
       // X values
       xVals.forEach((val, idx) => {
-        drawCanvasMathCentered(ctx, val, getX(idx), boxY + row1H / 2, 13, '#0f172a', true);
+        drawCanvasMathCentered(ctx, val, getX(idx), boxY + row1H / 2, 13, '#0f172a', false);
       });
 
       // Row 2: y' critical zeros / asymptotes || and interval signs
@@ -646,29 +670,28 @@ export function renderVariationTablePng(data: QuizDiagramData): RenderedDocxPng 
       const y3Bot = y3Top + row3H;
 
       for (let idx = 1; idx < n - 1; idx++) {
-        const rootSign = (yPrimeList[idx * 2] || '0').trim();
+        const rootSign = (yPrimeRoots[idx - 1] || '0').trim();
         const cx = getX(idx);
         if (rootSign === '||' || rootSign === '|') {
           ctx.strokeStyle = '#0f172a';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = 1.35;
           ctx.beginPath();
-          ctx.moveTo(cx - 2.5, boxY + row1H);
-          ctx.lineTo(cx - 2.5, y3Bot);
-          ctx.moveTo(cx + 2.5, boxY + row1H);
-          ctx.lineTo(cx + 2.5, y3Bot);
+          ctx.moveTo(cx - 2.3, boxY + row1H);
+          ctx.lineTo(cx - 2.3, y3Bot);
+          ctx.moveTo(cx + 2.3, boxY + row1H);
+          ctx.lineTo(cx + 2.3, y3Bot);
           ctx.stroke();
         } else {
-          drawCanvasMathCentered(ctx, rootSign, cx, y2Center, 13, '#0f172a', true);
+          drawCanvasMathCentered(ctx, rootSign, cx, y2Center, 13, '#0f172a', false);
         }
       }
 
-      // Interval signs between critical points
+      // Interval signs between critical points (clean black ink chuẩn SGK)
       for (let idx = 0; idx < n - 1; idx++) {
         const midX = (getX(idx) + getX(idx + 1)) / 2;
-        const sign = (yPrimeList[idx * 2 + 1] || (rawArrows[idx]?.dir === 'up' ? '+' : '-')).trim();
-        const signColor = sign.includes('+') ? '#dc2626' : sign.includes('-') ? '#2563eb' : '#0f172a';
-        ctx.font = 'bold 15px "Times New Roman", serif';
-        ctx.fillStyle = signColor;
+        const sign = (yPrimeIntervals[idx] || (rawArrows[idx]?.dir === 'up' ? '+' : '-')).trim();
+        ctx.font = 'bold 14.5px "Times New Roman", serif';
+        ctx.fillStyle = '#0f172a';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(sign, midX, y2Center);
@@ -687,8 +710,8 @@ export function renderVariationTablePng(data: QuizDiagramData): RenderedDocxPng 
         }
       }
 
-      const highY = y3Top + 22;
-      const lowY = y3Bot - 22;
+      const highY = y3Top + 20;
+      const lowY = y3Bot - 20;
 
       // Diagonal variation arrows in row 3
       for (let i = 0; i < Math.min(rawArrows.length, n - 1); i++) {
@@ -697,49 +720,50 @@ export function renderVariationTablePng(data: QuizDiagramData): RenderedDocxPng 
         const x1 = getX(i) + 22;
         const x2 = getX(i + 1) - 22;
         if (x2 <= x1 + 6) continue;
-        const sy = isUp ? lowY - 6 : highY + 6;
-        const ey = isUp ? highY + 6 : lowY - 6;
+        const sy = isUp ? lowY - 5 : highY + 5;
+        const ey = isUp ? highY + 5 : lowY - 5;
 
-        ctx.strokeStyle = '#1e293b';
-        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(x1, sy);
         ctx.lineTo(x2, ey);
         ctx.stroke();
-        drawArrowhead(ctx, x1, sy, x2, ey, 7.5, '#1e293b');
+        drawArrowhead(ctx, x1, sy, x2, ey, 7, '#0f172a');
       }
 
-      // Draw endpoint values inside crisp white pills so lines never touch numbers
+      // Draw endpoint values cleanly without overlap
       points.forEach((pt, idx) => {
         const cx = getX(idx);
         const cy = pt.isHigh ? highY : lowY;
-        const asym = (yPrimeList[idx * 2] || '').trim() === '||' || (yPrimeList[idx * 2] || '').trim() === '|';
+        const rootSign = idx > 0 && idx < n - 1 ? (yPrimeRoots[idx - 1] || '').trim() : '';
+        const asym = rootSign === '||' || rootSign === '|';
         if (asym && idx > 0 && idx < n - 1) {
           const prevArr = rawArrows[idx - 1];
           const nextArr = rawArrows[idx];
           if (prevArr?.end) {
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(cx - 28, (prevArr.dir === 'up' ? highY : lowY) - 10, 22, 20);
-            drawCanvasMathCentered(ctx, prevArr.end, cx - 17, prevArr.dir === 'up' ? highY : lowY, 12, '#0f172a', true);
+            drawCanvasMathCentered(ctx, prevArr.end, cx - 17, prevArr.dir === 'up' ? highY : lowY, 12.5, '#0f172a', false);
           }
           if (nextArr?.start) {
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(cx + 6, (nextArr.dir === 'down' ? highY : lowY) - 10, 22, 20);
-            drawCanvasMathCentered(ctx, nextArr.start, cx + 17, nextArr.dir === 'down' ? highY : lowY, 12, '#0f172a', true);
+            drawCanvasMathCentered(ctx, nextArr.start, cx + 17, nextArr.dir === 'down' ? highY : lowY, 12.5, '#0f172a', false);
           }
         } else {
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(cx - 20, cy - 11, 40, 22);
-          drawCanvasMathCentered(ctx, pt.val, cx, cy, 13, '#0f172a', true);
+          drawCanvasMathCentered(ctx, pt.val, cx, cy, 13, '#0f172a', false);
         }
       });
     },
-    435
+    420
   );
 }
 
 /**
- * 2. Render Bảng Xét Dấu chuẩn SGK GDPT 2018 thành ảnh PNG sắc nét
+ * 2. Render Bảng Xét Dấu chuẩn SGK GDPT 2018 thành ảnh PNG sắc nét (không tiêu đề thừa)
  */
 export function renderSignTablePng(data: QuizDiagramData): RenderedDocxPng | null {
   const xVals: string[] = Array.isArray(data?.x) && data.x.length >= 2 ? data.x : ['-\\infty', '-2', '3', '+\\infty'];
@@ -748,20 +772,19 @@ export function renderSignTablePng(data: QuizDiagramData): RenderedDocxPng | nul
       ? data.rows
       : [{ label: "f'(x)", signs: ['+', '0', '-', '0', '+'] }];
 
-  const W = 540;
+  const W = 520;
   const rowH = 34;
-  const titleH = 26;
-  const margin = 10;
-  const H = margin * 2 + titleH + rowH * (1 + rows.length);
+  const margin = 8;
+  const H = margin * 2 + rowH * (1 + rows.length);
 
   return renderOnCanvas(
     W,
     H,
     2.5,
     (ctx) => {
-      const leftColW = 78;
+      const leftColW = 74;
       const boxX = margin;
-      const boxY = margin + titleH;
+      const boxY = margin;
       const boxW = W - 2 * margin;
       const boxH = rowH * (1 + rows.length);
       const areaX = boxX + leftColW;
@@ -771,22 +794,12 @@ export function renderSignTablePng(data: QuizDiagramData): RenderedDocxPng | nul
       const getX = (idx: number) =>
         n <= 1 ? areaX + areaW / 2 : areaX + padX + (idx * (areaW - 2 * padX)) / (n - 1);
 
-      ctx.font = 'bold 12px Arial, sans-serif';
-      ctx.fillStyle = '#065f46';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText((data?.title || 'BẢNG XÉT DẤU').toUpperCase(), W / 2, margin + 12);
-
-      // Header row & left column background
-      ctx.fillStyle = '#f1f5f9';
-      ctx.fillRect(boxX, boxY, boxW, rowH);
-      ctx.fillRect(boxX, boxY, leftColW, boxH);
-
-      // Outer border
+      // Outer border & crisp dividers (chuẩn SGK giấy trắng nét đen)
       ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = 1.5;
       ctx.strokeRect(boxX, boxY, boxW, boxH);
 
+      ctx.lineWidth = 1.25;
       ctx.beginPath();
       ctx.moveTo(areaX, boxY);
       ctx.lineTo(areaX, boxY + boxH);
@@ -799,63 +812,48 @@ export function renderSignTablePng(data: QuizDiagramData): RenderedDocxPng | nul
       // Label 'x' and x values
       drawCanvasMathCentered(ctx, 'x', boxX + leftColW / 2, boxY + rowH / 2, 14, '#0f172a', true);
       xVals.forEach((val, idx) => {
-        drawCanvasMathCentered(ctx, val, getX(idx), boxY + rowH / 2, 13, '#0f172a', true);
+        drawCanvasMathCentered(ctx, val, getX(idx), boxY + rowH / 2, 13, '#0f172a', false);
       });
 
       // Sign rows
       rows.forEach((row, rIdx) => {
         const cy = boxY + (rIdx + 1) * rowH + rowH / 2;
         drawCanvasMathCentered(ctx, row.label || "f'(x)", boxX + leftColW / 2, cy, 13, '#0f172a', true);
-        const signs = row.signs || [];
+        const { roots, intervals } = normalizeSgkRowSignsDocx(row.signs || [], n);
 
-        // If signs array has (2*n - 3) or matching interleaved elements [+, 0, -, 0, +]
-        if (signs.length >= 2 * n - 3) {
-          for (let i = 1; i < n - 1; i++) {
-            const sym = (signs[i * 2 - 1] ?? signs[i * 2] ?? '0').trim();
-            const rootSym = signs.length === 2 * n - 3 ? (signs[i * 2 - 1] || '0').trim() : (signs[i * 2] || '0').trim();
-            const cx = getX(i);
-            if (rootSym === '||' || rootSym === '|') {
-              ctx.strokeStyle = '#0f172a';
-              ctx.lineWidth = 1.4;
-              ctx.beginPath();
-              ctx.moveTo(cx - 2.5, boxY + (rIdx + 1) * rowH);
-              ctx.lineTo(cx - 2.5, boxY + (rIdx + 2) * rowH);
-              ctx.moveTo(cx + 2.5, boxY + (rIdx + 1) * rowH);
-              ctx.lineTo(cx + 2.5, boxY + (rIdx + 2) * rowH);
-              ctx.stroke();
-            } else {
-              drawCanvasMathCentered(ctx, rootSym || sym, cx, cy, 13, '#0f172a', true);
-            }
+        for (let i = 1; i < n - 1; i++) {
+          const rootSym = (roots[i - 1] || '0').trim();
+          const cx = getX(i);
+          if (rootSym === '||' || rootSym === '|') {
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 1.35;
+            ctx.beginPath();
+            ctx.moveTo(cx - 2.3, boxY + (rIdx + 1) * rowH);
+            ctx.lineTo(cx - 2.3, boxY + (rIdx + 2) * rowH);
+            ctx.moveTo(cx + 2.3, boxY + (rIdx + 1) * rowH);
+            ctx.lineTo(cx + 2.3, boxY + (rIdx + 2) * rowH);
+            ctx.stroke();
+          } else {
+            drawCanvasMathCentered(ctx, rootSym, cx, cy, 13, '#0f172a', false);
           }
-          for (let i = 0; i < n - 1; i++) {
-            const intervalIdx = signs.length === 2 * n - 3 ? i * 2 : i * 2 + 1;
-            const s = (signs[intervalIdx] || '+').trim();
-            const midX = (getX(i) + getX(i + 1)) / 2;
-            const color = s === '+' ? '#dc2626' : s === '-' ? '#2563eb' : '#0f172a';
-            ctx.font = 'bold 15px "Times New Roman", serif';
-            ctx.fillStyle = color;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(s, midX, cy);
-          }
-        } else {
-          // Spread evenly across interval midpoints
-          signs.forEach((rawS, idx) => {
-            const s = (rawS || '').trim();
-            const frac = signs.length <= 1 ? 0.5 : idx / (signs.length - 1);
-            const cx = areaX + padX + frac * (areaW - 2 * padX);
-            const color = s === '+' ? '#dc2626' : s === '-' ? '#2563eb' : '#0f172a';
-            drawCanvasMathCentered(ctx, s, cx, cy, 14, color, true);
-          });
+        }
+        for (let i = 0; i < n - 1; i++) {
+          const s = (intervals[i] || '+').trim();
+          const midX = (getX(i) + getX(i + 1)) / 2;
+          ctx.font = 'bold 14.5px "Times New Roman", serif';
+          ctx.fillStyle = '#0f172a';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(s, midX, cy);
         }
       });
     },
-    435
+    420
   );
 }
 
 /**
- * 3. Render Đồ Thị Hàm Số chuẩn SGK (Oxy, đường cong, tiệm cận, điểm gióng)
+ * 3. Render Đồ Thị Hàm Số chuẩn SGK (Oxy trắng tinh khiết, không tiêu đề, không hiện tên hàm số)
  */
 export function renderFunctionGraphPng(data: QuizDiagramData, questionText: string = ''): RenderedDocxPng | null {
   const cleanLatex = ((data?.latex || data?.equation || data?.fn || '') + '').replace(/\$/g, '').trim();
@@ -868,13 +866,12 @@ export function renderFunctionGraphPng(data: QuizDiagramData, questionText: stri
     asymptoteY: data?.asymptoteY !== undefined ? Number(data.asymptoteY) : undefined,
   });
 
-  const W = 440;
-  const H = 310;
-  const padLeft = 26;
-  const padRight = 26;
-  const headerH = 30;
-  const padTop = headerH + 22;
-  const padBot = 24;
+  const W = 400;
+  const H = 265;
+  const padLeft = 24;
+  const padRight = 24;
+  const padTop = 20;
+  const padBot = 20;
   const plotW = W - padLeft - padRight;
   const plotH = H - padTop - padBot;
 
@@ -890,36 +887,7 @@ export function renderFunctionGraphPng(data: QuizDiagramData, questionText: stri
     H,
     2.5,
     (ctx) => {
-      // Subtle SGK header bar
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(0, 0, W, headerH);
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, headerH);
-      ctx.lineTo(W, headerH);
-      ctx.stroke();
-
-      ctx.font = 'bold 11px Arial, sans-serif';
-      ctx.fillStyle = '#1e3a8a';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(analysis.title.toUpperCase().slice(0, 38), 12, headerH / 2);
-
-      if (analysis.formulaLatex) {
-        const fLabel = formatMathLabelForCanvas(analysis.formulaLatex);
-        ctx.font = 'bold italic 12px "Times New Roman", serif';
-        ctx.fillStyle = '#1d4ed8';
-        ctx.textAlign = 'right';
-        ctx.fillText(fLabel.slice(0, 34), W - 12, headerH / 2);
-      }
-
-      // Outer border
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = 1.3;
-      ctx.strokeRect(1, 1, W - 2, H - 2);
-
-      // Clip plot area for curves & asymptotes
+      // Clip plot area for curves & asymptotes (nền trắng tinh chuẩn SGK, không viền hộp hay tiêu đề)
       ctx.save();
       ctx.beginPath();
       ctx.rect(padLeft - 4, padTop - 4, plotW + 8, plotH + 8);

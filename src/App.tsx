@@ -537,6 +537,7 @@ export default function App() {
   const [showRandomPickerModal, setShowRandomPickerModal] = useState<boolean>(false);
   const [pickerClassroom, setPickerClassroom] = useState<ClassRoom | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isFeatureFullscreen, setIsFeatureFullscreen] = useState<boolean>(false);
   const [isGeneratingAIQuiz, setIsGeneratingAIQuiz] = useState<boolean>(false);
   const [showAIQuizModal, setShowAIQuizModal] = useState<boolean>(false);
   const [showAIConfigModal, setShowAIConfigModal] = useState<boolean>(false);
@@ -862,9 +863,21 @@ export default function App() {
 
   useEffect(() => {
     const handleToggle = () => handleToggleFullscreen();
+    const handleFeatureFS = (e: Event) => {
+      const detail = (e as CustomEvent<{ active?: boolean }>).detail;
+      setIsFeatureFullscreen(Boolean(detail?.active));
+    };
     window.addEventListener('toggle-app-fullscreen', handleToggle);
-    return () => window.removeEventListener('toggle-app-fullscreen', handleToggle);
+    window.addEventListener('set-feature-fullscreen', handleFeatureFS);
+    return () => {
+      window.removeEventListener('toggle-app-fullscreen', handleToggle);
+      window.removeEventListener('set-feature-fullscreen', handleFeatureFS);
+    };
   }, []);
+
+  useEffect(() => {
+    setIsFeatureFullscreen(false);
+  }, [activeTab]);
 
   const handleToggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -1432,38 +1445,42 @@ export default function App() {
 
   return (
     <div className="w-screen h-dvh flex flex-col bg-[#f8fafc] text-slate-800 overflow-hidden select-none">
-      {/* 75-Inch Top Navigation Header Bar */}
-      <HeaderBar
-        syncStatus={syncStatus}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        textScale={textScale}
-        onTextScaleChange={setTextScale}
-        roomPin={roomState?.pin || '758899'}
-        onOpenQR={() => setShowQRModal(true)}
-        onOpenExport={() => setShowExportModal(true)}
-        onOpenTeacherAuth={() => setShowTeacherAuthModal(true)}
-        onOpenProfile={() => setShowProfileModal(true)}
-        onOpenAdmin={() => setShowAdminModal(true)}
-        onOpenRandomPicker={() => {
-          setPickerClassroom(activeTeacher?.classes?.[0] || null);
-          setShowRandomPickerModal(true);
-        }}
-        onSwitchToStudentView={() => setIsStudentMode(true)}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={handleToggleFullscreen}
-        activeLessonTitle={currentLesson.title}
-        activeTeacher={activeTeacher || null}
-        onLogout={handleLogout}
-        onOpenAIConfig={() => setShowAIConfigModal(true)}
-        pendingTeachersCount={pendingTeachersCount}
-        onOpenCasioCalculator={() => setShowCasioModal(true)}
-        onOpenStepByStepSimulation={() => setShowStepByStepModal(true)}
-      />
+      {/* 75-Inch Top Navigation Header Bar (Ẩn khi phóng toàn màn hình theo từng tính năng) */}
+      {!isFeatureFullscreen && (
+        <HeaderBar
+          syncStatus={syncStatus}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          textScale={textScale}
+          onTextScaleChange={setTextScale}
+          roomPin={roomState?.pin || '758899'}
+          onOpenQR={() => setShowQRModal(true)}
+          onOpenExport={() => setShowExportModal(true)}
+          onOpenTeacherAuth={() => setShowTeacherAuthModal(true)}
+          onOpenProfile={() => setShowProfileModal(true)}
+          onOpenAdmin={() => setShowAdminModal(true)}
+          onOpenRandomPicker={() => {
+            setPickerClassroom(activeTeacher?.classes?.[0] || null);
+            setShowRandomPickerModal(true);
+          }}
+          onSwitchToStudentView={() => setIsStudentMode(true)}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={handleToggleFullscreen}
+          activeLessonTitle={currentLesson.title}
+          activeTeacher={activeTeacher || null}
+          onLogout={handleLogout}
+          onOpenAIConfig={() => setShowAIConfigModal(true)}
+          pendingTeachersCount={pendingTeachersCount}
+          onOpenCasioCalculator={() => setShowCasioModal(true)}
+          onOpenStepByStepSimulation={() => setShowStepByStepModal(true)}
+        />
+      )}
 
       {/* Main Interactive Screen Content */}
       <main className={`flex-1 ${
-        activeTab === 'whiteboard'
+        isFeatureFullscreen
+          ? 'p-0 overflow-hidden bg-slate-950'
+          : activeTab === 'whiteboard'
           ? 'p-2 sm:p-3 md:p-4 overflow-hidden bg-white'
           : isMobile
           ? 'p-2.5 pb-24 overflow-y-auto bg-[#f8fafc]'
@@ -1472,10 +1489,10 @@ export default function App() {
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18, ease: 'easeOut' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16, ease: 'easeOut' }}
             className="w-full h-full"
           >
             {/* Tab 2: Document Reader View (Open Doc directly & AI Key Points) */}
@@ -2053,7 +2070,7 @@ export default function App() {
         </div>
       )}
       {/* MOBILE PHONE BOTTOM NAVIGATION BAR (< 768px) */}
-      {isMobile && !isStudentMode && !isFullscreen && (
+      {isMobile && !isStudentMode && !isFullscreen && !isFeatureFullscreen && (
         <nav
           className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-1 py-1.5 flex items-center justify-around shadow-2xl select-none"
           style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom))' }}

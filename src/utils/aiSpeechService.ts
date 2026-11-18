@@ -3105,6 +3105,10 @@ export function buildQuestionSpeechScript(
     id?: string;
     question: string;
     options?: Array<{ key: string; text: string }>;
+    subStatements?: Array<{ label?: string; key?: string; statement?: string; text?: string }>;
+    statements?: Array<{ label?: string; key?: string; statement?: string; text?: string }>;
+    shortAnswerKey?: string;
+    partType?: string;
     subject?: string;
   },
   isEnglish: boolean = false
@@ -3112,18 +3116,34 @@ export function buildQuestionSpeechScript(
   const qText = question.question || (question as any).content || '';
   let rawScript = '';
   const opts = Array.isArray(question.options) ? question.options : [];
+  const rawSubs =
+    Array.isArray(question.subStatements) && question.subStatements.length > 0
+      ? question.subStatements
+      : Array.isArray(question.statements) && question.statements.length > 0
+      ? question.statements
+      : [];
 
   if (isEnglish) {
     const cleanQ = qText.trim().replace(/^Question\s*\d*\s*[:.]\s*/i, '').trim();
     rawScript = `Question: ${cleanQ}. `;
-    opts.forEach((opt, idx) => {
-      const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
-      const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
-      if (text) {
-        const cleanText = text.replace(/^[A-Da-d][.:)\-\/]\s*/, '').replace(/^[:\-–—]\s*/, '').trim();
-        rawScript += `Option ${key}: ${cleanText}. `;
-      }
-    });
+    if (opts.length > 0) {
+      opts.forEach((opt, idx) => {
+        const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
+        const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
+        if (text) {
+          const cleanText = text.replace(/^[A-Da-d][.:)\-\/]\s*/, '').replace(/^[:\-–—]\s*/, '').trim();
+          rawScript += `Option ${key}: ${cleanText}. `;
+        }
+      });
+    } else if (rawSubs.length > 0) {
+      rawSubs.forEach((sub, idx) => {
+        const key = (sub.label || sub.key || ['a', 'b', 'c', 'd'][idx] || `${idx + 1}`).trim();
+        const text = (sub.statement || sub.text || '').trim();
+        if (text) {
+          rawScript += `Statement ${key}: ${text}. `;
+        }
+      });
+    }
   } else {
     const cleanQ = qText.trim()
       .replace(/\\begin\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}[\s\S]*?\\end\{(?:array|matrix|pmatrix|bmatrix|cases|aligned)\}/gi, ' ')
@@ -3136,37 +3156,48 @@ export function buildQuestionSpeechScript(
     const isCoordinateContext = /(tọa độ|toạ độ|giao điểm|tiếp điểm|tâm|đỉnh|hình chiếu|trung điểm|cực trị của đồ thị|cực đại của đồ thị|cực tiểu của đồ thị|điểm uốn|vectơ|véc-tơ|Oxy|Oxyz|mặt phẳng|không gian)/i.test(cleanQ);
     const isIntervalContext = /(đồng biến|nghịch biến|đơn điệu|liên tục|khoảng biến thiên|khoảng nghịch biến|khoảng đồng biến|trên khoảng)/i.test(cleanQ);
 
-    opts.forEach((opt, idx) => {
-      const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
-      const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
-      if (text) {
-        const keyPhonetic = key === 'A' ? 'A' : key === 'B' ? 'Bê' : key === 'C' ? 'Xê' : key === 'D' ? 'Dê' : key;
-        let cleanText = text
-          .replace(/^[A-Da-d][.:)\-\/]\s*/, '')
-          .replace(/^[:\-–—/]\s*/, '')
-          .replace(/^chia cho\s*/i, '')
-          .trim();
+    if (opts.length > 0) {
+      opts.forEach((opt, idx) => {
+        const key = (typeof opt === 'object' && opt && opt.key ? opt.key : String.fromCharCode(65 + idx)).trim().toUpperCase();
+        const text = (typeof opt === 'object' && opt && opt.text ? opt.text : (typeof opt === 'string' ? opt : '')).trim();
+        if (text) {
+          const keyPhonetic = key === 'A' ? 'A' : key === 'B' ? 'Bê' : key === 'C' ? 'Xê' : key === 'D' ? 'Dê' : key;
+          let cleanText = text
+            .replace(/^[A-Da-d][.:)\-\/]\s*/, '')
+            .replace(/^[:\-–—/]\s*/, '')
+            .replace(/^chia cho\s*/i, '')
+            .trim();
 
-        const tripletMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)?$/i);
-        const pairMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?|âm vô cùng|-\s*∞|\\-?\\infty)\s*[;,]\s*(-?\d+(?:[.,]\d+)?|dương vô cùng|\+\s*∞|\\\+?\\infty)\s*\)?$/i);
+          const tripletMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*[;,]\s*(-?\d+(?:[.,]\d+)?)\s*\)?$/i);
+          const pairMatch = cleanText.match(/^\(?\s*(-?\d+(?:[.,]\d+)?|âm vô cùng|-\s*∞|\\-?\\infty)\s*[;,]\s*(-?\d+(?:[.,]\d+)?|dương vô cùng|\+\s*∞|\\\+?\\infty)\s*\)?$/i);
 
-        if (tripletMatch) {
-          cleanText = `tọa độ ${tripletMatch[1]}, ${tripletMatch[2]}, ${tripletMatch[3]}`;
-        } else if (pairMatch) {
-          const val1 = pairMatch[1].replace(/\\?-\s*(?:\\infty|∞)/g, 'âm vô cùng');
-          const val2 = pairMatch[2].replace(/\\?\+?\s*(?:\\infty|∞)/g, 'dương vô cùng');
-          const hasInf = /vô cùng/i.test(val1) || /vô cùng/i.test(val2);
-          if (hasInf || isIntervalContext) {
-            cleanText = `khoảng từ ${val1} đến ${val2}`;
-          } else if (isCoordinateContext) {
-            cleanText = `tọa độ ${val1}, ${val2}`;
-          } else {
-            cleanText = `${val1}, ${val2}`;
+          if (tripletMatch) {
+            cleanText = `tọa độ ${tripletMatch[1]}, ${tripletMatch[2]}, ${tripletMatch[3]}`;
+          } else if (pairMatch) {
+            const val1 = pairMatch[1].replace(/\\?-\s*(?:\\infty|∞)/g, 'âm vô cùng');
+            const val2 = pairMatch[2].replace(/\\?\+?\s*(?:\\infty|∞)/g, 'dương vô cùng');
+            const hasInf = /vô cùng/i.test(val1) || /vô cùng/i.test(val2);
+            if (hasInf || isIntervalContext) {
+              cleanText = `khoảng từ ${val1} đến ${val2}`;
+            } else if (isCoordinateContext) {
+              cleanText = `tọa độ ${val1}, ${val2}`;
+            } else {
+              cleanText = `${val1}, ${val2}`;
+            }
           }
+          rawScript += `Đáp án ${keyPhonetic}: ${cleanText}. `;
         }
-        rawScript += `Đáp án ${keyPhonetic}: ${cleanText}. `;
-      }
-    });
+      });
+    } else if (rawSubs.length > 0) {
+      rawSubs.forEach((sub, idx) => {
+        const key = (sub.label || sub.key || ['a', 'b', 'c', 'd'][idx] || `${idx + 1}`).trim().toLowerCase();
+        const keyPhonetic = key === 'a' ? 'a' : key === 'b' ? 'bê' : key === 'c' ? 'xê' : key === 'd' ? 'dê' : key;
+        const text = (sub.statement || sub.text || '').trim();
+        if (text) {
+          rawScript += `Ý ${keyPhonetic}: ${text}. `;
+        }
+      });
+    }
   }
   return rawScript;
 }
@@ -3175,7 +3206,14 @@ export function buildQuestionSpeechScript(
  * Tải trước đoạn âm thanh đầu tiên của câu hỏi vào RAM cache để bấm Đọc Đề AI phát ngay 0ms
  */
 export async function prefetchQuestionSpeech(
-  question: { id?: string; question: string; options?: Array<{ key: string; text: string }>; subject?: string },
+  question: {
+    id?: string;
+    question: string;
+    options?: Array<{ key: string; text: string }>;
+    subStatements?: Array<{ label?: string; key?: string; statement?: string; text?: string }>;
+    statements?: Array<{ label?: string; key?: string; statement?: string; text?: string }>;
+    subject?: string;
+  },
   preset: VoiceTonePreset = VOICE_TONE_PRESETS[0]
 ): Promise<void> {
   if (!question || !question.question) return;

@@ -27,6 +27,11 @@ import {
   ChevronUp,
   RotateCcw,
   BookmarkPlus,
+  Type,
+  Palette,
+  Minus,
+  Plus,
+  Check,
 } from 'lucide-react';
 import { LessonDoc, SlideItem, TextScale, TeacherProfile } from '../types';
 import { TouchWhiteboard } from './TouchWhiteboard';
@@ -78,6 +83,156 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState<boolean>(false);
 
+  // Slide Typography & PowerPoint Theme state (for Chiếu Slide mode)
+  const [slideFontId, setSlideFontId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('smartboard_doc_slide_font') || 'be_vietnam';
+    } catch {
+      return 'be_vietnam';
+    }
+  });
+  const [slideFontSize, setSlideFontSize] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('smartboard_doc_slide_size'));
+      if (Number.isFinite(saved) && saved >= 16 && saved <= 36) return saved;
+      return 22;
+    } catch {
+      return 22;
+    }
+  });
+  const [slideThemeId, setSlideThemeId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('smartboard_doc_slide_theme') || 'swiss_white';
+    } catch {
+      return 'swiss_white';
+    }
+  });
+
+  const DOC_SLIDE_FONTS = [
+    { id: 'be_vietnam', name: 'Be Vietnam Pro', family: "'Be Vietnam Pro', sans-serif" },
+    { id: 'lexend', name: 'Lexend (75" TV)', family: "'Lexend', sans-serif" },
+    { id: 'montserrat', name: 'Montserrat', family: "'Montserrat', sans-serif" },
+    { id: 'lora', name: 'Lora (Có chân)', family: "'Lora', Georgia, serif" },
+    { id: 'times', name: 'Times New Roman', family: "'Times New Roman', Times, serif" },
+  ];
+
+  const DOC_SLIDE_THEMES: Record<string, {
+    name: string;
+    swatch: string;
+    isDark: boolean;
+    canvasStyle: React.CSSProperties;
+    ribbonGradient: string;
+    badgeClass: string;
+    titleClass: string;
+    subtitleClass: string;
+    bodyClass: string;
+    bulletDotClass: string;
+    formulaCardClass: string;
+    formulaTitleClass: string;
+    takeawayCardClass: string;
+    takeawayTitleClass: string;
+    takeawayTextClass: string;
+    footerClass: string;
+  }> = {
+    swiss_white: {
+      name: 'Trắng Thụy Sĩ',
+      swatch: 'linear-gradient(135deg, #ffffff 0%, #dbeafe 100%)',
+      isDark: false,
+      canvasStyle: {
+        background: 'linear-gradient(155deg, #ffffff 0%, #f1f5f9 100%)',
+      },
+      ribbonGradient: 'linear-gradient(90deg, #1d4ed8 0%, #0ea5e9 100%)',
+      badgeClass: 'bg-blue-50 border-blue-200 text-blue-800',
+      titleClass: 'text-slate-900',
+      subtitleClass: 'text-blue-700',
+      bodyClass: 'text-slate-800',
+      bulletDotClass: 'bg-blue-600',
+      formulaCardClass: 'bg-amber-50/90 border-amber-300 text-amber-950',
+      formulaTitleClass: 'text-amber-800',
+      takeawayCardClass: 'bg-blue-50/90 border-blue-200 text-slate-900',
+      takeawayTitleClass: 'text-blue-700',
+      takeawayTextClass: 'text-slate-900',
+      footerClass: 'border-slate-200 text-slate-500',
+    },
+    ivory_academic: {
+      name: 'Giấy Ngà SGK',
+      swatch: 'linear-gradient(135deg, #faf8f5 0%, #e7decb 100%)',
+      isDark: false,
+      canvasStyle: {
+        background: 'linear-gradient(155deg, #fdfbf7 0%, #f3ece0 100%)',
+      },
+      ribbonGradient: 'linear-gradient(90deg, #0f5132 0%, #b45309 100%)',
+      badgeClass: 'bg-[#e6f2ec] border-[#b7dcc9] text-[#0f5132]',
+      titleClass: 'text-stone-900',
+      subtitleClass: 'text-[#0f5132]',
+      bodyClass: 'text-stone-800',
+      bulletDotClass: 'bg-[#0f5132]',
+      formulaCardClass: 'bg-amber-50/95 border-amber-300 text-stone-900',
+      formulaTitleClass: 'text-amber-800',
+      takeawayCardClass: 'bg-[#e6f2ec]/80 border-[#b7dcc9] text-stone-900',
+      takeawayTitleClass: 'text-[#0f5132]',
+      takeawayTextClass: 'text-stone-900',
+      footerClass: 'border-[#dfd5c3] text-stone-600',
+    },
+    olympia_navy: {
+      name: 'Olympia Hải Quân',
+      swatch: 'linear-gradient(135deg, #090d16 0%, #1e293b 100%)',
+      isDark: true,
+      canvasStyle: {
+        background: 'linear-gradient(135deg, #070b14 0%, #0f172a 55%, #1e293b 100%)',
+      },
+      ribbonGradient: 'linear-gradient(90deg, #f59e0b 0%, #38bdf8 100%)',
+      badgeClass: 'bg-slate-800 border-amber-400/40 text-amber-300',
+      titleClass: 'text-white',
+      subtitleClass: 'text-amber-300',
+      bodyClass: 'text-slate-100',
+      bulletDotClass: 'bg-amber-400',
+      formulaCardClass: 'bg-slate-800/90 border-amber-400/50 text-amber-100',
+      formulaTitleClass: 'text-amber-300',
+      takeawayCardClass: 'bg-emerald-950/80 border-emerald-400/40 text-emerald-50',
+      takeawayTitleClass: 'text-emerald-300',
+      takeawayTextClass: 'text-white',
+      footerClass: 'border-slate-700 text-slate-400',
+    },
+    chalkboard_dark: {
+      name: 'Bảng Phấn Xanh',
+      swatch: 'linear-gradient(135deg, #06251b 0%, #14533c 100%)',
+      isDark: true,
+      canvasStyle: {
+        background: 'linear-gradient(135deg, #06251b 0%, #0d3c2b 55%, #14533c 100%)',
+      },
+      ribbonGradient: 'linear-gradient(90deg, #fbbf24 0%, #34d399 100%)',
+      badgeClass: 'bg-[#0e4431] border-emerald-300/40 text-amber-300',
+      titleClass: 'text-white',
+      subtitleClass: 'text-emerald-200',
+      bodyClass: 'text-emerald-50',
+      bulletDotClass: 'bg-amber-300',
+      formulaCardClass: 'bg-[#093224]/95 border-amber-300/45 text-amber-100',
+      formulaTitleClass: 'text-amber-300',
+      takeawayCardClass: 'bg-[#093224]/95 border-emerald-300/40 text-emerald-50',
+      takeawayTitleClass: 'text-emerald-300',
+      takeawayTextClass: 'text-white',
+      footerClass: 'border-emerald-400/25 text-emerald-200/80',
+    },
+  };
+
+  const activeSlideFont = DOC_SLIDE_FONTS.find((f) => f.id === slideFontId) || DOC_SLIDE_FONTS[0];
+  const activeSlideTheme = DOC_SLIDE_THEMES[slideThemeId] || DOC_SLIDE_THEMES.swiss_white;
+
+  const updateSlideFont = (id: string) => {
+    setSlideFontId(id);
+    try { localStorage.setItem('smartboard_doc_slide_font', id); } catch (_) {}
+  };
+  const updateSlideSize = (px: number) => {
+    const clamped = Math.min(36, Math.max(16, Math.round(px)));
+    setSlideFontSize(clamped);
+    try { localStorage.setItem('smartboard_doc_slide_size', String(clamped)); } catch (_) {}
+  };
+  const updateSlideTheme = (id: string) => {
+    setSlideThemeId(id);
+    try { localStorage.setItem('smartboard_doc_slide_theme', id); } catch (_) {}
+  };
+
   // File Upload states
   const [isUploadingFile, setIsUploadingFile] = useState<boolean>(false);
   const [uploadToast, setUploadToast] = useState<string | null>(null);
@@ -94,10 +249,28 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   // Extracted Formulas preview drawer/modal
   const [extractedFormulasData, setExtractedFormulasData] = useState<any | null>(null);
 
+  const wasNativeFsRef = useRef<boolean>(false);
+
+  // Đồng bộ App Header bar với chế độ Toàn màn hình của PresentationView
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: isFullscreen } }));
+    return () => {
+      if (isFullscreen) {
+        window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: false } }));
+      }
+    };
+  }, [isFullscreen]);
+
   // Listen to browser native fullscreen change events
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const hasFs = Boolean(document.fullscreenElement);
+      if (hasFs) {
+        wasNativeFsRef.current = true;
+      } else if (wasNativeFsRef.current) {
+        wasNativeFsRef.current = false;
+        setIsFullscreen(false);
+      }
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     document.addEventListener('webkitfullscreenchange', handleFsChange);
@@ -107,7 +280,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
     };
   }, []);
 
-  // Keyboard shortcut support: 'B' or 'P' enables pen; 'Esc' closes overlay
+  // Keyboard shortcut support: 'B' or 'P' enables pen; 'Esc' closes overlay or exits fullscreen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
@@ -116,26 +289,35 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
       if (e.key === 'b' || e.key === 'B' || e.key === 'p' || e.key === 'P') {
         setIsOverlayAnnotation(true);
         if (isSplitMode) setIsSplitMode(false);
-      } else if (e.key === 'Escape' && isOverlayAnnotation) {
-        setIsOverlayAnnotation(false);
+      } else if (e.key === 'Escape') {
+        if (isOverlayAnnotation) {
+          setIsOverlayAnnotation(false);
+        } else if (isFullscreen) {
+          wasNativeFsRef.current = false;
+          setIsFullscreen(false);
+          if (document.fullscreenElement) {
+            document.exitFullscreen?.().catch(() => {});
+          }
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOverlayAnnotation, isSplitMode]);
+  }, [isOverlayAnnotation, isSplitMode, isFullscreen]);
 
   const togglePresentationFullscreen = () => {
-    // Dispatch event to app to hide header
-    window.dispatchEvent(new CustomEvent('toggle-app-fullscreen'));
-    
     const el = document.getElementById('presentation-viewport');
-    if (!el) return;
-    if (!document.fullscreenElement) {
-      el.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
+    const nextVal = !isFullscreen;
+    setIsFullscreen(nextVal);
+    if (nextVal) {
+      if (el && !document.fullscreenElement && el.requestFullscreen) {
+        el.requestFullscreen().catch(() => {});
+      }
     } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
+      wasNativeFsRef.current = false;
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
     }
   };
 
@@ -321,9 +503,11 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative w-full ${
-        isFullscreen ? 'h-dvh rounded-none' : 'h-[calc(100vh-100px)] rounded-3xl'
-      } flex flex-col bg-slate-950 overflow-hidden border border-slate-800 shadow-2xl transition-all select-none`}
+      className={`${
+        isFullscreen
+          ? 'fixed inset-0 z-[9990] w-screen h-dvh rounded-none border-0'
+          : 'relative w-full h-[calc(100vh-100px)] rounded-3xl border border-slate-800 shadow-2xl'
+      } flex flex-col bg-slate-950 overflow-hidden transition-all select-none`}
     >
       {/* Hidden File Input for Teacher Uploads */}
       {/* Floating expand button when collapsed */}
@@ -685,89 +869,187 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
                 />
               </div>
             ) : (
-              /* STRUCTURED SLIDE PRESENTATION MODE */
-              <div className="relative w-full h-full p-8 md:p-12 overflow-y-auto flex flex-col justify-between bg-white text-slate-900">
-                {/* Slide Header */}
-                <div className="space-y-3 mb-6">
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 font-mono text-sm font-bold">
-                    <span>{lesson.subject}</span>
-                    <span>•</span>
-                    <span>{lesson.grade}</span>
-                    <span>•</span>
-                    <span>Slide {currentSlideIndex + 1}/{slides.length || 1}</span>
+              /* STRUCTURED SLIDE PRESENTATION MODE (POWERPOINT STYLE) */
+              <div
+                className="relative w-full h-full overflow-y-auto flex flex-col justify-between transition-colors duration-300"
+                style={{
+                  ...activeSlideTheme.canvasStyle,
+                  fontFamily: activeSlideFont.family,
+                }}
+              >
+                {/* PowerPoint Master Top Ribbon */}
+                <div
+                  className="h-2 w-full shrink-0"
+                  style={{ background: activeSlideTheme.ribbonGradient }}
+                />
+
+                <div className="p-6 md:p-10 lg:p-12 flex-1 flex flex-col justify-between gap-6">
+                  {/* Slide Header + Quick Slide Style Bar */}
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border font-mono text-xs md:text-sm font-bold tabular-nums ${activeSlideTheme.badgeClass}`}>
+                        <span>{lesson.subject}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{lesson.grade}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>Slide {currentSlideIndex + 1}/{slides.length || 1}</span>
+                      </div>
+
+                      {/* Inline Font / Size / Theme Bar for Structured Slides */}
+                      <div className={`flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs ${
+                        activeSlideTheme.isDark
+                          ? 'bg-black/25 border-white/15 text-white'
+                          : 'bg-white/80 border-slate-200 text-slate-800 shadow-xs'
+                      }`}>
+                        <div className="flex items-center gap-1.5">
+                          <Type className="w-3.5 h-3.5 opacity-75" />
+                          <select
+                            value={slideFontId}
+                            onChange={(e) => updateSlideFont(e.target.value)}
+                            className="bg-transparent font-bold outline-none cursor-pointer text-xs"
+                            title="Chọn font chữ slide"
+                          >
+                            {DOC_SLIDE_FONTS.map((f) => (
+                              <option key={f.id} value={f.id} className="text-slate-900 bg-white">
+                                {f.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="h-4 w-px bg-current opacity-20" />
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => updateSlideSize(slideFontSize - 2)}
+                            disabled={slideFontSize <= 16}
+                            className="p-1 rounded-lg hover:bg-current/10 disabled:opacity-35 cursor-pointer"
+                            title="Giảm cỡ chữ"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="font-mono font-black tabular-nums px-1">{slideFontSize}px</span>
+                          <button
+                            type="button"
+                            onClick={() => updateSlideSize(slideFontSize + 2)}
+                            disabled={slideFontSize >= 36}
+                            className="p-1 rounded-lg hover:bg-current/10 disabled:opacity-35 cursor-pointer"
+                            title="Tăng cỡ chữ"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="h-4 w-px bg-current opacity-20" />
+
+                        <div className="flex items-center gap-1.5">
+                          <Palette className="w-3.5 h-3.5 opacity-75" />
+                          {Object.entries(DOC_SLIDE_THEMES).map(([id, theme]) => {
+                            const active = slideThemeId === id;
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                onClick={() => updateSlideTheme(id)}
+                                title={theme.name}
+                                className={`w-5 h-5 rounded-full border flex items-center justify-center transition-transform cursor-pointer ${
+                                  active ? 'ring-2 ring-amber-400 scale-110 border-white' : 'border-black/20 hover:scale-105'
+                                }`}
+                                style={{ background: theme.swatch }}
+                              >
+                                {active && <Check className={`w-3 h-3 ${theme.isDark ? 'text-amber-300' : 'text-slate-900'}`} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <h1
+                      className={`font-black tracking-tight leading-tight ${activeSlideTheme.titleClass}`}
+                      style={{ fontSize: `${Math.round(slideFontSize * 1.68)}px` }}
+                    >
+                      {currentSlide.title}
+                    </h1>
+
+                    {currentSlide.subtitle && (
+                      <p
+                        className={`font-semibold ${activeSlideTheme.subtitleClass}`}
+                        style={{ fontSize: `${Math.round(slideFontSize * 1.1)}px` }}
+                      >
+                        {currentSlide.subtitle}
+                      </p>
+                    )}
                   </div>
 
-                  <h1 className={`${scaleClasses.title} text-slate-900 tracking-tight`}>
-                    {currentSlide.title}
-                  </h1>
-
-                  {currentSlide.subtitle && (
-                    <p className={scaleClasses.subtitle}>
-                      {currentSlide.subtitle}
-                    </p>
-                  )}
-                </div>
-
-                {/* Main Content & Formula Display */}
-                <div className="space-y-6 flex-1">
-                  {/* Formula Callout if exists */}
-                  {currentSlide.formula && (
-                    <div className="p-5 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm flex items-center gap-4">
-                      <div className="w-3 h-12 bg-amber-500 rounded-full" />
-                      <div className="flex-1">
-                        <div className="text-xs uppercase font-bold text-amber-700 tracking-wider mb-1">
-                          Công thức / Định lý trọng tâm:
+                  {/* Main Content & Formula Display */}
+                  <div className="space-y-6 flex-1">
+                    {/* Formula Callout if exists */}
+                    {currentSlide.formula && (
+                      <div className={`p-5 rounded-2xl border-2 shadow-sm overflow-hidden ${activeSlideTheme.formulaCardClass}`}>
+                        <div className={`text-xs uppercase font-black tracking-wider mb-1.5 ${activeSlideTheme.formulaTitleClass}`}>
+                          Công thức / Định lý trọng tâm
                         </div>
-                        <div className={scaleClasses.formula}>
+                        <div
+                          className="font-bold py-1"
+                          style={{ fontSize: `${Math.round(slideFontSize * 1.15)}px` }}
+                        >
                           <MathFormulaRenderer content={currentSlide.formula} isBlock={true} />
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Formatted Content Paragraphs / Bullets */}
-                  <div className={`space-y-4 ${scaleClasses.body}`}>
-                    {currentSlide.content.split('\n').map((line, lIdx) => {
-                      if (!line.trim()) return null;
-                      const isBullet = line.trim().startsWith('•') || line.trim().startsWith('-');
-                      const cleanLine = line.replace(/^[•\-]\s*/, '');
-                      return (
-                        <div key={lIdx} className={`flex items-start gap-3 ${isBullet ? 'pl-2' : ''}`}>
-                          {isBullet && (
-                            <div className="w-3 h-3 rounded-full bg-indigo-600 mt-2.5 shrink-0 shadow-xs" />
-                          )}
-                          <div className="flex-1 text-slate-800">
-                            <MathFormulaRenderer content={cleanLine} />
+                    {/* Formatted Content Paragraphs / Bullets */}
+                    <div
+                      className={`space-y-4 leading-relaxed ${activeSlideTheme.bodyClass}`}
+                      style={{ fontSize: `${slideFontSize}px` }}
+                    >
+                      {currentSlide.content.split('\n').map((line, lIdx) => {
+                        if (!line.trim()) return null;
+                        const isBullet = line.trim().startsWith('•') || line.trim().startsWith('-');
+                        const cleanLine = line.replace(/^[•\-]\s*/, '');
+                        return (
+                          <div key={lIdx} className={`flex items-start gap-3 ${isBullet ? 'pl-2' : ''}`}>
+                            {isBullet && (
+                              <div className={`w-2.5 h-2.5 rounded-full mt-2.5 shrink-0 shadow-xs ${activeSlideTheme.bulletDotClass}`} />
+                            )}
+                            <div className="flex-1">
+                              <MathFormulaRenderer content={cleanLine} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Key Takeaway Banner */}
+                    {currentSlide.keyTakeaway && (
+                      <div className={`mt-6 p-5 rounded-2xl border shadow-xs flex items-start gap-4 ${activeSlideTheme.takeawayCardClass}`}>
+                        <CheckCircle2 className="w-7 h-7 text-emerald-500 shrink-0 mt-0.5" />
+                        <div>
+                          <div className={`text-xs uppercase tracking-widest font-black mb-1 ${activeSlideTheme.takeawayTitleClass}`}>
+                            Ghi nhớ cốt lõi
+                          </div>
+                          <div
+                            className={`font-semibold leading-relaxed ${activeSlideTheme.takeawayTextClass}`}
+                            style={{ fontSize: `${Math.max(16, Math.round(slideFontSize * 0.96))}px` }}
+                          >
+                            {currentSlide.keyTakeaway}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Key Takeaway Banner */}
-                  {currentSlide.keyTakeaway && (
-                    <div className="mt-6 p-5 rounded-2xl bg-indigo-50/90 border border-indigo-200 shadow-xs flex items-start gap-4">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-600 shrink-0 mt-0.5" />
-                      <div>
-                        <div className="text-xs uppercase tracking-widest text-indigo-700 font-bold mb-1">
-                          Ghi nhớ cốt lõi:
-                        </div>
-                        <div className={scaleClasses.takeaway}>
-                          {currentSlide.keyTakeaway}
-                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Slide Footer */}
-                <div className="pt-6 mt-4 border-t border-slate-200 flex items-center justify-between text-slate-500 text-sm">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-slate-400" />
-                    <span>Giáo viên: {lesson.author}</span>
+                    )}
                   </div>
-                  <div className="font-mono text-slate-400">
-                    Tivi 75" Chế độ Giảng Dạy Cảm Ứng
+
+                  {/* Slide Footer */}
+                  <div className={`pt-5 mt-2 border-t flex items-center justify-between text-xs md:text-sm ${activeSlideTheme.footerClass}`}>
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="w-4 h-4 opacity-75" />
+                      <span>Giáo viên: {lesson.author}</span>
+                    </div>
+                    <div className="font-mono opacity-75">
+                      Tivi 75&quot; Chế độ Trình Chiếu Slide
+                    </div>
                   </div>
                 </div>
               </div>

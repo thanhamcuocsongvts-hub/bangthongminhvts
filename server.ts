@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -391,19 +391,22 @@ function writeJsonFileSync(filePath: string, data: any): void {
   }
 }
 
-// Initialize Gemini Client
-const getGeminiClient = () => {
-  const apiKey =
+// Initialize Gemini Client (supports per-request user API key header or server environment key)
+const getGeminiClient = (customKey?: string) => {
+  const apiKey = (
+    customKey ||
     process.env.GEMINI_API_KEY ||
     process.env.VITE_GEMINI_API_KEY ||
     process.env.API_KEY ||
     process.env.VITE_API_KEY ||
-    process.env.GOOGLE_API_KEY;
+    process.env.GOOGLE_API_KEY ||
+    ""
+  ).trim();
   if (!apiKey) {
-    console.warn("GEMINI_API_KEY (or VITE_GEMINI_API_KEY / API_KEY) is not set. Gemini features may fail.");
+    console.warn("GEMINI_API_KEY is not set. Set GEMINI_API_KEY in Secrets or pass x-gemini-api-key.");
   }
   return new GoogleGenAI({
-    apiKey: apiKey || "",
+    apiKey,
     httpOptions: {
       headers: {
         "User-Agent": "aistudio-build",
@@ -412,12 +415,11 @@ const getGeminiClient = () => {
   });
 };
 
-// Resilient AI caller with instant fallbacks, backoff retry, and timeout protection across official Gemini models
+// Resilient AI caller using official active Gemini 4 & 3.1 models
 async function generateWithGemini(ai: any, params: any) {
-  const timeoutMs = Number(params?.timeoutMs) || 60000;
+  const timeoutMs = Number(params?.timeoutMs) || 65000;
   const modelsToTry = [
-    "gemini-3.8-flash",
-    "gemini-flash-latest",
+    "gemini-4-hydrogen",
     "gemini-3.1-flash-lite",
   ];
   let lastError: any = null;
@@ -428,14 +430,36 @@ async function generateWithGemini(ai: any, params: any) {
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error(`Timeout after ${Math.round(timeoutMs / 1000)}s for ${model}`)), timeoutMs)
         );
+        const rawConfig = params?.config ? { ...params.config } : undefined;
+        let callConfig = rawConfig;
+        if (callConfig) {
+          // Do not pass deprecated sampling parameters (temperature, topP, topK, candidateCount) or maxOutputTokens truncation to gemini-4-hydrogen
+          if (model.startsWith("gemini-4")) {
+            delete callConfig.temperature;
+            delete callConfig.topP;
+            delete callConfig.topK;
+            delete callConfig.candidateCount;
+          } else if (model === "gemini-3.1-flash-lite") {
+            delete callConfig.thinkingConfig;
+          }
+        }
+        const { timeoutMs: _ignoreTimeout, ...restParams } = params || {};
         const callPromise = ai.models.generateContent({
-          ...params,
+          ...restParams,
+          ...(callConfig ? { config: callConfig } : {}),
           model,
         });
         return await Promise.race([callPromise, timeoutPromise]);
       } catch (err: any) {
         lastError = err;
         const msg = err?.message || String(err);
+        const isAuthOrInvalidKey =
+          msg.includes("API_KEY_INVALID") ||
+          msg.includes("PERMISSION_DENIED") ||
+          msg.includes("API key should be set");
+        if (isAuthOrInvalidKey) {
+          throw err;
+        }
         const isTransient =
           msg.includes("503") ||
           msg.includes("UNAVAILABLE") ||
@@ -446,14 +470,14 @@ async function generateWithGemini(ai: any, params: any) {
 
         if (isTransient) {
           console.warn(`[AI Notice] Model ${model} busy/rate-limited, trying next candidate...`);
-          await new Promise((r) => setTimeout(r, 400));
+          await new Promise((r) => setTimeout(r, 350));
         } else {
-          console.warn(`[AI Notice] Model ${model} unavailable (${msg.slice(0, 80)}), trying alternative...`);
+          console.warn(`[AI Notice] Model ${model} unavailable (${msg.slice(0, 120)}), trying alternative...`);
         }
       }
     }
     if (attempt === 0) {
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 500));
     }
   }
   throw lastError;
@@ -462,9 +486,8 @@ async function generateWithGemini(ai: any, params: any) {
 // Ultra-low latency vision caller specifically for live classroom handwriting recognition
 async function generateFastVisionWithGemini(ai: any, params: any) {
   const modelsToTry = [
-    "gemini-3.8-flash",       // Primary model in this project
-    "gemini-flash-latest",    // Fast alias
-    "gemini-3.1-flash-lite",  // Fast lite fallback
+    "gemini-4-hydrogen",
+    "gemini-3.1-flash-lite",
   ];
   let lastError: any = null;
 
@@ -472,10 +495,17 @@ async function generateFastVisionWithGemini(ai: any, params: any) {
     for (const model of modelsToTry) {
       try {
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Timeout after 8s for ${model}`)), 8000)
+          setTimeout(() => reject(new Error(`Timeout after 10s for ${model}`)), 10000)
         );
+        const rawConfig = params?.config ? { ...params.config } : undefined;
+        let callConfig = rawConfig;
+        if (callConfig && model.startsWith("gemini-4")) {
+          delete callConfig.temperature;
+          callConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+        }
         const callPromise = ai.models.generateContent({
           ...params,
+          ...(callConfig ? { config: callConfig } : {}),
           model,
         });
         return await Promise.race([callPromise, timeoutPromise]);
@@ -2537,7 +2567,54 @@ function normalizeQuizQuestionsMath(questions: any[]): any[] {
   });
 }
 
-// Helper to safely parse JSON strings that contain unescaped LaTeX backslashes from LLM
+// Helper to extract complete JSON objects from a partially truncated JSON array string
+function extractCompleteObjectsFromJsonArray(text: string): any[] | null {
+  const startArr = text.indexOf("[");
+  if (startArr === -1) return null;
+  const items: any[] = [];
+  let inString = false;
+  let escapeNext = false;
+  let depth = 0;
+  let objStart = -1;
+
+  for (let idx = startArr + 1; idx < text.length; idx++) {
+    const ch = text[idx];
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escapeNext = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") {
+      if (depth === 0) objStart = idx;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        const chunk = text.slice(objStart, idx + 1);
+        try {
+          items.push(JSON.parse(chunk));
+        } catch {
+          try {
+            const fixedChunk = chunk.replace(/(?<!\\)\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, "\\\\");
+            items.push(JSON.parse(fixedChunk));
+          } catch (_) {}
+        }
+        objStart = -1;
+      }
+    }
+  }
+  return items.length > 0 ? items : null;
+}
+
+// Helper to safely parse JSON strings that contain unescaped LaTeX backslashes or partial truncation from LLM
 function safeParseJsonWithLatex(raw: string): any {
   if (!raw) return null;
   const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -2553,7 +2630,7 @@ function safeParseJsonWithLatex(raw: string): any {
         const fixed2 = text.replace(/\\([a-zA-Z]+|\{|\})/g, "\\\\$1");
         return JSON.parse(fixed2);
       } catch (e3) {
-        return null;
+        return extractCompleteObjectsFromJsonArray(text);
       }
     }
   }
@@ -2666,38 +2743,49 @@ app.post("/api/ai/fast-matrix-quiz", async (req, res) => {
     count = 5,
     difficulty = "Thông hiểu",
     timeLimit = 30,
-    isMatrixMode = false
+    isMatrixMode = false,
+    apiKey: bodyApiKey = "",
   } = req.body;
 
-  const hasUploadedFile = !!matrixFile;
-  const isAutoMatrix = count === 'auto_matrix';
+  const customApiKey =
+    (req.headers["x-gemini-api-key"] as string) ||
+    (typeof bodyApiKey === "string" ? bodyApiKey : "");
+  const hasUploadedFile = Boolean(matrixFile && (matrixFile.text || matrixFile.base64));
+  const isAutoMatrix = count === "auto_matrix";
   const isMatrixExplicit = isMatrixMode === true || isAutoMatrix || hasUploadedFile;
   const userSpecifiedCount = isAutoMatrix ? null : (Number(count) || 5);
   const numQuestions = hasUploadedFile || isAutoMatrix ? 22 : (userSpecifiedCount ? Math.min(Math.max(userSpecifiedCount, 1), 50) : 5);
-  const userPrompt = (prompt || "").trim();
+  const rawUserPrompt = (prompt || "").trim();
+  // Guard against generic fallback titles leaking into matrix prompts
+  const isGenericDefaultPrompt =
+    hasUploadedFile &&
+    (!rawUserPrompt ||
+      rawUserPrompt.toLowerCase() === "khảo sát hàm số và đồ thị" ||
+      rawUserPrompt.toLowerCase() === "tạo đề theo ma trận đề tải lên");
+  const userPrompt = isGenericDefaultPrompt ? "" : rawUserPrompt;
 
   try {
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(customApiKey);
 
-    // 1. Tự động bóc tách text từ file PDF base64 trên server nếu chưa có text (đảm bảo AI đọc 100% chính xác từng dòng)
-    if (matrixFile?.base64 && (!matrixFile?.text || matrixFile.text.length < 50)) {
-      const isPdf = matrixFile.mimeType?.includes('pdf') || (matrixFile.fileName || '').toLowerCase().endsWith('.pdf');
+    // 1. Tự động bóc tách text từ file PDF base64 trên server nếu chưa có text
+    if (matrixFile?.base64 && (!matrixFile?.text || matrixFile.text.trim().length < 50)) {
+      const isPdf = matrixFile.mimeType?.includes("pdf") || (matrixFile.fileName || "").toLowerCase().endsWith(".pdf");
       if (isPdf) {
         try {
-          const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.js');
-          const cleanB64 = matrixFile.base64.replace(/^data:[^;]+;base64,/, '');
-          const buf = Buffer.from(cleanB64, 'base64');
+          const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.js");
+          const cleanB64 = matrixFile.base64.replace(/^data:.*?;base64,/, "");
+          const buf = Buffer.from(cleanB64, "base64");
           const loadingTask = pdfjsLib.getDocument({
             data: new Uint8Array(buf),
             useSystemFonts: true,
             disableFontFace: true,
           });
           const pdf = await loadingTask.promise;
-          let extracted = '';
+          let extracted = "";
           for (let i = 1; i <= Math.min(pdf.numPages, 30); i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            const pageText = textContent.items.map((it: any) => it.str).join(' ');
+            const pageText = textContent.items.map((it: any) => it.str).join(" ");
             if (pageText && pageText.trim()) {
               extracted += `--- Trang ${i} ---\n${pageText}\n`;
             }
@@ -2707,205 +2795,102 @@ app.post("/api/ai/fast-matrix-quiz", async (req, res) => {
             console.log(`[Server AI] Bóc tách thành công ${extracted.length} ký tự từ PDF: ${matrixFile.fileName}`);
           }
         } catch (pdfErr: any) {
-          console.warn('[Server AI] Không thể trích xuất text từ buffer PDF:', pdfErr?.message);
+          console.warn("[Server AI] Không thể trích xuất text từ buffer PDF:", pdfErr?.message);
         }
       }
     }
 
-    const isSpecificTopic = userPrompt.length > 0;
-    const isFunctionTopic = /(hàm số|đơn điệu|cực trị|khảo sát|tiệm cận|gtln|gtnn|giá trị lớn nhất|giá trị nhỏ nhất|bảng biến thiên|đồ thị)/i.test(userPrompt);
+    const isFunctionOnlyPrompt =
+      !hasUploadedFile &&
+      Boolean(userPrompt) &&
+      /(hàm số|đơn điệu|cực trị|khảo sát|tiệm cận|gtln|gtnn|giá trị lớn nhất|giá trị nhỏ nhất|bảng biến thiên|đồ thị)/i.test(userPrompt);
 
-    const systemInstruction = `Bạn là hệ thống AI Khảo thí & Soạn đề thi giáo dục hàng đầu Việt Nam theo chuẩn chương trình GDPT 2018 (phục vụ giảng dạy trên lớp, kiểm tra 15 phút, 1 tiết, kiểm tra định kỳ và kiểm tra chuyên đề từng bài học của giáo viên THPT/THCS).
-Nhiệm vụ: Phân tích ma trận đề (ảnh/PDF/word) hoặc yêu cầu của giáo viên để tạo đề thi CHUẨN XÁC, ĐÚNG 100% CẤU TRÚC VÀ NỘI DUNG ĐƯỢC YÊU CẦU.
-
-*** QUY TẮC BẤT DI BẤT DỊCH VỀ PHẠM VI NỘI DUNG & BÀI HỌC (TUYỆT ĐỐI TUÂN THỦ 100%): ***
-1. NẾU CÓ CHỦ ĐỀ CỤ THỂ HOẶC YÊU CẦU CỦA GIÁO VIÊN:
-   - Toàn bộ 100% các câu hỏi trong đề BẮT BUỘC PHẢI THUỘC VỀ ĐÚNG CHỦ ĐỀ: "${userPrompt || 'Nội dung bài học'}"!
-   - TUYỆT ĐỐI NGHIÊM CẤM TỰ Ý RA ĐỀ SANG CÁC CHƯƠNG KHÁC!
-   - ĐẶC BIỆT: NẾU CHỦ ĐỀ LIÊN QUAN ĐẾN "HÀM SỐ" (Đơn điệu, Cực trị, Giá trị lớn nhất - nhỏ nhất, Tiệm cận, Khảo sát hàm số, Đồ thị, Bảng biến thiên):
-     + TOÀN BỘ 100% CÁC CÂU HỎI TRONG ĐỀ PHẢI LÀ CÂU HỎI VỀ HÀM SỐ!
-     + TUYỆT ĐỐI CẤM 100% KHÔNG ĐƯỢC CÓ HÌNH HỌC OXYZ, CẤM VÉC-TƠ TRONG KHÔNG GIAN, CẤM PHƯƠNG TRÌNH MẶT PHẲNG, CẤM PHƯƠNG TRÌNH ĐƯỜNG THẲNG, MẶT CẦU!
-     + TUYỆT ĐỐI CẤM NGUYÊN HÀM, TÍCH PHÂN, SỐ PHỨC, XÁC SUẤT!
-     + Lớp 12 là dạy học theo từng bài/chương trên lớp, KHÔNG PHẢI TỰ Ý RA ĐỀ ÔN THI TỐT NGHIỆP CẢ NĂM KHI GIÁO VIÊN ĐANG DẠY CHUYÊN ĐỀ HÀM SỐ!
-2. NẾU CÓ TỆP MA TRẬN ĐỀ (ẢNH / PDF / DOCX):
-   - Đọc kỹ danh sách các bài học/chủ đề trong ma trận và CHỈ RA ĐỀ VÀO ĐÚNG CÁC CHỦ ĐỀ CÓ TRONG MA TRẬN ĐÓ.
-   - Nếu ma trận chỉ có bài học Hàm số thì 100% đề là Hàm số, CẤM đưa Hình học Oxyz vào!
-
-QUY TẮC CẤU TRÚC VÀ SỐ LƯỢNG CÂU HỎI:
-${hasUploadedFile || isAutoMatrix ? `1. CHẾ ĐỘ MA TRẬN ĐỀ THI ĐANG BẬT:
-   - BẮT BUỘC TẠO ĐỦ TẤT CẢ CÁC CÂU HỎI CỦA TỪNG PHẦN (TỔNG CỘNG 20 - 22 CÂU HỎI, TẤT CẢ PHẢI NẰM ĐÚNG TRONG PHẠM VI CHỦ ĐỀ YÊU CẦU):
-     + PHẦN I: Gồm đầy đủ 12 câu hỏi trắc nghiệm 4 lựa chọn A, B, C, D (part_1_choice).
-     + PHẦN II: Gồm đầy đủ 4 câu hỏi trắc nghiệm Đúng / Sai, mỗi câu có 4 mệnh đề a, b, c, d (part_2_true_false).
-     + PHẦN III: Gồm đầy đủ 6 câu hỏi trắc nghiệm Trả lời ngắn, điền kết quả số (part_3_short_answer).
-     + PHẦN IV (nếu ma trận có tự luận): Gồm đầy đủ các câu tự luận kèm thang điểm (part_4_essay).` : `1. Tạo đúng ${numQuestions} câu hỏi trắc nghiệm theo môn ${subject}, khối ${grade}, mức độ ${difficulty}, bám sát 100% chủ đề: "${userPrompt || 'Trọng tâm bài học'}".`}
-
-YÊU CẦU CẤU TRÚC TỪNG LOẠI CÂU HỎI TRONG MẢNG JSON:
-- Loại 1 (Phần I - Trắc nghiệm 4 lựa chọn):
-  "partType": "part_1_choice",
-  "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn",
-  "question": "Nội dung câu hỏi...",
-  "options": [
-    { "key": "A", "text": "Phương án A" },
-    { "key": "B", "text": "Phương án B" },
-    { "key": "C", "text": "Phương án C" },
-    { "key": "D", "text": "Phương án D" }
-  ],
-  "correctAnswer": "A",
-  "explanation": "Lời giải chi tiết...",
-  "timeLimit": 30
-
-- Loại 2 (Phần II - Trắc nghiệm Đúng / Sai):
-  "partType": "part_2_true_false",
-  "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai",
-  "question": "Câu dẫn và giả thiết bài toán...",
-  "subStatements": [
-    { "label": "a", "statement": "Nội dung mệnh đề a...", "correct": true },
-    { "label": "b", "statement": "Nội dung mệnh đề b...", "correct": false },
-    { "label": "c", "statement": "Nội dung mệnh đề c...", "correct": true },
-    { "label": "d", "statement": "Nội dung mệnh đề d...", "correct": false }
-  ],
-  "correctAnswer": "a:Đ, b:S, c:Đ, d:Đ",
-  "options": [],
-  "explanation": "Giải thích chi tiết tính đúng/sai cho từng mệnh đề a, b, c, d...",
-  "timeLimit": 60
-
-- Loại 3 (Phần III - Trả lời ngắn):
-  "partType": "part_3_short_answer",
-  "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn",
-  "question": "Nội dung câu hỏi yêu cầu tính toán ra một giá trị cụ thể...",
-  "shortAnswerKey": "2,5",
-  "correctAnswer": "2,5",
-  "options": [],
-  "explanation": "Các bước tính toán dẫn đến kết quả 2,5...",
-  "timeLimit": 45
-
-- Loại 4 (Phần IV hoặc Phần III Tự luận):
-  "partType": "part_4_essay",
-  "partLabel": "Phần Tự luận",
-  "question": "Đề bài câu hỏi tự luận...",
-  "essayRubric": "Hướng dẫn chấm chi tiết và thang điểm...",
-  "correctAnswer": "Lời giải tự luận mẫu",
-  "options": [],
-  "explanation": "Đáp án và lời giải chi tiết...",
-  "timeLimit": 120
-
-YÊU CẦU ĐẶC THÙ MÔN HỌC & ĐỒ THỊ / BẢNG BIẾN THIÊN / BÀI TOÁN THỰC TẾ (BẮT BUỘC):
-1. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC BỌC TRONG $: $\\frac{a}{b}$, $\\sqrt{x}$, $x(t) = A\\cos(\\omega t + \\varphi)$, $T = 2\\text{s}$.
-   - ĐẶC BIỆT KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (TUYỆT ĐỐI KHÔNG dùng \\vec{AB} vì mũi tên quá ngắn chỉ che chữ cái cuối; KHÔNG tự ghép ký tự unicode mũi tên rời).
-   - Nếu phương án A, B, C, D chứa véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").
-2. NẾU CÂU HỎI LIÊN QUAN ĐẾN BẢNG BIẾN THIÊN, BẮT BUỘC trả về:
-   "diagramType": "variation_table",
-   "diagramData": {
-     "title": "Bảng biến thiên của hàm số",
-     "x": ["-\\infty", "-1", "2", "+\\infty"],
-     "yPrime": ["+", "0", "-", "0", "+"],
-     "yArrows": [
-       { "start": "-\\infty", "end": "3", "dir": "up" },
-       { "start": "3", "end": "-2", "dir": "down" },
-       { "start": "-2", "end": "+\\infty", "dir": "up" }
-     ]
-   }
-3. NẾU CÂU HỎI CÓ ĐỒ THỊ HOẶC CÓ CỤM TỪ "như hình vẽ", "hình bên", "đồ thị của hàm số...":
-   - BẮT BUỘC 100% PHẢI CÓ trường "diagramType": "function_graph"
-   - Cung cấp "diagramData": {
-       "title": "Đồ thị hàm số chuẩn SGK",
-       "graphType": "rational" | "cubic" | "biquadratic" | "quadratic" | "sine",
-       "latex": "y = \\frac{ax+b}{cx+d}" hoặc công thức hàm số cụ thể
-     }
-   - TUYỆT ĐỐI CẤM ra đề có chữ "như hình vẽ" mà không cung cấp diagramType!
-4. NẾU CÂU HỎI LÀ BÀI TOÁN ỨNG DỤNG THỰC TẾ (Cắt 4 góc tấm tôn để gập hộp, lon nước ngọt hình trụ, cổng vòm parabol, người chèo thuyền qua sông, máng xối nước, rào khu đất...):
-   - BẮT BUỘC trả về "diagramType": "practical_illustration"
-   - "diagramData": {
-       "scenario": "box_folding" | "cylinder_can" | "parabola_arch" | "boat_river" | "water_gutter" | "fence_plot" | "cone_tank" | "water_pool",
-       "title": "Hình vẽ minh họa bài toán thực tế"
-     }
-   - Giúp học sinh có hình ảnh trực quan để tưởng tượng và thiết lập hàm số giải toán dễ dàng!
-
-KỸ THUẬT:
-- Dùng double backslash \\\\ cho mọi ký hiệu LaTeX trong JSON.
-- Đầu ra BẮT BUỘC là 1 mảng JSON thuần túy [ { ... }, { ... } ]. Không bao gồm markdown khác.`;
-
-    let contents: any;
-
-    if (matrixFile?.text) {
-      // Extracted text from PDF, Word docx or txt (Ultra-fast, 100% accurate)
-      contents = `Đây là nội dung Ma Trận Đề / Đề Thi ("${matrixFile.fileName || 'matrix'}") do giáo viên tải lên:
-${matrixFile.text.slice(0, 20000)}
-
-Yêu cầu của giáo viên: "${userPrompt || 'Tạo đề thi bám sát 100% ma trận trên: tạo đủ các phần thi (Phần I. Trắc nghiệm, Phần II. Đúng Sai, Phần III. Trả lời ngắn, Phần IV. Tự luận nếu có) với đúng số câu hỏi quy định'}"
-- Môn: ${subject}
-- Khối: ${grade}
-- Mức độ: ${difficulty}
-
-QUY TẮC BẮT BUỘC KHI TẠO ĐỀ THEO MA TRẬN:
-1. ĐỌC KỸ BẢNG MA TRẬN / ĐỀ CƯƠNG TRÊN ĐỂ TẠO ĐÚNG TẤT CẢ CÁC CHỦ ĐỀ VÀ DẠNG BÀI TOÁN CỦA MA TRẬN!
-2. BẮT BUỘC TẠO ĐỦ TẤT CẢ CÁC CÂU HỎI CỦA MỌI PHẦN THI THEO MA TRẬN (TỔNG CỘNG 20 - 22 CÂU HỎI THEO CHUẨN BGD&ĐT):
-   + PHẦN I: Gồm đầy đủ 12 câu hỏi trắc nghiệm 4 lựa chọn (part_1_choice).
-   + PHẦN II: Gồm đầy đủ 4 câu hỏi trắc nghiệm Đúng / Sai, mỗi câu có 4 ý a, b, c, d (part_2_true_false).
-   + PHẦN III: Gồm đầy đủ 6 câu hỏi trắc nghiệm Trả lời ngắn (part_3_short_answer).
-   + PHẦN IV (nếu có): Các câu hỏi tự luận kèm barem điểm (part_4_essay).
-3. LƯU Ý SỐNG CÒN: Chỉ tạo câu hỏi đúng các bài học có trong ma trận trên. Nếu ma trận chỉ có bài học Hàm số hoặc giáo viên yêu cầu Hàm số, 100% các câu hỏi BẮT BUỘC phải về Hàm số, TUYỆT ĐỐI CẤM đưa Hình học Oxyz, Véc-tơ không gian hay Tích phân vào!`;
-    } else if (matrixFile?.base64 && matrixFile?.mimeType) {
-      // Image or scanned PDF file provided
-      const cleanBase64 = matrixFile.base64.replace(/^data:[^;]+;base64,/, '');
-      contents = [
-        {
-          inlineData: {
-            mimeType: matrixFile.mimeType,
-            data: cleanBase64
-          }
-        },
-        {
-          text: `Đây là tệp Ma Trận Đề / Đề Thi ("${matrixFile.fileName || 'matrix'}") do giáo viên tải lên.
-YÊU CẦU QUAN TRỌNG NHẤT: BẠN PHẢI TẠO ĐẦY ĐỦ TẤT CẢ CÁC CÂU HỎI THEO ĐÚNG MA TRẬN ĐỀ ĐÃ CHO!
-- Môn: ${subject}
-- Khối: ${grade}
-- Mức độ: ${difficulty}
-- Yêu cầu bổ sung của giáo viên: "${userPrompt || 'Bám sát ma trận đính kèm'}"
-
-QUY TẮC BẮT BUỘC:
-1. Đọc kỹ bảng ma trận đề và tạo ĐỦ TẤT CẢ CÁC CÂU HỎI CỦA TỪNG PHẦN:
-   - Phần I: Gồm đầy đủ các câu trắc nghiệm nhiều phương án lựa chọn A, B, C, D (12 câu: Câu 1 đến Câu 12).
-   - Phần II: Gồm đầy đủ các câu trắc nghiệm Đúng / Sai (4 câu: Câu 1 đến Câu 4, mỗi câu gồm 4 mệnh đề a, b, c, d).
-   - Phần III: Gồm đầy đủ các câu trắc nghiệm Trả lời ngắn (6 câu: Câu 1 đến Câu 6).
-   - Phần IV (nếu ma trận có tự luận): Gồm đầy đủ các câu tự luận có barem điểm.
-2. TUYỆT ĐỐI BÁM SÁT NỘI DUNG MA TRẬN: Chỉ tạo câu hỏi thuộc đúng các bài học có trong tệp ma trận. Nếu ma trận chỉ có bài Khảo sát hàm số, 100% câu hỏi phải về Hàm số, CẤM đưa Hình học Oxyz vào!
-3. Đánh số câu thứ tự liên tục từ 1 đến hết trong mảng JSON [ { ... } ].`
-        }
-      ];
-    } else if (isMatrixExplicit) {
-      // Matrix Mode is active without attached file
-      contents = `Giáo viên yêu cầu soạn đề thi theo cấu trúc ma trận chuẩn Bộ GD&ĐT 2025:
-- Chủ đề: "${userPrompt || 'Đề kiểm tra chuyên đề'}"
-- Môn: ${subject}
-- Khối: ${grade}
-- Mức độ: ${difficulty}
-
-CHẾ ĐỘ MA TRẬN ĐỀ THI ĐANG BẬT:
-BẮT BUỘC TẠO ĐỦ TẤT CẢ CÁC PHẦN THI VÀ SỐ CÂU HỎI (TỔNG CỘNG 20 - 22 CÂU HỎI):
-- PHẦN I (Câu 1 đến Câu 12): 12 câu trắc nghiệm 4 lựa chọn (part_1_choice)
-- PHẦN II (Câu 1 đến Câu 4): 4 câu trắc nghiệm Đúng / Sai (part_2_true_false, mỗi câu 4 ý a, b, c, d)
-- PHẦN III (Câu 1 đến Câu 6): 6 câu trắc nghiệm Trả lời ngắn (part_3_short_answer)
-LƯU Ý QUAN TRỌNG NHẤT: BẮT BUỘC 100% CÁC CÂU HỎI ĐỀU PHẢI THUỘC VỀ CHỦ ĐỀ "${userPrompt || 'Nội dung bài học'}".
-NẾU CHỦ ĐỀ LÀ HÀM SỐ (hoặc Đơn điệu, Cực trị, Tiệm cận, Khảo sát hàm số, GTLN/GTNN, Đồ thị): TOÀN BỘ 100% CÁC CÂU LÀ VỀ HÀM SỐ. TUYỆT ĐỐI CẤM RA ĐỀ VÀO HÌNH HỌC OXYZ, CẤM VÉC-TƠ TRONG KHÔNG GIAN, CẤM MẶT PHẲNG, MẶT CẦU, CẤM TÍCH PHÂN!`;
-    } else {
-      // Text prompt only
-      contents = `Giáo viên yêu cầu: "${userPrompt || `Tạo đề trắc nghiệm ôn tập môn ${subject} ${grade} mức độ ${difficulty}`}"
-- Môn: ${subject}
-- Khối: ${grade}
-- Số câu: ${numQuestions} câu
-- Mức độ: ${difficulty}
-LƯU Ý QUAN TRỌNG: Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm chất lượng cao bám sát 100% chủ đề "${userPrompt || subject}", có đầy đủ công thức $...$, 4 phương án A, B, C, D, đáp án đúng và giải thích chi tiết. NẾU CHỦ ĐỀ LÀ HÀM SỐ: 100% câu hỏi phải về Hàm số, CẤM đưa Oxyz hay các chương khác vào.`;
+    const systemInstruction = `Bạn là chuyên gia Khảo thí & Soạn đề kiểm tra chuẩn Chương trình GDPT 2018 Việt Nam (THPT/THCS).
+Nhiệm vụ tối thượng: ${
+      hasUploadedFile
+        ? `ĐỌC THẬT KỸ TỆP MA TRẬN / ĐỀ CƯƠNG ĐÍNH KÈM ("${matrixFile?.fileName || "ma trận"}") và TẠO ĐỀ KIỂM TRA BÁM SÁT 100% ĐÚNG NỘI DUNG, CHỦ ĐỀ, KHỐI LỚP (${grade}), DẠNG TOÁN VÀ SỐ LƯỢNG CÂU HỎI CỦA MA TRẬN/ĐỀ CƯƠNG ĐÓ.`
+        : `Tạo đề thi chuẩn xác bám sát 100% chủ đề được yêu cầu ("${userPrompt || `${subject} ${grade}`}"), môn ${subject}, khối ${grade}, mức độ ${difficulty}.`
     }
 
-    const timeoutMs = matrixFile ? 95000 : 50000;
+*** QUY TẮC BẮT BUỘC VỀ NỘI DUNG & CẤU TRÚC: ***
+${
+  hasUploadedFile
+    ? `1. NGUYÊN TẮC BÁM SÁT TỆP MA TRẬN / ĐỀ CƯƠNG ĐÍNH KÈM (SỐNG CÒN):
+   - TỆP ĐÍNH KÈM LÀ NGUỒN CHÂN LÝ DUY NHẤT: Đọc kỹ từng dòng, từng bảng ma trận, từng chuyên đề / đơn vị kiến thức / dạng bài / câu mẫu trong tệp "${matrixFile?.fileName || ""}".
+   - MỖI CÂU HỎI TẠO RA PHẢI TƯƠNG ỨNG ĐÚNG VỚI TỪNG CHỦ ĐỀ, ĐƠN VỊ KIẾN THỨC VÀ MỨC ĐỘ (Nhận biết / Thông hiểu / Vận dụng) CÓ TRONG MA TRẬN/ĐỀ CƯƠNG ĐÓ!
+   - TUYỆT ĐỐI KHÔNG ĐƯỢC tự ý mặc định lấy đề "Khảo sát hàm số Lớp 12" hay các chủ đề không có trong tệp! Ví dụ nếu tệp là ${grade} (như Lượng giác, Dãy số, Cấp số, Giới hạn, Hàm số liên tục, Mũ - Logarit, Hình không gian, Thống kê, Xác suất, Đạo hàm, v.v.) hoặc môn ${subject} thì 100% câu hỏi PHẢI đúng kiến thức ${grade} trong tệp!
+   - SỐ LƯỢNG CÂU HỎI VÀ CÁC PHẦN: Nếu tệp ma trận ghi rõ số câu cho từng phần (Phần I Trắc nghiệm 4 lựa chọn, Phần II Đúng/Sai, Phần III Trả lời ngắn, Phần IV Tự luận) thì TẠO ĐÚNG Y HỆT SỐ CÂU TỪNG PHẦN ĐÓ! Chỉ khi tệp không ghi rõ tổng số câu từng phần thì mới dùng cấu trúc mặc định chuẩn BGD 2025 (12 câu Phần I + 4 câu Phần II + 6 câu Phần III = 22 câu).${
+     userPrompt ? `\n   - Yêu cầu bổ sung của giáo viên: "${userPrompt}".` : ""
+   }`
+    : isFunctionOnlyPrompt
+      ? `1. Chủ đề yêu cầu về HÀM SỐ: Toàn bộ 100% các câu hỏi PHẢI thuộc về chủ đề "${userPrompt}". Không đưa Oxyz hay chương khác vào.`
+      : `1. Toàn bộ 100% câu hỏi PHẢI đúng chủ đề "${userPrompt || `${subject} ${grade}`}", môn ${subject}, khối ${grade}.`
+}
+${
+  !hasUploadedFile && isAutoMatrix
+    ? `2. CHẾ ĐỘ MA TRẬN CHUẨN BGD 2025: Tạo đủ 22 câu gồm 12 câu Phần I (part_1_choice), 4 câu Phần II Đúng/Sai (part_2_true_false, mỗi câu 4 ý a, b, c, d), và 6 câu Phần III Trả lời ngắn (part_3_short_answer) — tất cả thuộc đúng chủ đề "${userPrompt || `${subject} ${grade}`}".`
+    : !hasUploadedFile
+      ? `2. Tạo đúng ${numQuestions} câu hỏi trắc nghiệm chất lượng cao bám sát chủ đề "${userPrompt || `${subject} ${grade}`}".`
+      : ""
+}
+
+ĐỊNH DẠNG JSON MỖI CÂU HỎI (BẮT BUỘC TRẢ VỀ MẢNG JSON THUẦN TÚY [ { ... } ]):
+1. Phần I (Trắc nghiệm 4 lựa chọn):
+   { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "A", "explanation": "Giải ngắn gọn 1-3 câu...", "timeLimit": ${timeLimit} }
+2. Phần II (Đúng / Sai, bắt buộc đủ 4 mệnh đề a, b, c, d):
+   { "id": "q2", "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "Giải ngắn gọn từng ý a, b, c, d...", "timeLimit": 60 }
+3. Phần III (Trả lời ngắn):
+   { "id": "q3", "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "explanation": "Giải ngắn gọn...", "timeLimit": 45 }
+4. Phần IV (Tự luận, nếu ma trận có tự luận):
+   { "id": "q4", "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "Thang điểm chi tiết...", "correctAnswer": "Đáp số / Hướng dẫn chấm", "options": [], "explanation": "Lời giải mẫu ngắn gọn...", "timeLimit": 120 }
+
+QUY TẮC HIỂN THỊ CÔNG THỨC & HÌNH VẼ:
+- Mọi công thức Toán/Lý/Hóa bọc trong $...$ (dùng \\\\ trong chuỗi JSON). Véc-tơ dùng \\overrightarrow{AB}.
+- Nếu câu hỏi có Bảng biến thiên: thêm "diagramType": "variation_table", "diagramData": { "x": [...], "yPrime": [...], "yArrows": [{"start":"...","end":"...","dir":"up"|"down"}] }.
+- Nếu câu hỏi có Đồ thị hoặc "như hình vẽ": thêm "diagramType": "function_graph", "diagramData": { "graphType": "rational"|"cubic"|"biquadratic"|"quadratic"|"sine", "latex": "..." }.
+- Nếu câu hỏi có Bảng thống kê / số liệu: thêm "diagramType": "data_table", "diagramData": { "headers": [...], "rows": [[...]] }.
+- Viết "explanation" súc tích, rõ ý (2-3 câu) để phản hồi nhanh và đầy đủ toàn bộ đề thi không bị cắt ngang.`;
+
+    const parts: any[] = [];
+    if (matrixFile?.base64 && matrixFile?.mimeType && matrixFile.base64.length < 15_000_000) {
+      const cleanBase64 = matrixFile.base64.replace(/^data:.*?;base64,/, "");
+      parts.push({
+        inlineData: {
+          mimeType: matrixFile.mimeType,
+          data: cleanBase64,
+        },
+      });
+    }
+
+    if (matrixFile?.text && matrixFile.text.trim().length > 0) {
+      parts.push({
+        text: `NỘI DUNG VĂN BẢN BÓC TÁCH TỪ TỆP MA TRẬN / ĐỀ CƯƠNG ("${matrixFile.fileName || "matrix"}"):\n"""\n${matrixFile.text.slice(0, 32000)}\n"""`,
+      });
+    }
+
+    if (hasUploadedFile) {
+      parts.push({
+        text: `Thông số lớp/môn: ${subject} - ${grade} - Mức độ: ${difficulty}.${
+          userPrompt ? `\nGhi chú thêm của giáo viên: "${userPrompt}"` : ""
+        }\nHãy phân tích kỹ tệp ma trận/đề cương đính kèm ở trên và tạo ĐÚNG các câu hỏi bám sát 100% nội dung ma trận/đề cương đó (KHÔNG tạo đề khác ngoài ma trận). Trả về mảng JSON thuần túy.`,
+      });
+    } else if (isMatrixExplicit) {
+      parts.push({
+        text: `Soạn đề theo cấu trúc ma trận GDPT 2018 (12 câu Phần I, 4 câu Phần II Đúng/Sai, 6 câu Phần III Trả lời ngắn):\n- Chủ đề: "${userPrompt || `${subject} ${grade}`}"\n- Môn: ${subject} | Khối: ${grade} | Mức độ: ${difficulty}\nToàn bộ câu hỏi phải bám sát 100% chủ đề trên. Trả về mảng JSON thuần túy.`,
+      });
+    } else {
+      parts.push({
+        text: `Soạn đúng ${numQuestions} câu hỏi trắc nghiệm 4 lựa chọn:\n- Chủ đề: "${userPrompt || `${subject} ${grade}`}"\n- Môn: ${subject} | Khối: ${grade} | Mức độ: ${difficulty}\nTrả về mảng JSON thuần túy.`,
+      });
+    }
+
+    const timeoutMs = hasUploadedFile ? 75000 : 45000;
     const response = await generateWithGemini(ai, {
-      contents,
+      contents: [{ role: "user", parts }],
       config: {
         responseMimeType: "application/json",
         systemInstruction,
-        temperature: 0.25,
-        maxOutputTokens: 8192,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       },
       timeoutMs,
     });
@@ -2921,33 +2906,32 @@ LƯU Ý QUAN TRỌNG: Hãy biên soạn đúng ${numQuestions} câu hỏi trắc
 
     if (Array.isArray(parsed) && parsed.length > 0) {
       const sanitized = parsed.map((q: any, idx: number) => {
-        const rawPartType = q.partType || '';
-        const isTrueFalse = rawPartType === 'part_2_true_false' || (Array.isArray(q.subStatements) && q.subStatements.length > 0);
-        const isShortAnswer = rawPartType === 'part_3_short_answer' || !!q.shortAnswerKey;
-        const isEssay = rawPartType === 'part_4_essay' || !!q.essayRubric;
+        const rawPartType = q.partType || "";
+        const isTrueFalse = rawPartType === "part_2_true_false" || (Array.isArray(q.subStatements) && q.subStatements.length > 0);
+        const isShortAnswer = rawPartType === "part_3_short_answer" || !!q.shortAnswerKey;
+        const isEssay = rawPartType === "part_4_essay" || !!q.essayRubric;
 
-        let partType: 'part_1_choice' | 'part_2_true_false' | 'part_3_short_answer' | 'part_4_essay' = 'part_1_choice';
-        let partLabel = q.partLabel || 'Phần I. Câu trắc nghiệm nhiều phương án lựa chọn';
+        let partType: "part_1_choice" | "part_2_true_false" | "part_3_short_answer" | "part_4_essay" = "part_1_choice";
+        let partLabel = q.partLabel || "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn";
 
         if (isTrueFalse) {
-          partType = 'part_2_true_false';
-          partLabel = q.partLabel || 'Phần II. Câu trắc nghiệm Đúng / Sai';
+          partType = "part_2_true_false";
+          partLabel = q.partLabel || "Phần II. Câu trắc nghiệm Đúng / Sai";
         } else if (isShortAnswer) {
-          partType = 'part_3_short_answer';
-          partLabel = q.partLabel || 'Phần III. Câu trắc nghiệm trả lời ngắn';
+          partType = "part_3_short_answer";
+          partLabel = q.partLabel || "Phần III. Câu trắc nghiệm trả lời ngắn";
         } else if (isEssay) {
-          partType = 'part_4_essay';
-          partLabel = q.partLabel || 'Phần IV. Tự luận';
+          partType = "part_4_essay";
+          partLabel = q.partLabel || "Phần IV. Tự luận";
         }
 
-        // Sub-statements for Part II (True / False)
         let subStatements: any[] | undefined = undefined;
         if (isTrueFalse) {
           if (Array.isArray(q.subStatements) && q.subStatements.length > 0) {
             subStatements = q.subStatements.map((s: any, sIdx: number) => {
-              const label = s.label || s.key || ['a', 'b', 'c', 'd'][sIdx] || `ý ${sIdx + 1}`;
-              const statement = s.statement || s.text || '';
-              const correct = typeof s.correct === 'boolean' ? s.correct : (typeof s.isCorrect === 'boolean' ? s.isCorrect : true);
+              const label = s.label || s.key || ["a", "b", "c", "d"][sIdx] || `ý ${sIdx + 1}`;
+              const statement = s.statement || s.text || "";
+              const correct = typeof s.correct === "boolean" ? s.correct : (typeof s.isCorrect === "boolean" ? s.isCorrect : true);
               return {
                 id: `sub_${idx}_${sIdx}`,
                 key: label,
@@ -2960,28 +2944,27 @@ LƯU Ý QUAN TRỌNG: Hãy biên soạn đúng ${numQuestions} câu hỏi trắc
             });
           } else {
             subStatements = [
-              { key: 'a', label: 'a', statement: 'Mệnh đề kiểm tra điều kiện a', correct: true, isCorrect: true },
-              { key: 'b', label: 'b', statement: 'Mệnh đề kiểm tra điều kiện b', correct: false, isCorrect: false },
-              { key: 'c', label: 'c', statement: 'Mệnh đề kiểm tra điều kiện c', correct: true, isCorrect: true },
-              { key: 'd', label: 'd', statement: 'Mệnh đề kiểm tra điều kiện d', correct: false, isCorrect: false },
+              { key: "a", label: "a", statement: "Mệnh đề kiểm tra điều kiện a", correct: true, isCorrect: true },
+              { key: "b", label: "b", statement: "Mệnh đề kiểm tra điều kiện b", correct: false, isCorrect: false },
+              { key: "c", label: "c", statement: "Mệnh đề kiểm tra điều kiện c", correct: true, isCorrect: true },
+              { key: "d", label: "d", statement: "Mệnh đề kiểm tra điều kiện d", correct: false, isCorrect: false },
             ];
           }
         }
 
-        // Options for Part I
         let options: any[] = [];
-        if (partType === 'part_1_choice') {
+        if (partType === "part_1_choice") {
           if (Array.isArray(q.options) && q.options.length >= 2) {
             options = q.options.map((opt: any, oIdx: number) => ({
-              key: opt.key || ['A', 'B', 'C', 'D'][oIdx] || 'A',
-              text: typeof opt === 'string' ? opt : (opt.text || `Lựa chọn ${opt.key || oIdx + 1}`)
+              key: opt.key || ["A", "B", "C", "D"][oIdx] || "A",
+              text: typeof opt === "string" ? opt : (opt.text || `Lựa chọn ${opt.key || oIdx + 1}`),
             }));
           } else {
             options = [
-              { key: 'A', text: 'Phương án A' },
-              { key: 'B', text: 'Phương án B' },
-              { key: 'C', text: 'Phương án C' },
-              { key: 'D', text: 'Phương án D' },
+              { key: "A", text: "Phương án A" },
+              { key: "B", text: "Phương án B" },
+              { key: "C", text: "Phương án C" },
+              { key: "D", text: "Phương án D" },
             ];
           }
         }
@@ -2997,10 +2980,10 @@ LƯU Ý QUAN TRỌNG: Hãy biên soạn đúng ${numQuestions} câu hỏi trắc
           partLabel,
           options,
           subStatements,
-          shortAnswerKey: q.shortAnswerKey || (isShortAnswer ? (q.correctAnswer || '') : undefined),
-          essayRubric: q.essayRubric || (isEssay ? (q.explanation || 'Hướng dẫn chấm theo barem điểm') : undefined),
-          correctAnswer: String(q.correctAnswer || (isShortAnswer ? q.shortAnswerKey : (isTrueFalse ? 'a:Đ, b:S, c:Đ, d:S' : 'A'))),
-          explanation: q.explanation || 'Lời giải chi tiết theo chuẩn sư phạm.',
+          shortAnswerKey: q.shortAnswerKey || (isShortAnswer ? (q.correctAnswer || "") : undefined),
+          essayRubric: q.essayRubric || (isEssay ? (q.explanation || "Hướng dẫn chấm theo barem điểm") : undefined),
+          correctAnswer: String(q.correctAnswer || (isShortAnswer ? q.shortAnswerKey : (isTrueFalse ? "a:Đ, b:S, c:Đ, d:S" : "A"))),
+          explanation: q.explanation || "Lời giải chi tiết theo chuẩn sư phạm.",
           diagramType: finalDiagramType,
           diagramData: finalDiagramData,
           timeLimit: Number(q.timeLimit) || Number(timeLimit) || (isTrueFalse ? 60 : (isShortAnswer ? 45 : (isEssay ? 120 : 30))),
@@ -3011,21 +2994,28 @@ LƯU Ý QUAN TRỌNG: Hãy biên soạn đúng ${numQuestions} câu hỏi trắc
 
       return res.json({ success: true, questions: normalizeQuizQuestionsMath(sanitized) });
     }
+
+    return res.status(502).json({
+      success: false,
+      error: "AI chưa trả về danh sách câu hỏi hợp lệ từ ma trận. Vui lòng thử bấm Tạo lại hoặc kiểm tra tệp ma trận.",
+    });
   } catch (error: any) {
-    console.warn("[Fast Matrix Quiz] AI generation notice:", error?.message || error);
+    const errMsg = error?.message || String(error);
+    console.error("[Fast Matrix Quiz] AI generation error:", errMsg);
+    const isAuthErr =
+      errMsg.includes("API_KEY_INVALID") ||
+      errMsg.includes("PERMISSION_DENIED") ||
+      errMsg.includes("API key should be set");
+    const isQuotaErr = errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429");
+    return res.status(isAuthErr ? 403 : isQuotaErr ? 429 : 502).json({
+      success: false,
+      error: isAuthErr
+        ? "Chưa cấu hình hoặc sai Gemini API Key (vui lòng kiểm tra Settings > Secrets hoặc Cấu hình API Key)."
+        : isQuotaErr
+          ? "Hệ thống AI đang quá tải giới hạn lượt gọi (429). Vui lòng thử lại sau ít giây."
+          : `Không thể phân tích ma trận bằng AI (${errMsg.slice(0, 140)}). Vui lòng thử lại.`,
+    });
   }
-
-  // Fast Intelligent Fallback (guarantees instantaneous response within < 1 second if AI is slow or rate-limited)
-  const isMatrix = isMatrixMode === true || !!matrixFile;
-  const fallback = isMatrix
-    ? generateFullMatrixExamCurriculum(subject, grade, difficulty, userPrompt)
-    : generateSmartCurriculumQuestions(userPrompt || "Ma trận đề kiểm tra", subject, numQuestions, difficulty);
-
-  res.json({
-    success: true,
-    questions: normalizeQuizQuestionsMath(fallback),
-    isFallback: true
-  });
 });
 
 // AI On-Demand Specific Extraction (Formulas, Exercises, Definitions, Summary, or Custom Query)

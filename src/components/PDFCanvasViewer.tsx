@@ -274,17 +274,32 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const wasNativeFsRef = useRef<boolean>(false);
 
   // Sync prop zoom if updated from parent
   useEffect(() => {
     if (zoom) setInternalZoom(zoom);
   }, [zoom]);
 
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: isFullscreen } }));
+    return () => {
+      if (isFullscreen) {
+        window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: false } }));
+      }
+    };
+  }, [isFullscreen]);
+
   // Fullscreen event listener to sync state with native browser fullscreen changes
   useEffect(() => {
     const handleFsChange = () => {
       const isFs = !!document.fullscreenElement;
-      setIsFullscreen(isFs);
+      if (isFs) {
+        wasNativeFsRef.current = true;
+      } else if (wasNativeFsRef.current) {
+        wasNativeFsRef.current = false;
+        setIsFullscreen(false);
+      }
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     document.addEventListener('webkitfullscreenchange', handleFsChange);
@@ -294,7 +309,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
     };
   }, []);
 
-  // Keyboard shortcut listener ('f' for fullscreen, 'b' or 'p' for pen drawing)
+  // Keyboard shortcut listener ('f' for fullscreen, 'b' or 'p' for pen drawing, 'Escape' exits fullscreen)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if user is typing in an input
@@ -306,13 +321,19 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
       }
       if (e.key === 'f' || e.key === 'F') {
         toggleFullscreen();
+      } else if (e.key === 'Escape' && isFullscreen) {
+        wasNativeFsRef.current = false;
+        setIsFullscreen(false);
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.().catch(() => {});
+        }
       } else if (e.key === 'b' || e.key === 'B' || e.key === 'p' || e.key === 'P') {
         toggleAnnotating();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleAnnotating]);
+  }, [toggleAnnotating, isFullscreen]);
 
   // Load PDF Document
   useEffect(() => {
@@ -540,13 +561,17 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
       onFullscreenRequest();
       return;
     }
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
+    const nextVal = !isFullscreen;
+    setIsFullscreen(nextVal);
+    if (nextVal) {
+      if (containerRef.current && !document.fullscreenElement && containerRef.current.requestFullscreen) {
+        containerRef.current.requestFullscreen().catch(() => {});
+      }
     } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
+      wasNativeFsRef.current = false;
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
     }
   };
 
@@ -633,7 +658,11 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
     <div
       ref={containerRef}
       id="pdf-viewer-root-container"
-      className="flex-1 w-full h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 relative select-text"
+      className={
+        isFullscreen
+          ? 'fixed inset-0 z-[9990] w-screen h-dvh flex flex-col overflow-hidden bg-slate-950 text-slate-100 select-text'
+          : 'flex-1 w-full h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 relative select-text'
+      }
     >
       {/* Top PDF Toolbar Strip */}
       <div className="px-3 py-2 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0 select-none shadow-md z-20">

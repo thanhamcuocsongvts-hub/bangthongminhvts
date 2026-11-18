@@ -1,5 +1,4 @@
 import React, { useId } from 'react';
-import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { analyzeAndSampleSgkGraph } from '../utils/sgkGraphMath';
 
 export interface StandardTextbookGraphProps {
@@ -97,21 +96,9 @@ export const StandardTextbookGraph: React.FC<StandardTextbookGraphProps> = ({
   const clipId = `sgkPlotClip_${clipUid}`;
 
   return (
-    <div className={`w-full max-w-md mx-auto bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden select-none ${className}`}>
-      {/* Header tiêu đề & công thức */}
-      <div className="px-4 py-2 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between gap-2">
-        <span className="text-xs font-bold text-slate-700 tracking-tight truncate">
-          {analysis.title}
-        </span>
-        {analysis.formulaLatex && (
-          <div className="text-xs font-semibold text-blue-700 bg-blue-50/80 px-2 py-0.5 rounded border border-blue-200/70 shrink-0">
-            <MathFormulaRenderer content={`$${analysis.formulaLatex}$`} />
-          </div>
-        )}
-      </div>
-
-      {/* SVG Canvas chuẩn SGK trắng tinh khiết */}
-      <div className="p-2.5 bg-white flex flex-col items-center justify-center">
+    <div className={`w-full max-w-md mx-auto bg-white rounded-xl overflow-hidden select-none ${className}`}>
+      {/* SVG Canvas chuẩn SGK trắng tinh khiết (không tiêu đề, không ghi tên hàm số) */}
+      <div className="p-2 bg-white flex flex-col items-center justify-center">
         <svg
           width={svgW}
           height={svgH}
@@ -385,10 +372,6 @@ export const StandardTextbookGraph: React.FC<StandardTextbookGraphProps> = ({
             );
           })}
         </svg>
-
-        <div className="mt-1 text-center text-[11px] font-medium text-slate-500 italic">
-          Đồ thị hàm số trên hệ trục tọa độ Oxy
-        </div>
       </div>
     </div>
   );

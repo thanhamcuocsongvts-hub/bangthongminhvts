@@ -560,17 +560,32 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [nextSlide, prevSlide, goToSlide, totalSlides, blackoutMode, isPenActive, showThumbnails]);
 
+  const wasNativeFsRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: isFullscreen } }));
+    return () => {
+      if (isFullscreen) {
+        window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: false } }));
+      }
+    };
+  }, [isFullscreen]);
+
   // Toggle Fullscreen
   const toggleFullscreen = () => {
     const target = containerRef.current;
-    if (!target) return;
+    const nextVal = !isFullscreen;
+    setIsFullscreen(nextVal);
 
-    if (!document.fullscreenElement) {
-      target.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
+    if (nextVal) {
+      if (target && !document.fullscreenElement && target.requestFullscreen) {
+        target.requestFullscreen().catch(() => {});
+      }
     } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
+      wasNativeFsRef.current = false;
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
     }
     onFullscreen?.();
   };
@@ -578,7 +593,13 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
   // Sync native fullscreen events
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const hasFs = Boolean(document.fullscreenElement);
+      if (hasFs) {
+        wasNativeFsRef.current = true;
+      } else if (wasNativeFsRef.current) {
+        wasNativeFsRef.current = false;
+        setIsFullscreen(false);
+      }
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     return () => document.removeEventListener('fullscreenchange', handleFsChange);

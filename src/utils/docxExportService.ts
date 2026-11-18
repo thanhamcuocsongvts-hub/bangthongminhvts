@@ -42,15 +42,32 @@ import {
  * Clean and map LaTeX commands and symbols to standard Unicode math symbols for Word OpenXML.
  * Ensures zero raw backslashes (like \sin, \cos, \varphi) leak into exported Word equations.
  */
+const BLACKBOARD_BOLD_MAP: Record<string, string> = {
+  R: 'ℝ',
+  Z: 'ℤ',
+  N: 'ℕ',
+  Q: 'ℚ',
+  C: 'ℂ',
+  P: 'ℙ',
+  E: '𝔼',
+  H: 'ℍ',
+};
+
 export function cleanLatexSymbols(text: string): string {
   if (!text) return '';
   return text
+    .replace(/\\\{/g, '\uE001')
+    .replace(/\\\}/g, '\uE002')
     .replace(/\\\\/g, ' ')
     .replace(/\\displaystyle\b|\\textstyle\b|\\scriptstyle\b|\\limits\b|\\nolimits\b/g, '')
     .replace(/\\(?:left|right)\s*\./g, '')
-    .replace(/\\(?:left|right|big|Big|bigg|Bigg)\s*([(\[{|<⟩⟩\]}|])/g, '$1')
+    .replace(/\\(?:left|right|big|Big|bigg|Bigg)\s*([(\[|<⟩⟩\]}|])/g, '$1')
     .replace(/\\langle\b/g, '⟨')
     .replace(/\\rangle\b/g, '⟩')
+    .replace(/\\lceil\b/g, '⌈')
+    .replace(/\\rceil\b/g, '⌉')
+    .replace(/\\lfloor\b/g, '⌊')
+    .replace(/\\rfloor\b/g, '⌋')
     .replace(/\\pm\b/g, '±')
     .replace(/\\mp\b/g, '∓')
     .replace(/\\infty\b/g, '∞')
@@ -86,6 +103,8 @@ export function cleanLatexSymbols(text: string): string {
     .replace(/\\div\b/g, '÷')
     .replace(/\\perp\b/g, '⟂')
     .replace(/\\parallel\b/g, '∥')
+    .replace(/\\mid\b/g, '|')
+    .replace(/\\nmid\b/g, '∤')
     .replace(/\\angle\b/g, '∠')
     .replace(/\\measuredangle\b/g, '∡')
     .replace(/\\sphericalangle\b/g, '∢')
@@ -128,16 +147,19 @@ export function cleanLatexSymbols(text: string): string {
     .replace(/\\chi\b/g, 'χ')
     .replace(/\\psi\b/g, 'ψ')
     .replace(/\\omega\b/g, 'ω')
-    .replace(/\\mathbb\{R\}|\\mathbf\{R\}|\\mathbb\s+R/g, 'ℝ')
-    .replace(/\\mathbb\{Z\}|\\mathbb\s+Z/g, 'ℤ')
-    .replace(/\\mathbb\{N\}|\\mathbb\s+N/g, 'ℕ')
-    .replace(/\\mathbb\{Q\}|\\mathbb\s+Q/g, 'ℚ')
-    .replace(/\\mathbb\{C\}|\\mathbb\s+C/g, 'ℂ')
+    .replace(/\\mathbb\s*\{([A-Za-z]+)\}/g, (_, ch) =>
+      ch
+        .split('')
+        .map((c: string) => BLACKBOARD_BOLD_MAP[c] || c)
+        .join('')
+    )
+    .replace(/\\mathbb\s+([A-Z])\b/g, (_, ch) => BLACKBOARD_BOLD_MAP[ch] || ch)
+    .replace(/\\mathbf\{R\}/g, 'ℝ')
+    .replace(/\\(?:mathcal|mathfrak|mathsf|mathtt|mathrm|mathbf|mathit|text|operatorname)\s*\{([^}]*)\}/g, '$1')
     .replace(/\\(?:emptyset|varnothing)\b/g, '∅')
     .replace(/\^\s*\{\s*\\circ\s*\}|\^\\circ|\\degree\b|\\circ\b/g, '°')
     .replace(/\\prime\b/g, '′')
-    .replace(/\\(?:ldots|dots|cdots|vdots)\b/g, '…')
-    .replace(/\\setminus\b/g, '\\')
+    .replace(/\\(?:ldots|dots|cdots|dotsm|dotsc|dotsb|vdots|ddots)\b/g, '…')
     .replace(
       /\\(arcsin|arccos|arctan|sinh|cosh|tanh|sin|cos|tan|cot|sec|csc|ln|log|lg|exp|lim|max|min|sup|inf|det|deg|mod|gcd|lcm|arg)\b/g,
       '$1 '
@@ -152,9 +174,12 @@ export function cleanLatexSymbols(text: string): string {
     .replace(/\\quad\b/g, '  ')
     .replace(/\\qquad\b/g, '    ')
     .replace(/\\[,;:! ]/g, ' ')
+    .replace(/\\(?:setminus|backslash)\b/g, ' ∖ ')
     .replace(/~/g, ' ')
-    .replace(/\\([{}%&$#_])/g, '$1')
+    .replace(/\\([%&$#_])/g, '$1')
     .replace(/[{}]/g, '')
+    .replace(/\uE001/g, '{')
+    .replace(/\uE002/g, '}')
     .replace(/\s{2,}/g, ' ');
 }
 
@@ -179,7 +204,10 @@ interface ScriptMeta {
 }
 
 /**
- * Creates a native Word OMML <m:acc> accent element (vector arrow →, hat ^, overline ¯, tilde ~)
+ * Creates a native Word OMML <m:acc> accent element using combining diacritical marks:
+ * - Vector arrow: '\u20D7' (⃗)
+ * - Circumflex / hat: '\u0302' (̂)
+ * - Tilde: '\u0303' (̃)
  */
 export function createMathAccent(accentChar: string, innerNodes: DocxMathChild[]): BuilderElement {
   return new BuilderElement({
@@ -205,7 +233,126 @@ export function createMathAccent(accentChar: string, innerNodes: DocxMathChild[]
 }
 
 /**
- * Creates a native Word OMML delimited matrix (<m:d> containing <m:m>) for cases, pmatrix, bmatrix, vmatrix, aligned
+ * Creates a native Word OMML <m:groupChr> extensible grouping element
+ * Used for multi-character wide vector arrows like \overrightarrow{AB} or \overrightarrow{AA'}
+ */
+export function createMathGroupChr(
+  chr: string,
+  pos: 'top' | 'bot',
+  vertJc: 'top' | 'bot',
+  innerNodes: DocxMathChild[]
+): BuilderElement {
+  return new BuilderElement({
+    name: 'm:groupChr',
+    children: [
+      new BuilderElement({
+        name: 'm:groupChrPr',
+        children: [
+          new BuilderElement({
+            name: 'm:chr',
+            attributes: {
+              val: { key: 'm:val', value: chr },
+            },
+          }),
+          new BuilderElement({
+            name: 'm:pos',
+            attributes: {
+              val: { key: 'm:val', value: pos },
+            },
+          }),
+          new BuilderElement({
+            name: 'm:vertJc',
+            attributes: {
+              val: { key: 'm:val', value: vertJc },
+            },
+          }),
+        ],
+      }),
+      new BuilderElement({
+        name: 'm:e',
+        children: innerNodes.length > 0 ? innerNodes : [new MathRun('')],
+      }),
+    ],
+  });
+}
+
+/**
+ * Creates a native Word OMML <m:bar> element for \overline{...} and \bar{...}
+ */
+export function createMathBar(pos: 'top' | 'bot', innerNodes: DocxMathChild[]): BuilderElement {
+  return new BuilderElement({
+    name: 'm:bar',
+    children: [
+      new BuilderElement({
+        name: 'm:barPr',
+        children: [
+          new BuilderElement({
+            name: 'm:pos',
+            attributes: {
+              val: { key: 'm:val', value: pos },
+            },
+          }),
+        ],
+      }),
+      new BuilderElement({
+        name: 'm:e',
+        children: innerNodes.length > 0 ? innerNodes : [new MathRun('')],
+      }),
+    ],
+  });
+}
+
+/**
+ * Checks whether an accent argument represents a single glyph/symbol (e.g. a, i, j, k, \alpha, a')
+ * versus multi-character segments (e.g. AB, AA', u_1).
+ */
+function isSingleMathSymbolArg(rawText: string): boolean {
+  const compact = (rawText || '').replace(/[{} \t\n]/g, '').replace(/\\prime/g, "'");
+  if (/^[a-zA-Z0-9]'*$/.test(compact)) return true;
+  if (
+    /^\\(?:alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|vartheta|iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|upsilon|phi|varphi|chi|psi|omega|Gamma|Delta|Theta|Lambda|Pi|Sigma|Phi|Psi|Omega)'*$/.test(
+      compact
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Creates a native Word OMML auto-scaling delimiter (<m:d>) for \left...\right
+ */
+function createMathDelimited(
+  begChr: string,
+  endChr: string,
+  innerNodes: DocxMathChild[]
+): BuilderElement {
+  return new BuilderElement({
+    name: 'm:d',
+    children: [
+      new BuilderElement({
+        name: 'm:dPr',
+        children: [
+          new BuilderElement({
+            name: 'm:begChr',
+            attributes: { val: { key: 'm:val', value: begChr } },
+          }),
+          new BuilderElement({
+            name: 'm:endChr',
+            attributes: { val: { key: 'm:val', value: endChr } },
+          }),
+        ],
+      }),
+      new BuilderElement({
+        name: 'm:e',
+        children: innerNodes.length > 0 ? innerNodes : [new MathRun('')],
+      }),
+    ],
+  });
+}
+
+/**
+ * Creates a native Word OMML delimited matrix (<m:d> containing <m:m>) for cases, pmatrix, bmatrix, vmatrix, aligned, array
  */
 function createMathMatrixOrCases(
   rows: DocxMathChild[][][],
@@ -235,28 +382,7 @@ function createMathMatrixOrCases(
     return matrixEl;
   }
 
-  return new BuilderElement({
-    name: 'm:d',
-    children: [
-      new BuilderElement({
-        name: 'm:dPr',
-        children: [
-          new BuilderElement({
-            name: 'm:begChr',
-            attributes: { val: { key: 'm:val', value: begChr } },
-          }),
-          new BuilderElement({
-            name: 'm:endChr',
-            attributes: { val: { key: 'm:val', value: endChr } },
-          }),
-        ],
-      }),
-      new BuilderElement({
-        name: 'm:e',
-        children: [matrixEl],
-      }),
-    ],
-  });
+  return createMathDelimited(begChr, endChr, [matrixEl]);
 }
 
 /**
@@ -388,14 +514,40 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
     return !nextChar || !/[a-zA-Z]/.test(nextChar);
   };
 
+  const readDelimiterToken = (str: string, idx: number): { chr: string; nextIdx: number } | null => {
+    const pos = skipSpaces(str, idx);
+    if (pos >= str.length) return null;
+    if (str.startsWith('\\{', pos)) return { chr: '{', nextIdx: pos + 2 };
+    if (str.startsWith('\\}', pos)) return { chr: '}', nextIdx: pos + 2 };
+    if (str.startsWith('\\|', pos)) return { chr: '‖', nextIdx: pos + 2 };
+    if (startsCommand(str, pos, '\\langle')) return { chr: '⟨', nextIdx: pos + 7 };
+    if (startsCommand(str, pos, '\\rangle')) return { chr: '⟩', nextIdx: pos + 7 };
+    if (startsCommand(str, pos, '\\lceil')) return { chr: '⌈', nextIdx: pos + 6 };
+    if (startsCommand(str, pos, '\\rceil')) return { chr: '⌉', nextIdx: pos + 6 };
+    if (startsCommand(str, pos, '\\lfloor')) return { chr: '⌊', nextIdx: pos + 7 };
+    if (startsCommand(str, pos, '\\rfloor')) return { chr: '⌋', nextIdx: pos + 7 };
+    if (startsCommand(str, pos, '\\lbrace')) return { chr: '{', nextIdx: pos + 7 };
+    if (startsCommand(str, pos, '\\rbrace')) return { chr: '}', nextIdx: pos + 7 };
+    const ch = str[pos];
+    if (ch === '.') return { chr: '', nextIdx: pos + 1 };
+    if ('()[]|'.includes(ch)) return { chr: ch, nextIdx: pos + 1 };
+    return null;
+  };
+
   while (i < src.length) {
-    // 0. Environments: \begin{cases|pmatrix|bmatrix|vmatrix|matrix|aligned}...\end{...}
+    // 0. Environments: \begin{cases|pmatrix|bmatrix|vmatrix|matrix|aligned|array}...\end{...}
     if (src.startsWith('\\begin{', i)) {
-      const envMatch = src.slice(i).match(/^\\begin\{(cases|pmatrix|bmatrix|vmatrix|Vmatrix|matrix|aligned|align\*?)\}([\s\S]*?)\\end\{\1\}/);
+      const envMatch = src
+        .slice(i)
+        .match(/^\\begin\{(cases|pmatrix|bmatrix|vmatrix|Vmatrix|matrix|aligned|align\*?|array)\}([\s\S]*?)\\end\{\1\}/);
       if (envMatch) {
         const envName = envMatch[1];
-        const envBody = envMatch[2];
+        let envBody = envMatch[2];
         i += envMatch[0].length;
+
+        if (envName === 'array') {
+          envBody = envBody.replace(/^\s*\{[^}]*\}\s*/, '');
+        }
 
         const rawLines = envBody
           .split(/\\\\/g)
@@ -422,6 +574,51 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
         }
         nodes.push(createMathMatrixOrCases(parsedMatrix, begChr, endChr));
         continue;
+      }
+    }
+
+    // 0b. Auto-scaling delimiters: \left<delim> ... \right<delim>
+    if (startsCommand(src, i, '\\left')) {
+      const openDelim = readDelimiterToken(src, i + 5);
+      if (openDelim) {
+        let depth = 1;
+        let scan = openDelim.nextIdx;
+        let closeStart = -1;
+        let closeEnd = -1;
+        let closeChr = '';
+
+        while (scan < src.length) {
+          if (startsCommand(src, scan, '\\left')) {
+            const innerOpen = readDelimiterToken(src, scan + 5);
+            if (innerOpen) {
+              depth++;
+              scan = innerOpen.nextIdx;
+              continue;
+            }
+          } else if (startsCommand(src, scan, '\\right')) {
+            const innerClose = readDelimiterToken(src, scan + 6);
+            if (innerClose) {
+              depth--;
+              if (depth === 0) {
+                closeStart = scan;
+                closeEnd = innerClose.nextIdx;
+                closeChr = innerClose.chr;
+                break;
+              }
+              scan = innerClose.nextIdx;
+              continue;
+            }
+          }
+          scan++;
+        }
+
+        if (closeStart !== -1) {
+          const innerLatex = src.slice(openDelim.nextIdx, closeStart).trim();
+          const innerNodes = parseLatexNodes(innerLatex);
+          nodes.push(createMathDelimited(openDelim.chr, closeChr, innerNodes));
+          i = closeEnd;
+          continue;
+        }
       }
     }
 
@@ -567,9 +764,11 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
       continue;
     }
 
-    // 7. Accents: vector, hat, overline, tilde
+    // 7. Accents: vector arrows, hat, overline, tilde
     if (
       startsCommand(src, i, '\\overrightarrow') ||
+      startsCommand(src, i, '\\overleftarrow') ||
+      startsCommand(src, i, '\\overleftrightarrow') ||
       startsCommand(src, i, '\\vec') ||
       startsCommand(src, i, '\\widehat') ||
       startsCommand(src, i, '\\hat') ||
@@ -579,55 +778,114 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
       startsCommand(src, i, '\\tilde')
     ) {
       let cmd = '\\vec';
-      let accentChar = '→';
+      let kind: 'vec_right' | 'vec_left' | 'vec_lr' | 'hat' | 'bar' | 'tilde' = 'vec_right';
       if (startsCommand(src, i, '\\overrightarrow')) {
         cmd = '\\overrightarrow';
-        accentChar = '→';
+        kind = 'vec_right';
+      } else if (startsCommand(src, i, '\\overleftarrow')) {
+        cmd = '\\overleftarrow';
+        kind = 'vec_left';
+      } else if (startsCommand(src, i, '\\overleftrightarrow')) {
+        cmd = '\\overleftrightarrow';
+        kind = 'vec_lr';
       } else if (startsCommand(src, i, '\\vec')) {
         cmd = '\\vec';
-        accentChar = '→';
+        kind = 'vec_right';
       } else if (startsCommand(src, i, '\\widehat')) {
         cmd = '\\widehat';
-        accentChar = '^';
+        kind = 'hat';
       } else if (startsCommand(src, i, '\\hat')) {
         cmd = '\\hat';
-        accentChar = '^';
+        kind = 'hat';
       } else if (startsCommand(src, i, '\\overline')) {
         cmd = '\\overline';
-        accentChar = '¯';
+        kind = 'bar';
       } else if (startsCommand(src, i, '\\bar')) {
         cmd = '\\bar';
-        accentChar = '¯';
+        kind = 'bar';
       } else if (startsCommand(src, i, '\\widetilde')) {
         cmd = '\\widetilde';
-        accentChar = '~';
+        kind = 'tilde';
       } else if (startsCommand(src, i, '\\tilde')) {
         cmd = '\\tilde';
-        accentChar = '~';
+        kind = 'tilde';
       }
 
       i += cmd.length;
       const argG = readGroup(src, i);
       i = argG.nextIdx;
-      nodes.push(createMathAccent(accentChar, parseLatexNodes(argG.text)));
+      const innerNodes = parseLatexNodes(argG.text);
+
+      if (kind === 'bar') {
+        nodes.push(createMathBar('top', innerNodes));
+      } else if (kind === 'hat') {
+        // COMBINING CIRCUMFLEX ACCENT (U+0302) aligns & stretches properly in Cambria Math
+        nodes.push(createMathAccent('\u0302', innerNodes));
+      } else if (kind === 'tilde') {
+        // COMBINING TILDE (U+0303)
+        nodes.push(createMathAccent('\u0303', innerNodes));
+      } else {
+        // Vector arrows: single symbol uses <m:acc> with combining mark (U+20D7),
+        // multi-character vectors (\overrightarrow{AB}, \overrightarrow{AA'}) use stretchy <m:groupChr>
+        const isSingle = isSingleMathSymbolArg(argG.text);
+        if (isSingle) {
+          const combChr =
+            kind === 'vec_left' ? '\u20D6' : kind === 'vec_lr' ? '\u20E1' : '\u20D7';
+          nodes.push(createMathAccent(combChr, innerNodes));
+        } else {
+          const wideChr = kind === 'vec_left' ? '←' : kind === 'vec_lr' ? '↔' : '→';
+          nodes.push(createMathGroupChr(wideChr, 'top', 'bot', innerNodes));
+        }
+      }
       continue;
     }
 
-    // 8. Font / text wrappers with brace groups: \text{...}, \mathrm{...}, \mathbf{...}, \mathit{...}, \operatorname{...}
+    // 8. Font / blackboard-bold / text wrappers: \mathbb{R}, \text{...}, \mathrm{...}, \mathbf{...}, etc.
     if (
+      startsCommand(src, i, '\\mathbb') ||
+      startsCommand(src, i, '\\mathcal') ||
+      startsCommand(src, i, '\\mathfrak') ||
+      startsCommand(src, i, '\\mathsf') ||
+      startsCommand(src, i, '\\mathtt') ||
       startsCommand(src, i, '\\text') ||
       startsCommand(src, i, '\\mathrm') ||
       startsCommand(src, i, '\\mathbf') ||
       startsCommand(src, i, '\\mathit') ||
       startsCommand(src, i, '\\operatorname')
     ) {
-      const m = src.slice(i).match(/^\\(?:text|mathrm|mathbf|mathit|operatorname)/);
-      const cmdLen = m ? m[0].length : 5;
-      i += cmdLen;
+      const m = src.slice(i).match(/^\\(?:mathbb|mathcal|mathfrak|mathsf|mathtt|text|mathrm|mathbf|mathit|operatorname)/);
+      const cmdName = m ? m[0] : '\\text';
+      i += cmdName.length;
       const textG = readGroup(src, i);
       i = textG.nextIdx;
-      const cleanedText = cleanLatexSymbols(textG.text);
-      if (cleanedText) nodes.push(new MathRun(cleanedText));
+      if (cmdName === '\\mathbb') {
+        const mapped = textG.text
+          .trim()
+          .split('')
+          .map((c) => BLACKBOARD_BOLD_MAP[c] || c)
+          .join('');
+        if (mapped) nodes.push(new MathRun(mapped));
+      } else {
+        const cleanedText = cleanLatexSymbols(textG.text);
+        if (cleanedText) nodes.push(new MathRun(cleanedText));
+      }
+      continue;
+    }
+
+    // 8b. Literal escaped set braces & set difference: \{, \}, \setminus
+    if (src.startsWith('\\{', i)) {
+      nodes.push(new MathRun('{'));
+      i += 2;
+      continue;
+    }
+    if (src.startsWith('\\}', i)) {
+      nodes.push(new MathRun('}'));
+      i += 2;
+      continue;
+    }
+    if (startsCommand(src, i, '\\setminus') || startsCommand(src, i, '\\backslash')) {
+      i += startsCommand(src, i, '\\setminus') ? 9 : 10;
+      nodes.push(new MathRun(' ∖ '));
       continue;
     }
 
@@ -700,12 +958,18 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
 
     // 12. Regular symbols / identifiers / operators / numbers
     const start = i;
+    let handledSplitBeforeScript = false;
     while (i < src.length) {
       const ch = src[i];
       if (ch === '^' || ch === '_' || ch === '{') break;
       if (ch === '\\') {
         if (
           src.startsWith('\\begin{', i) ||
+          src.startsWith('\\{', i) ||
+          src.startsWith('\\}', i) ||
+          startsCommand(src, i, '\\left') ||
+          startsCommand(src, i, '\\setminus') ||
+          startsCommand(src, i, '\\backslash') ||
           startsCommand(src, i, '\\frac') ||
           startsCommand(src, i, '\\dfrac') ||
           startsCommand(src, i, '\\tfrac') ||
@@ -721,6 +985,8 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
           startsCommand(src, i, '\\prod') ||
           startsCommand(src, i, '\\lim') ||
           startsCommand(src, i, '\\overrightarrow') ||
+          startsCommand(src, i, '\\overleftarrow') ||
+          startsCommand(src, i, '\\overleftrightarrow') ||
           startsCommand(src, i, '\\vec') ||
           startsCommand(src, i, '\\widehat') ||
           startsCommand(src, i, '\\hat') ||
@@ -728,6 +994,11 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
           startsCommand(src, i, '\\bar') ||
           startsCommand(src, i, '\\widetilde') ||
           startsCommand(src, i, '\\tilde') ||
+          startsCommand(src, i, '\\mathbb') ||
+          startsCommand(src, i, '\\mathcal') ||
+          startsCommand(src, i, '\\mathfrak') ||
+          startsCommand(src, i, '\\mathsf') ||
+          startsCommand(src, i, '\\mathtt') ||
           startsCommand(src, i, '\\text') ||
           startsCommand(src, i, '\\mathrm') ||
           startsCommand(src, i, '\\mathbf') ||
@@ -739,17 +1010,17 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
         // Advance past this symbol command (\alpha, \le, \sin, etc.) cleanly so script attachment binds to the symbol
         let cmdEnd = i + 1;
         while (cmdEnd < src.length && /[a-zA-Z]/.test(src[cmdEnd])) cmdEnd++;
-        if (cmdEnd === i + 1 && cmdEnd < src.length) cmdEnd++; // escaped char like \{ or \,
+        if (cmdEnd === i + 1 && cmdEnd < src.length) cmdEnd++; // escaped char like \, or \%
         i = cmdEnd;
-        // Stop right before subscript/superscript/brace or keep accumulating unless followed by _/^
+        // Stop right before subscript/superscript/brace so the emitted symbol receives _ or ^
         if (src[i] === '^' || src[i] === '_') break;
       } else {
         // If next char is ^ or _, flush multi-char prefix so ONLY the last character/identifier becomes the base of ^ or _
         if ((src[i + 1] === '^' || src[i + 1] === '_') && i > start) {
-          // If accumulating letters of a variable/digit before script, split before current char
           const prevChunk = cleanLatexSymbols(src.slice(start, i));
           if (prevChunk) nodes.push(new MathRun(prevChunk));
           nodes.push(new MathRun(ch));
+          handledSplitBeforeScript = true;
           i++;
           break;
         }
@@ -758,9 +1029,8 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
     }
 
     if (i > start) {
-      const rawChunk = src.slice(start, i);
-      // If we just split single-char script base inside loop above, don't double-emit
-      if (!(rawChunk.length > 1 && (src[i] === '^' || src[i] === '_') && rawChunk.slice(-1) !== '}')) {
+      if (!handledSplitBeforeScript) {
+        const rawChunk = src.slice(start, i);
         const cleanChunk = cleanLatexSymbols(rawChunk);
         if (cleanChunk) {
           nodes.push(new MathRun(cleanChunk));
@@ -874,7 +1144,35 @@ function splitMixedLatexSegments(input: string): Array<{ type: 'math' | 'text'; 
  * Wraps isolated unwrapped LaTeX commands (supporting nested braces!) into $...$
  */
 function wrapUnwrappedLatexCommands(text: string): string {
-  const cmds = ['\\overrightarrow', '\\vec', '\\widehat', '\\hat', '\\overline', '\\bar', '\\dfrac', '\\frac', '\\binom', '\\sqrt'];
+  // First, wrap unwrapped math spans that combine \mathbb{R} \setminus \{...\} or similar set/relation chains
+  let normalized = text.replace(
+    /(?:\\mathbb\s*(?:\{[A-Za-z]+\}|[A-Z]))(?:\s*\\setminus\s*(?:\\\{[^}]*\\\}|\{[^}]*\}|[A-Za-z0-9-]+))?(?:[\^*_](?:\{[^}]+\}|[A-Za-z0-9+-]))?/g,
+    (m) => `$${m}$`
+  );
+
+  // Also wrap contiguous unwrapped expressions like x \in (-\infty; 1) or y \le 2 or A \cup B
+  const cmds = [
+    '\\overrightarrow',
+    '\\overleftarrow',
+    '\\overleftrightarrow',
+    '\\vec',
+    '\\widehat',
+    '\\hat',
+    '\\overline',
+    '\\bar',
+    '\\widetilde',
+    '\\tilde',
+    '\\dfrac',
+    '\\frac',
+    '\\tfrac',
+    '\\binom',
+    '\\sqrt',
+    '\\mathbb',
+    '\\mathcal',
+    '\\mathrm',
+    '\\mathbf',
+    '\\text',
+  ];
   let out = '';
   let i = 0;
 
@@ -902,26 +1200,59 @@ function wrapUnwrappedLatexCommands(text: string): string {
     return idx;
   };
 
-  while (i < text.length) {
-    const matchedCmd = cmds.find((c) => text.startsWith(c, i));
-    if (matchedCmd) {
-      const firstEnd = readBalancedBrace(text, i + matchedCmd.length);
-      if (firstEnd !== -1) {
-        let totalEnd = firstEnd;
-        if (matchedCmd === '\\frac' || matchedCmd === '\\dfrac' || matchedCmd === '\\binom') {
-          const secondEnd = readBalancedBrace(text, firstEnd);
-          if (secondEnd !== -1) totalEnd = secondEnd;
+  let inMath = false;
+  while (i < normalized.length) {
+    if (normalized[i] === '$' && normalized[i - 1] !== '\\') {
+      inMath = !inMath;
+      out += normalized[i];
+      i++;
+      continue;
+    }
+    if (!inMath) {
+      const matchedCmd = cmds.find(
+        (c) =>
+          normalized.startsWith(c, i) &&
+          (!normalized[i + c.length] || !/[a-zA-Z]/.test(normalized[i + c.length]))
+      );
+      if (matchedCmd) {
+        const firstEnd = readBalancedBrace(normalized, i + matchedCmd.length);
+        if (firstEnd !== -1) {
+          let totalEnd = firstEnd;
+          if (
+            matchedCmd === '\\frac' ||
+            matchedCmd === '\\dfrac' ||
+            matchedCmd === '\\tfrac' ||
+            matchedCmd === '\\binom'
+          ) {
+            const secondEnd = readBalancedBrace(normalized, firstEnd);
+            if (secondEnd !== -1) totalEnd = secondEnd;
+          }
+          out += `$${normalized.slice(i, totalEnd)}$`;
+          i = totalEnd;
+          continue;
         }
-        out += `$${text.slice(i, totalEnd)}$`;
-        i = totalEnd;
-        continue;
       }
     }
-    out += text[i];
+    out += normalized[i];
     i++;
   }
 
-  return out.replace(/([A-Z]{1,3}[']?[⃗\u20D7])/g, '$$$1$$');
+  // Wrap remaining unwrapped standalone LaTeX symbol commands outside $...$ (e.g. \infty, \setminus, \le, \ge, \ne, \in, \alpha..\omega)
+  const segments = splitMixedLatexSegments(out);
+  const processed = segments
+    .map((seg) => {
+      if (seg.type === 'math') return seg.value;
+      return seg.value
+        .replace(/\\\{([^}\\]*)\\\}/g, '$\\{$1\\}$')
+        .replace(
+          /\\(?:setminus|backslash|infty|le|leq|leqslant|ge|geq|geqslant|ne|neq|in|notin|subset|subseteq|cup|cap|emptyset|varnothing|forall|exists|Rightarrow|Leftrightarrow|to|rightarrow|pm|mp|times|cdot|approx|equiv|Delta|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|sigma|phi|varphi|omega)\b/g,
+          (tok) => `$${tok}$`
+        )
+        .replace(/([A-Za-z0-9]{1,3}[']?[⃗\u20D7])/g, '$$$1$$');
+    })
+    .join('');
+
+  return processed;
 }
 
 /**
@@ -943,17 +1274,25 @@ export function parseTextWithLatexToDocxRuns(
   const hasDelimiters = /(?<!\\)\$|\\\(|\\\[/.test(cleanInput);
   if (!hasDelimiters) {
     const isFormulaOnly =
-      /(\\vec|\\overrightarrow|\\widehat|\\hat|\\frac|\\dfrac|\\sqrt|\\int|\\sum|\\lim|[A-Za-z0-9']+⃗|[A-Za-z0-9']+\u20D7)/.test(
+      /(\\vec|\\overrightarrow|\\widehat|\\hat|\\frac|\\dfrac|\\tfrac|\\sqrt|\\int|\\sum|\\lim|\\mathbb|\\setminus|[A-Za-z0-9']+⃗|[A-Za-z0-9']+\u20D7)/.test(
         cleanInput
-      ) ||
-      (/^[a-zA-Z0-9\s()',.+\-*=/\\_^{}≤≥±∓×÷·|∈∉⊂⊆∪∩≠≈≡→⇒⇔∀∃α-ωΑ-Ω°]+$/.test(cleanInput) &&
-        /[=<>≤≥±∓×÷·^_\\∈∉⊂⊆∪∩≠]/.test(cleanInput));
+      ) && !/[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i.test(cleanInput);
 
-    if (isFormulaOnly) {
+    const isPureMathExpr =
+      /^[a-zA-Z0-9\s()',.+\-*=/\\_^{}≤≥±∓×÷·|∈∉⊂⊆∪∩≠≈≡→⇒⇔∀∃α-ωΑ-Ω°]+$/.test(cleanInput) &&
+      /[=<>≤≥±∓×÷·^_\\∈∉⊂⊆∪∩≠]/.test(cleanInput);
+
+    if (isFormulaOnly || isPureMathExpr) {
       cleanInput = `$${cleanInput}$`;
     } else {
       cleanInput = wrapUnwrappedLatexCommands(cleanInput);
     }
+  } else {
+    // Also clean any unwrapped tokens that happen to sit outside existing $...$ segments
+    const preSegs = splitMixedLatexSegments(cleanInput);
+    cleanInput = preSegs
+      .map((s) => (s.type === 'math' ? s.value : wrapUnwrappedLatexCommands(s.value)))
+      .join('');
   }
 
   const runs: (TextRun | DocxMath)[] = [];
@@ -979,8 +1318,11 @@ export function parseTextWithLatexToDocxRuns(
         );
       }
     } else {
-      // Handle escaped \$ and clean Markdown bold **...** & simple italics *...*
-      const cleanPlain = part.value.replace(/\\\$/g, '$');
+      // Handle escaped \$ and braces cleanly, clean Markdown bold **...** & simple italics *...*
+      const cleanPlain = part.value
+        .replace(/\\\$/g, '$')
+        .replace(/\\\{/g, '{')
+        .replace(/\\\}/g, '}');
       const boldSegments = cleanPlain.split(/(\*\*[\s\S]+?\*\*)/g);
       for (const seg of boldSegments) {
         if (!seg) continue;
@@ -1019,9 +1361,43 @@ export function parseTextWithLatexToDocxRuns(
 /**
  * Fallback OpenXML Table for Variation Table (used only if Canvas is unavailable e.g. headless Node)
  */
+/**
+ * Normalize SGK variation/sign row signs so critical points (0 or ||) sit directly under interior x columns.
+ */
+function normalizeSgkRowSignsDocx(rawSigns: string[], xCount: number): string[] {
+  const expectedSlots = Math.max(1, 2 * xCount - 3);
+  const signs = rawSigns.map((s) => String(s ?? '').trim());
+  if (signs.length === expectedSlots) return signs;
+
+  if (signs.length >= expectedSlots + 1) {
+    const startToken = signs[0];
+    const endToken = signs[signs.length - 1];
+    if (startToken === '0' || startToken === '||' || startToken === '|' || startToken === '') {
+      const sliced = signs.slice(1, 1 + expectedSlots);
+      if (sliced.length === expectedSlots) return sliced;
+    }
+    if (endToken === '0' || endToken === '||' || endToken === '|' || endToken === '') {
+      const sliced = signs.slice(0, expectedSlots);
+      if (sliced.length === expectedSlots) return sliced;
+    }
+  }
+
+  const out: string[] = [];
+  for (let i = 0; i < expectedSlots; i++) {
+    out.push(signs[i] ?? '');
+  }
+  return out;
+}
+
+/**
+ * Fallback OpenXML Table for Variation Table (used only if Canvas is unavailable e.g. headless Node)
+ */
 export function createDocxVariationTable(diagramData: any): Table {
   const xVals: string[] = diagramData?.x || ['-\\infty', '-1', '2', '+\\infty'];
-  const yPrimeVals: string[] = diagramData?.yPrime || ['+', '0', '-', '0', '+'];
+  const yPrimeVals: string[] = normalizeSgkRowSignsDocx(
+    diagramData?.yPrime || ['+', '0', '-', '0', '+'],
+    xVals.length
+  );
   const yArrows: any[] = diagramData?.yArrows || [
     { start: '-\\infty', end: '3', dir: 'up' },
     { start: '3', end: '-2', dir: 'down' },
@@ -1029,34 +1405,32 @@ export function createDocxVariationTable(diagramData: any): Table {
   ];
 
   const cellBorder = {
-    top: { style: BorderStyle.SINGLE, size: 4, color: '334155' },
-    bottom: { style: BorderStyle.SINGLE, size: 4, color: '334155' },
-    left: { style: BorderStyle.SINGLE, size: 4, color: '334155' },
-    right: { style: BorderStyle.SINGLE, size: 4, color: '334155' },
+    top: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    left: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    right: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
   };
 
   const xCells: TableCell[] = [
     new TableCell({
       width: { size: 1200, type: WidthType.DXA },
-      shading: { type: ShadingType.CLEAR, fill: 'F1F5F9' },
       verticalAlign: VerticalAlign.CENTER,
       borders: cellBorder,
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: 'x', font: 'Times New Roman', bold: true, italics: true, size: 24 })],
+          children: [new TextRun({ text: 'x', font: 'Times New Roman', bold: true, italics: true, size: 24, color: '0F172A' })],
         }),
       ],
     }),
     ...xVals.map((val) =>
       new TableCell({
-        shading: { type: ShadingType.CLEAR, fill: 'F8FAFC' },
         verticalAlign: VerticalAlign.CENTER,
         borders: cellBorder,
         children: [
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            children: parseTextWithLatexToDocxRuns(`$${val.replace(/^\$+|\$+$/g, '')}$`, { bold: true, size: 22 }),
+            children: parseTextWithLatexToDocxRuns(`$${val.replace(/^\$+|\$+$/g, '')}$`, { bold: false, size: 22, color: '0F172A' }),
           }),
         ],
       })
@@ -1066,25 +1440,24 @@ export function createDocxVariationTable(diagramData: any): Table {
   const yPrimeCells: TableCell[] = [
     new TableCell({
       width: { size: 1200, type: WidthType.DXA },
-      shading: { type: ShadingType.CLEAR, fill: 'F1F5F9' },
       verticalAlign: VerticalAlign.CENTER,
       borders: cellBorder,
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: "y'", font: 'Times New Roman', bold: true, italics: true, size: 24 })],
+          children: [new TextRun({ text: "y'", font: 'Times New Roman', bold: true, italics: true, size: 24, color: '0F172A' })],
         }),
       ],
     }),
-    ...yPrimeVals.slice(0, Math.max(xVals.length, yPrimeVals.length)).map((sign) => {
+    ...yPrimeVals.map((sign) => {
       const isAsymptote = sign.trim() === '||' || sign.trim() === '|';
       return new TableCell({
         verticalAlign: VerticalAlign.CENTER,
         borders: isAsymptote
           ? {
               ...cellBorder,
-              left: { style: BorderStyle.DOUBLE, size: 12, color: '0F172A' },
-              right: { style: BorderStyle.DOUBLE, size: 12, color: '0F172A' },
+              left: { style: BorderStyle.DOUBLE, size: 8, color: '0F172A' },
+              right: { style: BorderStyle.DOUBLE, size: 8, color: '0F172A' },
             }
           : cellBorder,
         children: [
@@ -1092,11 +1465,11 @@ export function createDocxVariationTable(diagramData: any): Table {
             alignment: AlignmentType.CENTER,
             children: [
               new TextRun({
-                text: sign,
+                text: isAsymptote ? '||' : sign,
                 font: 'Times New Roman',
-                bold: true,
-                color: sign === '+' ? 'DC2626' : sign === '-' ? '2563EB' : '0F172A',
-                size: 24,
+                bold: false,
+                color: '0F172A',
+                size: 23,
               }),
             ],
           }),
@@ -1108,13 +1481,12 @@ export function createDocxVariationTable(diagramData: any): Table {
   const yCells: TableCell[] = [
     new TableCell({
       width: { size: 1200, type: WidthType.DXA },
-      shading: { type: ShadingType.CLEAR, fill: 'F1F5F9' },
       verticalAlign: VerticalAlign.CENTER,
       borders: cellBorder,
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: 'y', font: 'Times New Roman', bold: true, italics: true, size: 24 })],
+          children: [new TextRun({ text: 'y', font: 'Times New Roman', bold: true, italics: true, size: 24, color: '0F172A' })],
         }),
       ],
     }),
@@ -1127,17 +1499,17 @@ export function createDocxVariationTable(diagramData: any): Table {
           new Paragraph({
             alignment: AlignmentType.CENTER,
             children: [
-              ...parseTextWithLatexToDocxRuns(`$${String(arr.start || '').replace(/^\$+|\$+$/g, '')}$`, { size: 22 }),
+              ...parseTextWithLatexToDocxRuns(`$${String(arr.start || '').replace(/^\$+|\$+$/g, '')}$`, { size: 22, color: '0F172A' }),
               new TextRun({
                 text: isUp ? ' ↗ ' : ' ↘ ',
                 font: 'Times New Roman',
                 bold: true,
-                color: isUp ? 'DC2626' : '2563EB',
+                color: '0F172A',
                 size: 24,
               }),
               ...parseTextWithLatexToDocxRuns(`$${String(arr.end || '').replace(/^\$+|\$+$/g, '')}$`, {
-                bold: true,
                 size: 22,
+                color: '0F172A',
               }),
             ],
           }),
@@ -1165,34 +1537,32 @@ export function createDocxSignTable(diagramData: any): Table {
   const rows: any[] = diagramData?.rows || [{ label: "f'(x)", signs: ['+', '0', '-', '0', '+'] }];
 
   const cellBorder = {
-    top: { style: BorderStyle.SINGLE, size: 4, color: '334155' },
-    bottom: { style: BorderStyle.SINGLE, size: 4, color: '334155' },
-    left: { style: BorderStyle.SINGLE, size: 4, color: '334155' },
-    right: { style: BorderStyle.SINGLE, size: 4, color: '334155' },
+    top: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    left: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    right: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
   };
 
   const xCells: TableCell[] = [
     new TableCell({
       width: { size: 1400, type: WidthType.DXA },
-      shading: { type: ShadingType.CLEAR, fill: 'F1F5F9' },
       verticalAlign: VerticalAlign.CENTER,
       borders: cellBorder,
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: 'x', font: 'Times New Roman', bold: true, italics: true, size: 24 })],
+          children: [new TextRun({ text: 'x', font: 'Times New Roman', bold: true, italics: true, size: 24, color: '0F172A' })],
         }),
       ],
     }),
     ...xVals.map((val) =>
       new TableCell({
-        shading: { type: ShadingType.CLEAR, fill: 'F8FAFC' },
         verticalAlign: VerticalAlign.CENTER,
         borders: cellBorder,
         children: [
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            children: parseTextWithLatexToDocxRuns(`$${val.replace(/^\$+|\$+$/g, '')}$`, { bold: true, size: 22 }),
+            children: parseTextWithLatexToDocxRuns(`$${val.replace(/^\$+|\$+$/g, '')}$`, { size: 22, color: '0F172A' }),
           }),
         ],
       })
@@ -1200,20 +1570,20 @@ export function createDocxSignTable(diagramData: any): Table {
   ];
 
   const dataRows: TableRow[] = rows.map((r) => {
+    const normalizedSigns = normalizeSgkRowSignsDocx(r.signs || [], xVals.length);
     const cells: TableCell[] = [
       new TableCell({
         width: { size: 1400, type: WidthType.DXA },
-        shading: { type: ShadingType.CLEAR, fill: 'F1F5F9' },
         verticalAlign: VerticalAlign.CENTER,
         borders: cellBorder,
         children: [
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            children: parseTextWithLatexToDocxRuns(r.label || "f'(x)", { bold: true, italics: true, size: 22 }),
+            children: parseTextWithLatexToDocxRuns(r.label || "f'(x)", { bold: true, italics: true, size: 22, color: '0F172A' }),
           }),
         ],
       }),
-      ...(r.signs || []).map((sign: string) =>
+      ...normalizedSigns.map((sign: string) =>
         new TableCell({
           verticalAlign: VerticalAlign.CENTER,
           borders: cellBorder,
@@ -1224,9 +1594,9 @@ export function createDocxSignTable(diagramData: any): Table {
                 new TextRun({
                   text: sign,
                   font: 'Times New Roman',
-                  bold: true,
-                  color: sign === '+' ? 'DC2626' : sign === '-' ? '2563EB' : '0F172A',
-                  size: 24,
+                  bold: false,
+                  color: '0F172A',
+                  size: 23,
                 }),
               ],
             }),
@@ -1246,17 +1616,17 @@ export function createDocxSignTable(diagramData: any): Table {
 
 /**
  * Publication-grade OpenXML Table for Statistics & Data Tables (Bảng thống kê, tần số, số liệu).
- * Supports full OMML math inside every header and data cell.
+ * Clean SGK black-and-white style with full OMML math inside every header and data cell.
  */
 export function createDocxDataTable(diagramData: any): Table {
   const headers: string[] = diagramData?.headers || ['Cột 1', 'Cột 2'];
   const rows: string[][] = diagramData?.tableRows || diagramData?.rows || [];
 
   const cellBorder = {
-    top: { style: BorderStyle.SINGLE, size: 6, color: '334155' },
-    bottom: { style: BorderStyle.SINGLE, size: 6, color: '334155' },
-    left: { style: BorderStyle.SINGLE, size: 6, color: '334155' },
-    right: { style: BorderStyle.SINGLE, size: 6, color: '334155' },
+    top: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    bottom: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    left: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
+    right: { style: BorderStyle.SINGLE, size: 6, color: '0F172A' },
   };
 
   const headerRow = new TableRow({
@@ -1264,7 +1634,6 @@ export function createDocxDataTable(diagramData: any): Table {
     children: headers.map(
       (h) =>
         new TableCell({
-          shading: { type: ShadingType.CLEAR, fill: 'E2E8F0' },
           verticalAlign: VerticalAlign.CENTER,
           borders: cellBorder,
           margins: { top: 80, bottom: 80, left: 100, right: 100 },
@@ -1278,18 +1647,17 @@ export function createDocxDataTable(diagramData: any): Table {
     ),
   });
 
-  const bodyRows = rows.map((row, rIdx) => {
+  const bodyRows = rows.map((row) => {
     const cells = headers.map((_, cIdx) => {
       const val = row[cIdx] !== undefined ? String(row[cIdx]) : '';
       return new TableCell({
-        shading: rIdx % 2 === 1 ? { type: ShadingType.CLEAR, fill: 'F8FAFC' } : undefined,
         verticalAlign: VerticalAlign.CENTER,
         borders: cellBorder,
         margins: { top: 60, bottom: 60, left: 100, right: 100 },
         children: [
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            children: parseTextWithLatexToDocxRuns(val, { size: 22, bold: cIdx === 0 }),
+            children: parseTextWithLatexToDocxRuns(val, { size: 22, bold: cIdx === 0, color: '0F172A' }),
           }),
         ],
       });
@@ -1411,7 +1779,6 @@ function createDocxTrueFalseTable(subStatements: any[]): Table {
   const statementRows: TableRow[] = (subStatements || []).map((sub: any) => {
     const label = sub.label || sub.key || 'a';
     const text = sub.statement || sub.text || '';
-    const isCorrect = typeof sub.correct === 'boolean' ? sub.correct : sub.isCorrect;
 
     return new TableRow({
       children: [
@@ -1443,11 +1810,11 @@ function createDocxTrueFalseTable(subStatements: any[]): Table {
               alignment: AlignmentType.CENTER,
               children: [
                 new TextRun({
-                  text: isCorrect === true ? '☑' : '☐',
+                  text: '☐',
                   font: 'Times New Roman',
-                  bold: true,
-                  size: 26,
-                  color: isCorrect === true ? '16A34A' : '94A3B8',
+                  bold: false,
+                  size: 24,
+                  color: '475569',
                 }),
               ],
             }),
@@ -1461,11 +1828,11 @@ function createDocxTrueFalseTable(subStatements: any[]): Table {
               alignment: AlignmentType.CENTER,
               children: [
                 new TextRun({
-                  text: isCorrect === false ? '☑' : '☐',
+                  text: '☐',
                   font: 'Times New Roman',
-                  bold: true,
-                  size: 26,
-                  color: isCorrect === false ? 'DC2626' : '94A3B8',
+                  bold: false,
+                  size: 24,
+                  color: '475569',
                 }),
               ],
             }),
@@ -1479,6 +1846,142 @@ function createDocxTrueFalseTable(subStatements: any[]): Table {
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [headerRow, ...statementRows],
   });
+}
+
+/**
+ * Estimates visual horizontal character width of an option (including LaTeX)
+ * to decide 4-column (1 row), 2-column (2 rows), or 1-column (4 rows) Word layout.
+ */
+function getOptionVisualLength(raw: string): { length: number; hasMultiLine: boolean } {
+  const s = (raw || '').trim();
+  const hasMultiLine =
+    /\n|\\begin\{(?:cases|pmatrix|bmatrix|vmatrix|aligned|array)\}|\\\\/.test(s);
+
+  let visual = s
+    .replace(/^\$+|\$+$/g, '')
+    .replace(/\\(?:frac|dfrac|tfrac)\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, (_, n, d) =>
+      n.length >= d.length ? n : d
+    )
+    .replace(/\\sqrt(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g, '√$1')
+    .replace(/\\mathbb\s*\{([A-Za-z]+)\}/g, '$1')
+    .replace(/\\(?:text|mathrm|mathbf|mathit|overrightarrow|vec|widehat|hat|overline|bar)\s*\{([^{}]*)\}/g, '$1')
+    .replace(/\\(?:infty|alpha|beta|gamma|delta|theta|lambda|pi|sigma|phi|varphi|omega|Delta|le|leq|ge|geq|ne|neq|in|notin|cup|cap|subset|emptyset|pm|times|cdot|setminus|to|rightarrow|Rightarrow|Leftrightarrow)/g, 'X')
+    .replace(/\\\{|\\\}|\\\(|\\\)|\\\[|\\\]/g, 'X')
+    .replace(/\\left|\\right|\\displaystyle|\\textstyle/g, '')
+    .replace(/\\([a-zA-Z]+)/g, '$1')
+    .replace(/[{}$]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return { length: visual.length, hasMultiLine };
+}
+
+/**
+ * Adaptive MCQ Options Layout:
+ * - Short (4 options, single-line, max <= 16 chars & total <= 58 chars) -> 4 columns on 1 row
+ * - Medium (single-line, max <= 38 chars) -> 2 columns per row
+ * - Long / multiline -> 1 option per line
+ */
+function buildDocxMcqOptionsElements(options: any[]): (Paragraph | Table)[] {
+  const normalized = options.map((opt: any, idx: number) => ({
+    key: (opt.key || String.fromCharCode(65 + idx)).toUpperCase(),
+    text: String(opt.text ?? ''),
+  }));
+
+  const metrics = normalized.map((o) => getOptionVisualLength(o.text));
+  const hasMultiLine = metrics.some((m) => m.hasMultiLine);
+  const maxLen = Math.max(...metrics.map((m) => m.length));
+  const totalLen = metrics.reduce((acc, m) => acc + m.length + 3, 0);
+
+  const noBorder = {
+    top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  };
+  const noTableBorders = {
+    ...noBorder,
+    insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  };
+
+  if (normalized.length === 4 && !hasMultiLine && maxLen <= 16 && totalLen <= 58) {
+    return [
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: noTableBorders,
+        rows: [
+          new TableRow({
+            children: normalized.map(
+              (o, cIdx) =>
+                new TableCell({
+                  width: { size: 25, type: WidthType.PERCENTAGE },
+                  borders: noBorder,
+                  margins: { top: 20, bottom: 30, left: cIdx === 0 ? 400 : 80, right: 80 },
+                  children: [
+                    new Paragraph({
+                      spacing: { after: 20 },
+                      children: [
+                        new TextRun({ text: `${o.key}. `, bold: true, font: 'Times New Roman', size: 23, color: '1E293B' }),
+                        ...parseTextWithLatexToDocxRuns(o.text, { size: 23 }),
+                      ],
+                    }),
+                  ],
+                })
+            ),
+          }),
+        ],
+      }),
+    ];
+  }
+
+  if (!hasMultiLine && maxLen <= 38 && normalized.length >= 2) {
+    const rows: TableRow[] = [];
+    for (let i = 0; i < normalized.length; i += 2) {
+      const pair = [normalized[i], normalized[i + 1]];
+      rows.push(
+        new TableRow({
+          children: pair.map((o, cIdx) =>
+            new TableCell({
+              width: { size: 50, type: WidthType.PERCENTAGE },
+              borders: noBorder,
+              margins: { top: 20, bottom: 30, left: cIdx === 0 ? 400 : 120, right: 80 },
+              children: o
+                ? [
+                    new Paragraph({
+                      spacing: { after: 20 },
+                      children: [
+                        new TextRun({ text: `${o.key}. `, bold: true, font: 'Times New Roman', size: 23, color: '1E293B' }),
+                        ...parseTextWithLatexToDocxRuns(o.text, { size: 23 }),
+                      ],
+                    }),
+                  ]
+                : [new Paragraph({ children: [] })],
+            })
+          ),
+        })
+      );
+    }
+    return [
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: noTableBorders,
+        rows,
+      }),
+    ];
+  }
+
+  return normalized.map(
+    (o) =>
+      new Paragraph({
+        indent: { left: 400 },
+        spacing: { after: 40 },
+        children: [
+          new TextRun({ text: `${o.key}. `, bold: true, font: 'Times New Roman', size: 23, color: '1E293B' }),
+          ...parseTextWithLatexToDocxRuns(o.text, { size: 23 }),
+        ],
+      })
+  );
 }
 
 /**
@@ -1515,31 +2018,12 @@ function resolveAndRenderQuestionContentAndDiagram(
       elements.push(new Paragraph({ spacing: { after: 100 }, children: [] }));
     }
   } else if (diagramType === 'data_table') {
-    if (diagramData.title) {
-      elements.push(
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          spacing: { before: 60, after: 40 },
-          children: [
-            new TextRun({
-              text: diagramData.title,
-              font: 'Times New Roman',
-              bold: true,
-              size: 22,
-              color: '1E3A8A',
-            }),
-          ],
-        })
-      );
-    }
     elements.push(createDocxDataTable(diagramData));
     elements.push(new Paragraph({ spacing: { after: 100 }, children: [] }));
   } else if (diagramType === 'function_graph') {
     const png = renderFunctionGraphPng(diagramData, q.question || '');
     if (png) {
-      elements.push(
-        ...createCenteredDiagramImageParagraph(png, 'Hình vẽ: Đồ thị hàm số trên hệ trục tọa độ Oxy')
-      );
+      elements.push(...createCenteredDiagramImageParagraph(png));
     } else {
       const graphEq = diagramData.latex || diagramData.equation || diagramData.fn || '';
       elements.push(
@@ -1547,9 +2031,9 @@ function resolveAndRenderQuestionContentAndDiagram(
           spacing: { before: 80, after: 80 },
           indent: { left: 400 },
           children: [
-            new TextRun({ text: '[Đồ thị hàm số: ', font: 'Times New Roman', italics: true, size: 22, color: '2563EB', bold: true }),
+            new TextRun({ text: '[Đồ thị hàm số: ', font: 'Times New Roman', italics: true, size: 22, color: '0F172A', bold: true }),
             ...parseTextWithLatexToDocxRuns(graphEq ? `$${graphEq}$` : '(chuẩn SGK)', { size: 22, bold: true }),
-            new TextRun({ text: ']', font: 'Times New Roman', italics: true, size: 22, color: '2563EB' }),
+            new TextRun({ text: ']', font: 'Times New Roman', italics: true, size: 22, color: '0F172A' }),
           ],
         })
       );
@@ -1759,20 +2243,7 @@ export function buildExamDocxDocument(params: {
       children.push(...diagramElements);
 
       if (Array.isArray(q.options) && q.options.length > 0) {
-        q.options.forEach((opt: any) => {
-          const key = (opt.key || '').toUpperCase();
-          const text = opt.text || '';
-          children.push(
-            new Paragraph({
-              indent: { left: 400 },
-              spacing: { after: 40 },
-              children: [
-                new TextRun({ text: `${key}. `, bold: true, font: 'Times New Roman', size: 23, color: '1E293B' }),
-                ...parseTextWithLatexToDocxRuns(text, { size: 23 }),
-              ],
-            })
-          );
-        });
+        children.push(...buildDocxMcqOptionsElements(q.options));
       }
 
       globalQuestionIndex++;
@@ -1983,7 +2454,9 @@ export function buildExamDocxDocument(params: {
   questions.forEach((q, idx) => {
     let answerText = q.correctAnswer || q.shortAnswerKey || '';
     if (q.partType === 'part_2_true_false' && Array.isArray(q.subStatements)) {
-      answerText = q.subStatements.map((s: any) => `${s.label || s.key || ''}: ${s.correct ? 'Đ' : 'S'}`).join(', ');
+      answerText = q.subStatements
+        .map((s: any) => `${s.label || s.key || ''}: ${s.correct === true || s.isCorrect === true ? 'Đ' : 'S'}`)
+        .join(', ');
     }
 
     children.push(
@@ -1991,7 +2464,8 @@ export function buildExamDocxDocument(params: {
         spacing: { before: 120, after: 40 },
         children: [
           new TextRun({ text: `Câu ${idx + 1}: `, bold: true, font: 'Times New Roman', size: 22, color: '0F172A' }),
-          new TextRun({ text: `Đáp án: ${answerText}`, bold: true, font: 'Times New Roman', size: 22, color: '16A34A' }),
+          new TextRun({ text: 'Đáp án: ', bold: true, font: 'Times New Roman', size: 22, color: '16A34A' }),
+          ...parseTextWithLatexToDocxRuns(String(answerText), { bold: true, color: '16A34A', size: 22 }),
         ],
       }),
       new Paragraph({

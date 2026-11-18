@@ -3,13 +3,40 @@ import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { StandardTextbookGraph } from './StandardTextbookGraph';
 import { PracticalMathIllustration, detectPracticalScenario, PracticalScenario } from './PracticalMathIllustration';
 import {
-  ArrowUpRight,
-  ArrowDownRight,
   Zap,
   Activity,
-  BarChart2,
-  Table,
 } from 'lucide-react';
+
+function normalizeSgkRowSigns(rawList: string[], xCount: number, fallbackDirs?: Array<{ dir?: string }>): { roots: string[]; intervals: string[] } {
+  const n = Math.max(2, xCount);
+  const list = Array.isArray(rawList) ? rawList.map((s) => (s ?? '').toString().trim()) : [];
+  const roots: string[] = [];
+  const intervals: string[] = [];
+
+  if (list.length === 2 * n - 3) {
+    for (let i = 0; i < n - 1; i++) {
+      intervals.push(list[i * 2] || (fallbackDirs?.[i]?.dir === 'up' ? '+' : '-'));
+    }
+    for (let i = 1; i < n - 1; i++) {
+      roots.push(list[i * 2 - 1] || '0');
+    }
+  } else if (list.length >= 2 * n - 2) {
+    for (let i = 0; i < n - 1; i++) {
+      intervals.push(list[i * 2 + 1] || list[i * 2] || (fallbackDirs?.[i]?.dir === 'up' ? '+' : '-'));
+    }
+    for (let i = 1; i < n - 1; i++) {
+      roots.push(list[i * 2] || '0');
+    }
+  } else {
+    for (let i = 0; i < n - 1; i++) {
+      intervals.push(list[i] || (fallbackDirs?.[i]?.dir === 'up' ? '+' : '-'));
+    }
+    for (let i = 1; i < n - 1; i++) {
+      roots.push('0');
+    }
+  }
+  return { roots, intervals };
+}
 
 export interface QuizDiagramData {
   // Variation table for math (Bảng biến thiên)
@@ -72,6 +99,7 @@ interface QuizRichContentRendererProps {
   diagramData?: QuizDiagramData;
   className?: string;
   textClassName?: string;
+  textStyle?: React.CSSProperties;
   isPresentationMode?: boolean;
 }
 
@@ -364,6 +392,7 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
   diagramData: initialData,
   className = '',
   textClassName = '',
+  textStyle,
   isPresentationMode = false,
 }) => {
   const parsed = parseEmbeddedDiagram(content);
@@ -374,7 +403,7 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
   return (
     <div className={`space-y-3.5 ${className}`}>
       {/* Primary Question Text with LaTeX KaTeX */}
-      <div className={`leading-relaxed ${textClassName}`}>
+      <div className={`leading-relaxed ${textClassName}`} style={textStyle}>
         <MathFormulaRenderer content={displayContent} className={textClassName} />
       </div>
 
@@ -390,7 +419,6 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
             const padPct = 7;
             const getXPos = (i: number) => padPct + (i * (100 - 2 * padPct)) / (n - 1);
 
-            // Raw or default arrows
             const rawArrows: { start: string; end: string; dir: 'up' | 'down' }[] =
               diagramData.yArrows && diagramData.yArrows.length > 0
                 ? diagramData.yArrows
@@ -400,7 +428,6 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                     { start: '-2', end: '+\\infty', dir: 'up' },
                   ];
 
-            // Determine elevations (high = 18%, low = 80%) for each x point
             const pointValues: { val: string; isHigh: boolean; isAsymptote?: boolean }[] = [];
             for (let i = 0; i < n; i++) {
               if (i === 0) {
@@ -413,21 +440,16 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
               }
             }
 
-            // Raw or default yPrime signs and zeros
             const yPrimeList = diagramData.yPrime || ['+', '0', '-', '0', '+'];
+            const { roots: yPrimeRoots, intervals: yPrimeIntervals } = normalizeSgkRowSigns(yPrimeList, n, rawArrows);
 
             return (
-              <div className="w-full max-w-xl bg-white rounded-xl border-2 border-slate-800 shadow-md p-3.5 font-serif text-xs">
-                <div className="text-xs font-sans font-extrabold text-slate-800 mb-2.5 text-center flex items-center justify-center gap-1.5 uppercase tracking-wide">
-                  <Table className="w-4 h-4 text-indigo-600" />
-                  <span>{diagramData.title || 'Bảng biến thiên của hàm số'}</span>
-                </div>
-
-                {/* Khung Bảng Chuẩn Mực SGK Việt Nam */}
-                <div className="border border-slate-900 rounded overflow-hidden select-none bg-white">
+              <div className="w-full max-w-xl bg-white rounded-lg p-2 font-serif text-xs">
+                {/* Khung Bảng Chuẩn Mực SGK Việt Nam (không tiêu đề thừa) */}
+                <div className="border-[1.5px] border-slate-900 overflow-hidden select-none bg-white">
                   {/* HÀNG 1: DÒNG BIẾN SỐ x */}
-                  <div className="flex border-b-2 border-slate-900 bg-slate-100">
-                    <div className="w-14 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r-2 border-slate-900 bg-slate-200/90 py-2 text-sm">
+                  <div className="flex border-b border-slate-900 bg-white">
+                    <div className="w-12 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r border-slate-900 bg-white py-2 text-sm">
                       x
                     </div>
                     <div className="relative flex-1 h-9 flex items-center">
@@ -444,22 +466,21 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                   </div>
 
                   {/* HÀNG 2: DÒNG ĐẠO HÀM y' HOẶC f'(x) */}
-                  <div className="flex border-b-2 border-slate-900 bg-white">
-                    <div className="w-14 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r-2 border-slate-900 bg-slate-100/90 py-2 text-sm">
+                  <div className="flex border-b border-slate-900 bg-white">
+                    <div className="w-12 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r border-slate-900 bg-white py-2 text-sm">
                       y'
                     </div>
                     <div className="relative flex-1 h-9 flex items-center">
-                      {/* Critical roots & asymptotes directly under critical x points */}
+                      {/* Nghiệm / vạch tiệm cận dưới các điểm x ở giữa */}
                       {xVals.map((_, idx) => {
                         if (idx === 0 || idx === n - 1) return null;
-                        // Find sign or 0 at this point
-                        const rootSign = yPrimeList[idx * 2] || '0';
+                        const rootSign = yPrimeRoots[idx - 1] || '0';
                         const isAsymptote = rootSign === '||' || rootSign === '|';
                         return (
                           <div
                             key={`root-${idx}`}
-                            className={`absolute -translate-x-1/2 font-bold text-xs ${
-                              isAsymptote ? 'text-slate-900 tracking-tighter font-mono' : 'text-slate-900'
+                            className={`absolute -translate-x-1/2 font-bold text-slate-900 ${
+                              isAsymptote ? 'text-sm tracking-tighter font-mono' : 'text-xs'
                             }`}
                             style={{ left: `${getXPos(idx)}%` }}
                           >
@@ -468,36 +489,29 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                         );
                       })}
 
-                      {/* Interval Signs centered between critical x points */}
-                      {rawArrows.map((_, idx) => {
-                        if (idx >= n - 1) return null;
+                      {/* Dấu đạo hàm nằm giữa các khoảng */}
+                      {Array.from({ length: n - 1 }).map((_, idx) => {
                         const midLeft = (getXPos(idx) + getXPos(idx + 1)) / 2;
-                        // Get sign from yPrimeList
-                        const sign = yPrimeList[idx * 2 + 1] || (rawArrows[idx]?.dir === 'up' ? '+' : '-');
-                        const isPlus = sign.includes('+');
-                        const isMinus = sign.includes('-');
+                        const sign = (yPrimeIntervals[idx] || '+').trim();
                         return (
                           <div
                             key={`sign-${idx}`}
-                            className={`absolute -translate-x-1/2 font-bold text-sm ${
-                              isPlus ? 'text-rose-600' : isMinus ? 'text-blue-600' : 'text-slate-800'
-                            }`}
+                            className="absolute -translate-x-1/2 font-bold text-sm text-slate-900"
                             style={{ left: `${midLeft}%` }}
                           >
-                            {sign.trim()}
+                            {sign}
                           </div>
                         );
                       })}
                     </div>
                   </div>
 
-                  {/* HÀNG 3: DÒNG HÀM SỐ y VỚI CÁC MỨC CAO/THẤP VÀ MŨI TÊN CHÉO SGK */}
+                  {/* HÀNG 3: DÒNG HÀM SỐ y VỚI MŨI TÊN CHÉO SGK */}
                   <div className="flex bg-white">
-                    <div className="w-14 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r-2 border-slate-900 bg-slate-100/90 text-sm">
+                    <div className="w-12 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r border-slate-900 bg-white text-sm">
                       y
                     </div>
                     <div className="relative flex-1 h-28 bg-white overflow-hidden">
-                      {/* SVG Canvas vẽ các mũi tên chéo biến thiên và vạch tiệm cận đứng kép */}
                       <svg
                         className="absolute inset-0 w-full h-full pointer-events-none"
                         viewBox="0 0 100 100"
@@ -513,13 +527,14 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                             markerHeight="6"
                             orient="auto"
                           >
-                            <path d="M 0 1 L 9 5 L 0 9 z" fill="#1e293b" />
+                            <path d="M 0 1 L 9 5 L 0 9 z" fill="#0f172a" />
                           </marker>
                         </defs>
 
                         {/* Tiệm cận đứng || kép nếu có */}
                         {xVals.map((_, idx) => {
-                          const rootSign = yPrimeList[idx * 2];
+                          if (idx === 0 || idx === n - 1) return null;
+                          const rootSign = yPrimeRoots[idx - 1];
                           if (rootSign === '||' || rootSign === '|') {
                             const xP = getXPos(idx);
                             return (
@@ -538,10 +553,8 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                           const x1 = getXPos(idx);
                           const x2 = getXPos(idx + 1);
                           const isUp = arr.dir === 'up';
-
-                          // Tránh đè lên text: start padding & end padding
-                          const startX = x1 + 3.5;
-                          const endX = x2 - 3.5;
+                          const startX = x1 + 4;
+                          const endX = x2 - 4;
                           const startY = isUp ? 76 : 24;
                           const endY = isUp ? 24 : 76;
 
@@ -552,17 +565,47 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                               y1={startY}
                               x2={endX}
                               y2={endY}
-                              stroke="#1e293b"
-                              strokeWidth="1.6"
+                              stroke="#0f172a"
+                              strokeWidth="1.4"
                               markerEnd="url(#sgkArrow)"
                             />
                           );
                         })}
                       </svg>
 
-                      {/* Các giá trị số cực trị / vô cùng tại vị trí Cao (đỉnh) hoặc Thấp (đáy) */}
+                      {/* Giá trị cực trị / vô cùng tại vị trí Cao (đỉnh) hoặc Thấp (đáy) */}
                       {pointValues.map((pt, idx) => {
                         const xPos = getXPos(idx);
+                        const rootSign = idx > 0 && idx < n - 1 ? yPrimeRoots[idx - 1] : '';
+                        const isAsym = rootSign === '||' || rootSign === '|';
+                        if (isAsym && idx > 0 && idx < n - 1) {
+                          const prevArr = rawArrows[idx - 1];
+                          const nextArr = rawArrows[idx];
+                          return (
+                            <React.Fragment key={`val-${idx}`}>
+                              {prevArr?.end && (
+                                <div
+                                  className={`absolute font-semibold text-slate-900 text-xs px-1 bg-white/95 rounded whitespace-nowrap z-10 ${
+                                    prevArr.dir === 'up' ? 'top-2' : 'bottom-2'
+                                  }`}
+                                  style={{ left: `${xPos - 2}%`, transform: 'translateX(-100%)' }}
+                                >
+                                  <MathFormulaRenderer content={prevArr.end.startsWith('$') ? prevArr.end : `$${prevArr.end}$`} />
+                                </div>
+                              )}
+                              {nextArr?.start && (
+                                <div
+                                  className={`absolute font-semibold text-slate-900 text-xs px-1 bg-white/95 rounded whitespace-nowrap z-10 ${
+                                    nextArr.dir === 'down' ? 'top-2' : 'bottom-2'
+                                  }`}
+                                  style={{ left: `${xPos + 2}%` }}
+                                >
+                                  <MathFormulaRenderer content={nextArr.start.startsWith('$') ? nextArr.start : `$${nextArr.start}$`} />
+                                </div>
+                              )}
+                            </React.Fragment>
+                          );
+                        }
                         return (
                           <div
                             key={`val-${idx}`}
@@ -585,74 +628,80 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
           {/* ========================================================= */}
           {/* 2. BẢNG XÉT DẤU CHUẨN SGK (Toán 10, 11 & 12)               */}
           {/* ========================================================= */}
-          {diagramType === 'sign_table' && (
-            <div className="w-full max-w-xl bg-white rounded-xl border-2 border-slate-700 shadow-md p-3.5 text-xs">
-              <div className="text-xs font-sans font-extrabold text-slate-800 mb-2.5 text-center flex items-center justify-center gap-1.5 uppercase tracking-wide">
-                <BarChart2 className="w-4 h-4 text-emerald-600" />
-                <span>{diagramData.title || 'Bảng xét dấu'}</span>
-              </div>
+          {diagramType === 'sign_table' && (() => {
+            const xVals: string[] = diagramData.x || ['-\\infty', '-2', '3', '+\\infty'];
+            const n = Math.max(2, xVals.length);
+            const padPct = 7;
+            const getXPos = (i: number) => padPct + (i * (100 - 2 * padPct)) / (n - 1);
+            const rows: Array<{ label: string; signs: string[] }> =
+              diagramData.rows || [{ label: "f'(x)", signs: ['+', '0', '-', '0', '+'] }];
 
-              <div className="border border-slate-800 rounded overflow-hidden">
-                <table className="w-full border-collapse border-slate-800 text-center font-sans">
-                  <tbody>
-                    {/* Hàng x */}
-                    <tr className="border-b-2 border-slate-800 bg-slate-100/90">
-                      <td className="w-20 py-2 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-200/80">
-                        x
-                      </td>
-                      {(diagramData.x || ['-\\infty', '-2', '3', '+\\infty']).map((val, i) => (
-                        <td key={i} className="py-2 px-3 font-semibold text-slate-900 border-r border-slate-300 last:border-r-0">
+            return (
+              <div className="w-full max-w-xl bg-white rounded-lg p-2 font-serif text-xs">
+                <div className="border-[1.5px] border-slate-900 overflow-hidden select-none bg-white">
+                  {/* Hàng x */}
+                  <div className="flex border-b border-slate-900 bg-white">
+                    <div className="w-16 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r border-slate-900 bg-white py-2 text-sm">
+                      x
+                    </div>
+                    <div className="relative flex-1 h-9 flex items-center">
+                      {xVals.map((val, idx) => (
+                        <div
+                          key={idx}
+                          className="absolute -translate-x-1/2 font-semibold text-slate-900 text-xs whitespace-nowrap"
+                          style={{ left: `${getXPos(idx)}%` }}
+                        >
                           <MathFormulaRenderer content={val.startsWith('$') ? val : `$${val}$`} />
-                        </td>
+                        </div>
                       ))}
-                    </tr>
+                    </div>
+                  </div>
 
-                    {/* Các hàng xét dấu: f'(x), f(x), v.v. */}
-                    {(
-                      diagramData.rows || [
-                        {
-                          label: "f'(x)",
-                          signs: ['+', '0', '-', '0', '+'],
-                        },
-                      ]
-                    ).map((row, rIdx) => (
-                      <tr key={rIdx} className="border-b border-slate-300 last:border-b-0 bg-white">
-                        <td className="w-20 py-2 px-3 font-bold italic text-slate-900 border-r-2 border-slate-800 bg-slate-100/80">
-                          {row.label}
-                        </td>
-                        {row.signs.map((sign, sIdx) => {
-                          const trimmed = sign.trim();
-                          const isPlus = trimmed === '+';
-                          const isMinus = trimmed === '-';
-                          const isZero = trimmed === '0';
-                          const isAsymptote = trimmed === '||' || trimmed === '|';
-
-                          return (
-                            <td
-                              key={sIdx}
-                              className={`py-2 px-3 font-bold text-sm border-r border-slate-300 last:border-r-0 ${
-                                isPlus
-                                  ? 'text-rose-600 bg-rose-50/30'
-                                  : isMinus
-                                  ? 'text-blue-600 bg-blue-50/30'
-                                  : isZero
-                                  ? 'text-slate-900'
-                                  : isAsymptote
-                                  ? 'text-slate-800 font-mono tracking-tighter'
-                                  : 'text-slate-700'
-                              }`}
-                            >
-                              {isAsymptote ? '||' : trimmed}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                  {/* Các hàng xét dấu */}
+                  {rows.map((row, rIdx) => {
+                    const { roots, intervals } = normalizeSgkRowSigns(row.signs || [], n);
+                    return (
+                      <div key={rIdx} className="flex border-b border-slate-900 last:border-b-0 bg-white">
+                        <div className="w-16 shrink-0 flex items-center justify-center font-bold italic text-slate-900 border-r border-slate-900 bg-white py-2 text-xs px-1">
+                          <MathFormulaRenderer content={row.label.includes('$') ? row.label : `$${row.label}$`} />
+                        </div>
+                        <div className="relative flex-1 h-9 flex items-center">
+                          {xVals.map((_, idx) => {
+                            if (idx === 0 || idx === n - 1) return null;
+                            const sym = roots[idx - 1] || '0';
+                            const isAsym = sym === '||' || sym === '|';
+                            return (
+                              <div
+                                key={`r-${idx}`}
+                                className={`absolute -translate-x-1/2 font-bold text-slate-900 ${
+                                  isAsym ? 'text-sm tracking-tighter font-mono' : 'text-xs'
+                                }`}
+                                style={{ left: `${getXPos(idx)}%` }}
+                              >
+                                {isAsym ? '||' : sym}
+                              </div>
+                            );
+                          })}
+                          {Array.from({ length: n - 1 }).map((_, idx) => {
+                            const midLeft = (getXPos(idx) + getXPos(idx + 1)) / 2;
+                            return (
+                              <div
+                                key={`s-${idx}`}
+                                className="absolute -translate-x-1/2 font-bold text-sm text-slate-900"
+                                style={{ left: `${midLeft}%` }}
+                              >
+                                {(intervals[idx] || '+').trim()}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ========================================================= */}
           {/* 3. ĐỒ THỊ HÀM SỐ CHUẨN SÁCH GIÁO KHOA (SVG NATIVE)       */}
@@ -912,17 +961,12 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
           {/* 7. BẢNG SỐ LIỆU THỐNG KÊ (Địa lý, Lịch sử, Sinh học)     */}
           {/* ========================================================= */}
           {diagramType === 'data_table' && diagramData.headers && (diagramData.tableRows || diagramData.rows) && (
-            <div className="w-full max-w-lg bg-white rounded-xl border border-slate-300 p-2.5 shadow-xs text-xs">
-              {diagramData.title && (
-                <div className="text-xs font-bold text-slate-800 mb-2 text-center">
-                  {diagramData.title}
-                </div>
-              )}
-              <table className="w-full border-collapse border border-slate-300 text-center">
+            <div className="w-full max-w-lg bg-white rounded-lg p-2 text-xs font-serif">
+              <table className="w-full border-collapse border-[1.5px] border-slate-900 text-center">
                 <thead>
-                  <tr className="bg-slate-100 border-b border-slate-300">
+                  <tr className="bg-white border-b border-slate-900">
                     {diagramData.headers.map((h, i) => (
-                      <th key={i} className="p-2 border-r border-slate-300 font-bold text-slate-700">
+                      <th key={i} className="p-2 border-r border-slate-900 last:border-r-0 font-bold text-slate-900">
                         <MathFormulaRenderer content={h} />
                       </th>
                     ))}
@@ -930,9 +974,9 @@ export const QuizRichContentRenderer: React.FC<QuizRichContentRendererProps> = (
                 </thead>
                 <tbody>
                   {(diagramData.tableRows || []).map((row: string[], rIdx: number) => (
-                    <tr key={rIdx} className="border-b border-slate-200 hover:bg-slate-50">
+                    <tr key={rIdx} className="border-b border-slate-900 last:border-b-0 bg-white">
                       {row.map((cell, cIdx) => (
-                        <td key={cIdx} className="p-1.5 border-r border-slate-200 text-slate-800">
+                        <td key={cIdx} className="p-1.5 border-r border-slate-900 last:border-r-0 text-slate-900">
                           <MathFormulaRenderer content={cell} />
                         </td>
                       ))}

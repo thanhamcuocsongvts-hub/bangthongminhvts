@@ -165,6 +165,26 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   // Fullscreen state
   const [isFullBoard, setIsFullBoard] = useState<boolean>(isInitialFullScreen);
 
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: isFullBoard } }));
+    return () => {
+      if (isFullBoard) {
+        window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: false } }));
+      }
+    };
+  }, [isFullBoard]);
+
+  useEffect(() => {
+    if (!isFullBoard) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsFullBoard(false);
+      }
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [isFullBoard]);
+
   // Background style
   const [bgTheme, setBgTheme] = useState<BlackboardBackground>('blackboard');
 
@@ -3290,7 +3310,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
       ref={containerRef}
       className={`relative w-full overflow-hidden transition-all duration-300 select-none flex ${
         isFullBoard
-          ? 'fixed inset-0 z-50 h-screen w-screen rounded-none'
+          ? 'fixed inset-0 z-[9990] h-dvh w-screen rounded-none'
           : 'h-full w-full min-h-[500px]'
       } ${getBackgroundClass()}`}
     >
