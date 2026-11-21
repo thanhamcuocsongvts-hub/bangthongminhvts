@@ -100,7 +100,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     { id: 'gradebook', label: 'Lớp Học', shortLabel: 'Lớp Học', icon: <Users className="w-4 h-4 text-blue-400" />, desc: 'Danh sách học sinh, điểm số, chuyên cần' },
     { id: 'documents', label: 'Lưu Trữ', shortLabel: 'Lưu Trữ', icon: <FolderOpen className="w-4 h-4 text-amber-400" />, desc: 'Kho Lưu Trữ & Đồng Bộ Cloud (PDF, Word, PPTX, Excel ≤ 25MB)' },
     { id: 'reader', label: 'Tài Liệu', shortLabel: 'Tài Liệu', icon: <BookOpen className="w-4 h-4 text-sky-400" />, desc: 'Đọc tài liệu gốc & trích xuất kiến thức AI' },
-    { id: 'quiz', label: 'Trắc Nghiệm', shortLabel: 'Trắc Nghiệm', icon: <CheckSquare className="w-4 h-4 text-emerald-400" />, desc: 'Làm bài thi trực tiếp, thống kê biểu đồ lớp' },
+    { id: 'quiz', label: 'Tạo Đề', shortLabel: 'Tạo Đề', icon: <CheckSquare className="w-4 h-4 text-emerald-400" />, desc: 'Tạo đề AI, giao bài về nhà, trình chiếu & phòng thi trực tiếp' },
     { id: 'games', label: 'Trò Chơi', shortLabel: 'Trò Chơi', icon: <Gamepad2 className="w-4 h-4 text-rose-400" />, desc: 'Game tương tác học tập, ôn luyện kiến thức' },
     { id: 'embed', label: 'Nhúng Web', shortLabel: 'Nhúng Web', icon: <Globe className="w-4 h-4 text-purple-400" />, desc: 'Video bài giảng YouTube & mô phỏng thí nghiệm' },
   ];

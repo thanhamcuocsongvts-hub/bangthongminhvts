@@ -5,9 +5,49 @@ service cloud.firestore {
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidHomeworkAssignment(data) {
+      return data.id is string && isValidId(data.id)
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 300
+        && data.subject is string && data.subject.size() <= 80
+        && data.grade is string && data.grade.size() <= 80
+        && data.teacherId is string && data.teacherId.size() > 0 && data.teacherId.size() <= 128
+        && data.teacherName is string && data.teacherName.size() > 0 && data.teacherName.size() <= 150
+        && data.mode in ['class', 'open_link']
+        && data.status in ['active', 'closed']
+        && data.questions is list && data.questions.size() > 0 && data.questions.size() <= 100
+        && data.durationMinutes is number && data.durationMinutes >= 0 && data.durationMinutes <= 300
+        && data.allowRetake is bool
+        && data.showAnswersAfterSubmit is bool
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidHomeworkSubmission(data, assignmentId) {
+      return data.id is string && isValidId(data.id)
+        && data.assignmentId == assignmentId
+        && data.studentAuthUid is string && data.studentAuthUid.size() > 0 && data.studentAuthUid.size() <= 128
+        && data.studentName is string && data.studentName.size() > 0 && data.studentName.size() <= 150
+        && data.attemptNumber is number && data.attemptNumber >= 1 && data.attemptNumber <= 100
+        && data.totalScore is number && data.totalScore >= 0 && data.totalScore <= 10
+        && data.correctCount is number && data.correctCount >= 0 && data.correctCount <= 100
+        && data.wrongCount is number && data.wrongCount >= 0 && data.wrongCount <= 100
+        && data.totalQuestions is number && data.totalQuestions > 0 && data.totalQuestions <= 100
+        && data.totalTimeSeconds is number && data.totalTimeSeconds >= 0 && data.totalTimeSeconds <= 86400
+        && data.questionDetails is list && data.questionDetails.size() <= 100
+        && data.activityLog is list && data.activityLog.size() <= 500
+        && data.startedAt is string && data.startedAt.size() <= 64
+        && data.submittedAt is string && data.submittedAt.size() <= 64;
+    }
+
+    // Connection check document for Firestore SDK health probe
+    match /test/connection {
+      allow read: if true;
+      allow write: if false;
     }
 
     // Collections for cross-device sync across classroom smartboards and teacher devices
@@ -35,6 +75,26 @@ service cloud.firestore {
     match /boardStates/{boardId} {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Homework Assignments & Student Submissions (Giao bài theo lớp hoặc link tự do)
+    match /homework_assignments/{assignmentId} {
+      allow get, list: if true;
+      allow create: if isValidId(assignmentId) && isValidHomeworkAssignment(request.resource.data);
+      allow update: if isValidId(assignmentId) && isValidHomeworkAssignment(request.resource.data);
+      allow delete: if isValidId(assignmentId);
+
+      match /submissions/{submissionId} {
+        allow get, list: if true;
+        allow create: if isValidId(submissionId) && isValidHomeworkSubmission(request.resource.data, assignmentId);
+        allow update: if isValidId(submissionId) && isValidHomeworkSubmission(request.resource.data, assignmentId);
+        allow delete: if isValidId(submissionId);
+      }
+    }
+
+    // Catch-all deny rule
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

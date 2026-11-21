@@ -410,7 +410,7 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
               className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
             >
               <CheckSquare className="w-4 h-4" />
-              <span>Thi Trắc Nghiệm ({lesson.quizzes.length})</span>
+              <span>Tạo Đề ({lesson.quizzes.length})</span>
             </button>
           )}
 
@@ -517,7 +517,7 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
             title="Tạo bộ câu hỏi trắc nghiệm theo phạm vi kiến thức yêu cầu"
           >
             <CheckSquare className="w-3.5 h-3.5 text-amber-600" />
-            <span>{isGeneratingQuiz ? 'Đang ra đề...' : 'Tạo Trắc Nghiệm'}</span>
+            <span>{isGeneratingQuiz ? 'Đang tạo đề...' : 'Tạo Đề'}</span>
           </button>
         </div>
       </div>

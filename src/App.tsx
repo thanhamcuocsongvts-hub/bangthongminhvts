@@ -38,6 +38,7 @@ import { CasioCalculatorModal } from './components/CasioCalculatorModal';
 import { StepByStepConstructionModal } from './components/StepByStepConstructionModal';
 import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
+import { StudentHomeworkPortal } from './components/StudentHomeworkPortal';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadLessonsFromDB, saveLessonsToDB, forceSyncLessonsToCloud, forcePullLessonsFromCloud, deleteLessonFromStorage } from './utils/storageUtils';
 import { pullSavedQuizzesFromCloud } from './utils/savedQuizzesService';
@@ -60,6 +61,11 @@ export default function App() {
   const [studentRoomPin, setStudentRoomPin] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('room') || '758899';
+  });
+
+  const [homeworkIdParam, setHomeworkIdParam] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('homework') || params.get('hw') || '';
   });
 
   const syncTeachersToCloud = async (newTeachers: any[], immediate: boolean = false) => {
@@ -1162,6 +1168,22 @@ export default function App() {
     });
   };
 
+  // Direct link access to Student Homework Portal (?homework=<assignmentId>)
+  if (homeworkIdParam) {
+    return (
+      <StudentHomeworkPortal
+        assignmentId={homeworkIdParam}
+        onExit={() => {
+          setHomeworkIdParam('');
+          const url = new URL(window.location.href);
+          url.searchParams.delete('homework');
+          url.searchParams.delete('hw');
+          window.history.pushState({}, '', url.toString());
+        }}
+      />
+    );
+  }
+
   // Switch to student mobile portal
   if (isStudentMode) {
     return (
@@ -2079,7 +2101,7 @@ export default function App() {
             { id: 'whiteboard' as ActiveTab, label: 'Bảng Viết', icon: <PenTool className="w-5 h-5" />, activeColor: 'text-emerald-600' },
             { id: 'documents' as ActiveTab, label: 'Lưu Trữ', icon: <FolderOpen className="w-5 h-5" />, activeColor: 'text-amber-600' },
             { id: 'gradebook' as ActiveTab, label: 'Lớp Học', icon: <Users className="w-5 h-5" />, activeColor: 'text-blue-600' },
-            { id: 'quiz' as ActiveTab, label: 'Trắc Nghiệm', icon: <CheckSquare className="w-5 h-5" />, activeColor: 'text-orange-500' },
+            { id: 'quiz' as ActiveTab, label: 'Tạo Đề', icon: <CheckSquare className="w-5 h-5" />, activeColor: 'text-orange-500' },
           ].map((item) => {
             const isActive = activeTab === item.id || (item.id === 'documents' && activeTab === 'reader');
             return (

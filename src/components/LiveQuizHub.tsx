@@ -62,6 +62,8 @@ import {
   LayoutTemplate,
   Sun,
   Moon,
+  Send,
+  ClipboardList,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
@@ -74,6 +76,10 @@ import { QuizQuestion, RoomState, StudentSubmission, TextScale, ActiveStudent, C
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
+import { HomeworkAssignModal } from './HomeworkAssignModal';
+import { HomeworkTrackerView } from './HomeworkTrackerView';
+import { StudentHomeworkPortal } from './StudentHomeworkPortal';
+import { subscribeHomeworkAssignments } from '../utils/homeworkService';
 import { directFastMatrixQuiz, getGeminiApiKey, saveGeminiApiKey, isGeminiConfigured } from '../utils/geminiClient';
 import {
   getSpeechSpeedMultiplier,
@@ -945,8 +951,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   classroom,
   teacher,
 }) => {
-  // Mode: Default to 'creator' or switch to 'live', 'presentation', 'exam', or 'analytics' (Biểu đồ phân tích)
-  const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'presentation' | 'exam' | 'analytics'>('creator');
+  // Mode: Default to 'creator' or switch to 'live', 'presentation', 'exam', 'analytics', or 'homework'
+  const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'presentation' | 'exam' | 'analytics' | 'homework'>('creator');
 
   // Presentation Mode & Gọi học sinh lên bảng State
   const [boardSelectedStudent, setBoardSelectedStudent] = useState<string>('');
@@ -1204,6 +1210,21 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [saveQuizNotes, setSaveQuizNotes] = useState<string>('');
   const [savedQuizSearch, setSavedQuizSearch] = useState<string>('');
   const [quizToast, setQuizToast] = useState<string | null>(null);
+
+  // Homework Assignment & Tracking State
+  const [showHomeworkAssignModal, setShowHomeworkAssignModal] = useState<boolean>(false);
+  const [homeworkCustomTitle, setHomeworkCustomTitle] = useState<string>('');
+  const [homeworkCustomQuestions, setHomeworkCustomQuestions] = useState<QuizQuestion[] | null>(null);
+  const [selectedHomeworkTrackerId, setSelectedHomeworkTrackerId] = useState<string>('');
+  const [homeworkAssignmentsCount, setHomeworkAssignmentsCount] = useState<number>(0);
+  const [previewHomeworkId, setPreviewHomeworkId] = useState<string>('');
+
+  useEffect(() => {
+    const unsub = subscribeHomeworkAssignments(teacher?.id, (list) => {
+      setHomeworkAssignmentsCount(list.length);
+    });
+    return () => unsub();
+  }, [teacher?.id]);
 
   // Tự động đồng bộ thời gian thực cho Kho Đề Đã Lưu giữa PC và Điện thoại
   useEffect(() => {
@@ -2683,6 +2704,24 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               <BarChart3 className="w-4 h-4 text-teal-300" />
               <span>Biểu Đồ Phân Tích</span>
             </button>
+
+            <button
+              id="homework-mode-nav-btn"
+              onClick={() => setActiveMode('homework')}
+              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeMode === 'homework'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <ClipboardList className="w-4 h-4 text-emerald-300" />
+              <span>Giao Bài &amp; Chấm Điểm</span>
+              {homeworkAssignmentsCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-800 text-[11px] text-emerald-100 tabular-nums">
+                  {homeworkAssignmentsCount}
+                </span>
+              )}
+            </button>
           </div>
 
           <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pl-2">
@@ -2734,14 +2773,30 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
           )}
 
           {activeMode === 'creator' && generatedQuestions.length > 0 && (
-            <button
-              onClick={handleDeployToStudents}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-black flex items-center gap-2 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer active:scale-95"
-            >
-              <Play className="w-4 h-4" />
-              <span>Phát Đề Cho Học Sinh ({generatedQuestions.length} câu)</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setHomeworkCustomQuestions(null);
+                  setHomeworkCustomTitle('');
+                  setShowHomeworkAssignModal(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+                title="Giao đề này cho học sinh về nhà làm theo lớp hoặc qua đường link tự do"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Giao Bài Về Nhà</span>
+              </button>
+
+              <button
+                onClick={handleDeployToStudents}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-black flex items-center gap-2 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer active:scale-95"
+              >
+                <Play className="w-4 h-4" />
+                <span>Phát Đề Cho Học Sinh ({generatedQuestions.length} câu)</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </>
           )}
 
           {activeMode === 'live' && (
@@ -2829,7 +2884,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 <span>BÓC TÁCH MA TRẬN & SOẠN ĐỀ AI SIÊU TỐC</span>
               </div>
               <h2 className="text-xl font-black text-slate-900 leading-snug">
-                Tạo Đề Trắc Nghiệm Tự Động
+                Tạo Đề Tự Động
               </h2>
               <p className="text-xs text-slate-500 mt-1">
                 Nhập yêu cầu hoặc tải lên ma trận đề (Ảnh chụp, PDF, Word). AI sẽ bóc tách và tạo câu hỏi chuẩn hóa trong vòng 2-3 giây.
@@ -3161,7 +3216,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               <div className="flex items-center gap-3">
                 <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-indigo-600" />
-                  <span>Bộ Câu Hỏi Trắc Nghiệm Đã Tạo</span>
+                  <span>Bộ Câu Hỏi Đã Tạo</span>
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-xs font-extrabold font-mono">
                   {generatedQuestions.length} câu
@@ -3169,11 +3224,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               </div>
 
               {generatedQuestions.length > 0 && (
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={handleExportToWordDocx}
                     disabled={isExportingDocx}
-                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                    className="px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                     title="Xuất đề thi ra tệp Word (.docx) chuẩn OMML không dùng markdown"
                   >
                     <FileText className="w-4 h-4 text-white" />
@@ -3181,11 +3236,25 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   </button>
 
                   <button
+                    type="button"
+                    onClick={() => {
+                      setHomeworkCustomQuestions(null);
+                      setHomeworkCustomTitle('');
+                      setShowHomeworkAssignModal(true);
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-md shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                    title="Giao bài tập về nhà theo lớp hoặc gửi link làm tự do"
+                  >
+                    <Send className="w-4 h-4 text-white" />
+                    <span>GIAO BÀI VỀ NHÀ</span>
+                  </button>
+
+                  <button
                     onClick={handleDeployToStudents}
-                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                   >
                     <Play className="w-4 h-4 text-white" />
-                    <span>PHÁT ĐỀ CHO HỌC SINH THI NGAY</span>
+                    <span>THI TRỰC TIẾP</span>
                   </button>
                 </div>
               )}
@@ -5873,6 +5942,21 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         </div>
       )}
 
+      {/* Homework Assignment & Student Process Tracking Mode */}
+      {activeMode === 'homework' && (
+        <HomeworkTrackerView
+          teacherId={teacher?.id || 'teacher_default'}
+          initialAssignmentId={selectedHomeworkTrackerId}
+          canCreateNew={(generatedQuestions.length > 0 ? generatedQuestions : questions).length > 0}
+          onCreateNewAssignment={() => {
+            setHomeworkCustomQuestions(null);
+            setHomeworkCustomTitle('');
+            setShowHomeworkAssignModal(true);
+          }}
+          onPreviewStudent={(hwId) => setPreviewHomeworkId(hwId)}
+        />
+      )}
+
       {/* QR Code Modal for Student Mobile Join */}
       {showQRModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -6186,6 +6270,54 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Modal: Giao Bài Tập Về Nhà (Theo Lớp hoặc Theo Link Tự Do) */}
+      <HomeworkAssignModal
+        isOpen={showHomeworkAssignModal}
+        onClose={() => setShowHomeworkAssignModal(false)}
+        questions={
+          homeworkCustomQuestions && homeworkCustomQuestions.length > 0
+            ? homeworkCustomQuestions
+            : generatedQuestions.length > 0
+            ? generatedQuestions
+            : questions
+        }
+        defaultTitle={
+          homeworkCustomTitle ||
+          activeQuizTitle ||
+          promptTopic ||
+          currentLesson?.title ||
+          `Bài tập về nhà ${selectedSubject}`
+        }
+        subject={selectedSubject}
+        grade={selectedGrade}
+        teacherId={teacher?.id || 'teacher_default'}
+        teacherName={teacher?.name || 'Giáo viên'}
+        teacherClasses={teacherClasses}
+        defaultClassId={selectedCallingClassId}
+        onCreated={(assignment) => {
+          setSelectedHomeworkTrackerId(assignment.id);
+        }}
+        onOpenTracker={(hwId) => {
+          setSelectedHomeworkTrackerId(hwId);
+          setActiveMode('homework');
+        }}
+        onPreviewStudent={(hwId) => {
+          setShowHomeworkAssignModal(false);
+          setPreviewHomeworkId(hwId);
+        }}
+      />
+
+      {/* Overlay Preview: Giao diện Học Sinh làm bài về nhà */}
+      {previewHomeworkId && (
+        <div className="fixed inset-0 z-[120] bg-[#F8FAFC] overflow-y-auto">
+          <StudentHomeworkPortal
+            assignmentId={previewHomeworkId}
+            isTeacherPreview={true}
+            onExit={() => setPreviewHomeworkId('')}
+          />
         </div>
       )}
 

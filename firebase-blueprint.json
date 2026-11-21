@@ -59,6 +59,57 @@
         { "name": "storagePath", "type": "string" }
       ],
       "rules": "Users can read and write lecture files and metadata."
+    },
+    {
+      "name": "homework_assignments",
+      "document_id": "assignmentId",
+      "fields": [
+        { "name": "id", "type": "string" },
+        { "name": "code", "type": "string" },
+        { "name": "title", "type": "string" },
+        { "name": "subject", "type": "string" },
+        { "name": "grade", "type": "string" },
+        { "name": "teacherId", "type": "string" },
+        { "name": "teacherName", "type": "string" },
+        { "name": "mode", "type": "string" },
+        { "name": "classId", "type": "string" },
+        { "name": "className", "type": "string" },
+        { "name": "classRoster", "type": "array" },
+        { "name": "questions", "type": "array" },
+        { "name": "durationMinutes", "type": "number" },
+        { "name": "allowRetake", "type": "boolean" },
+        { "name": "showAnswersAfterSubmit", "type": "boolean" },
+        { "name": "dueDate", "type": "string" },
+        { "name": "note", "type": "string" },
+        { "name": "status", "type": "string" },
+        { "name": "createdAt", "type": "string" },
+        { "name": "updatedAt", "type": "string" }
+      ],
+      "rules": "Authenticated devices (including anonymous students via shared link) can read active homework assignments; teachers create, update, and delete assignments."
+    },
+    {
+      "name": "homework_assignments/{assignmentId}/submissions",
+      "document_id": "submissionId",
+      "fields": [
+        { "name": "id", "type": "string" },
+        { "name": "assignmentId", "type": "string" },
+        { "name": "studentAuthUid", "type": "string" },
+        { "name": "studentRosterId", "type": "string" },
+        { "name": "studentName", "type": "string" },
+        { "name": "studentClassName", "type": "string" },
+        { "name": "attemptNumber", "type": "number" },
+        { "name": "answers", "type": "map" },
+        { "name": "questionDetails", "type": "array" },
+        { "name": "totalScore", "type": "number" },
+        { "name": "correctCount", "type": "number" },
+        { "name": "wrongCount", "type": "number" },
+        { "name": "totalQuestions", "type": "number" },
+        { "name": "startedAt", "type": "string" },
+        { "name": "submittedAt", "type": "string" },
+        { "name": "totalTimeSeconds", "type": "number" },
+        { "name": "activityLog", "type": "array" }
+      ],
+      "rules": "Students submit their homework attempts and process telemetry; teachers read all submissions for grading and analytics."
     }
   ]
 }

@@ -354,3 +354,87 @@ export interface ExtractedDocSummary {
   discussionQuestions: string[];
 }
 
+export type HomeworkAssignMode = 'class' | 'open_link';
+
+export interface HomeworkRosterStudent {
+  id: string;
+  name: string;
+  code?: string;
+}
+
+export interface HomeworkAssignment {
+  id: string;
+  code: string;
+  title: string;
+  subject: string;
+  grade: string;
+  teacherId: string;
+  teacherName: string;
+  mode: HomeworkAssignMode;
+  classId?: string;
+  className?: string;
+  classRoster?: HomeworkRosterStudent[];
+  questions: QuizQuestion[];
+  durationMinutes: number; // 0 = không giới hạn thời gian
+  allowRetake: boolean;
+  showAnswersAfterSubmit: boolean;
+  dueDate?: string;
+  note?: string;
+  status: 'active' | 'closed';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HomeworkSubStatementResult {
+  label: string;
+  text: string;
+  studentChoice: boolean | null;
+  correctChoice: boolean;
+  isCorrect: boolean;
+}
+
+export interface HomeworkQuestionDetail {
+  questionId: string;
+  questionIndex: number;
+  partType: 'part_1_choice' | 'part_2_true_false' | 'part_3_short_answer' | 'part_4_essay';
+  isCorrect: boolean;
+  isPartiallyCorrect?: boolean;
+  scoreEarned: number;
+  maxScore: number;
+  selectedDisplay: string;
+  correctDisplay: string;
+  subResults?: HomeworkSubStatementResult[];
+  timeSpentSeconds: number;
+  changeCount: number;
+  answeredAt?: string;
+}
+
+export interface HomeworkActivityEvent {
+  timestamp: string;
+  elapsedSeconds: number;
+  type: 'start' | 'view_question' | 'answer' | 'change_answer' | 'submit';
+  questionIndex?: number;
+  detail: string;
+}
+
+export interface HomeworkSubmission {
+  id: string;
+  assignmentId: string;
+  studentAuthUid: string;
+  studentRosterId?: string;
+  studentName: string;
+  studentClassName?: string;
+  attemptNumber: number;
+  answers: Record<string, any>;
+  questionDetails: HomeworkQuestionDetail[];
+  totalScore: number; // 0 - 10 scale
+  correctCount: number;
+  wrongCount: number;
+  totalQuestions: number;
+  startedAt: string;
+  submittedAt: string;
+  totalTimeSeconds: number;
+  activityLog: HomeworkActivityEvent[];
+}
+
+
