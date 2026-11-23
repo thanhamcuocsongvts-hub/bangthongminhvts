@@ -79,13 +79,18 @@
         { "name": "durationMinutes", "type": "number" },
         { "name": "allowRetake", "type": "boolean" },
         { "name": "showAnswersAfterSubmit", "type": "boolean" },
+        { "name": "antiCheatMode", "type": "string" },
+        { "name": "shuffleQuestions", "type": "boolean" },
+        { "name": "shuffleOptions", "type": "boolean" },
+        { "name": "variantCount", "type": "number" },
+        { "name": "variants", "type": "array" },
         { "name": "dueDate", "type": "string" },
         { "name": "note", "type": "string" },
         { "name": "status", "type": "string" },
         { "name": "createdAt", "type": "string" },
         { "name": "updatedAt", "type": "string" }
       ],
-      "rules": "Authenticated devices (including anonymous students via shared link) can read active homework assignments; teachers create, update, and delete assignments."
+      "rules": "Anyone with a valid assignment ID link can read active online exam assignments; teachers create, update, and delete assignments with strict schema validation."
     },
     {
       "name": "homework_assignments/{assignmentId}/submissions",
@@ -97,6 +102,9 @@
         { "name": "studentRosterId", "type": "string" },
         { "name": "studentName", "type": "string" },
         { "name": "studentClassName", "type": "string" },
+        { "name": "variantCode", "type": "string" },
+        { "name": "variantLabel", "type": "string" },
+        { "name": "shuffleSeed", "type": "number" },
         { "name": "attemptNumber", "type": "number" },
         { "name": "answers", "type": "map" },
         { "name": "questionDetails", "type": "array" },
@@ -109,7 +117,17 @@
         { "name": "totalTimeSeconds", "type": "number" },
         { "name": "activityLog", "type": "array" }
       ],
-      "rules": "Students submit their homework attempts and process telemetry; teachers read all submissions for grading and analytics."
+      "rules": "Students accessing a valid assignment link can submit validated exam attempts and process telemetry; teachers read submissions for grading and analytics."
+    },
+    {
+      "name": "teacher_saved_quizzes",
+      "document_id": "teacherId",
+      "fields": [
+        { "name": "teacherId", "type": "string" },
+        { "name": "items", "type": "array" },
+        { "name": "updatedAt", "type": "string" }
+      ],
+      "rules": "Per-teacher private saved quiz & game bank; no collection listing permitted."
     }
   ]
 }

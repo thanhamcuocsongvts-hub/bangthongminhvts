@@ -356,6 +356,15 @@ export interface ExtractedDocSummary {
 
 export type HomeworkAssignMode = 'class' | 'open_link';
 
+export type OnlineExamAntiCheatMode = 'none' | 'shuffle_original' | 'variants_and_shuffle';
+
+export interface OnlineExamVariant {
+  id: string;
+  code: string; // e.g., '101', '102', '103'
+  label: string; // e.g., 'Mã đề 101'
+  questions: QuizQuestion[];
+}
+
 export interface HomeworkRosterStudent {
   id: string;
   name: string;
@@ -378,6 +387,11 @@ export interface HomeworkAssignment {
   durationMinutes: number; // 0 = không giới hạn thời gian
   allowRetake: boolean;
   showAnswersAfterSubmit: boolean;
+  antiCheatMode?: OnlineExamAntiCheatMode;
+  shuffleQuestions?: boolean;
+  shuffleOptions?: boolean;
+  variantCount?: number;
+  variants?: OnlineExamVariant[];
   dueDate?: string;
   note?: string;
   status: 'active' | 'closed';
@@ -424,6 +438,9 @@ export interface HomeworkSubmission {
   studentRosterId?: string;
   studentName: string;
   studentClassName?: string;
+  variantCode?: string;
+  variantLabel?: string;
+  shuffleSeed?: number;
   attemptNumber: number;
   answers: Record<string, any>;
   questionDetails: HomeworkQuestionDetail[];
@@ -436,5 +453,3 @@ export interface HomeworkSubmission {
   totalTimeSeconds: number;
   activityLog: HomeworkActivityEvent[];
 }
-
-

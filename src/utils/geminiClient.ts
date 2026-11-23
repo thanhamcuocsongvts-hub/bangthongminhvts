@@ -1,5 +1,6 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { QuizQuestion } from '../types';
+import { balanceQuizAnswerDistribution } from './quizDistribution';
 
 /**
  * Retrieve Gemini API Key from multiple sources:
@@ -343,8 +344,8 @@ Môn học: ${subject}, Khối lớp: ${grade}, Mức độ: ${difficulty}.
 
 YÊU CẦU ĐẶC BIỆT & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
 1. Mỗi câu hỏi gồm đúng 4 lựa chọn (A, B, C, D).
-2. Đáp án đúng correctAnswer phải là một trong các chữ cái: "A", "B", "C", "D".
-3. Có phần giải thích chi tiết, sư phạm, chuẩn xác.
+2. Đáp án đúng correctAnswer phải là một trong các chữ cái: "A", "B", "C", "D". PHẢI PHÂN BỔ ĐỀU các đáp án đúng A, B, C, D giữa các câu (tuyệt đối KHÔNG dồn toàn bộ vào A hay một chữ cái cố định).
+3. Có phần giải thích chi tiết, sư phạm, chuẩn xác (tập trung giải thích giá trị/công thức đúng, không ghi cứng "Đáp án A đúng").
 4. MỌI CÔNG THỨC TOÁN, LÝ, HÓA, BIỂU THỨC BẮT BUỘC BỌC TRONG CẶP DẤU $...$ (ví dụ: $x^2 + 2x - 3 = 0$, $y = f(x)$).
 5. ĐẶC BIỆT VỚI KÝ HIỆU VÉC-TƠ:
    - BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (KHÔNG dùng \\vec{AB} vì mũi tên không bao phủ hết hai chữ cái; KHÔNG tự ghép ký tự unicode mũi tên rời).
@@ -360,8 +361,8 @@ YÊU CẦU ĐẶC BIỆT & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
       { "key": "C", "text": "Phương án C" },
       { "key": "D", "text": "Phương án D" }
     ],
-    "correctAnswer": "A",
-    "explanation": "Giải thích chi tiết vì sao A đúng...",
+    "correctAnswer": "C",
+    "explanation": "Giải thích chi tiết công thức/kết quả đúng...",
     "timeLimit": 30
   }
 ]`;
@@ -385,7 +386,10 @@ YÊU CẦU ĐẶC BIỆT & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
         resList = parsed.questions;
       }
       if (resList.length > 0) {
-        return resList.map((q) => sanitizeQuizQuestionMath(q));
+        return balanceQuizAnswerDistribution(
+          resList.map((q) => sanitizeQuizQuestionMath(q)),
+          `${topic}_${Date.now()}`
+        );
       }
     } catch (e: any) {
       const msg = e?.message || String(e);
@@ -554,9 +558,11 @@ ${
       : ''
 }
 
+Định dạng JSON:
 - BẮT BUỘC chỉ trả về mảng JSON thuần túy [ { ... } ].
 Cấu trúc các loại câu:
-1. Phần I: { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "A", "explanation": "Giải ngắn gọn 1-3 câu...", "timeLimit": ${timeLimit} }
+1. Phần I: { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "C", "explanation": "Giải ngắn gọn 1-3 câu...", "timeLimit": ${timeLimit} }
+   (QUY TẮC ĐÁP ÁN PHẦN I: PHẢI phân bổ đều đáp án đúng qua đầy đủ A, B, C, D — tuyệt đối không để đa số là A; phần explanation chỉ giải thích giá trị/công thức đúng, không viết cứng "Đáp án A đúng").
 2. Phần II: { "id": "q2", "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "Giải ngắn gọn từng ý...", "timeLimit": 60 }
 3. Phần III: { "id": "q3", "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "explanation": "Giải ngắn gọn...", "timeLimit": 45 }
 4. Phần IV: { "id": "q4", "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "Barem điểm...", "correctAnswer": "Lời giải mẫu", "options": [], "explanation": "Lời giải mẫu ngắn gọn...", "timeLimit": 120 }
@@ -609,7 +615,7 @@ Cấu trúc các loại câu:
       }
 
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((q: any, idx: number) => {
+        const mapped = parsed.map((q: any, idx: number) => {
           const rawPartType = q.partType || '';
           const isTrueFalse = rawPartType === 'part_2_true_false' || (Array.isArray(q.subStatements) && q.subStatements.length > 0);
           const isShortAnswer = rawPartType === 'part_3_short_answer' || !!q.shortAnswerKey;
@@ -682,6 +688,7 @@ Cấu trúc các loại câu:
             timeLimit: Number(q.timeLimit) || Number(timeLimit) || (isTrueFalse ? 60 : (isShortAnswer ? 45 : (isEssay ? 120 : 30))),
           });
         });
+        return balanceQuizAnswerDistribution(mapped, `${userPrompt || grade}_${Date.now()}`);
       }
     } catch (err: any) {
       lastErr = err?.message || String(err);

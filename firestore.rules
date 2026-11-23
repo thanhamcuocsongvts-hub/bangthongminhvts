@@ -23,6 +23,11 @@ service cloud.firestore {
         && data.durationMinutes is number && data.durationMinutes >= 0 && data.durationMinutes <= 300
         && data.allowRetake is bool
         && data.showAnswersAfterSubmit is bool
+        && (!('antiCheatMode' in data) || data.antiCheatMode in ['none', 'shuffle_original', 'variants_and_shuffle'])
+        && (!('shuffleQuestions' in data) || data.shuffleQuestions is bool)
+        && (!('shuffleOptions' in data) || data.shuffleOptions is bool)
+        && (!('variantCount' in data) || (data.variantCount is number && data.variantCount >= 1 && data.variantCount <= 6))
+        && (!('variants' in data) || (data.variants is list && data.variants.size() <= 6))
         && data.createdAt is string && data.createdAt.size() <= 64
         && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
@@ -32,7 +37,13 @@ service cloud.firestore {
         && data.assignmentId == assignmentId
         && data.studentAuthUid is string && data.studentAuthUid.size() > 0 && data.studentAuthUid.size() <= 128
         && data.studentName is string && data.studentName.size() > 0 && data.studentName.size() <= 150
+        && (!('studentRosterId' in data) || (data.studentRosterId is string && data.studentRosterId.size() <= 128))
+        && (!('studentClassName' in data) || (data.studentClassName is string && data.studentClassName.size() <= 80))
+        && (!('variantCode' in data) || (data.variantCode is string && data.variantCode.size() <= 32))
+        && (!('variantLabel' in data) || (data.variantLabel is string && data.variantLabel.size() <= 80))
+        && (!('shuffleSeed' in data) || (data.shuffleSeed is number && data.shuffleSeed >= 0))
         && data.attemptNumber is number && data.attemptNumber >= 1 && data.attemptNumber <= 100
+        && data.answers is map
         && data.totalScore is number && data.totalScore >= 0 && data.totalScore <= 10
         && data.correctCount is number && data.correctCount >= 0 && data.correctCount <= 100
         && data.wrongCount is number && data.wrongCount >= 0 && data.wrongCount <= 100
@@ -77,18 +88,34 @@ service cloud.firestore {
       allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
-    // Homework Assignments & Student Submissions (Giao bài theo lớp hoặc link tự do)
+    function isValidTeacherQuizBank(data, teacherId) {
+      return data.teacherId == teacherId
+        && data.items is list && data.items.size() <= 500
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    // Per-teacher private quiz & game repository (strictly scoped by teacherId, never listable)
+    match /teacher_saved_quizzes/{teacherId} {
+      allow get: if isAuthenticated() && isValidId(teacherId);
+      allow list: if false;
+      allow create: if isAuthenticated() && isValidId(teacherId) && isValidTeacherQuizBank(request.resource.data, teacherId);
+      allow update: if isAuthenticated() && isValidId(teacherId) && isValidTeacherQuizBank(request.resource.data, teacherId);
+      allow delete: if isAuthenticated() && isValidId(teacherId);
+    }
+
+    // Homework Assignments & Student Submissions (Đề online theo lớp hoặc link tự do)
     match /homework_assignments/{assignmentId} {
-      allow get, list: if true;
+      allow get: if isValidId(assignmentId);
+      allow list: if resource.data.teacherId is string && resource.data.teacherId.size() > 0;
       allow create: if isValidId(assignmentId) && isValidHomeworkAssignment(request.resource.data);
       allow update: if isValidId(assignmentId) && isValidHomeworkAssignment(request.resource.data);
       allow delete: if isValidId(assignmentId);
 
       match /submissions/{submissionId} {
-        allow get, list: if true;
-        allow create: if isValidId(submissionId) && isValidHomeworkSubmission(request.resource.data, assignmentId);
-        allow update: if isValidId(submissionId) && isValidHomeworkSubmission(request.resource.data, assignmentId);
-        allow delete: if isValidId(submissionId);
+        allow get, list: if isValidId(assignmentId);
+        allow create: if isValidId(assignmentId) && isValidId(submissionId) && isValidHomeworkSubmission(request.resource.data, assignmentId);
+        allow update: if isValidId(assignmentId) && isValidId(submissionId) && isValidHomeworkSubmission(request.resource.data, assignmentId);
+        allow delete: if isValidId(assignmentId) && isValidId(submissionId);
       }
     }
 

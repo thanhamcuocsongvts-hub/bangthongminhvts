@@ -370,6 +370,7 @@ const LESSONS_FILE = path.join(DATA_DIR, "cloud_lessons.json");
 const DOCUMENTS_FILE = path.join(DATA_DIR, "cloud_documents.json");
 const LINKS_FILE = path.join(DATA_DIR, "cloud_links.json");
 const QUIZZES_FILE = path.join(DATA_DIR, "cloud_quizzes.json");
+const HOMEWORK_FILE = path.join(DATA_DIR, "cloud_homework.json");
 
 function readJsonFileSync<T>(filePath: string, fallback: T): T {
   try {
@@ -1322,75 +1323,115 @@ app.delete("/api/links", (req, res) => {
   res.json({ success: true, links: [] });
 });
 
-// 3c-2. Cloud Quizzes & Educational Items Endpoints for Cross-Device Sync (PC <-> Mobile)
+// 3c-2. Cloud Quizzes & Educational Items Endpoints for Cross-Device Sync (Strictly Scoped per Teacher Account)
 app.get("/api/quizzes", (req, res) => {
+  const teacherId = typeof req.query.teacherId === "string" ? req.query.teacherId.trim() : "";
+  if (!teacherId) {
+    return res.json({ success: true, items: [] });
+  }
   cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
-  res.json({ success: true, items: cloudQuizzesStore });
+  const owned = cloudQuizzesStore.filter((it) => it && it.teacherId === teacherId);
+  res.json({ success: true, items: owned });
 });
 
 app.get("/api/quizzes/sync", (req, res) => {
+  const teacherId = typeof req.query.teacherId === "string" ? req.query.teacherId.trim() : "";
+  if (!teacherId) {
+    return res.json({ success: true, items: [], timestamp: new Date().toISOString() });
+  }
   cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
-  res.json({ success: true, items: cloudQuizzesStore, timestamp: new Date().toISOString() });
+  const owned = cloudQuizzesStore.filter((it) => it && it.teacherId === teacherId);
+  res.json({ success: true, items: owned, timestamp: new Date().toISOString() });
 });
 
 app.post("/api/quizzes/sync", (req, res) => {
-  const { items } = req.body;
-  if (Array.isArray(items)) {
-    cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
-    const itemMap = new Map<string, any>();
-    // Existing items first
-    cloudQuizzesStore.forEach((it) => {
-      if (it && it.id) itemMap.set(it.id, it);
-    });
-    // Merge or update with incoming items
-    items.forEach((it) => {
-      if (!it || !it.id) return;
-      if (itemMap.has(it.id)) {
-        const existing = itemMap.get(it.id);
-        const existingDate = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-        const incomingDate = new Date(it.updatedAt || it.createdAt || 0).getTime();
-        if (incomingDate >= existingDate) {
-          itemMap.set(it.id, { ...existing, ...it });
-        }
-      } else {
-        itemMap.set(it.id, it);
-      }
-    });
-    cloudQuizzesStore = Array.from(itemMap.values());
-    writeJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  const { items, teacherId: rawTeacherId, replaceAll } = req.body || {};
+  const teacherId = typeof rawTeacherId === "string" ? rawTeacherId.trim() : "";
+  if (!teacherId) {
+    return res.status(400).json({ error: "Thiếu teacherId để đồng bộ kho đề riêng." });
   }
-  res.json({ success: true, items: cloudQuizzesStore, timestamp: new Date().toISOString() });
+
+  cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  const otherTeachersItems = cloudQuizzesStore.filter(
+    (it) => it && it.teacherId && it.teacherId !== teacherId
+  );
+
+  let nextOwned: any[] = [];
+  if (Array.isArray(items)) {
+    if (replaceAll) {
+      nextOwned = items
+        .filter((it) => it && it.id)
+        .map((it) => ({ ...it, teacherId }));
+    } else {
+      const itemMap = new Map<string, any>();
+      cloudQuizzesStore
+        .filter((it) => it && it.teacherId === teacherId && it.id)
+        .forEach((it) => itemMap.set(it.id, it));
+
+      items.forEach((it) => {
+        if (!it || !it.id) return;
+        const scopedIt = { ...it, teacherId };
+        if (itemMap.has(scopedIt.id)) {
+          const existing = itemMap.get(scopedIt.id);
+          const existingDate = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+          const incomingDate = new Date(scopedIt.updatedAt || scopedIt.createdAt || 0).getTime();
+          if (incomingDate >= existingDate) {
+            itemMap.set(scopedIt.id, { ...existing, ...scopedIt });
+          }
+        } else {
+          itemMap.set(scopedIt.id, scopedIt);
+        }
+      });
+      nextOwned = Array.from(itemMap.values());
+    }
+
+    cloudQuizzesStore = [...nextOwned, ...otherTeachersItems];
+    writeJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
+  } else {
+    nextOwned = cloudQuizzesStore.filter((it) => it && it.teacherId === teacherId);
+  }
+
+  res.json({ success: true, items: nextOwned, timestamp: new Date().toISOString() });
 });
 
 app.post("/api/quizzes", (req, res) => {
   const newItem = req.body;
-  if (!newItem || !newItem.title) {
-    return res.status(400).json({ error: "Thiếu dữ liệu bài tập hoặc câu hỏi" });
+  const teacherId = typeof newItem?.teacherId === "string" ? newItem.teacherId.trim() : "";
+  if (!newItem || !newItem.title || !teacherId) {
+    return res.status(400).json({ error: "Thiếu dữ liệu bài tập hoặc thông tin tài khoản" });
   }
   cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
   const now = new Date().toISOString();
   const finalItem = {
     ...newItem,
+    teacherId,
     id: newItem.id || `saved_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     createdAt: newItem.createdAt || now,
     updatedAt: now,
   };
-  const idx = cloudQuizzesStore.findIndex((q) => q.id === finalItem.id);
+  const idx = cloudQuizzesStore.findIndex((q) => q.id === finalItem.id && q.teacherId === teacherId);
   if (idx >= 0) {
     cloudQuizzesStore[idx] = { ...cloudQuizzesStore[idx], ...finalItem };
   } else {
     cloudQuizzesStore.unshift(finalItem);
   }
   writeJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
-  res.json({ success: true, item: finalItem, items: cloudQuizzesStore });
+  const owned = cloudQuizzesStore.filter((q) => q && q.teacherId === teacherId);
+  res.json({ success: true, item: finalItem, items: owned });
 });
 
 app.delete("/api/quizzes/:id", (req, res) => {
   const { id } = req.params;
+  const teacherId = typeof req.query.teacherId === "string" ? req.query.teacherId.trim() : "";
   cloudQuizzesStore = readJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
-  cloudQuizzesStore = cloudQuizzesStore.filter((q) => q.id !== id);
+  cloudQuizzesStore = cloudQuizzesStore.filter(
+    (q) => !(q.id === id && (!teacherId || q.teacherId === teacherId))
+  );
   writeJsonFileSync(QUIZZES_FILE, cloudQuizzesStore);
-  res.json({ success: true, items: cloudQuizzesStore });
+  const owned = teacherId
+    ? cloudQuizzesStore.filter((q) => q && q.teacherId === teacherId)
+    : [];
+  res.json({ success: true, items: owned });
 });
 
 // 3d. Comprehensive Storage Overview for Multi-Device Auto-Sync
@@ -2450,7 +2491,7 @@ QUY TẮC BẮT BUỘC & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
    - ĐẶC BIỆT KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (TUYỆT ĐỐI KHÔNG dùng \\vec{AB} vì mũi tên quá ngắn chỉ che chữ cái cuối; KHÔNG tự ghép ký tự unicode mũi tên rời).
    - Nếu phương án A, B, C, D chứa véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").
 3. Bốn phương án A, B, C, D phải rõ ràng, độc lập và có độ phân tán tốt.
-4. Chỉ định đúng "correctAnswer" (A, B, C, hoặc D) kèm phần "explanation" chi tiết, chuẩn xác có dẫn chứng công thức toán học.
+4. Chỉ định đúng "correctAnswer" (A, B, C, hoặc D). PHẢI PHÂN BỔ ĐỀU các đáp án đúng qua đầy đủ A, B, C, D (tuyệt đối KHÔNG dồn toàn bộ vào A hay một đáp án cố định), kèm phần "explanation" chi tiết giải thích công thức/giá trị đúng (không viết cứng "Đáp án A đúng").
 5. "timeLimit" là số giây (từ 20 đến 60).
 6. TRONG CHUỖI JSON: MỌI DẤU GẠCH CHÉO LATEX BẮT BUỘC VIẾT THÀNH HAI DẤU GẠCH CHÉO \\\\ (ví dụ \\\\frac, \\\\sqrt, \\\\Delta) để JSON hợp lệ 100%!
 7. ĐẶC BIỆT KHI SOẠN BÀI TOÁN CÓ BẢNG BIẾN THIÊN, BẢNG XÉT DẤU HOẶC ĐỒ THỊ HÀM SỐ:
@@ -2475,13 +2516,13 @@ Trả về định dạng JSON array hợp lệ:
       ]
     },
     "options": [
-      { "key": "A", "text": "$(-\\infty; -1)$" },
-      { "key": "B", "text": "$(-1; 1)$" },
+      { "key": "A", "text": "$(-1; 1)$" },
+      { "key": "B", "text": "$(-\\infty; -1)$" },
       { "key": "C", "text": "$(-1; 2)$" },
       { "key": "D", "text": "$(0; 1)$" }
     ],
-    "correctAnswer": "A",
-    "explanation": "Từ bảng biến thiên, ta thấy $y' > 0$ trên $(-\\infty; -1)$ và $(1; +\\infty)$, do đó hàm số đồng biến trên các khoảng đó.",
+    "correctAnswer": "B",
+    "explanation": "Từ bảng biến thiên, ta thấy $y' > 0$ trên $(-\\infty; -1)$ và $(1; +\\infty)$, do đó hàm số đồng biến trên khoảng $(-\\infty; -1)$.",
     "timeLimit": 35,
     "difficulty": "${difficulty}"
   }
@@ -2491,7 +2532,7 @@ Trả về định dạng JSON array hợp lệ:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        systemInstruction: "Bạn là chuyên gia khảo thí ra đề trắc nghiệm chuẩn Bộ GD&ĐT Việt Nam. Luôn xuất đúng JSON array với câu hỏi cụ thể, công thức KaTeX đẹp, dùng double backslash \\\\ trong JSON.",
+        systemInstruction: "Bạn là chuyên gia khảo thí ra đề trắc nghiệm chuẩn Bộ GD&ĐT Việt Nam. Luôn xuất đúng JSON array với câu hỏi cụ thể, phân bổ đều đáp án A, B, C, D, công thức KaTeX đẹp, dùng double backslash \\\\ trong JSON.",
         temperature: 0.3,
       },
     });
@@ -2508,7 +2549,7 @@ Trả về định dạng JSON array hợp lệ:
     }
 
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return res.json({ questions: normalizeQuizQuestionsMath(parsed) });
+      return res.json({ questions: balanceQuizAnswerDistributionServer(normalizeQuizQuestionsMath(parsed), `${targetTopic}_${Date.now()}`) });
     }
   } catch (error: any) {
     console.warn("[AI Notice] Quiz generation fallback triggered:", error?.message || error);
@@ -2516,7 +2557,7 @@ Trả về định dạng JSON array hợp lệ:
 
   // Authentic Curriculum Fallback
   const fallbackQuestions = generateSmartCurriculumQuestions(targetTopic, subject, numQuestions, difficulty);
-  res.json({ questions: normalizeQuizQuestionsMath(fallbackQuestions) });
+  res.json({ questions: balanceQuizAnswerDistributionServer(normalizeQuizQuestionsMath(fallbackQuestions), `${targetTopic}_${Date.now()}`) });
 });
 
 /**
@@ -2565,6 +2606,93 @@ function normalizeQuizQuestionsMath(questions: any[]): any[] {
     }
     return cleanQ;
   });
+}
+
+function balanceQuizAnswerDistributionServer(questions: any[], seedInput?: string): any[] {
+  if (!Array.isArray(questions) || questions.length === 0) return questions || [];
+  const KEYS = ["A", "B", "C", "D"];
+  let h = 2166136261;
+  const seedStr = seedInput || String(Date.now());
+  for (let i = 0; i < seedStr.length; i++) {
+    h ^= seedStr.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let state = (h >>> 0) || 1337;
+  const rng = () => {
+    state += 0x6d2b79f5;
+    let r = Math.imul(state ^ (state >>> 15), 1 | state);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+  const shuffleArr = <T,>(arr: T[]): T[] => {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  };
+  const hasPositionalRef = (q: any): boolean => {
+    const optsText = (q.options || []).map((o: any) => (typeof o === "string" ? o : o?.text || "")).join(" ");
+    const combined = `${q.question || ""} ${optsText}`;
+    return (
+      /cả\s+[A-D]\s*(?:,|và|&|lẫn)\s*[A-D]/i.test(combined) ||
+      /\b(?:phương\s*án|đáp\s*án|câu|lựa\s*chọn)\s*[A-D]\b/i.test(optsText) ||
+      /tất\s*cả\s*(?:các)?\s*(?:phương\s*án|đáp\s*án|câu|ý)\s*(?:trên|nêu\s*trên)/i.test(optsText)
+    );
+  };
+  const rewriteExpl = (expl: string, oldKey: string, newKey: string): string => {
+    if (!expl || oldKey === newKey) return expl;
+    return expl.replace(
+      /((?:đáp\s*án|phương\s*án|lựa\s*chọn)\s*(?:đúng|chính\s*xác)?\s*(?:là|:)?\s*|chọn\s+(?:đáp\s*án\s*|phương\s*án\s*)?)([A-D])(?=\s*(?:[.,;!)]|$|\s+đúng|\s+chính\s*xác))/gi,
+      (full, prefix, k) => (k.toUpperCase() === oldKey ? `${prefix}${newKey}` : full)
+    );
+  };
+
+  const eligibleIndices: number[] = [];
+  questions.forEach((q, idx) => {
+    const pt = q?.partType || (Array.isArray(q?.subStatements) && q.subStatements.length > 0 ? "part_2_true_false" : q?.shortAnswerKey ? "part_3_short_answer" : q?.essayRubric ? "part_4_essay" : "part_1_choice");
+    if (pt === "part_1_choice" && Array.isArray(q?.options) && q.options.length >= 4 && !hasPositionalRef(q)) {
+      eligibleIndices.push(idx);
+    }
+  });
+  if (eligibleIndices.length === 0) return questions;
+
+  const targets: string[] = [];
+  let prev = "";
+  let prevPrev = "";
+  while (targets.length < eligibleIndices.length) {
+    const block = shuffleArr(KEYS);
+    if (prev && prev === prevPrev && block[0] === prev) {
+      const sw = block.findIndex((k) => k !== prev);
+      if (sw > 0) [block[0], block[sw]] = [block[sw], block[0]];
+    }
+    for (const k of block) {
+      if (targets.length >= eligibleIndices.length) break;
+      targets.push(k);
+      prevPrev = prev;
+      prev = k;
+    }
+  }
+
+  const out = questions.map((q) => ({ ...q }));
+  eligibleIndices.forEach((qIdx, pos) => {
+    const q = out[qIdx];
+    const targetKey = targets[pos];
+    const normOpts = KEYS.map((k, i) => {
+      const found = q.options.find((o: any) => String(o?.key || "").trim().toUpperCase() === k) || q.options[i];
+      return { key: k, text: typeof found === "string" ? found : String(found?.text || `Phương án ${k}`) };
+    });
+    const oldKeyRaw = String(q.correctAnswer || "A").trim().toUpperCase();
+    const oldKey = KEYS.includes(oldKeyRaw) ? oldKeyRaw : "A";
+    const correctItem = normOpts.find((o) => o.key === oldKey) || normOpts[0];
+    const distractors = shuffleArr(normOpts.filter((o) => o.key !== correctItem.key).map((o) => o.text));
+    let dc = 0;
+    q.options = KEYS.map((k) => ({ key: k, text: k === targetKey ? correctItem.text : (distractors[dc++] ?? "") }));
+    q.correctAnswer = targetKey;
+    q.explanation = rewriteExpl(q.explanation || "", oldKey, targetKey);
+  });
+  return out;
 }
 
 // Helper to extract complete JSON objects from a partially truncated JSON array string
@@ -2729,7 +2857,13 @@ Yêu cầu:
 
   res.json({
     success: true,
-    questions: parsedQuestions.length > 0 ? parsedQuestions : generateSmartCurriculumQuestions("Đề thi tải lên", subject, 5, "Thông hiểu")
+    questions:
+      parsedQuestions.length > 0
+        ? balanceQuizAnswerDistributionServer(parsedQuestions, `parse_fallback_${Date.now()}`)
+        : balanceQuizAnswerDistributionServer(
+            generateSmartCurriculumQuestions("Đề thi tải lên", subject, 5, "Thông hiểu"),
+            `parse_smart_${Date.now()}`
+          )
   });
 });
 
@@ -2836,7 +2970,8 @@ ${
 
 ĐỊNH DẠNG JSON MỖI CÂU HỎI (BẮT BUỘC TRẢ VỀ MẢNG JSON THUẦN TÚY [ { ... } ]):
 1. Phần I (Trắc nghiệm 4 lựa chọn):
-   { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "A", "explanation": "Giải ngắn gọn 1-3 câu...", "timeLimit": ${timeLimit} }
+   { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "C", "explanation": "Giải ngắn gọn 1-3 câu...", "timeLimit": ${timeLimit} }
+   (QUY TẮC ĐÁP ÁN PHẦN I: PHẢI phân bổ đều đáp án đúng qua đầy đủ A, B, C, D giữa các câu — tuyệt đối KHÔNG dồn vào A; phần explanation giải thích giá trị/công thức đúng, không ghi cứng "Đáp án A đúng").
 2. Phần II (Đúng / Sai, bắt buộc đủ 4 mệnh đề a, b, c, d):
    { "id": "q2", "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "Giải ngắn gọn từng ý a, b, c, d...", "timeLimit": 60 }
 3. Phần III (Trả lời ngắn):
@@ -2992,7 +3127,13 @@ QUY TẮC HIỂN THỊ CÔNG THỨC & HÌNH VẼ:
         };
       });
 
-      return res.json({ success: true, questions: normalizeQuizQuestionsMath(sanitized) });
+      return res.json({
+        success: true,
+        questions: balanceQuizAnswerDistributionServer(
+          normalizeQuizQuestionsMath(sanitized),
+          `${userPrompt || matrixFile?.fileName || grade}_${Date.now()}`
+        ),
+      });
     }
 
     return res.status(502).json({
@@ -3016,6 +3157,102 @@ QUY TẮC HIỂN THỊ CÔNG THỨC & HÌNH VẼ:
           : `Không thể phân tích ma trận bằng AI (${errMsg.slice(0, 140)}). Vui lòng thử lại.`,
     });
   }
+});
+
+// AI Generate Similar Isomorphic Online Exam Variants (Mã đề 102, 103, 104...)
+app.post("/api/ai/generate-exam-variants", async (req, res) => {
+  const {
+    questions = [],
+    variantCount = 2,
+    subject = "Toán học",
+    grade = "Lớp 12",
+    title = "Đề kiểm tra online",
+    apiKey: bodyApiKey = "",
+  } = req.body || {};
+
+  if (!Array.isArray(questions) || questions.length === 0) {
+    return res.status(400).json({ error: "Danh sách câu hỏi gốc đang trống." });
+  }
+
+  const customApiKey =
+    (req.headers["x-gemini-api-key"] as string) ||
+    (typeof bodyApiKey === "string" ? bodyApiKey : "");
+  const totalVariants = Math.min(4, Math.max(2, Number(variantCount) || 2));
+  const extraCount = totalVariants - 1;
+
+  try {
+    const ai = getGeminiClient(customApiKey);
+    const compactSource = questions.slice(0, 35).map((q: any, i: number) => ({
+      idx: i + 1,
+      partType: q.partType || (Array.isArray(q.subStatements) && q.subStatements.length > 0 ? "part_2_true_false" : q.shortAnswerKey ? "part_3_short_answer" : q.essayRubric ? "part_4_essay" : "part_1_choice"),
+      question: q.question,
+      options: q.options,
+      subStatements: q.subStatements,
+      shortAnswerKey: q.shortAnswerKey,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+    }));
+
+    const prompt = `Bạn là Chuyên gia Khảo thí Bộ GD&ĐT Việt Nam.
+Dưới đây là ĐỀ GỐC ("${title}", môn ${subject}, ${grade}) gồm ${compactSource.length} câu hỏi:
+${JSON.stringify(compactSource)}
+
+Hãy tạo thêm đúng ${extraCount} MÃ ĐỀ TƯƠNG ĐƯƠNG (cùng chuyên đề kiến thức, cùng độ khó, cùng cấu trúc các phần, NHƯNG thay đổi số liệu/hàm số/giả thiết/tình huống tương đương để học sinh không trao đổi hay quay cóp khi làm đề online).
+
+QUY TẮC BẮT BUỘC:
+1. Mỗi mã đề phải giữ nguyên đủ ${compactSource.length} câu theo đúng thứ tự partType tương ứng đề gốc.
+2. Tính toán lại chính xác 100% đáp án đúng và lời giải chi tiết cho số liệu mới.
+3. Với câu Phần I (part_1_choice), phân bổ ĐỀU đáp án đúng qua cả A, B, C, D (tuyệt đối không dồn vào A).
+4. Công thức Toán/Lý/Hóa bọc trong $...$, dùng \\overrightarrow{AB} cho véctơ, escape \\\\ trong JSON.
+5. Trả về đúng JSON object: { "variants": [ { "questions": [...] }, ... ] } gồm đúng ${extraCount} phần tử trong mảng "variants".`;
+
+    const response = await generateWithGemini(ai, {
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        systemInstruction: "Bạn là chuyên gia tạo các mã đề thi tương đương chuẩn GDPT 2018. Luôn xuất đúng JSON object với công thức chuẩn KaTeX và đáp án cân bằng A/B/C/D.",
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      },
+      timeoutMs: 75000,
+    });
+
+    const parsed = safeParseJsonWithLatex(response.text || "");
+    const rawList = Array.isArray(parsed?.variants)
+      ? parsed.variants
+      : Array.isArray(parsed)
+      ? parsed
+      : null;
+
+    if (Array.isArray(rawList) && rawList.length > 0) {
+      const cleanedVariants = rawList.slice(0, extraCount).map((variantObj: any, vIdx: number) => {
+        const rawQs = Array.isArray(variantObj?.questions)
+          ? variantObj.questions
+          : Array.isArray(variantObj)
+          ? variantObj
+          : [];
+        const normQs = normalizeQuizQuestionsMath(rawQs).map((q: any) => {
+          const enriched = autoEnrichQuestionDiagram(q);
+          return {
+            ...q,
+            diagramType: q.diagramType || enriched.diagramType || undefined,
+            diagramData: q.diagramData || enriched.diagramData || undefined,
+          };
+        });
+        return {
+          code: String(102 + vIdx),
+          questions: balanceQuizAnswerDistributionServer(normQs, `srv_var_${vIdx}_${Date.now()}`),
+        };
+      });
+      return res.json({ success: true, variants: cleanedVariants });
+    }
+  } catch (err: any) {
+    console.warn("[Generate Exam Variants] Fallback triggered:", err?.message || err);
+  }
+
+  return res.status(502).json({
+    success: false,
+    error: "AI tạm thời chưa tạo được đề tương tự mới.",
+  });
 });
 
 // AI On-Demand Specific Extraction (Formulas, Exercises, Definitions, Summary, or Custom Query)
@@ -3511,12 +3748,12 @@ const DEFAULT_SAMPLE_QUESTIONS: any[] = [
     id: "q_sample_2",
     question: "Cho hàm số bậc ba $y = f(x) = x^3 - 3x + 2$ có đồ thị $(C)$. Tọa độ điểm cực đại của đồ thị hàm số là:",
     options: [
-      { key: "A", text: "$(-1; 4)$" },
-      { key: "B", text: "$(1; 0)$" },
-      { key: "C", text: "$(0; 2)$" },
+      { key: "A", text: "$(1; 0)$" },
+      { key: "B", text: "$(0; 2)$" },
+      { key: "C", text: "$(-1; 4)$" },
       { key: "D", text: "$(2; 4)$" },
     ],
-    correctAnswer: "A",
+    correctAnswer: "C",
     explanation: "Ta có $y' = 3x^2 - 3 = 0 \\Leftrightarrow x = \\pm 1$. Vì $y''(-1) = -6 < 0$ nên điểm cực đại là $(-1; 4)$.",
     timeLimit: 30,
     points: 10,
@@ -3535,12 +3772,12 @@ const DEFAULT_SAMPLE_QUESTIONS: any[] = [
     id: "q_sample_3",
     question: "Khảo sát điểm kiểm tra giữa kỳ môn Toán của 40 học sinh lớp 12A thu được bảng tần số ghép nhóm sau. Tìm mốt $M_o$ của mẫu số liệu ghép nhóm:",
     options: [
-      { key: "A", text: "$8.25$" },
-      { key: "B", text: "$7.85$" },
-      { key: "C", text: "$8.15$" },
-      { key: "D", text: "$7.50$" },
+      { key: "A", text: "$7.85$" },
+      { key: "B", text: "$8.15$" },
+      { key: "C", text: "$7.50$" },
+      { key: "D", text: "$8.25$" },
     ],
-    correctAnswer: "A",
+    correctAnswer: "D",
     explanation: "Nhóm chứa mốt là $[8; 9)$ với tần số $m_i = 16$. Áp dụng công thức mốt của mẫu số liệu ghép nhóm: $M_o = 8 + \\frac{16 - 10}{(16 - 10) + (16 - 6)} \\times (9 - 8) = 8 + \\frac{6}{16} = 8.375 \\approx 8.25$.",
     timeLimit: 30,
     points: 10,
@@ -3831,6 +4068,107 @@ app.post("/api/rooms/:pin/simulate-class", (req, res) => {
 
 // 8. Seed initial room
 ensureRoom("758899");
+
+// ============================================================================
+// ONLINE HOMEWORK ASSIGNMENTS & SUBMISSIONS BACKUP API
+// ============================================================================
+interface HomeworkDiskStore {
+  assignments: Record<string, any>;
+  submissions: Record<string, any[]>;
+}
+
+const homeworkDiskStore: HomeworkDiskStore = readJsonFileSync<HomeworkDiskStore>(HOMEWORK_FILE, {
+  assignments: {},
+  submissions: {},
+});
+if (!homeworkDiskStore.assignments) homeworkDiskStore.assignments = {};
+if (!homeworkDiskStore.submissions) homeworkDiskStore.submissions = {};
+
+function persistHomeworkStore() {
+  writeJsonFileSync(HOMEWORK_FILE, homeworkDiskStore);
+}
+
+app.get("/api/homework/assignments", (req, res) => {
+  const teacherId = String(req.query.teacherId || "").trim();
+  const list = Object.values(homeworkDiskStore.assignments || {}).filter(
+    (a: any) => a && (!teacherId || a.teacherId === teacherId)
+  );
+  list.sort((a: any, b: any) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  res.json({ success: true, assignments: list });
+});
+
+app.post("/api/homework/assignments", (req, res) => {
+  const assignment = req.body;
+  if (!assignment || typeof assignment.id !== "string" || !assignment.id.trim()) {
+    return res.status(400).json({ error: "Dữ liệu đề online không hợp lệ" });
+  }
+  homeworkDiskStore.assignments[assignment.id] = assignment;
+  persistHomeworkStore();
+  res.json({ success: true, assignment });
+});
+
+app.get("/api/homework/assignments/:id", (req, res) => {
+  const { id } = req.params;
+  const assignment = homeworkDiskStore.assignments?.[id];
+  if (!assignment) {
+    return res.status(404).json({ error: "Không tìm thấy đề online" });
+  }
+  res.json({ success: true, assignment });
+});
+
+app.post("/api/homework/assignments/:id/status", (req, res) => {
+  const { id } = req.params;
+  const { status, updatedAt } = req.body || {};
+  const existing = homeworkDiskStore.assignments?.[id];
+  if (!existing) {
+    return res.status(404).json({ error: "Không tìm thấy đề online" });
+  }
+  existing.status = status === "closed" ? "closed" : "active";
+  existing.updatedAt = updatedAt || new Date().toISOString();
+  persistHomeworkStore();
+  res.json({ success: true, assignment: existing });
+});
+
+app.delete("/api/homework/assignments/:id", (req, res) => {
+  const { id } = req.params;
+  if (homeworkDiskStore.assignments?.[id]) {
+    delete homeworkDiskStore.assignments[id];
+  }
+  if (homeworkDiskStore.submissions?.[id]) {
+    delete homeworkDiskStore.submissions[id];
+  }
+  persistHomeworkStore();
+  res.json({ success: true });
+});
+
+app.get("/api/homework/assignments/:id/submissions", (req, res) => {
+  const { id } = req.params;
+  const list = Array.isArray(homeworkDiskStore.submissions?.[id])
+    ? [...homeworkDiskStore.submissions[id]]
+    : [];
+  list.sort((a: any, b: any) => String(b.submittedAt || "").localeCompare(String(a.submittedAt || "")));
+  res.json({ success: true, submissions: list });
+});
+
+app.post("/api/homework/assignments/:id/submissions", (req, res) => {
+  const { id } = req.params;
+  const submission = req.body;
+  if (!submission || typeof submission.id !== "string" || !submission.id.trim()) {
+    return res.status(400).json({ error: "Dữ liệu bài nộp không hợp lệ" });
+  }
+  if (!Array.isArray(homeworkDiskStore.submissions[id])) {
+    homeworkDiskStore.submissions[id] = [];
+  }
+  const existingIdx = homeworkDiskStore.submissions[id].findIndex((s: any) => s.id === submission.id);
+  if (existingIdx >= 0) {
+    homeworkDiskStore.submissions[id][existingIdx] = submission;
+  } else {
+    homeworkDiskStore.submissions[id].unshift(submission);
+  }
+  homeworkDiskStore.submissions[id] = homeworkDiskStore.submissions[id].slice(0, 500);
+  persistHomeworkStore();
+  res.json({ success: true, submission });
+});
 
 // Integrate Vite Middleware & Instant Startup
 let viteServerInstance: any = null;

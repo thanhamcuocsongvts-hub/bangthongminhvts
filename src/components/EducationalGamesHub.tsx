@@ -44,11 +44,12 @@ import {
   Coins,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { QuizQuestion, Student, ClassroomGroup } from '../types';
+import { QuizQuestion, Student, ClassroomGroup, TeacherProfile } from '../types';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { gameSounds } from '../utils/gameSoundEffects';
 import { directGenerateQuiz } from '../utils/geminiClient';
+import { balanceQuizAnswerDistribution } from '../utils/quizDistribution';
 import {
   speakQuestionContent,
   speakGameVoiceEvent,
@@ -61,8 +62,10 @@ import {
   getSavedEducationalItems,
   saveEducationalItem,
   deleteEducationalItem,
+  pullSavedQuizzesFromCloud,
   SavedEducationalItem,
 } from '../utils/savedQuizzesService';
+import { normalizeTeacherOwnerId } from '../utils/teacherPrivacy';
 
 interface EducationalGamesHubProps {
   classroom?: ClassroomGroup | null;
@@ -72,6 +75,7 @@ interface EducationalGamesHubProps {
   lessonTitle?: string;
   lessonSubject?: string;
   lessonContent?: string;
+  teacher?: TeacherProfile | null;
   onOpenAIQuizCreator?: () => void;
   onUpdateQuestions?: (questions: QuizQuestion[]) => void;
 }
@@ -211,9 +215,11 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   lessonTitle = '',
   lessonSubject = 'Toán học',
   lessonContent = '',
+  teacher,
   onOpenAIQuizCreator,
   onUpdateQuestions,
 }) => {
+  const ownerTeacherId = useMemo(() => normalizeTeacherOwnerId(teacher?.id), [teacher?.id]);
   const [activeGame, setActiveGame] = useState<ActiveGame>('millionaire');
   const [localQuestions, setLocalQuestions] = useState<QuizQuestion[] | null>(null);
   const [selectedClassId, setSelectedClassId] = useState<string>(classroom?.id || '');
@@ -270,9 +276,9 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   const [showAIMakerModal, setShowAIMakerModal] = useState<boolean>(false);
   const [showQuestionsListModal, setShowQuestionsListModal] = useState<boolean>(false);
 
-  // Lưu & Mở Game Đã Lưu
+  // Lưu & Mở Game Đã Lưu (riêng tư theo từng tài khoản giáo viên)
   const [savedGamesList, setSavedGamesList] = useState<SavedEducationalItem[]>(() =>
-    getSavedEducationalItems().filter((x) => x.type === 'game')
+    getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'game')
   );
   const [showSavedGamesModal, setShowSavedGamesModal] = useState<boolean>(false);
   const [showSaveGameModal, setShowSaveGameModal] = useState<boolean>(false);
@@ -282,16 +288,28 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   const [gameToast, setGameToast] = useState<string | null>(null);
 
   useEffect(() => {
+    setSavedGamesList(getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'game'));
+    pullSavedQuizzesFromCloud(teacher?.id, teacher?.name).then((items) => {
+      if (items && Array.isArray(items)) {
+        setSavedGamesList(items.filter((x) => x.type === 'game'));
+      }
+    });
     const handleUpdate = (e: any) => {
-      if (e.detail && Array.isArray(e.detail)) {
+      if (e.detail && typeof e.detail === 'object' && !Array.isArray(e.detail)) {
+        if (e.detail.teacherId && e.detail.teacherId !== ownerTeacherId) return;
+        const list = Array.isArray(e.detail.items)
+          ? e.detail.items
+          : getSavedEducationalItems(teacher?.id, teacher?.name);
+        setSavedGamesList(list.filter((x: any) => x.type === 'game'));
+      } else if (e.detail && Array.isArray(e.detail)) {
         setSavedGamesList(e.detail.filter((x: any) => x.type === 'game'));
       } else {
-        setSavedGamesList(getSavedEducationalItems().filter((x) => x.type === 'game'));
+        setSavedGamesList(getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'game'));
       }
     };
     window.addEventListener('saved-quizzes-updated', handleUpdate);
     return () => window.removeEventListener('saved-quizzes-updated', handleUpdate);
-  }, []);
+  }, [ownerTeacherId, teacher?.id, teacher?.name]);
 
   const [gameTopic, setGameTopic] = useState<string>(lessonTitle || '');
   const [gameSubject, setGameSubject] = useState<string>(lessonSubject || 'Toán học');
@@ -370,7 +388,10 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
       }
 
       if (rawQuestions && rawQuestions.length > 0) {
-        const formatted = normalizeGameQuestions(rawQuestions);
+        const formatted = balanceQuizAnswerDistribution(
+          normalizeGameQuestions(rawQuestions),
+          `${gameTopic}_${Date.now()}`
+        );
         setLocalQuestions(formatted);
         onUpdateQuestions?.(formatted);
         setShowAIMakerModal(false);
@@ -402,18 +423,22 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
     e.preventDefault();
     if (!saveGameTitle.trim()) return;
 
-    const gameItem = saveEducationalItem({
-      title: saveGameTitle.trim(),
-      type: 'game',
-      gameType: activeGame,
-      subject: gameSubject,
-      grade: gameGrade,
-      questionCount: activeQuestions.length,
-      questions: activeQuestions,
-      notes: saveGameNotes.trim() || undefined,
-    });
+    const gameItem = saveEducationalItem(
+      {
+        title: saveGameTitle.trim(),
+        type: 'game',
+        gameType: activeGame,
+        subject: gameSubject,
+        grade: gameGrade,
+        questionCount: activeQuestions.length,
+        questions: activeQuestions,
+        notes: saveGameNotes.trim() || undefined,
+      },
+      teacher?.id,
+      teacher?.name
+    );
 
-    const updated = getSavedEducationalItems().filter((x) => x.type === 'game');
+    const updated = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'game');
     setSavedGamesList(updated);
     setShowSaveGameModal(false);
     setSaveGameTitle('');
@@ -439,8 +464,8 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   const handleDeleteSavedGame = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('Thầy/Cô có chắc chắn muốn xóa game này không?')) {
-      deleteEducationalItem(id);
-      const updated = getSavedEducationalItems().filter((x) => x.type === 'game');
+      deleteEducationalItem(id, teacher?.id);
+      const updated = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'game');
       setSavedGamesList(updated);
     }
   };

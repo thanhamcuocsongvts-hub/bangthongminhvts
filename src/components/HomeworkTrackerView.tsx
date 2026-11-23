@@ -22,6 +22,8 @@ import {
   Activity,
   FileCheck,
   AlertCircle,
+  Shuffle,
+  Layers,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { HomeworkAssignment, HomeworkSubmission } from '../types';
@@ -32,6 +34,7 @@ import {
   subscribeHomeworkSubmissions,
   updateHomeworkAssignmentStatus,
 } from '../utils/homeworkService';
+import { resolveStudentOnlineExam } from '../utils/quizDistribution';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 
@@ -224,14 +227,14 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
 
   const handleToggleStatus = async (assignment: HomeworkAssignment) => {
     const nextStatus = assignment.status === 'active' ? 'closed' : 'active';
-    await updateHomeworkAssignmentStatus(assignment.id, nextStatus);
+    await updateHomeworkAssignmentStatus(assignment.id, nextStatus, teacherId);
   };
 
   const handleDeleteAssignment = async (assignment: HomeworkAssignment) => {
     if (!window.confirm(`Xóa bài giao "${assignment.title}"? Dữ liệu theo dõi sẽ bị ẩn khỏi danh sách.`)) {
       return;
     }
-    await deleteHomeworkAssignment(assignment.id);
+    await deleteHomeworkAssignment(assignment.id, teacherId);
   };
 
   return (
@@ -243,10 +246,10 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
             <div>
               <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
                 <ClipboardList className="w-4 h-4 text-emerald-600" />
-                <span>Bài Tập Đã Giao ({assignments.length})</span>
+                <span>Đề Online Đã Giao ({assignments.length})</span>
               </h3>
               <p className="text-[11px] text-slate-500">
-                Theo dõi điểm số & quá trình làm bài
+                Theo dõi điểm số &amp; quá trình làm bài
               </p>
             </div>
             {canCreateNew && (
@@ -256,7 +259,7 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                 className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1 shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Giao Bài</span>
+                <span>Giao Đề</span>
               </button>
             )}
           </div>
@@ -288,11 +291,11 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
             <div className="p-6 text-center space-y-3 bg-slate-50 rounded-2xl border border-slate-200">
               <ClipboardList className="w-8 h-8 text-slate-400 mx-auto" />
               <div className="text-xs font-bold text-slate-700">
-                Chưa có bài tập về nhà nào được giao
+                Chưa có Đề online nào được giao
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed">
                 Sau khi soạn đề trong mục &ldquo;Soạn Đề AI &amp; Ma Trận&rdquo;, bấm nút{' '}
-                <strong>Giao Bài Về Nhà</strong> để gửi theo lớp hoặc link tự do.
+                <strong>Đề Online</strong> để gửi theo lớp hoặc link tự do.
               </p>
               {canCreateNew && (
                 <button
@@ -300,7 +303,7 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                   onClick={onCreateNewAssignment}
                   className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black cursor-pointer"
                 >
-                  Giao Bài Từ Đề Hiện Tại
+                  Giao Đề Online Từ Đề Hiện Tại
                 </button>
               )}
             </div>
@@ -354,11 +357,16 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                     {a.title}
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums">
-                    <span>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums gap-2">
+                    <span className="truncate">
                       {a.questions.length} câu · {a.durationMinutes > 0 ? `${a.durationMinutes}p` : 'Tự do'}
+                      {a.antiCheatMode === 'variants_and_shuffle'
+                        ? ` · ${a.variants?.length || a.variantCount || 2} mã đề`
+                        : a.antiCheatMode === 'shuffle_original'
+                        ? ' · Trộn đề'
+                        : ''}
                     </span>
-                    <span className="font-mono text-slate-400">{formatDateTime(a.createdAt)}</span>
+                    <span className="font-mono text-slate-400 shrink-0">{formatDateTime(a.createdAt)}</span>
                   </div>
                 </button>
               );
@@ -375,10 +383,10 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
               <ClipboardList className="w-8 h-8 text-indigo-600" />
             </div>
             <h3 className="text-lg font-black text-slate-900 mb-1">
-              Chọn Một Bài Tập Để Xem Điểm &amp; Quá Trình Làm Bài
+              Chọn Một Đề Online Để Xem Điểm &amp; Quá Trình Làm Bài
             </h3>
             <p className="text-xs text-slate-500 max-w-md mb-5">
-              Giáo viên có thể kiểm tra điểm từng học sinh, tỷ lệ đúng từng câu hỏi, thời gian làm từng câu và lịch sử đổi đáp án của học sinh.
+              Giáo viên có thể kiểm tra điểm từng học sinh, mã đề đã trộn, tỷ lệ đúng từng câu hỏi, thời gian làm từng câu và lịch sử đổi đáp án của học sinh.
             </p>
             {canCreateNew && (
               <button
@@ -387,7 +395,7 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                 className="px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black flex items-center gap-2 shadow-md cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>Giao Bài Tập Về Nhà Ngay</span>
+                <span>Giao Đề Online Ngay</span>
               </button>
             )}
           </div>
@@ -412,6 +420,20 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                         ? `Giao theo lớp ${selectedAssignment.className}`
                         : 'Giao theo link tự do'}
                     </span>
+                    {selectedAssignment.antiCheatMode === 'variants_and_shuffle' && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-100 text-purple-800 text-xs font-black">
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>
+                          {selectedAssignment.variants?.length || selectedAssignment.variantCount || 2} Mã đề tương tự + Trộn
+                        </span>
+                      </span>
+                    )}
+                    {selectedAssignment.antiCheatMode === 'shuffle_original' && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-amber-100 text-amber-800 text-xs font-black">
+                        <Shuffle className="w-3.5 h-3.5" />
+                        <span>Xáo trộn từ đề gốc</span>
+                      </span>
+                    )}
                     <span className="text-xs font-semibold text-slate-500">
                       {selectedAssignment.subject} · {selectedAssignment.grade}
                     </span>
@@ -626,7 +648,14 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                             return (
                               <tr key={sub.id} className="hover:bg-slate-50/80 transition-colors">
                                 <td className="py-3 px-4">
-                                  <div className="font-black text-slate-900">{sub.studentName}</div>
+                                  <div className="font-black text-slate-900 flex items-center gap-1.5 flex-wrap">
+                                    <span>{sub.studentName}</span>
+                                    {sub.variantCode && sub.variantCode !== 'GỐC' && (
+                                      <span className="px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-mono text-[10px] font-black">
+                                        {sub.variantLabel || `Mã ${sub.variantCode}`}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-[11px] text-slate-500">
                                     {sub.studentClassName ? `Lớp ${sub.studentClassName} · ` : ''}
                                     Lần {sub.attemptNumber}
@@ -777,7 +806,7 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
           <div className="w-full max-w-md p-6 rounded-3xl bg-white border border-slate-200 shadow-2xl text-center space-y-4">
             <h3 className="text-lg font-black text-slate-900">{showQRFor.title}</h3>
             <p className="text-xs text-slate-600">
-              Học sinh quét mã QR hoặc mở link để làm bài tập về nhà
+              Học sinh quét mã QR hoặc mở link để làm Đề online
             </p>
             <div className="flex justify-center p-4 rounded-2xl bg-slate-50 border border-slate-200">
               <QRCodeSVG
@@ -814,8 +843,13 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
             {/* Modal Header */}
             <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between gap-3 shrink-0">
               <div>
-                <div className="text-xs text-emerald-300 font-bold uppercase">
-                  Chi Tiết Quá Trình Làm Bài · Lần {inspectSubmission.attemptNumber}
+                <div className="text-xs text-emerald-300 font-bold uppercase flex items-center gap-2 flex-wrap">
+                  <span>Chi Tiết Quá Trình Làm Bài · Lần {inspectSubmission.attemptNumber}</span>
+                  {inspectSubmission.variantLabel && inspectSubmission.variantCode !== 'GỐC' && (
+                    <span className="px-2 py-0.5 rounded-md bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-mono text-[10px]">
+                      {inspectSubmission.variantLabel}
+                    </span>
+                  )}
                 </div>
                 <h3 className="text-base sm:text-lg font-black">
                   {inspectSubmission.studentName}
@@ -905,8 +939,18 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                   <span>Chi Tiết Bài Làm Từng Câu</span>
                 </h4>
 
-                {(inspectSubmission.questionDetails || []).map((det, idx) => {
-                  const q = selectedAssignment.questions[det.questionIndex] || selectedAssignment.questions[idx];
+                {(() => {
+                  const inspectedQuestions = resolveStudentOnlineExam(
+                    selectedAssignment,
+                    inspectSubmission.variantCode,
+                    inspectSubmission.shuffleSeed
+                  ).questions;
+                  return (inspectSubmission.questionDetails || []).map((det, idx) => {
+                    const q =
+                      inspectedQuestions[det.questionIndex] ||
+                      inspectedQuestions.find((item) => item.id === det.questionId) ||
+                      selectedAssignment.questions[det.questionIndex] ||
+                      selectedAssignment.questions[idx];
                   return (
                     <div
                       key={det.questionId || idx}
@@ -971,7 +1015,8 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                       </div>
                     </div>
                   );
-                })}
+                  });
+                })()}
               </div>
             </div>
           </div>

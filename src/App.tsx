@@ -41,7 +41,7 @@ import { StudentMobilePortal } from './components/StudentMobilePortal';
 import { StudentHomeworkPortal } from './components/StudentHomeworkPortal';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadLessonsFromDB, saveLessonsToDB, forceSyncLessonsToCloud, forcePullLessonsFromCloud, deleteLessonFromStorage } from './utils/storageUtils';
-import { pullSavedQuizzesFromCloud } from './utils/savedQuizzesService';
+import { getTeacherRoomPin, getLiveExamStorageKeys, normalizeTeacherOwnerId } from './utils/teacherPrivacy';
 import { db, auth } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
@@ -185,6 +185,9 @@ export default function App() {
     ? guestTeacherData 
     : (teachers || []).find((t) => t.id === activeTeacherId) || null;
 
+  const teacherRoomPin = useMemo(() => getTeacherRoomPin(activeTeacher?.id), [activeTeacher?.id]);
+  const teacherLiveStorageKeys = useMemo(() => getLiveExamStorageKeys(activeTeacher?.id), [activeTeacher?.id]);
+
   const pendingTeachersCount = useMemo(() => {
     return (teachers || []).filter((t) => t.status === 'pending').length;
   }, [teachers]);
@@ -242,12 +245,6 @@ export default function App() {
             setTeachers(d.teachers);
             localStorage.setItem('smartboard_teachers', JSON.stringify(d.teachers));
           }
-          if (d.savedQuizzes && Array.isArray(d.savedQuizzes)) {
-            try {
-              localStorage.setItem('smartboard_saved_quizzes_and_games', JSON.stringify(d.savedQuizzes));
-              window.dispatchEvent(new CustomEvent('saved-quizzes-updated', { detail: d.savedQuizzes }));
-            } catch (_) {}
-          }
           if (d.savedEmbedLinks && Array.isArray(d.savedEmbedLinks)) {
             try {
               localStorage.setItem('smartboard_saved_embed_links', JSON.stringify(d.savedEmbedLinks));
@@ -268,9 +265,6 @@ export default function App() {
         } catch (_) {}
       }
     }, () => {});
-
-    // Initial background pull for quizzes on startup
-    pullSavedQuizzesFromCloud().catch(() => {});
 
     // Initial background bidirectional sync for embed links across PC & Mobile
     (async () => {
@@ -517,15 +511,18 @@ export default function App() {
   };
 
   const currentLesson = useMemo(() => {
-    if (activeOpenedLesson) {
+    const isOwned = (l?: LessonDoc | null) =>
+      Boolean(l && (!l.author || !activeTeacher?.name || l.author === activeTeacher.name));
+    if (activeOpenedLesson && isOwned(activeOpenedLesson)) {
       const found = (lessons || []).find((l) => l.id === activeOpenedLesson.id);
-      return found ? { ...found, ...activeOpenedLesson } : activeOpenedLesson;
+      return found && isOwned(found) ? { ...found, ...activeOpenedLesson } : activeOpenedLesson;
     }
-    const found = (lessons || []).find((l) => l.id === activeLessonId);
+    const found = (lessons || []).find((l) => l.id === activeLessonId && isOwned(l));
     if (found) return found;
-    if (lessons && lessons.length > 0) return lessons[0];
+    const ownedLesson = (lessons || []).find((l) => isOwned(l));
+    if (ownedLesson) return ownedLesson;
     return emptyFallbackLesson;
-  }, [activeOpenedLesson, lessons, activeLessonId]);
+  }, [activeOpenedLesson, lessons, activeLessonId, activeTeacher?.name]);
 
   // Active Tab & Display Settings (Defaults to Classroom Blackboard on TV, PC and Mobile)
   const [activeTab, setActiveTab] = useState<ActiveTab>('whiteboard');
@@ -789,18 +786,20 @@ export default function App() {
     localStorage.setItem('smartboard_active_teacher', activeTeacherId);
   }, [activeTeacherId, isGuestMode]);
 
-  // Fetch Room State from backend periodically (ignoring stale responses that raced a recent quiz change)
-  const fetchRoom = useCallback(async (pin: string = '758899') => {
+  // Fetch Room State from backend periodically (isolated strictly to active teacher's PIN)
+  const fetchRoom = useCallback(async (pin: string) => {
+    const targetPin = pin || teacherRoomPin;
+    const storageKeys = teacherLiveStorageKeys;
     const startedAt = Date.now();
     try {
-      const res = await fetch(`/api/rooms/${pin}`);
+      const res = await fetch(`/api/rooms/${targetPin}`);
       if (!res.ok) return;
       const data = await res.json();
       if (lastRoomMutationAtRef.current > startedAt - 200) {
         return;
       }
 
-      // If server restarted and only holds default sample questions while teacher already chose a custom quiz locally, restore it once
+      // If server restarted and only holds default sample questions while this teacher already chose a custom quiz locally, restore it once
       const isServerDefaultSample =
         Array.isArray(data?.questions) &&
         data.questions.length === 4 &&
@@ -810,8 +809,8 @@ export default function App() {
         hasRecoveredLocalQuizRef.current = true;
         if (isServerDefaultSample) {
           try {
-            const savedQsRaw = localStorage.getItem('smartboard_live_exam_questions');
-            const savedTitle = localStorage.getItem('smartboard_live_exam_title') || '';
+            const savedQsRaw = localStorage.getItem(storageKeys.questionsKey);
+            const savedTitle = localStorage.getItem(storageKeys.titleKey) || '';
             if (savedQsRaw) {
               const parsedQs = JSON.parse(savedQsRaw);
               if (
@@ -824,7 +823,7 @@ export default function App() {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    pin,
+                    pin: targetPin,
                     title: savedTitle || data.title || 'Bài tập đã chọn',
                     questions: parsedQs,
                   }),
@@ -846,13 +845,32 @@ export default function App() {
     } catch (e) {
       console.warn('Could not fetch room', e);
     }
-  }, []);
+  }, [teacherRoomPin, teacherLiveStorageKeys]);
+
+  // Reset room & opened foreign lesson state cleanly when switching teacher accounts
+  useEffect(() => {
+    setRoomState(null);
+    hasRecoveredLocalQuizRef.current = false;
+    prevSyncedLessonIdRef.current = '';
+    lastRoomMutationAtRef.current = 0;
+    if (
+      activeOpenedLesson?.author &&
+      activeTeacher?.name &&
+      activeOpenedLesson.author !== activeTeacher.name
+    ) {
+      setActiveOpenedLesson(null);
+      try {
+        localStorage.removeItem('smartboard_active_lesson_obj');
+      } catch {}
+    }
+  }, [activeTeacher?.id, activeTeacher?.name, teacherRoomPin]);
 
   useEffect(() => {
-    fetchRoom('758899');
-    const interval = setInterval(() => fetchRoom('758899'), 2500);
+    if (!activeTeacher || isStudentMode || homeworkIdParam) return;
+    fetchRoom(teacherRoomPin);
+    const interval = setInterval(() => fetchRoom(teacherRoomPin), 2500);
     return () => clearInterval(interval);
-  }, [fetchRoom]);
+  }, [activeTeacher, isStudentMode, homeworkIdParam, teacherRoomPin, fetchRoom]);
 
   // Fullscreen toggle & Listener
   useEffect(() => {
@@ -897,24 +915,25 @@ export default function App() {
     }
   };
 
-  // Sync Room with active lesson questions ONLY when switching to a genuinely different lesson that has quizzes
+  // Sync Room with active owned lesson questions ONLY when switching to a genuinely different lesson that has quizzes
   useEffect(() => {
     const lessonId = currentLesson?.id || '';
-    if (!lessonId || lessonId === prevSyncedLessonIdRef.current) return;
+    if (!lessonId || lessonId === 'empty_lesson' || lessonId === prevSyncedLessonIdRef.current) return;
+    if (currentLesson.author && activeTeacher?.name && currentLesson.author !== activeTeacher.name) return;
     prevSyncedLessonIdRef.current = lessonId;
 
     if (currentLesson && currentLesson.quizzes?.length > 0) {
       lastRoomMutationAtRef.current = Date.now();
       try {
-        localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(currentLesson.quizzes));
-        localStorage.setItem('smartboard_live_exam_title', currentLesson.title || '');
+        localStorage.setItem(teacherLiveStorageKeys.questionsKey, JSON.stringify(currentLesson.quizzes));
+        localStorage.setItem(teacherLiveStorageKeys.titleKey, currentLesson.title || '');
       } catch (_) {}
 
       fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pin: '758899',
+          pin: teacherRoomPin,
           title: currentLesson.title,
           questions: currentLesson.quizzes,
         }),
@@ -925,7 +944,7 @@ export default function App() {
         })
         .catch((e) => console.warn('Sync room error', e));
     }
-  }, [activeLessonId, currentLesson]);
+  }, [activeLessonId, currentLesson, activeTeacher?.name, teacherRoomPin, teacherLiveStorageKeys]);
 
   // Real Cloud Sync to Server & Firestore
   const handleSyncToCloud = async () => {
@@ -1032,13 +1051,13 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            pin: '758899',
+            pin: teacherRoomPin,
             title: currentLesson.title,
             questions: updatedQuizzes,
           }),
         });
 
-        fetchRoom('758899');
+        fetchRoom(teacherRoomPin);
         setActiveTab('quiz');
       }
     } catch (e) {
@@ -1113,7 +1132,13 @@ export default function App() {
       setGuestTeacherData(null);
     }
     setActiveTeacherId('');
+    setRoomState(null);
+    setActiveOpenedLesson(null);
+    hasRecoveredLocalQuizRef.current = false;
+    prevSyncedLessonIdRef.current = '';
+    lastRoomMutationAtRef.current = 0;
     localStorage.removeItem('smartboard_active_teacher');
+    localStorage.removeItem('smartboard_active_lesson_obj');
     setShowTeacherAuthModal(false);
   };
 
@@ -1463,7 +1488,7 @@ export default function App() {
     );
   }
 
-  const joinUrl = `${window.location.origin}/?mode=student&room=${roomState?.pin || '758899'}`;
+  const joinUrl = `${window.location.origin}/?mode=student&room=${teacherRoomPin}`;
 
   return (
     <div className="w-screen h-dvh flex flex-col bg-[#f8fafc] text-slate-800 overflow-hidden select-none">
@@ -1475,7 +1500,7 @@ export default function App() {
           onTabChange={setActiveTab}
           textScale={textScale}
           onTextScaleChange={setTextScale}
-          roomPin={roomState?.pin || '758899'}
+          roomPin={teacherRoomPin}
           onOpenQR={() => setShowQRModal(true)}
           onOpenExport={() => setShowExportModal(true)}
           onOpenTeacherAuth={() => setShowTeacherAuthModal(true)}
@@ -1485,7 +1510,10 @@ export default function App() {
             setPickerClassroom(activeTeacher?.classes?.[0] || null);
             setShowRandomPickerModal(true);
           }}
-          onSwitchToStudentView={() => setIsStudentMode(true)}
+          onSwitchToStudentView={() => {
+            setStudentRoomPin(teacherRoomPin);
+            setIsStudentMode(true);
+          }}
           isFullscreen={isFullscreen}
           onToggleFullscreen={handleToggleFullscreen}
           activeLessonTitle={currentLesson.title}
@@ -1590,7 +1618,7 @@ export default function App() {
               <LiveQuizHub
                 roomState={roomState}
                 textScale={textScale}
-                onRefreshRoom={() => fetchRoom(roomState?.pin || '758899')}
+                onRefreshRoom={() => fetchRoom(teacherRoomPin)}
                 onOpenExportModal={() => setShowExportModal(true)}
                 classroom={activeTeacher?.classes?.[0]}
                 teacher={activeTeacher}
@@ -1599,17 +1627,17 @@ export default function App() {
                   setRoomState((prev) => {
                     if (!prev) {
                       return {
-                        pin: '758899',
+                        pin: teacherRoomPin,
                         activeQuestionIndex: idx,
                         isLive,
                         submissions: {},
                         participants: [],
                       } as any;
                     }
-                    return { ...prev, activeQuestionIndex: idx, isLive };
+                    return { ...prev, pin: teacherRoomPin, activeQuestionIndex: idx, isLive };
                   });
                   try {
-                    await fetch(`/api/rooms/${roomState?.pin || '758899'}/control`, {
+                    await fetch(`/api/rooms/${teacherRoomPin}/control`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ activeQuestionIndex: idx, isLive }),
@@ -1621,10 +1649,10 @@ export default function App() {
                 }}
                 onResetRoom={async () => {
                   lastRoomMutationAtRef.current = Date.now();
-                  await fetch(`/api/rooms/${roomState?.pin || '758899'}/reset`, {
+                  await fetch(`/api/rooms/${teacherRoomPin}/reset`, {
                     method: 'POST',
                   });
-                  fetchRoom(roomState?.pin || '758899');
+                  fetchRoom(teacherRoomPin);
                 }}
                 onCreateAIQuiz={() => setShowAIQuizModal(true)}
                 isLoadingAIQuiz={isGeneratingAIQuiz}
@@ -1633,35 +1661,40 @@ export default function App() {
                   lastRoomMutationAtRef.current = Date.now();
                   const resolvedTitle = quizTitle || currentLesson.title;
 
-                  const updatedLessons = lessons.map((l) =>
-                    l.id === currentLesson.id
-                      ? {
-                          ...l,
-                          title: resolvedTitle,
-                          quizzes: newQuestions,
-                          lastModified: new Date().toISOString(),
-                        }
-                      : l
-                  );
-                  setLessons(updatedLessons);
+                  if (
+                    currentLesson.id !== 'empty_lesson' &&
+                    (!currentLesson.author || !activeTeacher?.name || currentLesson.author === activeTeacher.name)
+                  ) {
+                    const updatedLessons = lessons.map((l) =>
+                      l.id === currentLesson.id
+                        ? {
+                            ...l,
+                            title: resolvedTitle,
+                            quizzes: newQuestions,
+                            lastModified: new Date().toISOString(),
+                          }
+                        : l
+                    );
+                    setLessons(updatedLessons);
 
-                  if (activeOpenedLesson && activeOpenedLesson.id === currentLesson.id) {
-                    const updatedActive = {
-                      ...activeOpenedLesson,
-                      title: resolvedTitle,
-                      quizzes: newQuestions,
-                      lastModified: new Date().toISOString(),
-                    };
-                    setActiveOpenedLesson(updatedActive);
-                    try {
-                      localStorage.setItem('smartboard_active_lesson_obj', JSON.stringify(updatedActive));
-                    } catch (_) {}
+                    if (activeOpenedLesson && activeOpenedLesson.id === currentLesson.id) {
+                      const updatedActive = {
+                        ...activeOpenedLesson,
+                        title: resolvedTitle,
+                        quizzes: newQuestions,
+                        lastModified: new Date().toISOString(),
+                      };
+                      setActiveOpenedLesson(updatedActive);
+                      try {
+                        localStorage.setItem('smartboard_active_lesson_obj', JSON.stringify(updatedActive));
+                      } catch (_) {}
+                    }
                   }
 
                   // Cập nhật ngay lập tức vào roomState React state không có độ trễ
                   setRoomState((prev) => ({
                     ...(prev || {
-                      pin: '758899',
+                      pin: teacherRoomPin,
                       title: resolvedTitle,
                       submissions: {},
                       isLive: true,
@@ -1670,24 +1703,26 @@ export default function App() {
                       activeStudents: [],
                       questions: [],
                     }),
+                    pin: teacherRoomPin,
                     title: resolvedTitle,
                     questions: newQuestions,
                     activeQuestionIndex: 0,
                     isLive: true,
                   }));
 
-                  // Lưu ngay vào localStorage
+                  // Lưu ngay vào localStorage riêng của tài khoản giáo viên
                   try {
-                    localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(newQuestions));
-                    localStorage.setItem('smartboard_live_exam_title', resolvedTitle);
+                    localStorage.setItem(teacherLiveStorageKeys.questionsKey, JSON.stringify(newQuestions));
+                    localStorage.setItem(teacherLiveStorageKeys.titleKey, resolvedTitle);
                   } catch (_) {}
 
-                  // Đồng bộ an toàn vào Firestore
+                  // Đồng bộ an toàn vào Firestore theo mã phòng riêng của tài khoản
                   try {
-                    const roomPin = roomState?.pin || '758899';
+                    const roomPin = teacherRoomPin;
                     const roomRef = doc(db, 'rooms', roomPin);
                     safeSetDoc(roomRef, {
                       pin: roomPin,
+                      teacherId: normalizeTeacherOwnerId(activeTeacher?.id),
                       title: resolvedTitle,
                       questions: newQuestions,
                       activeQuestionIndex: 0,
@@ -1701,7 +1736,7 @@ export default function App() {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
-                        pin: roomState?.pin || '758899',
+                        pin: teacherRoomPin,
                         title: resolvedTitle,
                         questions: newQuestions,
                       }),
@@ -1726,20 +1761,26 @@ export default function App() {
                 questions={currentLesson.quizzes}
                 lessonTitle={currentLesson.title}
                 lessonSubject={currentLesson.subject}
+                teacher={activeTeacher}
                 classroom={pickerClassroom || activeTeacher?.classes?.[0] || null}
                 allClasses={activeTeacher?.classes || []}
                 onSelectClassroom={(cls) => setPickerClassroom(cls)}
                 onOpenAIQuizCreator={() => setShowAIQuizModal(true)}
                 onUpdateQuestions={(newQuestions) => {
-                  const updatedLessons = lessons.map((l) =>
-                    l.id === currentLesson.id ? { ...l, quizzes: newQuestions } : l
-                  );
-                  setLessons(updatedLessons);
+                  if (
+                    currentLesson.id !== 'empty_lesson' &&
+                    (!currentLesson.author || !activeTeacher?.name || currentLesson.author === activeTeacher.name)
+                  ) {
+                    const updatedLessons = lessons.map((l) =>
+                      l.id === currentLesson.id ? { ...l, quizzes: newQuestions } : l
+                    );
+                    setLessons(updatedLessons);
+                  }
                   fetch('/api/rooms', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      pin: '758899',
+                      pin: teacherRoomPin,
                       title: currentLesson.title,
                       questions: newQuestions,
                     }),
@@ -1947,39 +1988,44 @@ export default function App() {
             const updatedQuizzes = replace ? newQuestions : [...(currentLesson.quizzes || []), ...newQuestions];
             const resolvedTitle = quizTitle || currentLesson.title;
 
-            const updatedLessons = lessons.map((l) =>
-              l.id === currentLesson.id
-                ? {
-                    ...l,
-                    title: resolvedTitle,
-                    quizzes: updatedQuizzes,
-                    lastModified: new Date().toISOString(),
-                  }
-                : l
-            );
-            setLessons(updatedLessons);
+            if (
+              currentLesson.id !== 'empty_lesson' &&
+              (!currentLesson.author || !activeTeacher?.name || currentLesson.author === activeTeacher.name)
+            ) {
+              const updatedLessons = lessons.map((l) =>
+                l.id === currentLesson.id
+                  ? {
+                      ...l,
+                      title: resolvedTitle,
+                      quizzes: updatedQuizzes,
+                      lastModified: new Date().toISOString(),
+                    }
+                  : l
+              );
+              setLessons(updatedLessons);
 
-            if (activeOpenedLesson && activeOpenedLesson.id === currentLesson.id) {
-              const updatedActive = {
-                ...activeOpenedLesson,
-                title: resolvedTitle,
-                quizzes: updatedQuizzes,
-                lastModified: new Date().toISOString(),
-              };
-              setActiveOpenedLesson(updatedActive);
-              try {
-                localStorage.setItem('smartboard_active_lesson_obj', JSON.stringify(updatedActive));
-              } catch (_) {}
+              if (activeOpenedLesson && activeOpenedLesson.id === currentLesson.id) {
+                const updatedActive = {
+                  ...activeOpenedLesson,
+                  title: resolvedTitle,
+                  quizzes: updatedQuizzes,
+                  lastModified: new Date().toISOString(),
+                };
+                setActiveOpenedLesson(updatedActive);
+                try {
+                  localStorage.setItem('smartboard_active_lesson_obj', JSON.stringify(updatedActive));
+                } catch (_) {}
+              }
             }
 
             try {
-              localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(updatedQuizzes));
-              localStorage.setItem('smartboard_live_exam_title', resolvedTitle);
+              localStorage.setItem(teacherLiveStorageKeys.questionsKey, JSON.stringify(updatedQuizzes));
+              localStorage.setItem(teacherLiveStorageKeys.titleKey, resolvedTitle);
             } catch (_) {}
 
             setRoomState((prev) => ({
               ...(prev || {
-                pin: '758899',
+                pin: teacherRoomPin,
                 title: resolvedTitle,
                 submissions: {},
                 isLive: true,
@@ -1988,6 +2034,7 @@ export default function App() {
                 activeStudents: [],
                 questions: [],
               }),
+              pin: teacherRoomPin,
               title: resolvedTitle,
               questions: updatedQuizzes,
               activeQuestionIndex: 0,
@@ -1999,7 +2046,7 @@ export default function App() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  pin: '758899',
+                  pin: teacherRoomPin,
                   title: resolvedTitle,
                   questions: updatedQuizzes,
                 }),
@@ -2067,7 +2114,7 @@ export default function App() {
             <div className="space-y-1 mb-6 w-full">
               <div className="text-xs uppercase tracking-widest text-slate-500 font-bold">MÃ PIN TRUY CẬP:</div>
               <div className="text-4xl md:text-5xl font-mono font-black text-emerald-600 tracking-widest bg-slate-50 px-6 py-2.5 rounded-2xl border border-slate-200">
-                {roomState?.pin || '758899'}
+                {teacherRoomPin}
               </div>
             </div>
 

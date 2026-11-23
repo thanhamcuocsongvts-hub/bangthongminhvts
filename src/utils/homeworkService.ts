@@ -6,12 +6,15 @@ import {
   getDocFromServer,
   getDocs,
   onSnapshot,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import { isQuotaError, markFirestoreQuotaExhausted } from './firebaseSafe';
+import { normalizeTeacherOwnerId } from './teacherPrivacy';
 import {
   ClassRoom,
   HomeworkActivityEvent,
@@ -21,6 +24,8 @@ import {
   HomeworkRosterStudent,
   HomeworkSubmission,
   HomeworkSubStatementResult,
+  OnlineExamAntiCheatMode,
+  OnlineExamVariant,
   QuizQuestion,
 } from '../types';
 
@@ -118,6 +123,49 @@ export async function ensureHomeworkAuth(): Promise<string> {
   }
 }
 
+async function postHomeworkApiJson(url: string, body: any, method: 'POST' | 'DELETE' = 'POST'): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: method === 'DELETE' ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return false;
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) return false;
+    const data = await res.json();
+    return Boolean(data?.success);
+  } catch {
+    return false;
+  }
+}
+
+async function getHomeworkApiJson<T = any>(url: string): Promise<T | null> {
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4500);
+    const res = await fetch(url, { method: 'GET', signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+function isPermissionDeniedError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('insufficient');
+}
+
 /**
  * Recursively removes undefined values and NaN so Firestore setDoc/updateDoc never fail.
  */
@@ -147,24 +195,62 @@ export function sanitizeForFirestore<T>(input: T): T {
   return input;
 }
 
-const LOCAL_ASSIGNMENTS_KEY = 'smartboard_homework_assignments_v1';
+const LOCAL_ASSIGNMENTS_KEY_PREFIX = 'smartboard_homework_assignments_v2_';
+const LOCAL_SINGLE_ASSIGNMENT_PREFIX = 'smartboard_homework_single_v2_';
 const LOCAL_SUBMISSIONS_PREFIX = 'smartboard_homework_submissions_v1_';
 
-function readLocalAssignments(): HomeworkAssignment[] {
+function getLocalAssignmentsKey(teacherId?: string | null): string {
+  return `${LOCAL_ASSIGNMENTS_KEY_PREFIX}${normalizeTeacherOwnerId(teacherId)}`;
+}
+
+function readLocalAssignments(teacherId?: string | null): HomeworkAssignment[] {
+  if (!teacherId) return [];
+  const ownerId = normalizeTeacherOwnerId(teacherId);
   try {
-    const raw = localStorage.getItem(LOCAL_ASSIGNMENTS_KEY);
+    const raw = localStorage.getItem(getLocalAssignmentsKey(ownerId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((a: HomeworkAssignment) => a && a.teacherId === ownerId)
+      : [];
   } catch {
     return [];
   }
 }
 
-function writeLocalAssignments(items: HomeworkAssignment[]): void {
+function writeLocalAssignments(
+  teacherId: string | undefined | null,
+  items: HomeworkAssignment[]
+): void {
+  if (!teacherId) return;
+  const ownerId = normalizeTeacherOwnerId(teacherId);
   try {
-    localStorage.setItem(LOCAL_ASSIGNMENTS_KEY, JSON.stringify(items.slice(0, 60)));
-    window.dispatchEvent(new CustomEvent('homework-assignments-updated', { detail: items }));
+    const owned = (items || []).filter((a) => a && a.teacherId === ownerId).slice(0, 60);
+    localStorage.setItem(getLocalAssignmentsKey(ownerId), JSON.stringify(owned));
+    window.dispatchEvent(
+      new CustomEvent('homework-assignments-updated', {
+        detail: { teacherId: ownerId, items: owned },
+      })
+    );
+  } catch {}
+}
+
+function readSingleAssignmentCache(assignmentId: string): HomeworkAssignment | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_SINGLE_ASSIGNMENT_PREFIX + assignmentId);
+    if (!raw) return null;
+    return JSON.parse(raw) as HomeworkAssignment;
+  } catch {
+    return null;
+  }
+}
+
+function writeSingleAssignmentCache(assignment: HomeworkAssignment): void {
+  try {
+    localStorage.setItem(
+      LOCAL_SINGLE_ASSIGNMENT_PREFIX + assignment.id,
+      JSON.stringify(assignment)
+    );
   } catch {}
 }
 
@@ -230,6 +316,11 @@ export interface CreateHomeworkParams {
   durationMinutes: number;
   allowRetake: boolean;
   showAnswersAfterSubmit: boolean;
+  antiCheatMode?: OnlineExamAntiCheatMode;
+  shuffleQuestions?: boolean;
+  shuffleOptions?: boolean;
+  variantCount?: number;
+  variants?: OnlineExamVariant[];
   dueDate?: string;
   note?: string;
 }
@@ -253,13 +344,35 @@ export async function createHomeworkAssignment(
         }))
       : [];
 
+  const ownerId = normalizeTeacherOwnerId(params.teacherId);
+  const antiCheatMode: OnlineExamAntiCheatMode = params.antiCheatMode || 'none';
+  const shuffleQuestions =
+    antiCheatMode === 'none' ? false : params.shuffleQuestions !== false;
+  const shuffleOptions =
+    antiCheatMode === 'none' ? false : params.shuffleOptions !== false;
+  const normalizedVariants: OnlineExamVariant[] | undefined =
+    antiCheatMode === 'variants_and_shuffle' &&
+    Array.isArray(params.variants) &&
+    params.variants.length > 0
+      ? params.variants.slice(0, 6).map((v, vIdx) => ({
+          id: String(v.id || `var_${101 + vIdx}`).slice(0, 64),
+          code: String(v.code || String(101 + vIdx)).slice(0, 32),
+          label: String(v.label || `Mã đề ${101 + vIdx}`).slice(0, 80),
+          questions: normalizeQuizQuestionsForHomework(v.questions || params.questions),
+        }))
+      : undefined;
+  const variantCount =
+    antiCheatMode === 'variants_and_shuffle'
+      ? Math.min(6, Math.max(2, normalizedVariants?.length || Number(params.variantCount || 2)))
+      : 1;
+
   const assignment: HomeworkAssignment = sanitizeForFirestore({
     id,
     code,
-    title: params.title.trim().slice(0, 300) || 'Bài tập về nhà',
+    title: params.title.trim().slice(0, 300) || 'Đề online',
     subject: (params.subject || 'Toán học').slice(0, 80),
     grade: (params.grade || 'Lớp 12').slice(0, 80),
-    teacherId: (params.teacherId || 'teacher_default').slice(0, 128),
+    teacherId: ownerId,
     teacherName: (params.teacherName || 'Giáo viên').slice(0, 150),
     mode: params.mode,
     classId: params.mode === 'class' && params.classroom ? String(params.classroom.id) : '',
@@ -269,6 +382,11 @@ export async function createHomeworkAssignment(
     durationMinutes: Math.max(0, Math.min(300, Number(params.durationMinutes || 0))),
     allowRetake: Boolean(params.allowRetake),
     showAnswersAfterSubmit: Boolean(params.showAnswersAfterSubmit),
+    antiCheatMode,
+    shuffleQuestions,
+    shuffleOptions,
+    variantCount,
+    ...(normalizedVariants ? { variants: normalizedVariants } : {}),
     dueDate: params.dueDate ? String(params.dueDate).slice(0, 64) : '',
     note: params.note ? params.note.trim().slice(0, 600) : '',
     status: 'active',
@@ -276,9 +394,12 @@ export async function createHomeworkAssignment(
     updatedAt: now,
   });
 
-  // Update local cache immediately
-  const existing = readLocalAssignments().filter((a) => a.id !== assignment.id);
-  writeLocalAssignments([assignment, ...existing]);
+  // Update only this teacher's scoped local cache
+  const existing = readLocalAssignments(ownerId).filter((a) => a.id !== assignment.id);
+  writeLocalAssignments(ownerId, [assignment, ...existing]);
+  writeSingleAssignmentCache(assignment);
+
+  const serverSavePromise = postHomeworkApiJson('/api/homework/assignments', assignment);
 
   const path = `homework_assignments/${assignment.id}`;
   try {
@@ -287,7 +408,10 @@ export async function createHomeworkAssignment(
     if (isQuotaError(err)) {
       markFirestoreQuotaExhausted();
     } else {
-      handleFirestoreError(err, OperationType.CREATE, path);
+      const serverSaved = await serverSavePromise;
+      if (!serverSaved) {
+        handleFirestoreError(err, OperationType.CREATE, path);
+      }
     }
   }
 
@@ -306,36 +430,60 @@ export async function getHomeworkAssignmentById(
     const snap = await getDoc(doc(db, 'homework_assignments', assignmentId));
     if (snap.exists()) {
       const data = snap.data() as HomeworkAssignment;
-      const local = readLocalAssignments().filter((a) => a.id !== data.id);
-      writeLocalAssignments([data, ...local]);
+      writeSingleAssignmentCache(data);
       return data;
     }
   } catch (err) {
     if (isQuotaError(err)) {
       markFirestoreQuotaExhausted();
     } else {
-      const cached = readLocalAssignments().find((a) => a.id === assignmentId);
+      const apiRes = await getHomeworkApiJson<{ assignment?: HomeworkAssignment }>(
+        `/api/homework/assignments/${encodeURIComponent(assignmentId)}`
+      );
+      if (apiRes?.assignment) {
+        writeSingleAssignmentCache(apiRes.assignment);
+        return apiRes.assignment;
+      }
+      const cached = readSingleAssignmentCache(assignmentId);
       if (cached) return cached;
       handleFirestoreError(err, OperationType.GET, path);
     }
   }
 
-  return readLocalAssignments().find((a) => a.id === assignmentId) || null;
+  const apiFallback = await getHomeworkApiJson<{ assignment?: HomeworkAssignment }>(
+    `/api/homework/assignments/${encodeURIComponent(assignmentId)}`
+  );
+  if (apiFallback?.assignment) {
+    writeSingleAssignmentCache(apiFallback.assignment);
+    return apiFallback.assignment;
+  }
+
+  return readSingleAssignmentCache(assignmentId);
 }
 
 export function subscribeHomeworkAssignments(
   teacherId: string | undefined,
   callback: (assignments: HomeworkAssignment[]) => void
 ): () => void {
-  // Emit local cached assignments right away
-  const localInitial = readLocalAssignments();
-  if (localInitial.length > 0) {
-    callback(
-      localInitial
-        .filter((a) => !teacherId || a.teacherId === teacherId)
-        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-    );
+  if (!teacherId) {
+    callback([]);
+    return () => {};
   }
+
+  const ownerId = normalizeTeacherOwnerId(teacherId);
+  if (ownerId === 'guest') {
+    const guestLocal = readLocalAssignments(ownerId).sort((a, b) =>
+      (b.createdAt || '').localeCompare(a.createdAt || '')
+    );
+    callback(guestLocal);
+    return () => {};
+  }
+
+  // Emit this teacher's cached assignments right away
+  const localInitial = readLocalAssignments(ownerId).sort((a, b) =>
+    (b.createdAt || '').localeCompare(a.createdAt || '')
+  );
+  callback(localInitial);
 
   let active = true;
   let unsub: (() => void) | null = null;
@@ -343,20 +491,23 @@ export function subscribeHomeworkAssignments(
   ensureHomeworkAuth()
     .then(() => {
       if (!active) return;
-      unsub = onSnapshot(
+      const q = query(
         collection(db, 'homework_assignments'),
+        where('teacherId', '==', ownerId)
+      );
+      unsub = onSnapshot(
+        q,
         (snap) => {
-          const all: HomeworkAssignment[] = [];
+          const owned: HomeworkAssignment[] = [];
           snap.forEach((d) => {
             const data = d.data() as HomeworkAssignment;
-            if (data && data.id) all.push(data);
+            if (data && data.id && data.teacherId === ownerId) {
+              owned.push(data);
+            }
           });
-          all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-          writeLocalAssignments(all);
-          const filtered = teacherId
-            ? all.filter((a) => a.teacherId === teacherId || !a.teacherId)
-            : all;
-          callback(filtered);
+          owned.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          writeLocalAssignments(ownerId, owned);
+          callback(owned);
         },
         (err) => {
           if (isQuotaError(err)) {
@@ -369,12 +520,13 @@ export function subscribeHomeworkAssignments(
     })
     .catch(() => {});
 
-  const handleLocalEvt = () => {
-    const items = readLocalAssignments();
-    const filtered = teacherId
-      ? items.filter((a) => a.teacherId === teacherId || !a.teacherId)
-      : items;
-    callback(filtered.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+  const handleLocalEvt = (e: Event) => {
+    const detail = (e as CustomEvent<{ teacherId?: string }>).detail;
+    if (detail?.teacherId && detail.teacherId !== ownerId) return;
+    const items = readLocalAssignments(ownerId).sort((a, b) =>
+      (b.createdAt || '').localeCompare(a.createdAt || '')
+    );
+    callback(items);
   };
   window.addEventListener('homework-assignments-updated', handleLocalEvt);
 
@@ -387,14 +539,23 @@ export function subscribeHomeworkAssignments(
 
 export async function updateHomeworkAssignmentStatus(
   assignmentId: string,
-  status: 'active' | 'closed'
+  status: 'active' | 'closed',
+  teacherId?: string
 ): Promise<void> {
   await ensureHomeworkAuth();
   const now = new Date().toISOString();
-  const updatedLocal = readLocalAssignments().map((a) =>
-    a.id === assignmentId ? { ...a, status, updatedAt: now } : a
+  if (teacherId) {
+    const ownerId = normalizeTeacherOwnerId(teacherId);
+    const updatedLocal = readLocalAssignments(ownerId).map((a) =>
+      a.id === assignmentId ? { ...a, status, updatedAt: now } : a
+    );
+    writeLocalAssignments(ownerId, updatedLocal);
+  }
+
+  const serverStatusPromise = postHomeworkApiJson(
+    `/api/homework/assignments/${encodeURIComponent(assignmentId)}/status`,
+    { status, updatedAt: now }
   );
-  writeLocalAssignments(updatedLocal);
 
   const path = `homework_assignments/${assignmentId}`;
   try {
@@ -406,15 +567,30 @@ export async function updateHomeworkAssignmentStatus(
     if (isQuotaError(err)) {
       markFirestoreQuotaExhausted();
     } else {
-      handleFirestoreError(err, OperationType.UPDATE, path);
+      const serverUpdated = await serverStatusPromise;
+      if (!serverUpdated) {
+        handleFirestoreError(err, OperationType.UPDATE, path);
+      }
     }
   }
 }
 
-export async function deleteHomeworkAssignment(assignmentId: string): Promise<void> {
+export async function deleteHomeworkAssignment(
+  assignmentId: string,
+  teacherId?: string
+): Promise<void> {
   await ensureHomeworkAuth();
-  const updatedLocal = readLocalAssignments().filter((a) => a.id !== assignmentId);
-  writeLocalAssignments(updatedLocal);
+  if (teacherId) {
+    const ownerId = normalizeTeacherOwnerId(teacherId);
+    const updatedLocal = readLocalAssignments(ownerId).filter((a) => a.id !== assignmentId);
+    writeLocalAssignments(ownerId, updatedLocal);
+  }
+
+  const serverDeletePromise = postHomeworkApiJson(
+    `/api/homework/assignments/${encodeURIComponent(assignmentId)}`,
+    undefined,
+    'DELETE'
+  );
 
   const path = `homework_assignments/${assignmentId}`;
   try {
@@ -423,7 +599,10 @@ export async function deleteHomeworkAssignment(assignmentId: string): Promise<vo
     if (isQuotaError(err)) {
       markFirestoreQuotaExhausted();
     } else {
-      handleFirestoreError(err, OperationType.DELETE, path);
+      const serverDeleted = await serverDeletePromise;
+      if (!serverDeleted) {
+        handleFirestoreError(err, OperationType.DELETE, path);
+      }
     }
   }
 }
@@ -637,6 +816,10 @@ export async function submitHomeworkAttempt(params: {
   studentName: string;
   studentRosterId?: string;
   studentClassName?: string;
+  effectiveQuestions?: QuizQuestion[];
+  variantCode?: string;
+  variantLabel?: string;
+  shuffleSeed?: number;
   answersMap: Record<string, any>;
   processStats: Record<string, QuestionProcessStat>;
   activityLog: HomeworkActivityEvent[];
@@ -645,73 +828,129 @@ export async function submitHomeworkAttempt(params: {
 }): Promise<HomeworkSubmission> {
   const uid = await ensureHomeworkAuth();
   const { assignment } = params;
+  const questionsToGrade = (
+    params.effectiveQuestions && params.effectiveQuestions.length > 0
+      ? params.effectiveQuestions
+      : assignment.questions
+  ).slice(0, 100);
+
+  if (questionsToGrade.length === 0) {
+    throw new Error('Đề online chưa có câu hỏi để chấm điểm.');
+  }
+
+  const safeStudentName = (params.studentName || '').trim().slice(0, 150) || 'Học sinh';
+  const safeUid = String(uid || `dev_${Date.now()}`).trim().slice(0, 128) || `dev_${Date.now()}`;
 
   const existingSubs = readLocalSubmissions(assignment.id);
   const prevAttempts = existingSubs.filter(
     (s) =>
       (params.studentRosterId && s.studentRosterId === params.studentRosterId) ||
-      s.studentName.trim().toLowerCase() === params.studentName.trim().toLowerCase()
+      s.studentName.trim().toLowerCase() === safeStudentName.toLowerCase()
   ).length;
 
+  const safeAnswersMap =
+    params.answersMap && typeof params.answersMap === 'object' && !Array.isArray(params.answersMap)
+      ? params.answersMap
+      : {};
+
   const graded = gradeHomeworkSubmission(
-    assignment.questions,
-    params.answersMap,
-    params.processStats
+    questionsToGrade,
+    safeAnswersMap,
+    params.processStats || {}
   );
 
-  const submittedAt = new Date().toISOString();
+  const submittedAt = new Date().toISOString().slice(0, 64);
+  const startedAt = String(params.startedAt || submittedAt).slice(0, 64);
+  const clampedTotalTime = Math.min(86400, Math.max(0, Math.round(params.totalTimeSeconds || 0)));
   const submissionId = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
   const finalLog: HomeworkActivityEvent[] = [
-    ...params.activityLog.slice(-490),
+    ...(params.activityLog || []).slice(-490),
     {
       timestamp: submittedAt,
-      elapsedSeconds: Math.max(0, Math.round(params.totalTimeSeconds)),
-      type: 'submit',
-      detail: `Nộp bài hoàn tất — Đạt ${graded.totalScore}/10 điểm (${graded.correctCount}/${assignment.questions.length} câu đúng)`,
+      elapsedSeconds: clampedTotalTime,
+      type: 'submit' as const,
+      detail: `Nộp bài hoàn tất — Đạt ${graded.totalScore}/10 điểm (${graded.correctCount}/${questionsToGrade.length} câu đúng)`,
     },
-  ];
+  ].slice(-500);
 
   const submission: HomeworkSubmission = sanitizeForFirestore({
     id: submissionId,
     assignmentId: assignment.id,
-    studentAuthUid: uid,
-    studentRosterId: params.studentRosterId || '',
-    studentName: params.studentName.trim().slice(0, 150),
-    studentClassName: (params.studentClassName || assignment.className || '').slice(0, 80),
-    attemptNumber: prevAttempts + 1,
-    answers: params.answersMap,
-    questionDetails: graded.questionDetails,
-    totalScore: graded.totalScore,
-    correctCount: graded.correctCount,
-    wrongCount: graded.wrongCount,
-    totalQuestions: assignment.questions.length,
-    startedAt: params.startedAt,
+    studentAuthUid: safeUid,
+    studentRosterId: String(params.studentRosterId || '').slice(0, 128),
+    studentName: safeStudentName,
+    studentClassName: String(params.studentClassName || assignment.className || '').slice(0, 80),
+    ...(params.variantCode ? { variantCode: String(params.variantCode).slice(0, 32) } : {}),
+    ...(params.variantLabel ? { variantLabel: String(params.variantLabel).slice(0, 80) } : {}),
+    ...(typeof params.shuffleSeed === 'number' && params.shuffleSeed >= 0
+      ? { shuffleSeed: Math.round(params.shuffleSeed) }
+      : {}),
+    attemptNumber: Math.min(100, Math.max(1, prevAttempts + 1)),
+    answers: safeAnswersMap,
+    questionDetails: graded.questionDetails.slice(0, 100),
+    totalScore: Math.min(10, Math.max(0, Number(graded.totalScore || 0))),
+    correctCount: Math.min(100, Math.max(0, Math.round(graded.correctCount || 0))),
+    wrongCount: Math.min(100, Math.max(0, Math.round(graded.wrongCount || 0))),
+    totalQuestions: Math.min(100, Math.max(1, questionsToGrade.length)),
+    startedAt,
     submittedAt,
-    totalTimeSeconds: Math.max(0, Math.round(params.totalTimeSeconds)),
+    totalTimeSeconds: clampedTotalTime,
     activityLog: finalLog,
   });
 
-  // Save locally for instant student receipt + fallback
+  // Save locally for instant student receipt + offline resilience
   writeLocalSubmissions(assignment.id, [submission, ...existingSubs]);
   try {
     localStorage.setItem(`smartboard_hw_receipt_${assignment.id}`, JSON.stringify(submission));
   } catch {}
 
+  const serverSubPromise = postHomeworkApiJson(
+    `/api/homework/assignments/${encodeURIComponent(assignment.id)}/submissions`,
+    submission
+  );
+
   const path = `homework_assignments/${assignment.id}/submissions/${submission.id}`;
+  const subDocRef = doc(db, 'homework_assignments', assignment.id, 'submissions', submission.id);
+
   try {
-    await setDoc(
-      doc(db, 'homework_assignments', assignment.id, 'submissions', submission.id),
-      submission
-    );
-  } catch (err) {
-    if (isQuotaError(err)) {
+    await setDoc(subDocRef, submission);
+  } catch (firstErr) {
+    if (isQuotaError(firstErr)) {
       markFirestoreQuotaExhausted();
-    } else {
-      handleFirestoreError(err, OperationType.CREATE, path);
+      await serverSubPromise;
+      return submission;
     }
+
+    // Retry once automatically for transient mobile/network failures unless clearly permission denied
+    if (!isPermissionDeniedError(firstErr)) {
+      try {
+        await new Promise((r) => setTimeout(r, 350));
+        await setDoc(subDocRef, submission);
+        await serverSubPromise;
+        return submission;
+      } catch (retryErr) {
+        if (isQuotaError(retryErr)) {
+          markFirestoreQuotaExhausted();
+          await serverSubPromise;
+          return submission;
+        }
+        const serverSaved = await serverSubPromise;
+        if (serverSaved) {
+          return submission;
+        }
+        handleFirestoreError(retryErr, OperationType.CREATE, path);
+      }
+    }
+
+    const serverSaved = await serverSubPromise;
+    if (serverSaved) {
+      return submission;
+    }
+    handleFirestoreError(firstErr, OperationType.CREATE, path);
   }
 
+  await serverSubPromise;
   return submission;
 }
 
@@ -720,24 +959,44 @@ export async function fetchHomeworkSubmissions(
 ): Promise<HomeworkSubmission[]> {
   if (!assignmentId) return [];
   await ensureHomeworkAuth();
+
+  const mergedMap = new Map<string, HomeworkSubmission>();
+  const apiResPromise = getHomeworkApiJson<{ submissions?: HomeworkSubmission[] }>(
+    `/api/homework/assignments/${encodeURIComponent(assignmentId)}/submissions`
+  );
+
   try {
     const snap = await getDocs(
       collection(db, 'homework_assignments', assignmentId, 'submissions')
     );
-    const list: HomeworkSubmission[] = [];
     snap.forEach((d) => {
       const data = d.data() as HomeworkSubmission;
-      if (data && data.id) list.push(data);
+      if (data && data.id) mergedMap.set(data.id, data);
     });
-    list.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
-    writeLocalSubmissions(assignmentId, list);
-    return list;
   } catch (err) {
     if (isQuotaError(err)) {
       markFirestoreQuotaExhausted();
     }
-    return readLocalSubmissions(assignmentId);
   }
+
+  const apiRes = await apiResPromise;
+  if (Array.isArray(apiRes?.submissions)) {
+    apiRes.submissions.forEach((s) => {
+      if (s && s.id && !mergedMap.has(s.id)) {
+        mergedMap.set(s.id, s);
+      }
+    });
+  }
+
+  if (mergedMap.size > 0) {
+    const list = Array.from(mergedMap.values()).sort((a, b) =>
+      (b.submittedAt || '').localeCompare(a.submittedAt || '')
+    );
+    writeLocalSubmissions(assignmentId, list);
+    return list;
+  }
+
+  return readLocalSubmissions(assignmentId);
 }
 
 export function subscribeHomeworkSubmissions(

@@ -81,6 +81,7 @@ import { HomeworkTrackerView } from './HomeworkTrackerView';
 import { StudentHomeworkPortal } from './StudentHomeworkPortal';
 import { subscribeHomeworkAssignments } from '../utils/homeworkService';
 import { directFastMatrixQuiz, getGeminiApiKey, saveGeminiApiKey, isGeminiConfigured } from '../utils/geminiClient';
+import { balanceQuizAnswerDistribution } from '../utils/quizDistribution';
 import {
   getSpeechSpeedMultiplier,
   prefetchQuestionSpeech,
@@ -151,6 +152,11 @@ import {
   initSavedQuizzesRealtimeSync,
   SavedEducationalItem,
 } from '../utils/savedQuizzesService';
+import {
+  getTeacherRoomPin,
+  getLiveExamStorageKeys,
+  normalizeTeacherOwnerId,
+} from '../utils/teacherPrivacy';
 
 if (typeof window !== 'undefined' && 'Worker' in window && pdfjsLib) {
   try {
@@ -951,6 +957,19 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   classroom,
   teacher,
 }) => {
+  const ownerTeacherId = useMemo(() => normalizeTeacherOwnerId(teacher?.id), [teacher?.id]);
+  const teacherRoomPin = useMemo(() => getTeacherRoomPin(teacher?.id), [teacher?.id]);
+  const liveStorageKeys = useMemo(() => getLiveExamStorageKeys(teacher?.id), [teacher?.id]);
+  const isCurrentLessonOwned = useMemo(
+    () =>
+      Boolean(
+        currentLesson &&
+          currentLesson.id !== 'empty_lesson' &&
+          (!currentLesson.author || !teacher?.name || currentLesson.author === teacher.name)
+      ),
+    [currentLesson, teacher?.name]
+  );
+
   // Mode: Default to 'creator' or switch to 'live', 'presentation', 'exam', 'analytics', or 'homework'
   const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'presentation' | 'exam' | 'analytics' | 'homework'>('creator');
 
@@ -1006,7 +1025,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [showBoardVoiceMenu, setShowBoardVoiceMenu] = useState<boolean>(false);
   const [activeQuizTitle, setActiveQuizTitle] = useState<string>(() => {
     try {
-      return localStorage.getItem('smartboard_live_exam_title') || '';
+      return localStorage.getItem(liveStorageKeys.titleKey) || '';
     } catch {
       return '';
     }
@@ -1197,9 +1216,9 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     setSpeechSpeed(updated);
   };
 
-  // Lưu & Mở Đề Trắc Nghiệm / Bài Tập Đã Lưu
+  // Lưu & Mở Đề Trắc Nghiệm / Bài Tập Đã Lưu (riêng tư theo tài khoản giáo viên)
   const [savedQuizzesList, setSavedQuizzesList] = useState<SavedEducationalItem[]>(() =>
-    getSavedEducationalItems().filter((x) => x.type === 'quiz')
+    getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz')
   );
   const [isSyncingSavedQuizzes, setIsSyncingSavedQuizzes] = useState<boolean>(false);
   const [showSavedQuizzesModal, setShowSavedQuizzesModal] = useState<boolean>(false);
@@ -1226,28 +1245,36 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     return () => unsub();
   }, [teacher?.id]);
 
-  // Tự động đồng bộ thời gian thực cho Kho Đề Đã Lưu giữa PC và Điện thoại
+  // Tự động đồng bộ thời gian thực cho Kho Đề Đã Lưu giữa PC và Điện thoại (chỉ trong cùng tài khoản)
   useEffect(() => {
-    // 1. Tải từ Cloud khi mở
-    pullSavedQuizzesFromCloud().then((items) => {
+    setSavedQuizzesList(getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz'));
+
+    // 1. Tải từ Cloud khi mở hoặc chuyển tài khoản
+    pullSavedQuizzesFromCloud(teacher?.id, teacher?.name).then((items) => {
       if (items && Array.isArray(items)) {
         setSavedQuizzesList(items.filter((x) => x.type === 'quiz'));
       }
     });
 
-    // 2. Lắng nghe Firestore Realtime (khi PC lưu, Điện thoại cập nhật trong tích tắc)
-    const unsub = initSavedQuizzesRealtimeSync((items) => {
+    // 2. Lắng nghe Firestore Realtime theo đúng tài khoản giáo viên hiện tại
+    const unsub = initSavedQuizzesRealtimeSync(teacher?.id, teacher?.name, (items) => {
       if (items && Array.isArray(items)) {
         setSavedQuizzesList(items.filter((x) => x.type === 'quiz'));
       }
     });
 
-    // 3. Lắng nghe sự kiện cục bộ
+    // 3. Lắng nghe sự kiện cục bộ (lọc đúng tài khoản)
     const handleLocalUpdate = (e: any) => {
-      if (e.detail && Array.isArray(e.detail)) {
+      if (e.detail && typeof e.detail === 'object' && !Array.isArray(e.detail)) {
+        if (e.detail.teacherId && e.detail.teacherId !== ownerTeacherId) return;
+        const items = Array.isArray(e.detail.items)
+          ? e.detail.items
+          : getSavedEducationalItems(teacher?.id, teacher?.name);
+        setSavedQuizzesList(items.filter((x: any) => x.type === 'quiz'));
+      } else if (e.detail && Array.isArray(e.detail)) {
         setSavedQuizzesList(e.detail.filter((x: any) => x.type === 'quiz'));
       } else {
-        setSavedQuizzesList(getSavedEducationalItems().filter((x) => x.type === 'quiz'));
+        setSavedQuizzesList(getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz'));
       }
     };
     window.addEventListener('saved-quizzes-updated', handleLocalUpdate);
@@ -1256,17 +1283,17 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       unsub();
       window.removeEventListener('saved-quizzes-updated', handleLocalUpdate);
     };
-  }, []);
+  }, [ownerTeacherId, teacher?.id, teacher?.name]);
 
-  // Hàm bấm tay để đồng bộ tức thì từ Đám Mây
+  // Hàm bấm tay để đồng bộ tức thì từ Đám Mây cho tài khoản hiện tại
   const handleManualSyncQuizzesFromCloud = async () => {
     setIsSyncingSavedQuizzes(true);
     try {
-      const items = await pullSavedQuizzesFromCloud();
+      const items = await pullSavedQuizzesFromCloud(teacher?.id, teacher?.name);
       const quizzesOnly = items.filter((x) => x.type === 'quiz');
       setSavedQuizzesList(quizzesOnly);
       gameSounds.playCorrectChime();
-      setQuizToast(`Đã đồng bộ thành công ${quizzesOnly.length} bộ đề từ Đám Mây (PC & Điện Thoại)!`);
+      setQuizToast(`Đã đồng bộ thành công ${quizzesOnly.length} bộ đề riêng của tài khoản từ Đám Mây!`);
       setTimeout(() => setQuizToast(null), 3500);
     } catch (_) {
       setQuizToast('Đã kiểm tra đồng bộ với Đám Mây.');
@@ -1276,10 +1303,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     }
   };
 
-  // State chung lưu trữ câu hỏi phòng thi trực tiếp (ưu tiên localStorage nếu teacher vừa chọn đề tùy chỉnh, sau đó roomState hoặc currentLesson)
+  // State chung lưu trữ câu hỏi phòng thi trực tiếp (cô lập theo từng tài khoản giáo viên)
   const [liveExamQuestions, setLiveExamQuestions] = useState<QuizQuestion[]>(() => {
     try {
-      const saved = localStorage.getItem('smartboard_live_exam_questions');
+      const saved = localStorage.getItem(liveStorageKeys.questionsKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.id !== 'q_sample_1') {
@@ -1287,19 +1314,54 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         }
       }
     } catch (_) {}
-    if (roomState?.questions && roomState.questions.length > 0) return roomState.questions;
+    if (
+      roomState?.questions &&
+      roomState.questions.length > 0 &&
+      (!roomState.pin || roomState.pin === teacherRoomPin)
+    ) {
+      return roomState.questions;
+    }
     try {
-      const saved = localStorage.getItem('smartboard_live_exam_questions');
+      const saved = localStorage.getItem(liveStorageKeys.questionsKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (_) {}
-    return currentLesson?.quizzes || [];
+    return isCurrentLessonOwned ? (currentLesson?.quizzes || []) : [];
   });
 
-  // Tự động đồng bộ liveExamQuestions mỗi khi roomState.questions cập nhật từ server/firestore (tránh ghi đè lúc vừa nạp bộ đề mới)
+  // Reset draft/live exam state immediately when switching teacher accounts
+  const prevTeacherOwnerRef = useRef<string>(ownerTeacherId);
   useEffect(() => {
+    if (prevTeacherOwnerRef.current !== ownerTeacherId) {
+      prevTeacherOwnerRef.current = ownerTeacherId;
+      try {
+        setActiveQuizTitle(localStorage.getItem(liveStorageKeys.titleKey) || '');
+      } catch {
+        setActiveQuizTitle('');
+      }
+      try {
+        const saved = localStorage.getItem(liveStorageKeys.questionsKey);
+        const parsed = saved ? JSON.parse(saved) : [];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setLiveExamQuestions(parsed);
+          setGeneratedQuestions(parsed);
+        } else {
+          setLiveExamQuestions([]);
+          setGeneratedQuestions([]);
+        }
+      } catch {
+        setLiveExamQuestions([]);
+        setGeneratedQuestions([]);
+      }
+      setLocalActiveIndex(0);
+    }
+  }, [ownerTeacherId, liveStorageKeys.questionsKey, liveStorageKeys.titleKey]);
+
+  // Tự động đồng bộ liveExamQuestions mỗi khi roomState.questions cập nhật từ server/firestore (chỉ nhận đúng phòng của giáo viên hiện tại)
+  useEffect(() => {
+    if (roomState?.pin && roomState.pin !== teacherRoomPin) return;
     if (roomState?.questions && roomState.questions.length > 0) {
       const timeSinceManualLaunch = Date.now() - lastManualQuizLaunchAtRef.current;
       const isIncomingDefaultSample =
@@ -1312,23 +1374,23 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         setActiveQuizTitle(roomState.title);
       }
       try {
-        localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(roomState.questions));
+        localStorage.setItem(liveStorageKeys.questionsKey, JSON.stringify(roomState.questions));
         if (roomState.title) {
-          localStorage.setItem('smartboard_live_exam_title', roomState.title);
+          localStorage.setItem(liveStorageKeys.titleKey, roomState.title);
         }
       } catch (_) {}
     }
-  }, [roomState?.questions, roomState?.title]);
+  }, [roomState?.pin, roomState?.questions, roomState?.title, teacherRoomPin, liveStorageKeys.questionsKey, liveStorageKeys.titleKey]);
 
-  // Bộ câu hỏi phòng thi: đọc trực tiếp ngay lập tức, không bao giờ bị rỗng nếu vừa tạo câu hỏi
+  // Bộ câu hỏi phòng thi: đọc trực tiếp ngay lập tức cho đúng tài khoản giáo viên hiện tại
   const questions: QuizQuestion[] = (
     liveExamQuestions.length > 0
       ? liveExamQuestions
-      : (roomState?.questions && roomState.questions.length > 0)
+      : (roomState?.questions && roomState.questions.length > 0 && (!roomState.pin || roomState.pin === teacherRoomPin))
       ? roomState.questions
       : (generatedQuestions.length > 0)
       ? generatedQuestions
-      : (currentLesson?.quizzes && currentLesson.quizzes.length > 0)
+      : (isCurrentLessonOwned && currentLesson?.quizzes && currentLesson.quizzes.length > 0)
       ? currentLesson.quizzes
       : []
   );
@@ -1367,10 +1429,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     if (activeMode === 'live' && liveExamQuestions.length === 0 && generatedQuestions.length > 0) {
       setLiveExamQuestions(generatedQuestions);
       try {
-        localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(generatedQuestions));
+        localStorage.setItem(liveStorageKeys.questionsKey, JSON.stringify(generatedQuestions));
       } catch (_) {}
     }
-  }, [activeMode, liveExamQuestions.length, generatedQuestions]);
+  }, [activeMode, liveExamQuestions.length, generatedQuestions, liveStorageKeys.questionsKey]);
 
   // If room already has questions and generatedQuestions is empty, initialize preview
   useEffect(() => {
@@ -1965,11 +2027,15 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       setGenerationTimeMs(elapsed);
 
       if (questions && questions.length > 0) {
-        setGeneratedQuestions(questions);
+        const balancedQuestions = balanceQuizAnswerDistribution(
+          questions,
+          `${promptTopic || selectedGrade}_${Date.now()}`
+        );
+        setGeneratedQuestions(balancedQuestions);
         setStatusMessage(
           uploadedFile
-            ? `⚡ Hoàn tất! Đã tạo ${questions.length} câu hỏi bám sát ma trận "${uploadedFile.name}" trong ${(elapsed / 1000).toFixed(1)}s.`
-            : `⚡ Hoàn tất! Tạo thành công ${questions.length} câu hỏi chuẩn hóa trong ${(elapsed / 1000).toFixed(1)}s.`
+            ? `⚡ Hoàn tất! Đã tạo ${balancedQuestions.length} câu hỏi bám sát ma trận "${uploadedFile.name}" trong ${(elapsed / 1000).toFixed(1)}s.`
+            : `⚡ Hoàn tất! Tạo thành công ${balancedQuestions.length} câu hỏi chuẩn hóa trong ${(elapsed / 1000).toFixed(1)}s.`
         );
       } else {
         throw new Error(
@@ -2003,20 +2069,21 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     // 1. Lập tức gán mảng câu hỏi vừa tạo vào state chung của phòng thi (liveExamQuestions = createdQuestions)
     setLiveExamQuestions(questionsToDeploy);
 
-    // 2. Đồng bộ ngay vào localStorage phòng thi
+    // 2. Đồng bộ ngay vào localStorage phòng thi riêng của tài khoản
     try {
-      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(questionsToDeploy));
-      localStorage.setItem('smartboard_live_exam_title', resolvedTitle);
+      localStorage.setItem(liveStorageKeys.questionsKey, JSON.stringify(questionsToDeploy));
+      localStorage.setItem(liveStorageKeys.titleKey, resolvedTitle);
     } catch (e) {
       console.warn('localStorage error', e);
     }
 
-    // 3. Đồng bộ an toàn vào Firestore phòng thi (không nghẽn quota)
+    // 3. Đồng bộ an toàn vào Firestore phòng thi riêng của tài khoản
     try {
-      const pin = roomState?.pin || '758899';
+      const pin = teacherRoomPin;
       const roomDocRef = doc(db, 'rooms', pin);
       safeSetDoc(roomDocRef, {
         pin,
+        teacherId: ownerTeacherId,
         title: resolvedTitle,
         questions: questionsToDeploy,
         activeQuestionIndex: 0,
@@ -2429,22 +2496,26 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       return;
     }
 
-    const savedItem = saveEducationalItem({
-      title: saveQuizTitle.trim(),
-      type: 'quiz',
-      subject: saveQuizSubject,
-      grade: saveQuizGrade,
-      questionCount: targetQuestions.length,
-      questions: targetQuestions,
-      notes: saveQuizNotes.trim() || undefined,
-    });
+    const savedItem = saveEducationalItem(
+      {
+        title: saveQuizTitle.trim(),
+        type: 'quiz',
+        subject: saveQuizSubject,
+        grade: saveQuizGrade,
+        questionCount: targetQuestions.length,
+        questions: targetQuestions,
+        notes: saveQuizNotes.trim() || undefined,
+      },
+      teacher?.id,
+      teacher?.name
+    );
 
-    const updated = getSavedEducationalItems().filter((x) => x.type === 'quiz');
+    const updated = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz');
     setSavedQuizzesList(updated);
     setShowSaveQuizModal(false);
     setSaveQuizTitle('');
     setSaveQuizNotes('');
-    setQuizToast(`Đã lưu bài tập "${savedItem.title}" (${targetQuestions.length} câu) thành công! Khi đến trường, Thầy/Cô chỉ cần mở "Kho Đề Đã Lưu" để trình chiếu cho học sinh.`);
+    setQuizToast(`Đã lưu bài tập "${savedItem.title}" (${targetQuestions.length} câu) vào kho riêng của Thầy/Cô!`);
     gameSounds.playVictoryFanfare();
     setTimeout(() => setQuizToast(null), 4500);
   };
@@ -2462,8 +2533,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     setShowSavedQuizzesModal(false);
 
     try {
-      localStorage.setItem('smartboard_live_exam_questions', JSON.stringify(item.questions));
-      localStorage.setItem('smartboard_live_exam_title', item.title);
+      localStorage.setItem(liveStorageKeys.questionsKey, JSON.stringify(item.questions));
+      localStorage.setItem(liveStorageKeys.titleKey, item.title);
     } catch (_) {}
 
     if (onApplyQuestions) {
@@ -2501,8 +2572,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const handleDeleteSavedQuiz = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('Thầy/Cô có chắc chắn muốn xóa bài tập trắc nghiệm này không?')) {
-      deleteEducationalItem(id);
-      const updated = getSavedEducationalItems().filter((x) => x.type === 'quiz');
+      deleteEducationalItem(id, teacher?.id);
+      const updated = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz');
       setSavedQuizzesList(updated);
     }
   };
@@ -2524,7 +2595,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     .sort((a, b) => a.timeSpentSeconds - b.timeSpentSeconds)
     .slice(0, 4);
 
-  const joinUrl = `${window.location.origin}/?mode=student&room=${roomState?.pin || '758899'}`;
+  const joinUrl = `${window.location.origin}/?mode=student&room=${teacherRoomPin}`;
 
   // Font scale helper
   const getScale = () => {
@@ -2715,7 +2786,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               }`}
             >
               <ClipboardList className="w-4 h-4 text-emerald-300" />
-              <span>Giao Bài &amp; Chấm Điểm</span>
+              <span>Đề Online &amp; Chấm Điểm</span>
               {homeworkAssignmentsCount > 0 && (
                 <span className="px-1.5 py-0.5 rounded-full bg-emerald-800 text-[11px] text-emerald-100 tabular-nums">
                   {homeworkAssignmentsCount}
@@ -2726,7 +2797,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
           <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pl-2">
             <span>Mã phòng:</span>
-            <span className="font-mono font-black text-amber-400 text-sm tracking-wider">{roomState?.pin || '758899'}</span>
+            <span className="font-mono font-black text-amber-400 text-sm tracking-wider">{teacherRoomPin}</span>
           </div>
         </div>
 
@@ -2782,10 +2853,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   setShowHomeworkAssignModal(true);
                 }}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 whitespace-nowrap"
-                title="Giao đề này cho học sinh về nhà làm theo lớp hoặc qua đường link tự do"
+                title="Phát Đề online cho học sinh làm theo lớp hoặc qua đường link tự do (hỗ trợ trộn đề)"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>Giao Bài Về Nhà</span>
+                <span>Đề Online</span>
               </button>
 
               <button
@@ -3243,10 +3314,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       setShowHomeworkAssignModal(true);
                     }}
                     className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-md shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
-                    title="Giao bài tập về nhà theo lớp hoặc gửi link làm tự do"
+                    title="Phát Đề online theo lớp hoặc gửi link làm tự do (hỗ trợ trộn đề chống quay cóp)"
                   >
                     <Send className="w-4 h-4 text-white" />
-                    <span>GIAO BÀI VỀ NHÀ</span>
+                    <span>ĐỀ ONLINE</span>
                   </button>
 
                   <button
@@ -3541,7 +3612,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               >
                 <QrCode className="w-5 h-5 text-emerald-600" />
                 <span>MÃ PIN:</span>
-                <span className="font-mono text-xl text-emerald-600 font-black tracking-widest">{roomState?.pin || '758899'}</span>
+                <span className="font-mono text-xl text-emerald-600 font-black tracking-widest">{teacherRoomPin}</span>
               </button>
 
               {/* Active students count */}
@@ -5488,7 +5559,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     <div className="bg-slate-900/90 px-4 py-2 rounded-2xl border border-slate-700 flex items-center gap-3">
                       <div className="text-xs text-slate-400 font-bold uppercase tracking-wider">MÃ PIN XÁC THỰC:</div>
                       <span className="font-mono text-2xl md:text-3xl font-black text-amber-400 tracking-widest">
-                        {roomState?.pin || '758899'}
+                        {teacherRoomPin}
                       </span>
                     </div>
                     <button
@@ -5835,7 +5906,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   <div className="space-y-1">
                     <h4 className="text-base font-bold text-slate-200">Chưa có thí sinh nào vào phòng</h4>
                     <p className="text-xs text-slate-400 max-w-md">
-                      Học sinh quét mã QR hoặc truy cập đường link và nhập mã PIN <span className="font-mono font-bold text-amber-400">{roomState?.pin || '758899'}</span> cùng Số Báo Danh để bắt đầu.
+                      Học sinh quét mã QR hoặc truy cập đường link và nhập mã PIN <span className="font-mono font-bold text-amber-400">{teacherRoomPin}</span> cùng Số Báo Danh để bắt đầu.
                     </p>
                   </div>
                   <button
@@ -5945,7 +6016,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       {/* Homework Assignment & Student Process Tracking Mode */}
       {activeMode === 'homework' && (
         <HomeworkTrackerView
-          teacherId={teacher?.id || 'teacher_default'}
+          teacherId={ownerTeacherId}
           initialAssignmentId={selectedHomeworkTrackerId}
           canCreateNew={(generatedQuestions.length > 0 ? generatedQuestions : questions).length > 0}
           onCreateNewAssignment={() => {
@@ -5973,7 +6044,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             <div className="space-y-1 mb-6 w-full">
               <div className="text-xs uppercase tracking-widest text-slate-500 font-bold">MÃ PIN PHÒNG HỌC:</div>
               <div className="text-4xl md:text-5xl font-mono font-black text-emerald-600 tracking-widest bg-slate-50 px-6 py-2 rounded-2xl border border-slate-200">
-                {roomState?.pin || '758899'}
+                {teacherRoomPin}
               </div>
             </div>
 
@@ -6284,16 +6355,16 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             ? generatedQuestions
             : questions
         }
-        defaultTitle={
-          homeworkCustomTitle ||
-          activeQuizTitle ||
-          promptTopic ||
-          currentLesson?.title ||
-          `Bài tập về nhà ${selectedSubject}`
-        }
+          defaultTitle={
+            homeworkCustomTitle ||
+            activeQuizTitle ||
+            promptTopic ||
+            currentLesson?.title ||
+            `Đề online ${selectedSubject}`
+          }
         subject={selectedSubject}
         grade={selectedGrade}
-        teacherId={teacher?.id || 'teacher_default'}
+        teacherId={ownerTeacherId}
         teacherName={teacher?.name || 'Giáo viên'}
         teacherClasses={teacherClasses}
         defaultClassId={selectedCallingClassId}

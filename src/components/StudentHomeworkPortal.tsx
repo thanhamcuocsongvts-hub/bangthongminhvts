@@ -18,6 +18,7 @@ import {
   Check,
   Compass,
   ListFilter,
+  Shuffle,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -33,6 +34,10 @@ import {
   QuestionProcessStat,
   submitHomeworkAttempt,
 } from '../utils/homeworkService';
+import {
+  pickStudentVariantAssignment,
+  resolveStudentOnlineExam,
+} from '../utils/quizDistribution';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { gameSounds } from '../utils/gameSoundEffects';
@@ -79,6 +84,7 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [startedAtIso, setStartedAtIso] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [submitError, setSubmitError] = useState<string>('');
   const [showSubmitConfirm, setShowSubmitConfirm] = useState<boolean>(false);
   const [showOnlyUnanswered, setShowOnlyUnanswered] = useState<boolean>(false);
 
@@ -89,9 +95,12 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
   const sessionStartMsRef = useRef<number>(Date.now());
   const activityLogRef = useRef<HomeworkActivityEvent[]>([]);
 
-  // Result state
+  // Result & per-student anti-cheat exam variant state
   const [submission, setSubmission] = useState<HomeworkSubmission | null>(null);
   const [resultFilter, setResultFilter] = useState<'all' | 'correct' | 'wrong'>('all');
+  const [assignedVariantCode, setAssignedVariantCode] = useState<string>('');
+  const [assignedVariantLabel, setAssignedVariantLabel] = useState<string>('');
+  const [assignedShuffleSeed, setAssignedShuffleSeed] = useState<number>(0);
 
   useEffect(() => {
     let mounted = true;
@@ -102,7 +111,7 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
       .then((data) => {
         if (!mounted) return;
         if (!data) {
-          setLoadError('Không tìm thấy bài tập này. Vui lòng kiểm tra lại đường link từ giáo viên.');
+          setLoadError('Không tìm thấy Đề online này. Vui lòng kiểm tra lại đường link từ giáo viên.');
           setLoading(false);
           return;
         }
@@ -119,6 +128,11 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
               if (parsed && parsed.assignmentId === data.id) {
                 setSubmission(parsed);
                 setStudentName(parsed.studentName);
+                if (parsed.variantCode) setAssignedVariantCode(parsed.variantCode);
+                if (parsed.variantLabel) setAssignedVariantLabel(parsed.variantLabel);
+                if (typeof parsed.shuffleSeed === 'number') {
+                  setAssignedShuffleSeed(parsed.shuffleSeed);
+                }
                 setPhase('result');
               }
             }
@@ -128,8 +142,8 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
       })
       .catch((err) => {
         if (!mounted) return;
-        console.error('Load homework error:', err);
-        setLoadError('Lỗi tải dữ liệu bài tập. Vui lòng thử tải lại trang.');
+        console.error('Load online exam error:', err);
+        setLoadError('Lỗi tải dữ liệu Đề online. Vui lòng thử tải lại trang.');
         setLoading(false);
       });
 
@@ -138,7 +152,12 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
     };
   }, [assignmentId, isTeacherPreview]);
 
-  const questions: QuizQuestion[] = assignment?.questions || [];
+  const resolvedExam = useMemo(() => {
+    if (!assignment) return null;
+    return resolveStudentOnlineExam(assignment, assignedVariantCode, assignedShuffleSeed);
+  }, [assignment, assignedVariantCode, assignedShuffleSeed]);
+
+  const questions: QuizQuestion[] = resolvedExam?.questions || assignment?.questions || [];
 
   const getElapsedSecsNow = () =>
     Math.max(0, Math.round((Date.now() - sessionStartMsRef.current) / 1000));
@@ -251,6 +270,17 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
 
     if (!resolvedName) return;
 
+    const pickedVariant = pickStudentVariantAssignment(assignment, resolvedName);
+    setAssignedVariantCode(pickedVariant.variantCode);
+    setAssignedVariantLabel(pickedVariant.variantLabel);
+    setAssignedShuffleSeed(pickedVariant.shuffleSeed);
+
+    const previewResolved = resolveStudentOnlineExam(
+      assignment,
+      pickedVariant.variantCode,
+      pickedVariant.shuffleSeed
+    );
+
     setStudentName(resolvedName);
     const nowIso = new Date().toISOString();
     setStartedAtIso(nowIso);
@@ -267,7 +297,11 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
         timestamp: nowIso,
         elapsedSeconds: 0,
         type: 'start',
-        detail: `${resolvedName} bắt đầu làm bài (${assignment.questions.length} câu)`,
+        detail: `${resolvedName} bắt đầu làm bài (${previewResolved.questions.length} câu${
+          assignment.antiCheatMode && assignment.antiCheatMode !== 'none'
+            ? ` · ${pickedVariant.variantLabel}`
+            : ''
+        })`,
       },
     ];
     setPhase('taking');
@@ -359,6 +393,7 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
   const executeFinalSubmit = async (autoByTimeout = false) => {
     if (!assignment || isSubmitting) return;
     setShowSubmitConfirm(false);
+    setSubmitError('');
     setIsSubmitting(true);
 
     try {
@@ -376,6 +411,10 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
         studentName: studentName || 'Học sinh',
         studentRosterId: selectedRosterStudent?.id,
         studentClassName: studentClassName || assignment.className,
+        effectiveQuestions: questions,
+        variantCode: resolvedExam?.variantCode || assignedVariantCode,
+        variantLabel: resolvedExam?.variantLabel || assignedVariantLabel,
+        shuffleSeed: resolvedExam?.shuffleSeed ?? assignedShuffleSeed,
         answersMap,
         processStats: questionStatsRef.current,
         activityLog: activityLogRef.current,
@@ -398,10 +437,39 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
       }
     } catch (err) {
       console.error('Submit homework error:', err);
-      alert('Có sự cố khi lưu bài nộp. Vui lòng thử bấm Nộp bài lại.');
+      const rawMsg = err instanceof Error ? err.message : String(err || '');
+      const lower = rawMsg.toLowerCase();
+      if (lower.includes('permission') || lower.includes('insufficient')) {
+        setSubmitError(
+          'Máy chủ dữ liệu đang cập nhật quyền lưu bài nộp. Vui lòng thử bấm Nộp lại sau vài giây hoặc kiểm tra kết nối mạng.'
+        );
+      } else if (lower.includes('offline') || lower.includes('network') || lower.includes('failed to fetch')) {
+        setSubmitError(
+          'Kết nối mạng không ổn định nên chưa gửi được bài lên hệ thống. Bài làm đã được lưu tạm trên máy, em hãy kiểm tra Wi-Fi/4G rồi bấm Thử Gửi Lại.'
+        );
+      } else {
+        setSubmitError(
+          'Có sự cố kết nối khi lưu bài nộp lên hệ thống. Bài làm của em vẫn được giữ nguyên, hãy bấm Thử Gửi Lại.'
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleViewLocalReceiptFallback = () => {
+    if (!assignment) return;
+    try {
+      const savedReceipt = localStorage.getItem(`smartboard_hw_receipt_${assignment.id}`);
+      if (savedReceipt) {
+        const parsed = JSON.parse(savedReceipt) as HomeworkSubmission;
+        if (parsed && parsed.assignmentId === assignment.id) {
+          setSubmitError('');
+          setSubmission(parsed);
+          setPhase('result');
+        }
+      }
+    } catch {}
   };
 
   const handleRetry = () => {
@@ -427,7 +495,7 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
     return (
       <div className="min-h-screen w-full bg-[#F8FAFC] flex flex-col items-center justify-center p-6 text-slate-800">
         <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mb-3" />
-        <div className="text-sm font-bold text-slate-700">Đang tải bài tập về nhà...</div>
+        <div className="text-sm font-bold text-slate-700">Đang tải Đề online...</div>
       </div>
     );
   }
@@ -437,9 +505,9 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
       <div className="min-h-screen w-full bg-[#F8FAFC] flex items-center justify-center p-4">
         <div className="max-w-md w-full p-6 rounded-3xl bg-white border border-slate-200 shadow-sm text-center space-y-4">
           <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
-          <h2 className="text-lg font-black text-slate-900">Không Thể Mở Bài Tập</h2>
+          <h2 className="text-lg font-black text-slate-900">Không Thể Mở Đề Online</h2>
           <p className="text-xs text-slate-600 leading-relaxed">
-            {loadError || 'Bài tập không tồn tại hoặc đã bị xóa.'}
+            {loadError || 'Đề online không tồn tại hoặc đã bị xóa.'}
           </p>
           {onExit && (
             <button
@@ -493,8 +561,8 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
             <div className="flex items-center justify-between gap-2">
               <span className="px-2.5 py-0.5 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[11px] font-black">
                 {assignment.mode === 'class'
-                  ? `BÀI TẬP LỚP ${assignment.className}`
-                  : 'BÀI TẬP VỀ NHÀ'}
+                  ? `ĐỀ ONLINE LỚP ${assignment.className}`
+                  : 'ĐỀ ONLINE'}
               </span>
               {onExit && (
                 <button
@@ -649,7 +717,7 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
               className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
             >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Bắt Đầu Làm Bài Tập</span>
+              <span>Bắt Đầu Làm Đề Online</span>
             </button>
           </form>
         </div>
@@ -672,9 +740,16 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
         <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-3">
           <div className="w-full flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-[11px] font-bold text-slate-500 truncate">
-                {submission.studentName}
-                {submission.studentClassName ? ` · Lớp ${submission.studentClassName}` : ''}
+              <div className="text-[11px] font-bold text-slate-500 truncate flex items-center gap-1.5 flex-wrap">
+                <span>
+                  {submission.studentName}
+                  {submission.studentClassName ? ` · Lớp ${submission.studentClassName}` : ''}
+                </span>
+                {submission.variantLabel && submission.variantCode !== 'GỐC' && (
+                  <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-mono text-[10px] font-black">
+                    {submission.variantLabel}
+                  </span>
+                )}
               </div>
               <h1 className="text-sm sm:text-base font-black text-slate-900 truncate">
                 {assignment.title}
@@ -1030,11 +1105,21 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
               <FileText className="w-5 h-5 text-emerald-400" />
             </div>
             <div className="min-w-0">
-              <div className="text-[11px] font-bold text-slate-500 truncate">
-                {studentName}
-                {studentClassName ? ` · Lớp ${studentClassName}` : ''}
-                {assignment.subject ? ` · ${assignment.subject}` : ''}
-                {assignment.grade ? ` (${assignment.grade})` : ''}
+              <div className="text-[11px] font-bold text-slate-500 truncate flex items-center gap-1.5 flex-wrap">
+                <span>
+                  {studentName}
+                  {studentClassName ? ` · Lớp ${studentClassName}` : ''}
+                  {assignment.subject ? ` · ${assignment.subject}` : ''}
+                  {assignment.grade ? ` (${assignment.grade})` : ''}
+                </span>
+                {assignment.antiCheatMode &&
+                  assignment.antiCheatMode !== 'none' &&
+                  resolvedExam?.variantLabel && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-mono text-[10px] font-black">
+                      <Shuffle className="w-3 h-3" />
+                      {resolvedExam.variantLabel}
+                    </span>
+                  )}
               </div>
               <h1 className="text-sm sm:text-base font-black text-slate-900 truncate">
                 {assignment.title}
@@ -1114,6 +1199,38 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
           );
         })}
       </div>
+
+      {/* Inline Submission Retry Banner (replaces blocking browser alert) */}
+      {submitError && (
+        <div className="w-full px-4 sm:px-6 lg:px-8 pt-3">
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-start gap-2.5 text-xs sm:text-sm">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-black text-rose-900">Chưa thể gửi bài lên máy chủ</div>
+                <div className="text-rose-800 leading-relaxed">{submitError}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={() => executeFinalSubmit(false)}
+                disabled={isSubmitting}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs cursor-pointer whitespace-nowrap disabled:opacity-50"
+              >
+                {isSubmitting ? 'Đang Gửi Lại...' : 'Thử Gửi Lại Ngay'}
+              </button>
+              <button
+                type="button"
+                onClick={handleViewLocalReceiptFallback}
+                className="px-3.5 py-2 rounded-xl bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 font-bold text-xs cursor-pointer whitespace-nowrap"
+              >
+                Xem Điểm Tạm Trên Máy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Full-Width 2-Zone Academic Exam Workspace */}
       <main className="flex-1 w-full px-4 sm:px-6 lg:px-8 py-4 lg:py-6 flex flex-col lg:flex-row gap-6 items-start pb-20">

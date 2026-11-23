@@ -34,6 +34,7 @@ import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { parseQuizFromFile } from '../utils/quizFileParser';
 import { directGenerateQuiz } from '../utils/geminiClient';
+import { balanceQuizAnswerDistribution } from '../utils/quizDistribution';
 import {
   speakQuestionContent,
   stopAllSpeech,
@@ -190,12 +191,15 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
       }
 
       if (rawQuestions && rawQuestions.length > 0) {
-        const withLimits = rawQuestions.map((q: QuizQuestion, idx: number) => ({
-          ...q,
-          id: `ai_q_${Date.now()}_${idx + 1}`,
-          timeLimit: q.timeLimit || timeLimit,
-          difficulty: q.difficulty || difficulty,
-        }));
+        const withLimits = balanceQuizAnswerDistribution(
+          rawQuestions.map((q: QuizQuestion, idx: number) => ({
+            ...q,
+            id: `ai_q_${Date.now()}_${idx + 1}`,
+            timeLimit: q.timeLimit || timeLimit,
+            difficulty: q.difficulty || difficulty,
+          })),
+          `${topic}_${Date.now()}`
+        );
         setGeneratedQuestions((prev) => replaceExisting ? withLimits : [...prev, ...withLimits]);
         setSuccessMessage(`Đã tạo thành công ${withLimits.length} câu hỏi chuẩn từ AI!`);
       } else {

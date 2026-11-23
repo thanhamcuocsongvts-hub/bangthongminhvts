@@ -16,19 +16,27 @@ import {
   AlertCircle,
   RotateCcw,
   Eye,
+  Shuffle,
+  ShieldCheck,
+  Layers,
+  Loader2,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   ClassRoom,
   HomeworkAssignMode,
   HomeworkAssignment,
+  OnlineExamAntiCheatMode,
+  OnlineExamVariant,
   QuizQuestion,
 } from '../types';
 import {
   createHomeworkAssignment,
   getHomeworkShareUrl,
 } from '../utils/homeworkService';
+import { generateOnlineExamVariants } from '../utils/examVariantsService';
 import { gameSounds } from '../utils/gameSoundEffects';
+import { normalizeTeacherOwnerId } from '../utils/teacherPrivacy';
 
 interface HomeworkAssignModalProps {
   isOpen: boolean;
@@ -67,23 +75,29 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
   const [selectedClassId, setSelectedClassId] = useState<string>(
     defaultClassId || teacherClasses[0]?.id || ''
   );
-  const [title, setTitle] = useState<string>(defaultTitle || `Bài tập về nhà ${subject}`);
+  const [title, setTitle] = useState<string>(defaultTitle || `Đề online ${subject}`);
   const [durationMinutes, setDurationMinutes] = useState<number>(30);
   const [dueDate, setDueDate] = useState<string>('');
   const [allowRetake, setAllowRetake] = useState<boolean>(false);
   const [showAnswersAfterSubmit, setShowAnswersAfterSubmit] = useState<boolean>(true);
+  const [antiCheatMode, setAntiCheatMode] = useState<OnlineExamAntiCheatMode>('shuffle_original');
+  const [shuffleQuestions, setShuffleQuestions] = useState<boolean>(true);
+  const [shuffleOptions, setShuffleOptions] = useState<boolean>(true);
+  const [variantCount, setVariantCount] = useState<number>(3);
   const [note, setNote] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [savingStepText, setSavingStepText] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [createdAssignment, setCreatedAssignment] = useState<HomeworkAssignment | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
   useEffect(() => {
     if (isOpen) {
-      setTitle(defaultTitle || `Bài tập về nhà ${subject}`);
+      setTitle(defaultTitle || `Đề online ${subject}`);
       setCreatedAssignment(null);
       setErrorMsg('');
       setCopied(false);
+      setSavingStepText('');
       if (defaultClassId && teacherClasses.some((c) => c.id === defaultClassId)) {
         setSelectedClassId(defaultClassId);
       } else if (teacherClasses.length > 0 && !teacherClasses.some((c) => c.id === selectedClassId)) {
@@ -115,11 +129,30 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
 
     setIsSaving(true);
     try {
+      const resolvedTitle = title.trim() || `Đề online ${subject}`;
+      const resolvedGrade = selectedClass?.grade || grade;
+      let generatedVariants: OnlineExamVariant[] | undefined;
+
+      if (antiCheatMode === 'variants_and_shuffle') {
+        setSavingStepText(`Đang tạo ${variantCount} mã đề tương tự & trộn câu hỏi...`);
+        const variantRes = await generateOnlineExamVariants({
+          questions,
+          variantCount,
+          subject,
+          grade: resolvedGrade,
+          title: resolvedTitle,
+          shuffleQuestions,
+          shuffleOptions,
+        });
+        generatedVariants = variantRes.variants;
+      }
+
+      setSavingStepText('Đang phát hành link Đề online...');
       const created = await createHomeworkAssignment({
-        title: title.trim() || `Bài tập về nhà ${subject}`,
+        title: resolvedTitle,
         subject,
-        grade: selectedClass?.grade || grade,
-        teacherId: teacherId || 'teacher_default',
+        grade: resolvedGrade,
+        teacherId: normalizeTeacherOwnerId(teacherId),
         teacherName: teacherName || 'Giáo viên',
         mode: assignMode,
         classroom: assignMode === 'class' ? selectedClass : null,
@@ -127,6 +160,11 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
         durationMinutes,
         allowRetake,
         showAnswersAfterSubmit,
+        antiCheatMode,
+        shuffleQuestions: antiCheatMode !== 'none' ? shuffleQuestions : false,
+        shuffleOptions: antiCheatMode !== 'none' ? shuffleOptions : false,
+        variantCount: antiCheatMode === 'variants_and_shuffle' ? variantCount : 1,
+        variants: generatedVariants,
         dueDate: dueDate || undefined,
         note: note.trim() || undefined,
       });
@@ -135,10 +173,11 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
       gameSounds.playVictoryFanfare();
       onCreated?.(created);
     } catch (err: any) {
-      console.error('Create homework assignment error:', err);
-      setErrorMsg('Không thể tạo bài giao về nhà. Vui lòng kiểm tra kết nối mạng và thử lại.');
+      console.error('Create online exam error:', err);
+      setErrorMsg('Không thể tạo Đề online. Vui lòng kiểm tra kết nối mạng và thử lại.');
     } finally {
       setIsSaving(false);
+      setSavingStepText('');
     }
   };
 
@@ -173,7 +212,7 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
             </div>
             <div className="min-w-0">
               <h3 className="text-base sm:text-lg font-black tracking-tight truncate">
-                {createdAssignment ? 'Đã Tạo Link Giao Bài Về Nhà' : 'Giao Bài Tập Về Nhà Cho Học Sinh'}
+                {createdAssignment ? 'Đã Tạo Link Đề Online' : 'Giao Đề Online Cho Học Sinh'}
               </h3>
               <p className="text-xs text-slate-300 truncate">
                 {questions.length} câu hỏi · {subject} · {grade}
@@ -195,9 +234,9 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
           <div className="p-6 space-y-5 max-h-[82vh] overflow-y-auto">
             <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-start gap-3">
               <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
-              <div className="space-y-1 flex-1 min-w-0">
+              <div className="space-y-1.5 flex-1 min-w-0">
                 <div className="text-sm font-black text-emerald-950">
-                  Bài tập &ldquo;{createdAssignment.title}&rdquo; đã sẵn sàng!
+                  Đề online &ldquo;{createdAssignment.title}&rdquo; đã sẵn sàng!
                 </div>
                 <div className="text-xs text-emerald-800">
                   {createdAssignment.mode === 'class' ? (
@@ -211,6 +250,30 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
                     </>
                   )}
                 </div>
+                {createdAssignment.antiCheatMode === 'variants_and_shuffle' &&
+                  createdAssignment.variants &&
+                  createdAssignment.variants.length > 0 && (
+                    <div className="pt-1 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-black text-indigo-800 flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                        Chống quay cóp:
+                      </span>
+                      {createdAssignment.variants.map((v) => (
+                        <span
+                          key={v.id}
+                          className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-900 border border-indigo-200 font-mono text-[11px] font-black"
+                        >
+                          {v.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                {createdAssignment.antiCheatMode === 'shuffle_original' && (
+                  <div className="pt-1 text-[11px] font-bold text-indigo-800 flex items-center gap-1.5">
+                    <Shuffle className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Chống quay cóp: Tự động xáo trộn thứ tự câu hỏi &amp; đáp án riêng cho từng học sinh.</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -327,7 +390,7 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
             {/* 2 Assignment Mode Options */}
             <div className="space-y-2">
               <label className="text-xs font-black uppercase tracking-wider text-slate-600 block">
-                1. Chọn phương án giao bài về nhà
+                1. Chọn phương án phát Đề online
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
@@ -444,14 +507,14 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-800 block mb-1.5">
-                  2. Tên bài tập giao về nhà: <span className="text-rose-500">*</span>
+                  2. Tên Đề online: <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Ví dụ: Bài tập về nhà Chương I - Hàm số (Lớp 12A1)"
+                  placeholder="Ví dụ: Đề online Chương I - Hàm số (Lớp 12A1)"
                   className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-300 text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -536,6 +599,125 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
                   </div>
                 </label>
               </div>
+              {/* 3. Chống quay cóp & Trộn mã đề online */}
+              <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-black uppercase tracking-wider text-indigo-950 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                    <span>3. Chống quay cóp &amp; Trộn mã đề online</span>
+                  </label>
+                  <span className="text-[11px] font-bold text-indigo-700">
+                    Hạn chế trao đổi khi kiểm tra
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setAntiCheatMode('none')}
+                    className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                      antiCheatMode === 'none'
+                        ? 'border-slate-900 bg-white shadow-xs'
+                        : 'border-slate-200 bg-white/70 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="text-xs font-black text-slate-900 mb-0.5">Giữ nguyên đề gốc</div>
+                    <p className="text-[11px] text-slate-600 leading-snug">
+                      Mọi học sinh làm cùng thứ tự câu &amp; đáp án.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAntiCheatMode('shuffle_original')}
+                    className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                      antiCheatMode === 'shuffle_original'
+                        ? 'border-indigo-600 bg-white shadow-xs'
+                        : 'border-slate-200 bg-white/70 hover:border-indigo-300'
+                    }`}
+                  >
+                    <div className="text-xs font-black text-indigo-900 flex items-center gap-1 mb-0.5">
+                      <Shuffle className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Xáo trộn đề gốc</span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-snug">
+                      Mỗi học sinh nhận một thứ tự câu &amp; đáp án riêng.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAntiCheatMode('variants_and_shuffle')}
+                    className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                      antiCheatMode === 'variants_and_shuffle'
+                        ? 'border-emerald-600 bg-white shadow-xs'
+                        : 'border-slate-200 bg-white/70 hover:border-emerald-300'
+                    }`}
+                  >
+                    <div className="text-xs font-black text-emerald-900 flex items-center gap-1 mb-0.5">
+                      <Layers className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Tạo thêm đề tương tự</span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-snug">
+                      AI sinh thêm các mã đề đổi số/hàm tương đương rồi trộn.
+                    </p>
+                  </button>
+                </div>
+
+                {antiCheatMode !== 'none' && (
+                  <div className="pt-2 border-t border-indigo-200/70 space-y-2.5">
+                    {antiCheatMode === 'variants_and_shuffle' && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-2.5 rounded-xl border border-emerald-200">
+                        <span className="text-xs font-bold text-slate-800">
+                          Số mã đề phát hành (Mã 101, 102...):
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {[2, 3, 4].map((cnt) => (
+                            <button
+                              key={cnt}
+                              type="button"
+                              onClick={() => setVariantCount(cnt)}
+                              className={`px-3 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                variantCount === cnt
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                              }`}
+                            >
+                              {cnt} mã đề
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <label className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={shuffleQuestions}
+                          onChange={(e) => setShuffleQuestions(e.target.checked)}
+                          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                        />
+                        <span className="text-xs font-bold text-slate-800">
+                          Trộn thứ tự câu hỏi (theo từng phần)
+                        </span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={shuffleOptions}
+                          onChange={(e) => setShuffleOptions(e.target.checked)}
+                          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                        />
+                        <span className="text-xs font-bold text-slate-800">
+                          Xáo trộn thứ tự đáp án A, B, C, D
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Footer Submit */}
@@ -543,7 +725,8 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
+                disabled={isSaving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer disabled:opacity-50"
               >
                 Hủy
               </button>
@@ -552,8 +735,14 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
                 disabled={isSaving}
                 className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center gap-2 shadow-md shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-50"
               >
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>{isSaving ? 'Đang Tạo Link...' : 'Tạo Link Giao Bài Ngay'}</span>
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                )}
+                <span>
+                  {isSaving ? savingStepText || 'Đang Tạo Link...' : 'Tạo Link Đề Online Ngay'}
+                </span>
               </button>
             </div>
           </form>
