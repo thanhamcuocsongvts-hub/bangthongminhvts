@@ -137,6 +137,7 @@ interface ClassroomBlackboardViewProps {
   onSwitchToReader?: () => void;
   onOpenRandomPicker?: () => void;
   isInitialFullScreen?: boolean;
+  hasExternalSidePanel?: boolean;
 }
 
 export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = ({
@@ -155,6 +156,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   onSwitchToReader,
   onOpenRandomPicker,
   isInitialFullScreen = false,
+  hasExternalSidePanel = false,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -633,8 +635,17 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   useEffect(() => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
+    const containerEl = containerRef.current;
+    let observer: ResizeObserver | null = null;
+    if (containerEl && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        resizeCanvas();
+      });
+      observer.observe(containerEl);
+    }
     return () => {
       window.removeEventListener('resize', resizeCanvas);
+      if (observer) observer.disconnect();
       if (drawAnimFrameIdRef.current !== null) {
         cancelAnimationFrame(drawAnimFrameIdRef.current);
         drawAnimFrameIdRef.current = null;
@@ -3309,9 +3320,9 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     <div
       ref={containerRef}
       className={`relative w-full overflow-hidden transition-all duration-300 select-none flex ${
-        isFullBoard
+        isFullBoard && !hasExternalSidePanel
           ? 'fixed inset-0 z-[9990] h-dvh w-screen rounded-none'
-          : 'h-full w-full min-h-[500px]'
+          : 'h-full w-full min-h-[420px]'
       } ${getBackgroundClass()}`}
     >
       {/* Hidden File Input (Đầy đủ định dạng: Word, PDF, Excel, PowerPoint, Ảnh, Text) */}

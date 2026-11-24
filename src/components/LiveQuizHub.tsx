@@ -930,6 +930,7 @@ interface LiveQuizHubProps {
   onOpenExportModal?: () => void;
   classroom?: any;
   teacher?: any;
+  hasExternalSidePanel?: boolean;
 }
 
 interface UploadedMatrixFile {
@@ -956,6 +957,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   onOpenExportModal,
   classroom,
   teacher,
+  hasExternalSidePanel = false,
 }) => {
   const ownerTeacherId = useMemo(() => normalizeTeacherOwnerId(teacher?.id), [teacher?.id]);
   const teacherRoomPin = useMemo(() => getTeacherRoomPin(teacher?.id), [teacher?.id]);
@@ -2679,8 +2681,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       id="live-quiz-viewport"
       className={
         isScopedPresentationFS
-          ? 'fixed inset-0 z-[9990] w-screen h-dvh flex flex-col bg-slate-950 rounded-none overflow-hidden border-0 shadow-none'
-          : 'relative w-full h-[calc(100vh-100px)] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-md'
+          ? hasExternalSidePanel
+            ? 'relative w-full h-full flex flex-col bg-slate-950 rounded-none overflow-hidden border-0 shadow-none'
+            : 'fixed inset-0 z-[9990] w-screen h-dvh flex flex-col bg-slate-950 rounded-none overflow-hidden border-0 shadow-none'
+          : 'relative w-full h-full min-h-[420px] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-md'
       }
     >
       {/* Top Universal Mode Switcher & Room Status Bar (Ẩn hoàn toàn khi trình chiếu câu hỏi Toàn Màn Hình) */}

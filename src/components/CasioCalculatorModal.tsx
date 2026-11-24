@@ -7,7 +7,7 @@ declare global {
 }
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { X } from 'lucide-react';
+import { X, Columns2, Monitor, ArrowLeftRight } from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
@@ -2008,17 +2008,41 @@ function ClassroomBigScreen({
   );
 }
 
+export type CasioDisplayMode = 'standalone' | 'with_blackboard';
+
+let latestPreservedCasioState: CasioState | null = null;
+
 interface CasioFx580VNXInnerProps {
   onClose?: () => void;
+  displayMode?: CasioDisplayMode;
+  onChangeDisplayMode?: (mode: CasioDisplayMode) => void;
+  dockPosition?: 'left' | 'right';
+  onToggleDockPosition?: () => void;
+  onBigScreenChange?: (active: boolean) => void;
 }
 
-function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
+function CasioFx580VNXInner({
+  onClose,
+  displayMode = 'standalone',
+  onChangeDisplayMode,
+  dockPosition = 'right',
+  onToggleDockPosition,
+  onBigScreenChange,
+}: CasioFx580VNXInnerProps) {
+  const isDocked = displayMode === 'with_blackboard';
   const { katexReady: katexLoaded } = useExternalMathLibraries();
   const [showChalk, setShowChalk] = useState(false);
-  const [showBigScreen, setShowBigScreen] = useState(true);
-  const [zoomScale, setZoomScale] = useState(1);
+  const [showBigScreen, setShowBigScreen] = useState(!isDocked);
+  const [zoomScale, setZoomScale] = useState(isDocked ? 0.92 : 1);
+
+  useEffect(() => {
+    onBigScreenChange?.(showBigScreen);
+  }, [showBigScreen, onBigScreenChange]);
 
   const [calcState, setCalcState] = useState<CasioState>(() => {
+    if (latestPreservedCasioState) {
+      return latestPreservedCasioState;
+    }
     const initial = createInitialEmptyTree();
     return {
       mode: 'COMP',
@@ -3104,6 +3128,10 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
     moveCursor(direction);
   }, [moveCursor]);
 
+  useEffect(() => {
+    latestPreservedCasioState = calcState;
+  }, [calcState]);
+
   const currentLatexExpression = useMemo(
     () => serializeSlotToLatex(calcState.rootSlot, calcState.cursor, true),
     [calcState.rootSlot, calcState.cursor]
@@ -3111,7 +3139,11 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
 
   return (
     <div
-      className={`relative w-full ${showBigScreen ? 'max-w-[1180px]' : 'max-w-[450px]'} max-h-[95vh] flex flex-col items-center justify-start py-4 px-3 sm:px-6 overflow-y-auto overflow-x-hidden custom-scrollbar rounded-3xl border border-white/20 shadow-2xl transition-all duration-300`}
+      className={`relative w-full ${
+        isDocked
+          ? 'h-full rounded-2xl border border-emerald-500/35 py-2.5 px-2.5 sm:px-3.5 shadow-xl'
+          : `${showBigScreen ? 'max-w-[1180px]' : 'max-w-[450px]'} max-h-[95vh] rounded-3xl border border-white/20 py-4 px-3 sm:px-6 shadow-2xl`
+      } flex flex-col items-center justify-start overflow-y-auto overflow-x-hidden custom-scrollbar transition-all duration-300`}
       style={{
         backgroundColor: '#193829',
         backgroundImage: `
@@ -3122,35 +3154,99 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
     >
       {showChalk && <ChalkboardDoodles />}
 
-      {/* Thanh tiêu đề & Nút Bật/Tắt Màn Hình Lớn + Phóng to */}
-      <div className="relative z-10 mb-4 flex flex-wrap items-center justify-center gap-2.5 px-4 py-2 rounded-full bg-[#0d1c14] border border-white/20 text-white/90 text-xs shadow-lg">
+      {/* Thanh tiêu đề & Tùy chọn Hiển thị Độc lập / Song song Bảng Xanh + Màn Hình Lớn + Phóng to */}
+      <div
+        className={`relative z-10 ${
+          isDocked ? 'mb-2.5 px-2.5 py-1.5 rounded-2xl w-full' : 'mb-4 px-4 py-2 rounded-full'
+        } flex flex-wrap items-center justify-center gap-2 bg-[#0d1c14] border border-white/20 text-white/90 text-xs shadow-lg`}
+      >
         <span className="font-medium tracking-wide flex items-center gap-1.5">
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
           Casio fx-580VN X
         </span>
-        <span className="text-white/30">•</span>
-        <span className="font-bold text-amber-300 tracking-wide">
-          Được phát triển bởi TTK
-        </span>
+        {!isDocked && (
+          <>
+            <span className="text-white/30">•</span>
+            <span className="font-bold text-amber-300 tracking-wide">
+              Được phát triển bởi TTK
+            </span>
+          </>
+        )}
+
+        {onChangeDisplayMode && (
+          <>
+            <span className="text-white/30">|</span>
+            <div className="inline-flex items-center p-0.5 rounded-full bg-white/10 border border-white/15 gap-0.5">
+              <button
+                type="button"
+                onClick={() => onChangeDisplayMode('standalone')}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
+                  !isDocked
+                    ? 'bg-sky-500 text-slate-950 shadow-sm'
+                    : 'text-slate-200 hover:bg-white/15'
+                }`}
+                title="Hiển thị cửa sổ máy tính độc lập"
+              >
+                <Monitor className="w-3 h-3" />
+                <span>Độc lập</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeDisplayMode('with_blackboard')}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
+                  isDocked
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-emerald-200 hover:bg-white/15'
+                }`}
+                title="Chèn máy tính song song cùng Bảng Xanh, Tài Liệu, Tạo Đề, Trò Chơi..."
+              >
+                <Columns2 className="w-3 h-3" />
+                <span>Chèn Song Song</span>
+              </button>
+            </div>
+          </>
+        )}
+
+        {isDocked && onToggleDockPosition && (
+          <button
+            type="button"
+            onClick={onToggleDockPosition}
+            className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-amber-200 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap"
+            title="Đổi vị trí máy tính sang Trái hoặc Phải màn hình"
+          >
+            <ArrowLeftRight className="w-3 h-3" />
+            <span>{dockPosition === 'right' ? 'Sang Trái' : 'Sang Phải'}</span>
+          </button>
+        )}
+
         <span className="text-white/30">|</span>
         <button
           type="button"
           onClick={() => setShowBigScreen((v) => !v)}
-          className={`px-3 py-1 rounded-full font-bold transition cursor-pointer flex items-center gap-1.5 ${
+          className={`px-2.5 py-1 rounded-full font-bold text-[11px] transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
             showBigScreen
               ? 'bg-emerald-500 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
               : 'bg-white/15 text-emerald-200 hover:bg-white/25'
           }`}
         >
           <span>🖥️</span>
-          <span>{showBigScreen ? 'Đang bật Màn hình lớn (Cho học sinh)' : 'Bật Màn hình lớn (Cho học sinh)'}</span>
+          <span>
+            {isDocked
+              ? showBigScreen
+                ? 'Màn hình lớn: Bật'
+                : 'Màn hình lớn'
+              : showBigScreen
+              ? 'Đang bật Màn hình lớn (Cho học sinh)'
+              : 'Bật Màn hình lớn (Cho học sinh)'}
+          </span>
         </button>
+
         <span className="text-white/30">|</span>
-        <div className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-full border border-white/15">
-          <span className="text-[10.5px] text-emerald-300 font-semibold mr-0.5">Phóng to:</span>
+        <div className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-full border border-white/15">
+          <span className="text-[10.5px] text-emerald-300 font-semibold mr-0.5">Thu phóng:</span>
           <button
             type="button"
-            onClick={() => setZoomScale((z) => Math.max(0.8, Number((z - 0.1).toFixed(2))))}
+            onClick={() => setZoomScale((z) => Math.max(0.75, Number((z - 0.1).toFixed(2))))}
             className="px-1.5 py-0.5 text-xs hover:bg-white/20 rounded font-bold cursor-pointer"
             title="Thu nhỏ thân máy tính"
           >
@@ -3167,32 +3263,38 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
           >
             +
           </button>
-          {zoomScale !== 1 && (
+          {zoomScale !== (isDocked ? 0.92 : 1) && (
             <button
               type="button"
-              onClick={() => setZoomScale(1)}
+              onClick={() => setZoomScale(isDocked ? 0.92 : 1)}
               className="text-[9.5px] text-amber-300 hover:underline ml-1 cursor-pointer"
               title="Đặt lại tỷ lệ chuẩn"
             >
-              100%
+              Chuẩn
             </button>
           )}
         </div>
-        <span className="text-white/30">|</span>
-        <button
-          type="button"
-          onClick={() => setShowChalk(!showChalk)}
-          className="text-emerald-300 hover:text-emerald-200 underline underline-offset-2 transition cursor-pointer"
-        >
-          {showChalk ? 'Ẩn phấn' : 'Hiện phấn'}
-        </button>
+
+        {!isDocked && (
+          <>
+            <span className="text-white/30">|</span>
+            <button
+              type="button"
+              onClick={() => setShowChalk(!showChalk)}
+              className="text-emerald-300 hover:text-emerald-200 underline underline-offset-2 transition cursor-pointer"
+            >
+              {showChalk ? 'Ẩn phấn' : 'Hiện phấn'}
+            </button>
+          </>
+        )}
+
         {onClose && (
           <>
             <span className="text-white/30">|</span>
             <button
               type="button"
               onClick={onClose}
-              className="text-rose-300 hover:text-rose-100 font-bold transition cursor-pointer flex items-center gap-0.5"
+              className="text-rose-300 hover:text-rose-100 font-bold transition cursor-pointer flex items-center gap-0.5 whitespace-nowrap"
               title="Đóng máy tính"
             >
               <X className="w-3.5 h-3.5" />
@@ -3206,7 +3308,11 @@ function CasioFx580VNXInner({ onClose }: CasioFx580VNXInnerProps) {
           BỐ CỤC CHÍNH: MÁY TÍNH BÊN TRÁI + MÀN HÌNH LỚN BÊN PHẢI
       ==================================================================== */}
       <div
-        className="relative z-10 w-full flex flex-col lg:flex-row items-center lg:items-start justify-center gap-6 transition-all duration-300"
+        className={`relative z-10 w-full flex ${
+          isDocked
+            ? 'flex-col items-center gap-4'
+            : 'flex-col lg:flex-row items-center lg:items-start justify-center gap-6'
+        } transition-all duration-300`}
       >
         {/* CỘT TRÁI: THÂN MÁY TÍNH CASIO + THANH CHẾ ĐỘ NHANH */}
         <div
@@ -4086,8 +4192,38 @@ class SafeCalculatorErrorBoundary extends React.Component<
 export const CasioCalculatorModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
-}> = ({ isOpen, onClose }) => {
+  displayMode?: CasioDisplayMode;
+  onChangeDisplayMode?: (mode: CasioDisplayMode) => void;
+  dockPosition?: 'left' | 'right';
+  onToggleDockPosition?: () => void;
+  onBigScreenChange?: (active: boolean) => void;
+}> = ({
+  isOpen,
+  onClose,
+  displayMode = 'standalone',
+  onChangeDisplayMode,
+  dockPosition = 'right',
+  onToggleDockPosition,
+  onBigScreenChange,
+}) => {
   if (!isOpen) return null;
+
+  if (displayMode === 'with_blackboard') {
+    return (
+      <div className="w-full h-full flex flex-col select-none">
+        <SafeCalculatorErrorBoundary onClose={onClose}>
+          <CasioFx580VNXInner
+            onClose={onClose}
+            displayMode="with_blackboard"
+            onChangeDisplayMode={onChangeDisplayMode}
+            dockPosition={dockPosition}
+            onToggleDockPosition={onToggleDockPosition}
+            onBigScreenChange={onBigScreenChange}
+          />
+        </SafeCalculatorErrorBoundary>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/90 animate-in fade-in duration-200 select-none overflow-y-auto">
@@ -4103,7 +4239,12 @@ export const CasioCalculatorModal: React.FC<{
         </button>
 
         <SafeCalculatorErrorBoundary onClose={onClose}>
-          <CasioFx580VNXInner onClose={onClose} />
+          <CasioFx580VNXInner
+            onClose={onClose}
+            displayMode="standalone"
+            onChangeDisplayMode={onChangeDisplayMode}
+            onBigScreenChange={onBigScreenChange}
+          />
         </SafeCalculatorErrorBoundary>
       </div>
     </div>

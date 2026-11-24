@@ -330,7 +330,7 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
   return (
     <div
       id="doc-reader-viewport"
-      className="relative w-full h-[calc(100vh-100px)] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-md p-4 md:p-6 space-y-4"
+      className="relative w-full h-full min-h-[420px] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-md p-4 md:p-6 space-y-4"
     >
       {savedToast && (
         <div className="absolute top-4 right-4 z-50 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-xl flex items-center gap-2 animate-fade-in border border-emerald-400">

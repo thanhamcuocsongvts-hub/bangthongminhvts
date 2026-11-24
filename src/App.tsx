@@ -34,7 +34,7 @@ import { RandomStudentPickerModal } from './components/RandomStudentPickerModal'
 import { TeacherProfileModal } from './components/TeacherProfileModal';
 import { AIConfigModal } from './components/AIConfigModal';
 import { AdminManagementModal } from './components/AdminManagementModal';
-import { CasioCalculatorModal } from './components/CasioCalculatorModal';
+import { CasioCalculatorModal, CasioDisplayMode } from './components/CasioCalculatorModal';
 import { StepByStepConstructionModal } from './components/StepByStepConstructionModal';
 import { cleanStudentList } from './utils/studentFilter';
 import { StudentMobilePortal } from './components/StudentMobilePortal';
@@ -545,7 +545,31 @@ export default function App() {
   const [showAIQuizModal, setShowAIQuizModal] = useState<boolean>(false);
   const [showAIConfigModal, setShowAIConfigModal] = useState<boolean>(false);
   const [showCasioModal, setShowCasioModal] = useState<boolean>(false);
+  const [casioDisplayMode, setCasioDisplayMode] = useState<CasioDisplayMode>('standalone');
+  const [isCasioDockedOpen, setIsCasioDockedOpen] = useState<boolean>(false);
+  const [casioDockPosition, setCasioDockPosition] = useState<'left' | 'right'>('right');
   const [showStepByStepModal, setShowStepByStepModal] = useState<boolean>(false);
+
+  const handleChangeCasioDisplayMode = (mode: CasioDisplayMode) => {
+    setCasioDisplayMode(mode);
+    if (mode === 'with_blackboard') {
+      setShowCasioModal(false);
+      setIsCasioDockedOpen(true);
+    } else {
+      setIsCasioDockedOpen(false);
+      setShowCasioModal(true);
+    }
+  };
+
+  const handleOpenCasioButton = () => {
+    if (casioDisplayMode === 'with_blackboard') {
+      setIsCasioDockedOpen((prev) => !prev);
+    } else {
+      setShowCasioModal((prev) => !prev);
+    }
+  };
+
+  const isCasioDockedActive = casioDisplayMode === 'with_blackboard' && isCasioDockedOpen;
 
   // AI Chat Messages
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -1521,7 +1545,9 @@ export default function App() {
           onLogout={handleLogout}
           onOpenAIConfig={() => setShowAIConfigModal(true)}
           pendingTeachersCount={pendingTeachersCount}
-          onOpenCasioCalculator={() => setShowCasioModal(true)}
+          onOpenCasioCalculator={handleOpenCasioButton}
+          isCasioActive={showCasioModal || (casioDisplayMode === 'with_blackboard' && isCasioDockedOpen)}
+          casioDisplayMode={casioDisplayMode}
           onOpenStepByStepSimulation={() => setShowStepByStepModal(true)}
         />
       )}
@@ -1533,95 +1559,111 @@ export default function App() {
           : activeTab === 'whiteboard'
           ? 'p-2 sm:p-3 md:p-4 overflow-hidden bg-white'
           : isMobile
-          ? 'p-2.5 pb-24 overflow-y-auto bg-[#f8fafc]'
+          ? isCasioDockedActive
+            ? 'p-2 pb-20 overflow-hidden bg-[#f8fafc]'
+            : 'p-2.5 pb-24 overflow-y-auto bg-[#f8fafc]'
           : 'p-3 md:p-4 overflow-hidden bg-[#f8fafc]'
       } relative`}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16, ease: 'easeOut' }}
-            className="w-full h-full"
+        <div
+          className={`w-full h-full flex flex-col ${
+            casioDockPosition === 'left' ? 'lg:flex-row-reverse' : 'lg:flex-row'
+          } gap-2 sm:gap-3 overflow-hidden`}
+        >
+          <div
+            className={`flex-1 min-w-0 min-h-0 h-full ${
+              activeTab === 'whiteboard' || activeTab === 'reader' || activeTab === 'quiz' || activeTab === 'games'
+                ? 'overflow-hidden'
+                : 'overflow-y-auto'
+            }`}
           >
-            {/* Tab 2: Document Reader View (Open Doc directly & AI Key Points) */}
-            {activeTab === 'reader' && (
-              <DocumentReaderView
-                lesson={currentLesson}
-                textScale={textScale}
-                allLessons={lessons}
-                onSelectLesson={handleSelectLesson}
-                onAddNewLesson={handleSaveToLibrary}
-                onOpenTemporaryLesson={handleOpenTemporaryLesson}
-                onSaveToLibrary={handleSaveToLibrary}
-                isSavedInLibrary={isCurrentLessonSavedInLibrary}
-                onUpdateLesson={(updatedDoc) => {
-                  setActiveOpenedLesson(updatedDoc);
-                  if (lessons.some((l) => l.id === updatedDoc.id)) {
-                    setLessons((prev) =>
-                      prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
-                    );
-                  }
-                }}
-                onDeleteLesson={(id) => {
-                  handleDeleteLesson(id);
-                  setActiveTab('whiteboard');
-                }}
-                onLaunchSlides={() => setActiveTab('whiteboard')}
-                onLaunchQuiz={() => setActiveTab('quiz')}
-                onSendToAIChat={() => {}}
-              />
-            )}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeTab}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.16, ease: 'easeOut' }}
+                className="w-full h-full"
+              >
+                {/* Tab 2: Document Reader View (Open Doc directly & AI Key Points) */}
+                {activeTab === 'reader' && (
+                  <DocumentReaderView
+                    lesson={currentLesson}
+                    textScale={textScale}
+                    allLessons={lessons}
+                    onSelectLesson={handleSelectLesson}
+                    onAddNewLesson={handleSaveToLibrary}
+                    onOpenTemporaryLesson={handleOpenTemporaryLesson}
+                    onSaveToLibrary={handleSaveToLibrary}
+                    isSavedInLibrary={isCurrentLessonSavedInLibrary}
+                    onUpdateLesson={(updatedDoc) => {
+                      setActiveOpenedLesson(updatedDoc);
+                      if (lessons.some((l) => l.id === updatedDoc.id)) {
+                        setLessons((prev) =>
+                          prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
+                        );
+                      }
+                    }}
+                    onDeleteLesson={(id) => {
+                      handleDeleteLesson(id);
+                      setActiveTab('whiteboard');
+                    }}
+                    onLaunchSlides={() => setActiveTab('whiteboard')}
+                    onLaunchQuiz={() => setActiveTab('quiz')}
+                    onSendToAIChat={() => {}}
+                  />
+                )}
 
-            {/* Tab 3: Authentic Classroom Blackboard (Bảng Xanh Sư Phạm 75 Pro) */}
-            {activeTab === 'whiteboard' && (
-              <ClassroomBlackboardView
-                classroom={activeTeacher?.classes?.[0] || null}
-                activeTeacher={activeTeacher || null}
-                lessons={lessons.filter(l => l.author === activeTeacher?.name) || []}
-                activeLessonId={activeLessonId}
-                onSelectLesson={(id) => {
-                  const target = lessons.find((l) => l.id === id);
-                  if (target) {
-                    handleSelectLesson(target);
-                  } else {
-                    setActiveLessonId(id);
-                  }
-                }}
-                onAddLesson={handleSaveToLibrary}
-                onOpenTemporaryLesson={handleOpenTemporaryLesson}
-                onSaveToLibrary={handleSaveToLibrary}
-                isSavedInLibrary={isCurrentLessonSavedInLibrary}
-                onUpdateLesson={(updatedDoc) => {
-                  setActiveOpenedLesson(updatedDoc);
-                  if (lessons.some((l) => l.id === updatedDoc.id)) {
-                    setLessons((prev) =>
-                      prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
-                    );
-                  }
-                }}
-                onDeleteLesson={(id) => {
-                  handleDeleteLesson(id);
-                }}
-                onSwitchToPresentation={() => setActiveTab('whiteboard')}
-                onSwitchToReader={() => setActiveTab('reader')}
-                onOpenRandomPicker={() => {
-                  setPickerClassroom(activeTeacher?.classes?.[0] || null);
-                  setShowRandomPickerModal(true);
-                }}
-              />
-            )}
+                {/* Tab 3: Authentic Classroom Blackboard (Bảng Xanh Sư Phạm 75 Pro) */}
+                {activeTab === 'whiteboard' && (
+                  <ClassroomBlackboardView
+                    classroom={activeTeacher?.classes?.[0] || null}
+                    activeTeacher={activeTeacher || null}
+                    lessons={lessons.filter(l => l.author === activeTeacher?.name) || []}
+                    activeLessonId={activeLessonId}
+                    onSelectLesson={(id) => {
+                      const target = lessons.find((l) => l.id === id);
+                      if (target) {
+                        handleSelectLesson(target);
+                      } else {
+                        setActiveLessonId(id);
+                      }
+                    }}
+                    onAddLesson={handleSaveToLibrary}
+                    onOpenTemporaryLesson={handleOpenTemporaryLesson}
+                    onSaveToLibrary={handleSaveToLibrary}
+                    isSavedInLibrary={isCurrentLessonSavedInLibrary}
+                    onUpdateLesson={(updatedDoc) => {
+                      setActiveOpenedLesson(updatedDoc);
+                      if (lessons.some((l) => l.id === updatedDoc.id)) {
+                        setLessons((prev) =>
+                          prev.map((l) => (l.id === updatedDoc.id ? updatedDoc : l))
+                        );
+                      }
+                    }}
+                    onDeleteLesson={(id) => {
+                      handleDeleteLesson(id);
+                    }}
+                    onSwitchToPresentation={() => setActiveTab('whiteboard')}
+                    onSwitchToReader={() => setActiveTab('reader')}
+                    onOpenRandomPicker={() => {
+                      setPickerClassroom(activeTeacher?.classes?.[0] || null);
+                      setShowRandomPickerModal(true);
+                    }}
+                    hasExternalSidePanel={isCasioDockedActive}
+                  />
+                )}
 
-            {/* Tab 4: Live Quiz Hub & Classroom Submission (with embedded Analytics) */}
-            {activeTab === 'quiz' && (
-              <LiveQuizHub
-                roomState={roomState}
-                textScale={textScale}
-                onRefreshRoom={() => fetchRoom(teacherRoomPin)}
-                onOpenExportModal={() => setShowExportModal(true)}
-                classroom={activeTeacher?.classes?.[0]}
-                teacher={activeTeacher}
+                {/* Tab 4: Live Quiz Hub & Classroom Submission (with embedded Analytics) */}
+                {activeTab === 'quiz' && (
+                  <LiveQuizHub
+                    roomState={roomState}
+                    textScale={textScale}
+                    onRefreshRoom={() => fetchRoom(teacherRoomPin)}
+                    onOpenExportModal={() => setShowExportModal(true)}
+                    classroom={activeTeacher?.classes?.[0]}
+                    teacher={activeTeacher}
+                    hasExternalSidePanel={isCasioDockedActive}
                 onControlRoom={async (idx, isLive) => {
                   lastRoomMutationAtRef.current = Date.now();
                   setRoomState((prev) => {
@@ -1835,8 +1877,25 @@ export default function App() {
                 onDeleteLesson={handleDeleteLesson}
               />
             )}
-          </motion.div>
-        </AnimatePresence>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+
+          {isCasioDockedActive && (
+            <div className="w-full h-[46%] lg:h-full lg:w-[410px] xl:w-[440px] shrink-0 min-h-0">
+              <CasioCalculatorModal
+                isOpen={true}
+                displayMode="with_blackboard"
+                onChangeDisplayMode={handleChangeCasioDisplayMode}
+                dockPosition={casioDockPosition}
+                onToggleDockPosition={() =>
+                  setCasioDockPosition((prev) => (prev === 'right' ? 'left' : 'right'))
+                }
+                onClose={() => setIsCasioDockedOpen(false)}
+              />
+            </div>
+          )}
+        </div>
       </main>
 
       {/* Teacher Authentication / Profile Switcher Modal */}
@@ -2086,9 +2145,11 @@ export default function App() {
         onClose={() => setShowAIConfigModal(false)}
       />
 
-      {/* Casio fx-580VN X Scientific Calculator Emulator */}
+      {/* Casio fx-580VN X Scientific Calculator Emulator (Standalone Modal) */}
       <CasioCalculatorModal
         isOpen={showCasioModal}
+        displayMode="standalone"
+        onChangeDisplayMode={handleChangeCasioDisplayMode}
         onClose={() => setShowCasioModal(false)}
       />
 

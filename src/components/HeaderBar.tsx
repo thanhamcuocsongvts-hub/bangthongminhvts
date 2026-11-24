@@ -41,6 +41,8 @@ interface HeaderBarProps {
   onOpenAIConfig?: () => void;
   pendingTeachersCount?: number;
   onOpenCasioCalculator?: () => void;
+  isCasioActive?: boolean;
+  casioDisplayMode?: 'standalone' | 'with_blackboard';
   onOpenStepByStepSimulation?: () => void;
 }
 
@@ -59,11 +61,15 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onSwitchToStudentView,
   isFullscreen,
   onToggleFullscreen,
+  activeLessonTitle,
+  syncStatus = 'synced',
   activeTeacher,
   onLogout,
   onOpenAIConfig,
   pendingTeachersCount = 0,
   onOpenCasioCalculator,
+  isCasioActive = false,
+  casioDisplayMode = 'standalone',
   onOpenStepByStepSimulation,
 }) => {
   const { isMobile } = useDeviceDetection();
@@ -754,11 +760,20 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         {/* Nút Giả lập máy tính Casio fx-580VN X */}
         <button
           onClick={onOpenCasioCalculator}
-          className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border border-sky-500/50 text-sky-300 text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0 active:scale-95"
-          title="Mở máy tính khoa học Casio fx-580VN X (COMP, Phương trình bậc 2-3, Hệ PT, Bảng giá trị f(x))"
+          className={`px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0 active:scale-95 border ${
+            isCasioActive
+              ? 'bg-gradient-to-r from-sky-600 to-emerald-600 border-emerald-300 text-white shadow-[0_0_12px_rgba(16,185,129,0.45)]'
+              : 'bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border-sky-500/50 text-sky-300'
+          }`}
+          title="Mở máy tính khoa học Casio fx-580VN X (Hỗ trợ Độc lập hoặc Chèn song song cùng Bảng Xanh, Tài Liệu, Tạo Đề, Trò Chơi)"
         >
-          <Calculator className="w-3.5 h-3.5 text-sky-400" />
+          <Calculator className={`w-3.5 h-3.5 ${isCasioActive ? 'text-white' : 'text-sky-400'}`} />
           <span className="text-[11px] font-black tracking-tight">Máy tính 580 VN X</span>
+          {isCasioActive && casioDisplayMode === 'with_blackboard' && (
+            <span className="px-1.5 py-0.2 rounded-md bg-white/20 text-[9px] font-black">
+              Song song
+            </span>
+          )}
         </button>
 
         {/* Nút Dựng hình từng bước & Thí nghiệm ảo KHTN */}
