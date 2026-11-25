@@ -480,31 +480,31 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-950 text-white rounded-3xl overflow-hidden shadow-2xl border border-slate-800 select-none relative">
+    <div className="w-full h-full flex flex-col bg-slate-950 text-white rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border border-slate-800 select-none relative">
       {/* Top Game Selection Header Bar */}
-      <div className="p-3 md:p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400">
-            <Trophy className="w-6 h-6 animate-bounce" />
+      <div className="p-2.5 sm:p-3 md:p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 shrink-0">
+            <Trophy className="w-5 h-5 sm:w-6 sm:h-6 animate-bounce" />
           </div>
-          <div>
-            <h2 className="text-base md:text-lg font-black text-white tracking-tight flex items-center gap-2">
-              <span>Đấu Trường Trò Chơi Củng Cố Tri Thức</span>
-              <span className="text-[10px] uppercase font-black px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-                Gamification 4-in-1
+          <div className="min-w-0">
+            <h2 className="text-sm sm:text-base md:text-lg font-black text-white tracking-tight flex items-center gap-2 flex-wrap">
+              <span className="truncate">Đấu Trường Trò Chơi</span>
+              <span className="text-[10px] uppercase font-black px-2 sm:px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shrink-0">
+                4-in-1
               </span>
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-400 hidden sm:block">
               Các hình thức ôn tập vui nhộn, hào hứng, kích thích tương tác trên màn hình TV cảm ứng 75&quot;
             </p>
           </div>
         </div>
 
         {/* Game Mode Tabs */}
-        <div className="flex items-center bg-slate-800/90 p-1 rounded-2xl border border-slate-700">
+        <div className="flex items-center gap-1 bg-slate-800/90 p-1 rounded-2xl border border-slate-700 overflow-x-auto scrollbar-none w-full lg:w-auto">
           <button
             onClick={() => setActiveGame('millionaire')}
-            className={`px-3.5 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 sm:px-3.5 py-1.5 min-h-[38px] rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeGame === 'millionaire'
                 ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500 text-white shadow-lg shadow-indigo-500/25 ring-2 ring-amber-400/50'
                 : 'text-slate-400 hover:text-white'
@@ -519,7 +519,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 
           <button
             onClick={() => setActiveGame('race')}
-            className={`px-3.5 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 sm:px-3.5 py-1.5 min-h-[38px] rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeGame === 'race'
                 ? 'bg-rose-600 text-white shadow-lg'
                 : 'text-slate-400 hover:text-white'
@@ -531,7 +531,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 
           <button
             onClick={() => setActiveGame('wheel')}
-            className={`px-3.5 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 sm:px-3.5 py-1.5 min-h-[38px] rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeGame === 'wheel'
                 ? 'bg-amber-600 text-white shadow-lg'
                 : 'text-slate-400 hover:text-white'
@@ -543,7 +543,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 
           <button
             onClick={() => setActiveGame('puzzle')}
-            className={`px-3.5 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 sm:px-3.5 py-1.5 min-h-[38px] rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeGame === 'puzzle'
                 ? 'bg-emerald-600 text-white shadow-lg'
                 : 'text-slate-400 hover:text-white'
@@ -555,10 +555,10 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
         </div>
 
         {/* Action Buttons: Class Selector, Voice Controls, Question Inspector & AI Quiz Maker */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-none w-full lg:w-auto pb-0.5">
           {/* Class Selection Dropdown */}
           {allClasses && allClasses.length > 0 && (
-            <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-200">
+            <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 rounded-xl px-2.5 py-1 min-h-[38px] text-slate-200 shrink-0">
               <Users className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span className="text-xs font-bold text-slate-300 hidden md:inline">Lớp:</span>
               <select
@@ -589,7 +589,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
               const found = VOICE_TONE_PRESETS.find((p) => p.id === e.target.value);
               if (found) setSelectedVoice(found);
             }}
-            className="text-xs font-bold text-slate-200 bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-2 focus:outline-none hidden xl:block"
+            className="text-xs font-bold text-slate-200 bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-2 focus:outline-none hidden xl:block shrink-0"
             title="Chọn phong cách giọng đọc AI cho trò chơi"
           >
             {VOICE_TONE_PRESETS.map((p) => (
@@ -608,7 +608,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
                 return next;
               });
             }}
-            className={`px-3 py-2 rounded-2xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 py-2 min-h-[38px] rounded-2xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               voiceEnabled
                 ? 'bg-rose-500/20 border border-rose-500/50 text-rose-300 hover:bg-rose-500/30 shadow-xs'
                 : 'bg-slate-800 text-slate-400 border border-slate-700'
@@ -624,7 +624,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
               setSaveGameTitle(gameTopic || `${activeGame === 'race' ? 'Đua Xe' : activeGame === 'wheel' ? 'Vòng Quay' : activeGame === 'puzzle' ? 'Mảnh Ghép' : 'Triệu Phú'} - ${gameSubject}`);
               setShowSaveGameModal(true);
             }}
-            className="px-3 py-2 rounded-2xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            className="px-3 py-2 min-h-[38px] rounded-2xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
             title="Lưu trò chơi này vào kho để mở lại bất cứ lúc nào"
           >
             <Save className="w-4 h-4 text-amber-400" />
@@ -640,7 +640,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
                 }
               });
             }}
-            className="px-3 py-2 rounded-2xl font-bold text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            className="px-3 py-2 min-h-[38px] rounded-2xl font-bold text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
             title="Mở kho game đã lưu để học sinh chơi ngay"
           >
             <FolderOpen className="w-4 h-4 text-amber-400" />
@@ -649,7 +649,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 
           <button
             onClick={() => setShowQuestionsListModal(true)}
-            className="px-3 py-2 rounded-2xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            className="px-3 py-2 min-h-[38px] rounded-2xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
             title="Xem danh sách câu hỏi game hiện tại"
           >
             <ListChecks className="w-4 h-4 text-cyan-400" />
@@ -661,22 +661,22 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
               setGameTopic(lessonTitle || gameTopic || '');
               setShowAIMakerModal(true);
             }}
-            className="px-4 py-2 rounded-2xl font-black text-xs bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:opacity-95 text-white shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all cursor-pointer border border-white/20 active:scale-95"
+            className="px-4 py-2 min-h-[38px] rounded-2xl font-black text-xs bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:opacity-95 text-white shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all cursor-pointer border border-white/20 active:scale-95 whitespace-nowrap shrink-0"
             title="Soạn đề Game đúng theo chủ đề bài học bằng AI"
           >
             <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-            <span>Soạn đề Game bằng AI</span>
+            <span>Soạn đề Game AI</span>
           </button>
         </div>
       </div>
 
       {/* Notice Banner if using default questions */}
       {isUsingDefault && (
-        <div className="px-4 py-2 bg-gradient-to-r from-amber-900/40 via-purple-900/40 to-slate-900 border-b border-amber-500/30 flex items-center justify-between gap-3 text-xs text-amber-200">
-          <div className="flex items-center gap-2">
-            <span className="text-amber-400 text-sm">💡</span>
-            <span>
-              Game đang dùng 5 câu hỏi kiến thức chung. Thầy cô hãy nhấn <strong>&quot;Soạn đề Game bằng AI&quot;</strong> để tạo ngay bộ câu hỏi bám sát 100% đúng chuyên đề bài học <strong>&quot;{lessonTitle || 'bài giảng này'}&quot;</strong>!
+        <div className="px-3 sm:px-4 py-2 bg-gradient-to-r from-amber-900/40 via-purple-900/40 to-slate-900 border-b border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-200 shrink-0">
+          <div className="flex items-start sm:items-center gap-2">
+            <span className="text-amber-400 text-sm shrink-0">💡</span>
+            <span className="leading-snug">
+              Game đang dùng 5 câu hỏi kiến thức chung. Nhấn <strong>&quot;Soạn đề Game AI&quot;</strong> để tạo bộ câu hỏi bám sát bài <strong>&quot;{lessonTitle || 'bài giảng này'}&quot;</strong>!
             </span>
           </div>
           <button
@@ -684,7 +684,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
               setGameTopic(lessonTitle || '');
               setShowAIMakerModal(true);
             }}
-            className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] shrink-0 transition-all cursor-pointer shadow-md"
+            className="px-3 py-1.5 min-h-[34px] rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] shrink-0 transition-all cursor-pointer shadow-md self-start sm:self-auto"
           >
             Tạo đề bám sát bài ngay
           </button>
@@ -692,7 +692,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
       )}
 
       {/* Main Game Arena */}
-      <div className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-radial from-slate-900 to-slate-950 flex flex-col custom-scrollbar">
+      <div className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden p-2.5 sm:p-4 md:p-6 pb-24 sm:pb-6 bg-radial from-slate-900 to-slate-950 flex flex-col custom-scrollbar">
         {activeGame === 'race' && (
           <GrandPrixRacingGame
             questions={activeQuestions}

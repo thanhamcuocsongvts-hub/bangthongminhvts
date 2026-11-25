@@ -3341,11 +3341,11 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         isMobile ? (
           <div className="absolute top-2 left-2 right-2 z-30 flex items-center justify-between pointer-events-none gap-1 animate-fade-in select-none">
             {/* Page navigation compact for phone */}
-            <div className="flex items-center gap-1 pointer-events-auto bg-slate-950/90 backdrop-blur-md px-2 py-1 rounded-xl border border-white/20 text-white shadow-lg text-xs">
+            <div className="flex items-center gap-0.5 pointer-events-auto bg-slate-950/90 backdrop-blur-md px-1.5 py-1 rounded-xl border border-white/20 text-white shadow-lg text-xs">
               <button
                 onClick={() => setCurrentPageIndex((prev) => Math.max(0, prev - 1))}
                 disabled={currentPageIndex === 0}
-                className="p-1 rounded-lg hover:bg-white/20 disabled:opacity-30 transition-colors cursor-pointer"
+                className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg hover:bg-white/20 disabled:opacity-30 transition-colors cursor-pointer"
                 title="Trang trước"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -3356,14 +3356,14 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <button
                 onClick={() => setCurrentPageIndex((prev) => Math.min(pages.length - 1, prev + 1))}
                 disabled={currentPageIndex === pages.length - 1}
-                className="p-1 rounded-lg hover:bg-white/20 disabled:opacity-30 transition-colors cursor-pointer"
+                className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg hover:bg-white/20 disabled:opacity-30 transition-colors cursor-pointer"
                 title="Trang sau"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
               <button
                 onClick={handleAddNewPage}
-                className="p-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white ml-0.5 cursor-pointer"
+                className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white ml-0.5 cursor-pointer"
                 title="Thêm trang bảng mới"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -3375,7 +3375,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               {/* Document Modal */}
               <button
                 onClick={() => setShowDocumentModal(true)}
-                className="px-2.5 py-1 rounded-xl bg-indigo-600 text-white text-[11px] font-bold flex items-center gap-1 shadow cursor-pointer"
+                className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-indigo-600 text-white text-[11px] font-bold flex items-center gap-1 shadow cursor-pointer"
                 title="Mở tài liệu"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
@@ -3386,32 +3386,32 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               <button
                 type="button"
                 onClick={() => toggleCasioCalculator('side_by_side')}
-                className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
+                className={`min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl border transition-colors cursor-pointer ${
                   casioState.isOpen
                     ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow'
                     : 'bg-slate-900/90 text-cyan-300 border-white/20 hover:bg-slate-800'
                 }`}
                 title="Chèn / Tắt máy tính Casio 580"
               >
-                <Calculator className="w-3.5 h-3.5" />
+                <Calculator className="w-4 h-4" />
               </button>
 
               {/* Mobile Fullscreen toggle */}
               <button
                 onClick={() => setIsFullBoard((prev) => !prev)}
-                className="p-1.5 rounded-xl bg-slate-900/90 text-white border border-white/20 hover:bg-slate-800 cursor-pointer"
+                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl bg-slate-900/90 text-white border border-white/20 hover:bg-slate-800 cursor-pointer"
                 title={isFullBoard ? 'Thu nhỏ bảng' : 'Bảng toàn màn hình điện thoại'}
               >
-                {isFullBoard ? <Minimize2 className="w-3.5 h-3.5 text-amber-300" /> : <Maximize2 className="w-3.5 h-3.5 text-emerald-300" />}
+                {isFullBoard ? <Minimize2 className="w-4 h-4 text-amber-300" /> : <Maximize2 className="w-4 h-4 text-emerald-300" />}
               </button>
 
               {/* Collapse Top Bar to free up canvas */}
               <button
                 onClick={() => setIsTopBarCollapsed(true)}
-                className="p-1.5 rounded-xl bg-slate-900/90 text-slate-300 border border-white/20 hover:text-white cursor-pointer"
+                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl bg-slate-900/90 text-slate-300 border border-white/20 hover:text-white cursor-pointer"
                 title="Thu gọn để viết rộng hơn"
               >
-                <ChevronUp className="w-3.5 h-3.5" />
+                <ChevronUp className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -5515,13 +5515,13 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
         isMobileChalkDockMinimized ? (
           <button
             onClick={() => setIsMobileChalkDockMinimized(false)}
-            className={`absolute ${isFullBoard ? 'bottom-4' : 'bottom-[74px]'} right-4 z-40 p-3 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xl border-2 border-white flex items-center justify-center cursor-pointer hover:scale-110 active:scale-95 transition-all`}
+            className={`absolute ${isFullBoard ? 'bottom-4' : 'bottom-[80px]'} right-4 z-40 min-w-[48px] min-h-[48px] p-3 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xl border-2 border-white flex items-center justify-center cursor-pointer hover:scale-110 active:scale-95 transition-all`}
             title="Mở thanh bút phấn"
           >
             <Pen className="w-5 h-5 text-white" />
           </button>
         ) : (
-        <div className={`absolute ${isFullBoard || (isMobile && isLandscape) ? 'bottom-2' : 'bottom-[74px]'} left-1/2 -translate-x-1/2 z-40 pointer-events-auto ${isLandscape ? 'w-[98vw] max-w-[620px]' : 'w-[96vw] max-w-[440px]'} flex flex-col items-center gap-1.5 animate-in slide-in-from-bottom-2 select-none transition-all duration-200`}>
+        <div className={`absolute ${isFullBoard || (isMobile && isLandscape) ? 'bottom-2' : 'bottom-[78px]'} left-1/2 -translate-x-1/2 z-40 pointer-events-auto ${isLandscape ? 'w-[98vw] max-w-[620px]' : 'w-[96vw] max-w-[440px]'} flex flex-col items-center gap-1.5 animate-in slide-in-from-bottom-2 select-none transition-all duration-200`}>
           {/* Sub-sheet: Mobile Function Graph Picker (Toán & Vật lý) */}
           {showFunctionPicker && (
             <div
@@ -6116,7 +6116,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           )}
 
           {/* Main Floating Tool Pill on Phone */}
-          <div className="w-full bg-slate-950/95 backdrop-blur-2xl border border-white/20 shadow-2xl rounded-2xl px-2 py-1.5 flex items-center justify-start gap-1.5 text-white overflow-x-auto scrollbar-none touch-pan-x">
+          <div className="w-full bg-slate-950/95 backdrop-blur-2xl border border-white/20 shadow-2xl rounded-2xl px-2 py-2 flex items-center justify-start gap-1.5 text-white overflow-x-auto scrollbar-none touch-pan-x">
             {/* 0. Chọn (Select) - Tiện lợi cho giáo viên trên di động */}
             <button
               onClick={() => {
@@ -7942,17 +7942,17 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                 return (
                   <div
                     key={les.id}
-                    className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                    className={`p-3 sm:p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 ${
                       isCurrent
                         ? 'bg-indigo-50/90 border-indigo-400 ring-2 ring-indigo-300/60'
                         : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="flex items-center gap-3 overflow-hidden min-w-0">
                       <div className="p-2 rounded-xl bg-slate-100 text-slate-700 shrink-0">
                         <FileText className="w-5 h-5 text-indigo-600" />
                       </div>
-                      <div className="overflow-hidden">
+                      <div className="overflow-hidden min-w-0">
                         <h4 className="text-sm font-black text-slate-900 truncate">{les.title}</h4>
                         <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
                           <span className="font-bold text-indigo-600">{les.subject}</span>
@@ -7964,7 +7964,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto scrollbar-none">
                       <button
                         onClick={() => handleOpenExistingDoc(les.id, 'split')}
                         className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1 shadow-2xs"

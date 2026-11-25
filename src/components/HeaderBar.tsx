@@ -94,9 +94,12 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     };
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('touchstart', handleClickOutside);
+    const handleOpenMoreSheet = () => setShowMobileDrawer(true);
+    window.addEventListener('open-mobile-more-sheet', handleOpenMoreSheet);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
+      window.removeEventListener('open-mobile-more-sheet', handleOpenMoreSheet);
     };
   }, []);
 
@@ -116,30 +119,27 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   // ================= MOBILE PHONE HEADER BAR (< 768px) =================
   if (isMobile) {
     return (
-      <header className="w-full flex items-center justify-between px-2.5 py-1.5 overflow-hidden select-none bg-slate-900 border-b border-slate-800 text-white z-30 shadow-xs relative">
+      <header className="w-full flex items-center justify-between gap-1.5 px-2.5 py-1.5 overflow-hidden select-none bg-slate-900 border-b border-slate-800 text-white z-30 shadow-xs relative">
         {/* Left: Compact Teacher Avatar / Name */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0 min-w-0">
           {activeTeacher ? (
             <button
               type="button"
               onClick={() => setShowTeacherAccountModal(true)}
-              className="flex items-center gap-1.5 p-1 pr-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 transition-all text-left cursor-pointer active:scale-95"
+              className="flex items-center gap-1.5 min-h-[40px] px-1.5 pr-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 transition-all text-left cursor-pointer active:scale-95"
               title={`Tài khoản: ${activeTeacher.name} (Bấm để xem thông tin & Đăng xuất)`}
             >
-              <div className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-sm shadow-xs">
+              <div className="w-7 h-7 rounded-lg bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-sm shadow-xs shrink-0">
                 {activeTeacher.avatar || '👨‍🏫'}
               </div>
-              <div className="flex items-center gap-1">
-                <span className="max-w-[90px] truncate text-[11px] font-black text-slate-200 leading-tight">
-                  {activeTeacher.name.split(' ').slice(-2).join(' ')}
-                </span>
-                <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
-              </div>
+              <span className="max-w-[74px] truncate text-[11px] font-black text-slate-200 leading-tight">
+                {activeTeacher.name.split(' ').slice(-2).join(' ')}
+              </span>
             </button>
           ) : (
             <button
               onClick={onOpenTeacherAuth}
-              className="flex items-center gap-1 px-2 py-1 rounded-xl bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 text-[11px] font-bold"
+              className="flex items-center gap-1 min-h-[40px] px-2.5 py-1.5 rounded-xl bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 text-[11px] font-bold active:scale-95"
             >
               <LogIn className="w-3.5 h-3.5" />
               <span>Đăng nhập</span>
@@ -147,22 +147,36 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           )}
         </div>
 
-        {/* Center: Quick Active Tab Pill */}
+        {/* Center: Quick Active Tab Pill (opens Bottom Sheet) */}
         <button
           onClick={() => setShowMobileDrawer(true)}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800/90 border border-slate-700 text-white text-xs font-black shadow-xs max-w-[140px] truncate cursor-pointer active:scale-95 transition-all"
+          className="flex items-center gap-1.5 min-h-[40px] px-2.5 py-1 rounded-xl bg-slate-800/90 border border-slate-700 text-white text-xs font-black shadow-xs min-w-0 max-w-[136px] cursor-pointer active:scale-95 transition-all"
           title="Bấm để chuyển nhanh giữa các tính năng giảng dạy"
         >
-          {currentTab.icon}
+          <span className="shrink-0">{currentTab.icon}</span>
           <span className="truncate">{currentTab.shortLabel}</span>
-          <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+          <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
         </button>
 
-        {/* Right: Lucky Wheel, PIN & Hamburger Drawer Button */}
+        {/* Right: Casio, Lucky Wheel, PIN & Bottom Sheet Button */}
         <div className="flex items-center gap-1 shrink-0">
+          {onOpenCasioCalculator && (
+            <button
+              onClick={onOpenCasioCalculator}
+              className={`min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl border transition-all cursor-pointer active:scale-95 ${
+                isCasioActive
+                  ? 'bg-sky-600 border-sky-400 text-white shadow-sm shadow-sky-500/30'
+                  : 'bg-slate-800 border-slate-700 text-sky-300'
+              }`}
+              title="Máy tính Casio fx-580VN X"
+            >
+              <Calculator className="w-4 h-4" />
+            </button>
+          )}
+
           <button
             onClick={onOpenRandomPicker}
-            className="p-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-xs cursor-pointer active:scale-95 transition-all"
+            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-xs cursor-pointer active:scale-95 transition-all"
             title="Quay gọi học sinh ngẫu nhiên"
           >
             <Dices className="w-4 h-4 text-slate-950" />
@@ -170,17 +184,17 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 
           <button
             onClick={() => setShowStudentMenu((prev) => !prev)}
-            className="flex items-center gap-1 px-2 py-1 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-[11px] font-mono font-black cursor-pointer"
+            className="flex items-center gap-1 min-h-[40px] px-2 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-[11px] font-mono font-black cursor-pointer active:scale-95"
             title="Mã PIN học sinh"
           >
             <QrCode className="w-3.5 h-3.5 text-emerald-400" />
-            <span>#{roomPin}</span>
+            <span className="hidden min-[400px]:inline">#{roomPin}</span>
           </button>
 
           <button
             onClick={() => setShowMobileDrawer(true)}
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 cursor-pointer"
-            title="Mở menu toàn bộ tính năng"
+            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 cursor-pointer active:scale-95"
+            title="Mở bảng điều khiển nhanh"
           >
             <Menu className="w-4 h-4" />
           </button>
@@ -199,7 +213,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 setShowStudentMenu(false);
                 onOpenQR();
               }}
-              className="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2 cursor-pointer"
+              className="w-full min-h-[44px] p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2 cursor-pointer"
             >
               <QrCode className="w-4 h-4 text-emerald-400" />
               <span>Quét mã QR học sinh</span>
@@ -209,7 +223,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 setShowStudentMenu(false);
                 onSwitchToStudentView();
               }}
-              className="w-full p-2.5 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/50 text-indigo-300 text-xs font-bold flex items-center gap-2 cursor-pointer"
+              className="w-full min-h-[44px] p-2.5 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/50 text-indigo-300 text-xs font-bold flex items-center gap-2 cursor-pointer"
             >
               <Smartphone className="w-4 h-4 text-indigo-400" />
               <span>Xem giao diện làm bài của HS</span>
@@ -217,198 +231,232 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           </div>
         )}
 
-        {/* MOBILE SLIDE-OVER DRAWER FOR COMPLETE EASY NAVIGATION */}
+        {/* MOBILE THUMB-ZONE BOTTOM ACTION SHEET */}
         {showMobileDrawer && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex justify-end animate-fade-in">
-            <div className="w-[85vw] max-w-[340px] h-full bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col overflow-y-auto text-white">
-              {/* Drawer Header */}
-              <div className="p-3.5 bg-gradient-to-r from-slate-950 to-slate-900 border-b border-slate-800 text-white flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-xl">
-                    {activeTeacher?.avatar || '👨‍🏫'}
-                  </div>
-                  <div className="leading-tight">
-                    <div className="font-black text-sm text-white truncate max-w-[180px]">
-                      {activeTeacher?.name || 'Giáo viên'}
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-end justify-center animate-fade-in"
+            onClick={() => setShowMobileDrawer(false)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg max-h-[85dvh] bg-slate-900 border-t border-slate-700 rounded-t-3xl shadow-2xl flex flex-col overflow-hidden text-white pb-safe"
+            >
+              {/* Drag Handle & Sheet Header */}
+              <div className="pt-2.5 pb-3 px-4 bg-slate-950/80 border-b border-slate-800 flex flex-col gap-2 shrink-0">
+                <div className="w-10 h-1 rounded-full bg-slate-600 mx-auto" />
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-xl shrink-0">
+                      {activeTeacher?.avatar || '👨‍🏫'}
                     </div>
-                    <div className="text-[11px] text-emerald-300 truncate max-w-[180px]">
-                      {activeTeacher?.school || 'SmartBoard 75 Pro'}
+                    <div className="leading-tight min-w-0">
+                      <div className="font-black text-sm text-white truncate">
+                        {activeTeacher?.name || 'Giáo viên'}
+                      </div>
+                      <div className="text-[11px] text-emerald-300 truncate">
+                        {activeTeacher?.school || 'SmartBoard 75 Pro'} • PIN #{roomPin}
+                      </div>
                     </div>
                   </div>
+                  <button
+                    onClick={() => setShowMobileDrawer(false)}
+                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-slate-800 hover:bg-slate-700 text-white cursor-pointer shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setShowMobileDrawer(false)}
-                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
               </div>
 
-              {/* 8 Main Navigation Tabs */}
-              <div className="p-3 space-y-1.5 flex-1">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1 mb-1">
-                  CHỌN TÍNH NĂNG GIẢNG DẠY
-                </div>
-                {tabs.map((tab) => {
-                  const isActive = activeTab === tab.id;
-                  const isWhiteboard = tab.id === 'whiteboard';
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => {
-                        onTabChange(tab.id);
-                        setShowMobileDrawer(false);
-                      }}
-                      className={`w-full p-2.5 rounded-2xl flex items-center gap-3 transition-all text-left cursor-pointer ${
-                        isWhiteboard
-                          ? isActive
-                            ? 'bg-emerald-600 text-white shadow-md border-2 border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.5)]'
-                            : 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-950/80'
-                          : isActive
-                          ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
-                          : 'bg-slate-800/80 hover:bg-slate-800 text-slate-200 border border-slate-700/60'
-                      }`}
-                    >
-                      <div className={`p-2 rounded-xl shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-slate-700 shadow-xs'}`}>
-                        {tab.icon}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-xs font-black truncate ${isActive ? 'text-white' : 'text-slate-100'}`}>
-                          {tab.label}
-                        </div>
-                        <div className={`text-[10px] truncate ${isActive ? 'text-emerald-100' : 'text-slate-400'}`}>
-                          {tab.desc}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-
-                {/* Quick Teacher Actions */}
-                <div className="pt-3 border-t border-slate-800 space-y-1.5">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
-                    TIỆN ÍCH DẠY HỌC
+              {/* Scrollable Grid Body */}
+              <div className="p-3.5 space-y-4 overflow-y-auto flex-1">
+                {/* 7 Main Navigation Tabs as Thumb-Friendly 2-Column Tiles */}
+                <div>
+                  <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1 mb-2">
+                    CHỌN CHẾ ĐỘ GIẢNG DẠY
                   </div>
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onOpenRandomPicker();
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-amber-950/60 hover:bg-amber-900 border border-amber-500/40 text-amber-200 text-xs font-bold flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Dices className="w-4 h-4 text-amber-400" />
-                    <span>Quay gọi học sinh ngẫu nhiên</span>
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    {tabs.map((tab) => {
+                      const isActive = activeTab === tab.id;
+                      const isWhiteboard = tab.id === 'whiteboard';
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => {
+                            onTabChange(tab.id);
+                            setShowMobileDrawer(false);
+                          }}
+                          className={`min-h-[54px] p-2.5 rounded-2xl flex items-center gap-2.5 transition-all text-left cursor-pointer active:scale-97 ${
+                            isWhiteboard
+                              ? isActive
+                                ? 'bg-emerald-600 text-white shadow-md border-2 border-emerald-400'
+                                : 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300'
+                              : isActive
+                              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md border border-indigo-400/50'
+                              : 'bg-slate-800/90 hover:bg-slate-800 text-slate-200 border border-slate-700/80'
+                          }`}
+                        >
+                          <div className={`p-2 rounded-xl shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-slate-700/80'}`}>
+                            {tab.icon}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className={`text-xs font-black truncate ${isActive ? 'text-white' : 'text-slate-100'}`}>
+                              {tab.label}
+                            </div>
+                            <div className={`text-[10px] truncate ${isActive ? 'text-emerald-100' : 'text-slate-400'}`}>
+                              {tab.id === 'whiteboard' ? 'Bảng viết & AI' :
+                               tab.id === 'gradebook' ? 'Điểm & danh sách' :
+                               tab.id === 'documents' ? 'Kho & đồng bộ' :
+                               tab.id === 'reader' ? 'Đọc & trích xuất' :
+                               tab.id === 'quiz' ? 'AI & ma trận' :
+                               tab.id === 'games' ? 'Ôn tập vui nhộn' : 'GeoGebra & PhET'}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onOpenCasioCalculator?.();
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-sky-500/40 text-sky-300 text-xs font-bold flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Calculator className="w-4 h-4 text-sky-400" />
-                    <span>Máy tính Casio fx-580VN X</span>
-                  </button>
+                {/* Quick Teacher Utilities 2-Col Grid */}
+                <div className="pt-3 border-t border-slate-800">
+                  <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1 mb-2">
+                    TIỆN ÍCH DẠY HỌC NHANH
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onOpenCasioCalculator?.();
+                      }}
+                      className="min-h-[48px] p-2.5 rounded-xl bg-sky-950/70 border border-sky-500/40 text-sky-200 text-xs font-bold flex items-center gap-2 cursor-pointer active:scale-97"
+                    >
+                      <Calculator className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span className="truncate">Máy tính 580</span>
+                    </button>
 
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onOpenStepByStepSimulation?.();
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-indigo-950/60 hover:bg-indigo-900 border border-purple-500/40 text-purple-200 text-xs font-bold flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Layers className="w-4 h-4 text-purple-400" />
-                    <span>Dựng hình bài toán & Thí nghiệm ảo</span>
-                  </button>
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onOpenRandomPicker();
+                      }}
+                      className="min-h-[48px] p-2.5 rounded-xl bg-amber-950/60 border border-amber-500/40 text-amber-200 text-xs font-bold flex items-center gap-2 cursor-pointer active:scale-97"
+                    >
+                      <Dices className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span className="truncate">Quay gọi tên</span>
+                    </button>
 
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onOpenExport();
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-4 h-4 text-indigo-400" />
-                    <span>Xuất bài giảng (PDF / Ảnh HD)</span>
-                  </button>
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onOpenStepByStepSimulation?.();
+                      }}
+                      className="min-h-[48px] p-2.5 rounded-xl bg-indigo-950/60 border border-purple-500/40 text-purple-200 text-xs font-bold flex items-center gap-2 cursor-pointer active:scale-97"
+                    >
+                      <Layers className="w-4 h-4 text-purple-400 shrink-0" />
+                      <span className="truncate">Dựng hình & TN</span>
+                    </button>
 
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onToggleFullscreen();
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Maximize className="w-4 h-4 text-slate-400" />
-                    <span>{isFullscreen ? 'Thu nhỏ màn hình' : 'Toàn màn hình điện thoại'}</span>
-                  </button>
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onOpenQR();
+                      }}
+                      className="min-h-[48px] p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center gap-2 cursor-pointer active:scale-97"
+                    >
+                      <QrCode className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="truncate">QR & PIN HS</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onOpenExport();
+                      }}
+                      className="min-h-[48px] p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2 cursor-pointer active:scale-97"
+                    >
+                      <Download className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <span className="truncate">Xuất PDF / Ảnh</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onToggleFullscreen();
+                      }}
+                      className="min-h-[48px] p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2 cursor-pointer active:scale-97"
+                    >
+                      <Maximize className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span className="truncate">{isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Account & Profile Options */}
                 <div className="pt-3 border-t border-slate-800 space-y-1.5">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
-                    TÀI KHOẢN GIÁO VIÊN
+                  <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
+                    TÀI KHOẢN & CẤU HÌNH
                   </div>
-                  {activeTeacher && activeTeacher.role === 'admin' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {activeTeacher && activeTeacher.role === 'admin' && (
+                      <button
+                        onClick={() => {
+                          setShowMobileDrawer(false);
+                          onOpenAdmin?.();
+                        }}
+                        className="col-span-2 min-h-[44px] px-3 py-2 rounded-xl bg-amber-950/40 border border-amber-500/30 text-xs font-bold text-amber-300 flex items-center justify-between cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-amber-400" />
+                          <span>Quản trị Admin</span>
+                        </div>
+                        {pendingTeachersCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black">
+                            {pendingTeachersCount}
+                          </span>
+                        )}
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setShowMobileDrawer(false);
-                        onOpenAdmin?.();
+                        onOpenAIConfig?.();
                       }}
-                      className="w-full p-2 rounded-xl text-xs font-bold text-amber-400 hover:bg-amber-950/50 flex items-center justify-between cursor-pointer"
+                      className="min-h-[44px] px-3 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-xs font-bold text-purple-300 flex items-center gap-2 cursor-pointer"
                     >
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="w-4 h-4 text-amber-400" />
-                        <span>Quản trị Admin Hệ thống</span>
-                      </div>
-                      {pendingTeachersCount > 0 && (
-                        <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black animate-pulse">
-                          {pendingTeachersCount}
-                        </span>
-                      )}
+                      <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+                      <span className="truncate">Gemini AI</span>
                     </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onOpenAIConfig?.();
-                    }}
-                    className="w-full p-2 rounded-xl text-xs font-bold text-purple-300 hover:bg-purple-950/50 flex items-center gap-2 cursor-pointer"
-                  >
-                    <Sparkles className="w-4 h-4 text-purple-400" />
-                    <span>Cấu hình Gemini AI & API Key</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onOpenProfile?.();
-                    }}
-                    className="w-full p-2 rounded-xl text-xs font-bold text-slate-200 hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
-                  >
-                    <KeyRound className="w-4 h-4 text-slate-400" />
-                    <span>Đổi mật khẩu & Thông tin</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onOpenTeacherAuth();
-                    }}
-                    className="w-full p-2 rounded-xl text-xs font-bold text-slate-200 hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
-                  >
-                    <RefreshCw className="w-4 h-4 text-slate-400" />
-                    <span>Đổi tài khoản giáo viên</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowMobileDrawer(false);
-                      onLogout();
-                    }}
-                    className="w-full p-2 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-950/50 flex items-center gap-2 cursor-pointer"
-                  >
-                    <LogOut className="w-4 h-4 text-rose-400" />
-                    <span>Đăng xuất tài khoản</span>
-                  </button>
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onOpenProfile?.();
+                      }}
+                      className="min-h-[44px] px-3 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-2 cursor-pointer"
+                    >
+                      <KeyRound className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span className="truncate">Đổi mật khẩu</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onOpenTeacherAuth();
+                      }}
+                      className="min-h-[44px] px-3 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-2 cursor-pointer"
+                    >
+                      <RefreshCw className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span className="truncate">Đổi tài khoản</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowMobileDrawer(false);
+                        onLogout();
+                      }}
+                      className="min-h-[44px] px-3 py-2 rounded-xl bg-rose-950/50 border border-rose-500/30 text-xs font-bold text-rose-300 flex items-center gap-2 cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span className="truncate">Đăng xuất</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

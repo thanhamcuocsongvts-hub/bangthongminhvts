@@ -2640,6 +2640,18 @@ function CasioFx580VNXInner({
   const [showChalk, setShowChalk] = useState(false);
   const [showBigScreen, setShowBigScreen] = useState(!isDocked);
   const [zoomScale, setZoomScale] = useState(isDocked ? 0.92 : 1);
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 1024
+  );
+
+  useEffect(() => {
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const autoMobileFit = viewportWidth < 392 ? Math.max(0.82, (viewportWidth - 36) / 348) : 1;
+  const effectiveScale = Number((zoomScale * autoMobileFit).toFixed(3));
 
   useEffect(() => {
     onBigScreenChange?.(showBigScreen);
@@ -4230,8 +4242,8 @@ function CasioFx580VNXInner({
     <div
       className={`relative w-full ${
         isDocked
-          ? 'h-full rounded-2xl border border-emerald-500/35 py-2.5 px-2.5 sm:px-3.5 shadow-xl'
-          : `${showBigScreen ? 'max-w-[1180px]' : 'max-w-[450px]'} max-h-[95vh] rounded-3xl border border-white/20 py-4 px-3 sm:px-6 shadow-2xl`
+          ? 'h-full rounded-2xl border border-emerald-500/35 py-2 px-2 sm:py-2.5 sm:px-3.5 shadow-xl'
+          : `${showBigScreen ? 'max-w-[1180px]' : 'max-w-[450px]'} max-h-[92dvh] sm:max-h-[95vh] rounded-2xl sm:rounded-3xl border border-white/20 py-3 px-2.5 sm:py-4 sm:px-6 shadow-2xl`
       } flex flex-col items-center justify-start overflow-y-auto overflow-x-hidden custom-scrollbar transition-all duration-300`}
       style={{
         backgroundColor: '#193829',
@@ -4246,8 +4258,10 @@ function CasioFx580VNXInner({
       {/* Thanh tiêu đề & Tùy chọn Hiển thị Độc lập / Song song Bảng Xanh + Màn Hình Lớn + Phóng to */}
       <div
         className={`relative z-10 ${
-          isDocked ? 'mb-2.5 px-2.5 py-1.5 rounded-2xl w-full' : 'mb-4 px-4 py-2 rounded-full'
-        } flex flex-wrap items-center justify-center gap-2 bg-[#0d1c14] border border-white/20 text-white/90 text-xs shadow-lg`}
+          isDocked
+            ? 'mb-2 px-2.5 py-1.5 rounded-2xl w-full'
+            : 'mb-3 sm:mb-4 px-2.5 py-2 sm:px-4 sm:py-2 rounded-2xl sm:rounded-full w-full sm:w-auto pr-10 sm:pr-4'
+        } flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 bg-[#0d1c14] border border-white/20 text-white/90 text-xs shadow-lg`}
       >
         <span className="font-medium tracking-wide flex items-center gap-1.5">
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
@@ -4255,8 +4269,8 @@ function CasioFx580VNXInner({
         </span>
         {!isDocked && (
           <>
-            <span className="text-white/30">•</span>
-            <span className="font-bold text-amber-300 tracking-wide">
+            <span className="text-white/30 hidden sm:inline">•</span>
+            <span className="font-bold text-amber-300 tracking-wide hidden sm:inline">
               Được phát triển bởi TTK
             </span>
           </>
@@ -4264,12 +4278,12 @@ function CasioFx580VNXInner({
 
         {onChangeDisplayMode && (
           <>
-            <span className="text-white/30">|</span>
+            <span className="text-white/30 hidden sm:inline">|</span>
             <div className="inline-flex items-center p-0.5 rounded-full bg-white/10 border border-white/15 gap-0.5">
               <button
                 type="button"
                 onClick={() => onChangeDisplayMode('standalone')}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
+                className={`px-2.5 py-1 min-h-[30px] rounded-full text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
                   !isDocked
                     ? 'bg-sky-500 text-slate-950 shadow-sm'
                     : 'text-slate-200 hover:bg-white/15'
@@ -4282,7 +4296,7 @@ function CasioFx580VNXInner({
               <button
                 type="button"
                 onClick={() => onChangeDisplayMode('with_blackboard')}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
+                className={`px-2.5 py-1 min-h-[30px] rounded-full text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
                   isDocked
                     ? 'bg-emerald-500 text-slate-950 shadow-sm'
                     : 'text-emerald-200 hover:bg-white/15'
@@ -4300,7 +4314,7 @@ function CasioFx580VNXInner({
           <button
             type="button"
             onClick={onToggleDockPosition}
-            className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-amber-200 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap"
+            className="px-2.5 py-1 min-h-[30px] rounded-full bg-white/10 hover:bg-white/20 text-amber-200 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap"
             title="Đổi vị trí máy tính sang Trái hoặc Phải màn hình"
           >
             <ArrowLeftRight className="w-3 h-3" />
@@ -4308,18 +4322,19 @@ function CasioFx580VNXInner({
           </button>
         )}
 
-        <span className="text-white/30">|</span>
+        <span className="text-white/30 hidden sm:inline">|</span>
         <button
           type="button"
           onClick={() => setShowBigScreen((v) => !v)}
-          className={`px-2.5 py-1 rounded-full font-bold text-[11px] transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
+          className={`px-2.5 py-1 min-h-[30px] rounded-full font-bold text-[11px] transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
             showBigScreen
               ? 'bg-emerald-500 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
               : 'bg-white/15 text-emerald-200 hover:bg-white/25'
           }`}
         >
           <span>🖥️</span>
-          <span>
+          <span className="sm:hidden">{showBigScreen ? 'Màn hình lớn: Bật' : 'Màn hình lớn'}</span>
+          <span className="hidden sm:inline">
             {isDocked
               ? showBigScreen
                 ? 'Màn hình lớn: Bật'
@@ -4330,9 +4345,9 @@ function CasioFx580VNXInner({
           </span>
         </button>
 
-        <span className="text-white/30">|</span>
+        <span className="text-white/30 hidden sm:inline">|</span>
         <div className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-full border border-white/15">
-          <span className="text-[10.5px] text-emerald-300 font-semibold mr-0.5">Thu phóng:</span>
+          <span className="text-[10.5px] text-emerald-300 font-semibold mr-0.5 hidden sm:inline">Thu phóng:</span>
           <button
             type="button"
             onClick={() => setZoomScale((z) => Math.max(0.75, Number((z - 0.1).toFixed(2))))}
@@ -4366,7 +4381,7 @@ function CasioFx580VNXInner({
 
         {!isDocked && (
           <>
-            <span className="text-white/30">|</span>
+            <span className="text-white/30 hidden sm:inline">|</span>
             <button
               type="button"
               onClick={() => setShowChalk(!showChalk)}
@@ -4379,7 +4394,7 @@ function CasioFx580VNXInner({
 
         {onClose && (
           <>
-            <span className="text-white/30">|</span>
+            <span className="text-white/30 hidden sm:inline">|</span>
             <button
               type="button"
               onClick={onClose}
@@ -4400,14 +4415,14 @@ function CasioFx580VNXInner({
         className={`relative z-10 w-full flex ${
           isDocked
             ? 'flex-col items-center gap-4'
-            : 'flex-col lg:flex-row items-center lg:items-start justify-center gap-6'
+            : 'flex-col lg:flex-row items-center lg:items-start justify-center gap-4 sm:gap-6'
         } transition-all duration-300`}
       >
         {/* CỘT TRÁI: THÂN MÁY TÍNH CASIO + THANH CHẾ ĐỘ NHANH */}
         <div
           className="flex flex-col items-center shrink-0 transition-transform duration-200 origin-top"
           style={{
-            transform: zoomScale !== 1 ? `scale(${zoomScale})` : undefined,
+            transform: effectiveScale !== 1 ? `scale(${effectiveScale})` : undefined,
           }}
         >
           <div className="relative select-none">
@@ -5491,13 +5506,13 @@ export const CasioCalculatorModal: React.FC<{
   }
 
   return (
-    <div className="fixed inset-0 z-[10060] flex items-center justify-center p-2 sm:p-4 bg-slate-950/90 animate-in fade-in duration-200 select-none overflow-y-auto">
-      <div className="relative my-auto flex flex-col items-center">
+    <div className="fixed inset-0 z-[10060] flex items-center justify-center p-1.5 sm:p-4 bg-slate-950/90 animate-in fade-in duration-200 select-none overflow-y-auto pb-safe">
+      <div className="relative my-auto w-full sm:w-auto max-w-full flex flex-col items-center">
         {/* Nút đóng nổi bật góc trên bên phải */}
         <button
           type="button"
           onClick={onClose}
-          className="absolute -top-3.5 -right-3.5 z-50 p-2 rounded-full bg-slate-900/90 hover:bg-rose-600 text-white shadow-2xl border border-white/25 transition-all cursor-pointer active:scale-95"
+          className="absolute top-2 right-2 sm:-top-3.5 sm:-right-3.5 z-50 min-w-[36px] min-h-[36px] p-2 rounded-full bg-slate-900/95 hover:bg-rose-600 text-white shadow-2xl border border-white/25 flex items-center justify-center transition-all cursor-pointer active:scale-95"
           title="Đóng máy tính Casio fx-580VN X"
         >
           <X className="w-4 h-4" />

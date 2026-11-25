@@ -47,7 +47,7 @@ import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { safeSetDoc } from './utils/firebaseSafe';
 import { useDeviceDetection } from './hooks/useDeviceDetection';
-import { PenTool, FolderOpen, Users, CheckSquare, Trophy, LogOut, Lock, Clock, User, ShieldCheck, Mail, Phone, School, Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { PenTool, FolderOpen, Users, CheckSquare, Trophy, LogOut, Lock, Clock, User, ShieldCheck, Mail, Phone, School, Sparkles, AlertCircle, CheckCircle2, LayoutGrid } from 'lucide-react';
 import { TextToSpeechFloatingTooltip } from './components/TextToSpeechFloatingTooltip';
 
 export default function App() {
@@ -1600,17 +1600,17 @@ export default function App() {
       )}
 
       {/* Main Interactive Screen Content */}
-      <main className={`flex-1 ${
+      <main className={`flex-1 min-h-0 ${
         isFeatureFullscreen
           ? isCasioDockedActive
             ? 'p-1.5 sm:p-2 overflow-hidden bg-slate-950'
             : 'p-0 overflow-hidden bg-slate-950'
           : activeTab === 'whiteboard'
-          ? 'p-2 sm:p-3 md:p-4 overflow-hidden bg-white'
+          ? 'p-1.5 sm:p-3 md:p-4 overflow-hidden bg-white'
           : isMobile
           ? isCasioDockedActive
-            ? 'p-2 pb-20 overflow-hidden bg-[#f8fafc]'
-            : 'p-2.5 pb-24 overflow-y-auto bg-[#f8fafc]'
+            ? 'p-1.5 overflow-hidden bg-[#f8fafc]'
+            : 'p-2 pb-[74px] overflow-hidden bg-[#f8fafc]'
           : 'p-3 md:p-4 overflow-hidden bg-[#f8fafc]'
       } relative`}>
         <div
@@ -1932,7 +1932,7 @@ export default function App() {
           </div>
 
           {isCasioDockedActive && (
-            <div className="w-full h-[46%] lg:h-full lg:w-[410px] xl:w-[440px] shrink-0 min-h-0">
+            <div className="w-full h-[46dvh] lg:h-full lg:w-[410px] xl:w-[440px] shrink-0 min-h-0">
               <CasioCalculatorModal
                 isOpen={true}
                 displayMode="with_blackboard"
@@ -2250,33 +2250,53 @@ export default function App() {
         </div>
       )}
       {/* MOBILE PHONE BOTTOM NAVIGATION BAR (< 768px) */}
-      {isMobile && !isStudentMode && !isFullscreen && !isFeatureFullscreen && (
+      {isMobile && !isStudentMode && !isFullscreen && !isFeatureFullscreen && !isCasioDockedActive && (
         <nav
-          className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-1 py-1.5 flex items-center justify-around shadow-2xl select-none"
+          className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-1.5 pt-1 flex items-center justify-around shadow-[0_-4px_20px_rgba(15,23,42,0.08)] select-none"
           style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom))' }}
         >
           {[
-            { id: 'whiteboard' as ActiveTab, label: 'Bảng Viết', icon: <PenTool className="w-5 h-5" />, activeColor: 'text-emerald-600' },
-            { id: 'documents' as ActiveTab, label: 'Lưu Trữ', icon: <FolderOpen className="w-5 h-5" />, activeColor: 'text-amber-600' },
-            { id: 'gradebook' as ActiveTab, label: 'Lớp Học', icon: <Users className="w-5 h-5" />, activeColor: 'text-blue-600' },
-            { id: 'quiz' as ActiveTab, label: 'Tạo Đề', icon: <CheckSquare className="w-5 h-5" />, activeColor: 'text-orange-500' },
+            { id: 'whiteboard' as ActiveTab, label: 'Bảng Viết', icon: <PenTool className="w-5 h-5" />, activeColor: 'text-emerald-600', activeBg: 'bg-emerald-50' },
+            { id: 'gradebook' as ActiveTab, label: 'Lớp Học', icon: <Users className="w-5 h-5" />, activeColor: 'text-blue-600', activeBg: 'bg-blue-50' },
+            { id: 'quiz' as ActiveTab, label: 'Tạo Đề', icon: <CheckSquare className="w-5 h-5" />, activeColor: 'text-orange-600', activeBg: 'bg-orange-50' },
+            { id: 'documents' as ActiveTab, label: 'Lưu Trữ', icon: <FolderOpen className="w-5 h-5" />, activeColor: 'text-amber-600', activeBg: 'bg-amber-50' },
           ].map((item) => {
-            const isActive = activeTab === item.id || (item.id === 'documents' && activeTab === 'reader');
+            const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer ${
-                  isActive ? `${item.activeColor} font-black scale-105` : 'text-slate-400 hover:text-slate-600 font-medium'
+                className={`flex-1 min-h-[54px] flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer active:scale-95 ${
+                  isActive ? `${item.activeColor} font-black` : 'text-slate-400 hover:text-slate-600 font-semibold'
                 }`}
               >
-                <div className={`p-1 rounded-xl ${isActive ? 'bg-slate-100 shadow-xs' : ''}`}>
+                <div className={`px-3 py-1 rounded-xl transition-colors ${isActive ? `${item.activeBg} shadow-xs` : ''}`}>
                   {item.icon}
                 </div>
-                <span className="text-[10px] tracking-tight mt-0.5">{item.label}</span>
+                <span className="text-[10.5px] tracking-tight mt-0.5">{item.label}</span>
               </button>
             );
           })}
+
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-mobile-more-sheet'))}
+            className={`flex-1 min-h-[54px] flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer active:scale-95 ${
+              activeTab === 'reader' || activeTab === 'games' || activeTab === 'embed'
+                ? 'text-indigo-600 font-black'
+                : 'text-slate-400 hover:text-slate-600 font-semibold'
+            }`}
+          >
+            <div
+              className={`px-3 py-1 rounded-xl transition-colors ${
+                activeTab === 'reader' || activeTab === 'games' || activeTab === 'embed'
+                  ? 'bg-indigo-50 shadow-xs'
+                  : ''
+              }`}
+            >
+              <LayoutGrid className="w-5 h-5" />
+            </div>
+            <span className="text-[10.5px] tracking-tight mt-0.5">Thêm</span>
+          </button>
         </nav>
       )}
 

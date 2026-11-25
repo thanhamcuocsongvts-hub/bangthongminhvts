@@ -330,37 +330,37 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
   return (
     <div
       id="doc-reader-viewport"
-      className="relative w-full h-full min-h-[420px] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-md p-4 md:p-6 space-y-4"
+      className="relative w-full h-full min-h-[380px] flex flex-col bg-white rounded-2xl sm:rounded-3xl overflow-hidden border border-slate-200 shadow-md p-2.5 sm:p-4 md:p-6 space-y-2.5 sm:space-y-4"
     >
       {savedToast && (
-        <div className="absolute top-4 right-4 z-50 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-xl flex items-center gap-2 animate-fade-in border border-emerald-400">
-          <Check className="w-4 h-4" />
-          <span>Đã lưu tài liệu vào Kho Bài Giảng thành công!</span>
+        <div className="absolute top-3 right-3 z-50 px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-xl flex items-center gap-2 animate-fade-in border border-emerald-400">
+          <Check className="w-4 h-4 shrink-0" />
+          <span>Đã lưu tài liệu vào Kho Bài Giảng!</span>
         </div>
       )}
       {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-indigo-50 text-indigo-700 border border-indigo-200">
-            <BookOpen className="w-6 h-6" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 sm:pb-3 border-b border-slate-200 shrink-0">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+            <BookOpen className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black uppercase text-indigo-600 tracking-wider">
-                TRÌNH ĐỌC & TRÍCH XUẤT TÀI LIỆU
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] sm:text-xs font-black uppercase text-indigo-600 tracking-wider">
+                TRÌNH ĐỌC TÀI LIỆU
               </span>
-              <span className="px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-bold">
+              <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[10px] sm:text-[11px] font-bold">
                 {lesson.fileType ? lesson.fileType.toUpperCase() : 'TÀI LIỆU'} • {lesson.fileSize || 'Sẵn sàng'}
               </span>
             </div>
-            <h1 className="text-xl md:text-2xl font-black text-slate-900 truncate max-w-xl">
+            <h1 className="text-base sm:text-xl md:text-2xl font-black text-slate-900 truncate">
               {lesson.title}
             </h1>
           </div>
         </div>
 
         {/* Quick Launch Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none pb-0.5 sm:pb-0">
           {/* Save to library button if viewing temporary file */}
           {onSaveToLibrary && lesson && (
             isSavedInLibrary ? (
@@ -369,154 +369,155 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
                 <span className="hidden sm:inline">Đã Có Trong Kho</span>
               </span>
             ) : (
-              <button
-                onClick={() => {
-                  onSaveToLibrary(lesson);
-                  setSavedToast(true);
-                  setTimeout(() => setSavedToast(false), 3500);
-                }}
-                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                title="Lưu tài liệu đang mở này vào Kho Bài Giảng"
-              >
-                <BookmarkPlus className="w-4 h-4" />
-                <span>Lưu Vào Kho Bài Giảng</span>
-              </button>
-            )
-          )}
+            <button
+              onClick={() => {
+                onSaveToLibrary(lesson);
+                setSavedToast(true);
+                setTimeout(() => setSavedToast(false), 3500);
+              }}
+              className="min-h-[38px] px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+              title="Lưu tài liệu đang mở này vào Kho Bài Giảng"
+            >
+              <BookmarkPlus className="w-4 h-4 shrink-0" />
+              <span className="sm:hidden">Lưu Kho</span>
+              <span className="hidden sm:inline">Lưu Vào Kho Bài Giảng</span>
+            </button>
+          )
+        )}
 
-          {/* Open other file button */}
+        {/* Open other file button */}
+        <button
+          onClick={() => setShowOpenFileModal(true)}
+          className="min-h-[38px] px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+          title="Mở tài liệu Word, PDF, PowerPoint, Excel khác từ máy tính hoặc Kho bài giảng"
+        >
+          <FolderOpen className="w-4 h-4 shrink-0" />
+          <span>Mở File</span>
+        </button>
+
+        {lesson.slides && lesson.slides.length > 0 && (
           <button
-            onClick={() => setShowOpenFileModal(true)}
-            className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-            title="Mở tài liệu Word, PDF, PowerPoint, Excel khác từ máy tính hoặc Kho bài giảng"
+            onClick={onLaunchSlides}
+            className="min-h-[38px] px-3 py-1.5 sm:py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all whitespace-nowrap shrink-0"
           >
-            <FolderOpen className="w-4 h-4" />
-            <span>Mở File Khác</span>
+            <Layers className="w-4 h-4 shrink-0" />
+            <span>Slide ({lesson.slides.length})</span>
           </button>
+        )}
 
-          {lesson.slides && lesson.slides.length > 0 && (
-            <button
-              onClick={onLaunchSlides}
-              className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-            >
-              <Layers className="w-4 h-4" />
-              <span>Chiếu Slide ({lesson.slides.length})</span>
-            </button>
-          )}
-
-          {lesson.quizzes && lesson.quizzes.length > 0 && (
-            <button
-              onClick={onLaunchQuiz}
-              className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-            >
-              <CheckSquare className="w-4 h-4" />
-              <span>Tạo Đề ({lesson.quizzes.length})</span>
-            </button>
-          )}
-
-          {onDeleteLesson && (
-            <button
-              type="button"
-              onClick={() => setShowDeleteDocModal(true)}
-              className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 border border-rose-200 transition-all shadow-xs cursor-pointer active:scale-95"
-              title="Xóa tài liệu này khỏi hệ thống"
-            >
-              <Trash2 className="w-4 h-4 text-rose-600" />
-              <span className="hidden sm:inline">Xóa Tài Liệu</span>
-            </button>
-          )}
-
+        {lesson.quizzes && lesson.quizzes.length > 0 && (
           <button
-            onClick={() => exportLessonToWord(lesson)}
-            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all"
-            title="Tải về tệp Word"
+            onClick={onLaunchQuiz}
+            className="min-h-[38px] px-3 py-1.5 sm:py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all whitespace-nowrap shrink-0"
           >
-            <Download className="w-4 h-4 text-indigo-600" />
-            <span className="hidden sm:inline">Xuất Word</span>
+            <CheckSquare className="w-4 h-4 shrink-0" />
+            <span>Tạo Đề ({lesson.quizzes.length})</span>
           </button>
-        </div>
+        )}
+
+        {onDeleteLesson && (
+          <button
+            type="button"
+            onClick={() => setShowDeleteDocModal(true)}
+            className="min-h-[38px] px-3 py-1.5 sm:py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 border border-rose-200 transition-all shadow-xs cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
+            title="Xóa tài liệu này khỏi hệ thống"
+          >
+            <Trash2 className="w-4 h-4 text-rose-600 shrink-0" />
+            <span className="hidden sm:inline">Xóa Tài Liệu</span>
+          </button>
+        )}
+
+        <button
+          onClick={() => exportLessonToWord(lesson)}
+          className="min-h-[38px] px-3 py-1.5 sm:py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0"
+          title="Tải về tệp Word"
+        >
+          <Download className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span className="hidden sm:inline">Xuất Word</span>
+        </button>
       </div>
+    </div>
 
       {/* Main Mode Switcher + On-Demand Extraction Quick Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 bg-slate-50 p-2 sm:p-2.5 rounded-2xl border border-slate-200 shrink-0">
         {/* Left: View Modes */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5 lg:pb-0">
           <button
             onClick={() => setActiveViewMode('original')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition-all whitespace-nowrap shrink-0 ${
               activeViewMode === 'original'
                 ? 'bg-indigo-600 text-white shadow-md font-extrabold'
                 : 'text-slate-700 hover:bg-slate-200/60'
             }`}
           >
-            <Eye className="w-4 h-4" />
-            <span>1. Xem Tài Liệu Gốc ({lesson.fileType?.toUpperCase() || 'Tệp'})</span>
+            <Eye className="w-4 h-4 shrink-0" />
+            <span>1. Xem Gốc ({lesson.fileType?.toUpperCase() || 'Tệp'})</span>
           </button>
 
           <button
             onClick={() => setActiveViewMode('extracted')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition-all whitespace-nowrap shrink-0 ${
               activeViewMode === 'extracted'
                 ? 'bg-indigo-600 text-white shadow-md font-extrabold'
                 : 'text-slate-700 hover:bg-slate-200/60'
             }`}
           >
-            <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>2. Trích Xuất AI & Tra Cứu</span>
+            <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+            <span>2. Trích Xuất AI</span>
           </button>
 
           <button
             onClick={() => setActiveViewMode('notes')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition-all whitespace-nowrap shrink-0 ${
               activeViewMode === 'notes'
                 ? 'bg-indigo-600 text-white shadow-md font-extrabold'
                 : 'text-slate-700 hover:bg-slate-200/60'
             }`}
           >
-            <Edit3 className="w-4 h-4" />
-            <span>3. Ghi Chú Giáo Án</span>
+            <Edit3 className="w-4 h-4 shrink-0" />
+            <span>3. Ghi Chú</span>
           </button>
         </div>
 
         {/* Right: On-Demand Actions Bar */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5 lg:pb-0">
           <button
             onClick={() => setScopeModalAction('formulas')}
             disabled={isExtractingFormulas}
-            className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:border-indigo-400 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-indigo-50/50 cursor-pointer"
+            className="min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:border-indigo-400 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-indigo-50/50 cursor-pointer whitespace-nowrap shrink-0"
             title="Trích xuất các định lý, công thức theo phạm vi kiến thức"
           >
-            <Sigma className={`w-3.5 h-3.5 text-indigo-600 ${isExtractingFormulas ? 'animate-spin' : ''}`} />
-            <span>{isExtractingFormulas ? 'Đang trích xuất...' : 'Trích Xuất Công Thức'}</span>
+            <Sigma className={`w-3.5 h-3.5 text-indigo-600 shrink-0 ${isExtractingFormulas ? 'animate-spin' : ''}`} />
+            <span>{isExtractingFormulas ? 'Đang trích...' : 'Công Thức'}</span>
           </button>
 
           <button
             onClick={() => setScopeModalAction('summary')}
             disabled={isExtractingSummary}
-            className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:border-indigo-400 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-indigo-50/50 cursor-pointer"
+            className="min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:border-indigo-400 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-indigo-50/50 cursor-pointer whitespace-nowrap shrink-0"
             title="Tóm tắt ngắn gọn theo phạm vi kiến thức"
           >
-            <BookmarkCheck className={`w-3.5 h-3.5 text-emerald-600 ${isExtractingSummary ? 'animate-spin' : ''}`} />
-            <span>{isExtractingSummary ? 'Đang tóm tắt...' : 'Tóm Tắt 2 Phút'}</span>
+            <BookmarkCheck className={`w-3.5 h-3.5 text-emerald-600 shrink-0 ${isExtractingSummary ? 'animate-spin' : ''}`} />
+            <span>{isExtractingSummary ? 'Đang tóm tắt...' : 'Tóm Tắt'}</span>
           </button>
 
           <button
             onClick={() => setScopeModalAction('slides')}
             disabled={isConvertingSlides}
-            className="px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-200 hover:bg-purple-100 text-purple-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            className="min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-200 hover:bg-purple-100 text-purple-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
             title="Tạo các slide giảng dạy theo phạm vi kiến thức yêu cầu"
           >
-            <Layers className="w-3.5 h-3.5 text-purple-600" />
+            <Layers className="w-3.5 h-3.5 text-purple-600 shrink-0" />
             <span>{isConvertingSlides ? 'Đang tạo...' : 'Tạo Slide'}</span>
           </button>
 
           <button
             onClick={() => setScopeModalAction('quiz')}
             disabled={isGeneratingQuiz}
-            className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            className="min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
             title="Tạo bộ câu hỏi trắc nghiệm theo phạm vi kiến thức yêu cầu"
           >
-            <CheckSquare className="w-3.5 h-3.5 text-amber-600" />
+            <CheckSquare className="w-3.5 h-3.5 text-amber-600 shrink-0" />
             <span>{isGeneratingQuiz ? 'Đang tạo đề...' : 'Tạo Đề'}</span>
           </button>
         </div>
@@ -541,20 +542,22 @@ export const DocumentReaderView: React.FC<DocumentReaderViewProps> = ({
           {/* Ask AI Input Box */}
           <form
             onSubmit={handleAskQuestion}
-            className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 shadow-xs flex items-center gap-2"
+            className="p-3 sm:p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
           >
-            <Sparkles className="w-5 h-5 text-indigo-600 shrink-0" />
-            <input
-              type="text"
-              value={customAIQuery}
-              onChange={(e) => setCustomAIQuery(e.target.value)}
-              placeholder="Hỏi AI bất kỳ điều gì về tài liệu này (Ví dụ: 'Giải thích định lý Lagrange', 'Tìm công thức tính diện tích')..."
-              className="flex-1 px-3 py-2 rounded-xl bg-white border border-indigo-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs font-medium"
-            />
+            <div className="flex items-center gap-2 flex-1">
+              <Sparkles className="w-5 h-5 text-indigo-600 shrink-0 hidden sm:block" />
+              <input
+                type="text"
+                value={customAIQuery}
+                onChange={(e) => setCustomAIQuery(e.target.value)}
+                placeholder="Hỏi AI về tài liệu này..."
+                className="w-full px-3 py-2.5 sm:py-2 rounded-xl bg-white border border-indigo-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs font-medium"
+              />
+            </div>
             <button
               type="submit"
               disabled={isAskingAI || !customAIQuery.trim()}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shrink-0 shadow-xs transition-all"
+              className="min-h-[42px] sm:min-h-[38px] px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 shadow-xs transition-all"
             >
               <Send className="w-3.5 h-3.5" />
               <span>{isAskingAI ? 'Đang hỏi...' : 'Hỏi AI'}</span>

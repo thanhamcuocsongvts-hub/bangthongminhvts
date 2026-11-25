@@ -202,16 +202,16 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden text-slate-900 my-auto">
+    <div className="fixed inset-0 z-[100] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto pb-safe">
+      <div className="w-full max-w-2xl bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-2xl overflow-hidden text-slate-900 my-auto">
         {/* Top Modal Header */}
-        <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0">
-              <Send className="w-5 h-5 text-emerald-400" />
+        <div className="px-4 py-3 sm:px-6 sm:py-4 bg-slate-900 text-white flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0">
+              <Send className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-base sm:text-lg font-black tracking-tight truncate">
+              <h3 className="text-sm sm:text-lg font-black tracking-tight truncate">
                 {createdAssignment ? 'Đã Tạo Link Đề Online' : 'Giao Đề Online Cho Học Sinh'}
               </h3>
               <p className="text-xs text-slate-300 truncate">
@@ -222,7 +222,7 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
+            className="min-w-[38px] min-h-[38px] p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0 flex items-center justify-center"
             title="Đóng"
           >
             <X className="w-5 h-5" />
@@ -231,7 +231,7 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
 
         {createdAssignment ? (
           /* STEP 2: SHARE LINK & QR VIEW */
-          <div className="p-6 space-y-5 max-h-[82vh] overflow-y-auto">
+          <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 max-h-[82dvh] overflow-y-auto">
             <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-start gap-3">
               <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
               <div className="space-y-1.5 flex-1 min-w-0">
@@ -721,19 +721,19 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
             </div>
 
             {/* Footer Submit */}
-            <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2.5">
+            <div className="pt-3 border-t border-slate-200 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-2.5 pb-safe">
               <button
                 type="button"
                 onClick={onClose}
                 disabled={isSaving}
-                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer disabled:opacity-50"
+                className="px-4 py-2.5 min-h-[42px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer disabled:opacity-50"
               >
                 Hủy
               </button>
               <button
                 type="submit"
                 disabled={isSaving}
-                className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center gap-2 shadow-md shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-50"
+                className="px-6 py-2.5 min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-50"
               >
                 {isSaving ? (
                   <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />

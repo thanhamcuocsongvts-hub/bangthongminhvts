@@ -977,6 +977,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
   // Mode: Default to 'creator' or switch to 'live', 'presentation', 'exam', 'analytics', or 'homework'
   const [activeMode, setActiveMode] = useState<'creator' | 'live' | 'presentation' | 'exam' | 'analytics' | 'homework'>('creator');
+  const [creatorMobilePane, setCreatorMobilePane] = useState<'setup' | 'questions'>('setup');
 
   // Presentation Mode & Gọi học sinh lên bảng State
   const [boardSelectedStudent, setBoardSelectedStudent] = useState<string>('');
@@ -2079,6 +2080,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
           `${promptTopic || selectedGrade}_${Date.now()}`
         );
         setGeneratedQuestions(balancedQuestions);
+        setCreatorMobilePane('questions');
         setStatusMessage(
           uploadedFile
             ? `⚡ Hoàn tất! Đã tạo ${balancedQuestions.length} câu hỏi bám sát ma trận "${uploadedFile.name}" trong ${(elapsed / 1000).toFixed(1)}s.`
@@ -2749,20 +2751,20 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     >
       {/* Top Universal Mode Switcher & Room Status Bar (Ẩn hoàn toàn khi trình chiếu câu hỏi Toàn Màn Hình) */}
       {!isScopedPresentationFS && (
-      <div className="flex items-center justify-between px-6 py-3.5 bg-slate-900 text-white z-20 shrink-0">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 px-2.5 sm:px-4 lg:px-6 py-2 lg:py-3.5 bg-slate-900 text-white z-20 shrink-0">
         {/* Left: View Mode Navigation Toggle */}
-        <div className="flex items-center gap-2">
-          <div className="bg-slate-800 p-1 rounded-2xl flex items-center gap-1 border border-slate-700">
+        <div className="flex items-center gap-2 min-w-0 w-full lg:w-auto">
+          <div className="bg-slate-800 p-1 rounded-2xl flex items-center gap-1 border border-slate-700 overflow-x-auto scrollbar-none w-full lg:w-auto">
             <button
               onClick={() => setActiveMode('creator')}
-              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              className={`min-h-[38px] px-3 lg:px-4 py-1.5 lg:py-2 rounded-xl text-xs lg:text-sm font-bold flex items-center gap-1.5 lg:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 activeMode === 'creator'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
               }`}
             >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>Soạn Đề AI & Ma Trận</span>
+              <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Soạn Đề AI</span>
               {generatedQuestions.length > 0 && (
                 <span className="px-1.5 py-0.5 rounded-full bg-indigo-800 text-[11px] text-indigo-200">
                   {generatedQuestions.length}
@@ -2772,17 +2774,17 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
             <button
               onClick={() => setActiveMode('live')}
-              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              className={`min-h-[38px] px-3 lg:px-4 py-1.5 lg:py-2 rounded-xl text-xs lg:text-sm font-bold flex items-center gap-1.5 lg:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 activeMode === 'live'
                   ? 'bg-emerald-600 text-white shadow-md'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
               }`}
             >
-              <Play className="w-4 h-4 text-emerald-300" />
-              <span>Phòng Thi Trực Tiếp</span>
+              <Play className="w-4 h-4 text-emerald-300 shrink-0" />
+              <span>Phòng Thi</span>
               {questions.length > 0 && (
                 <span className="px-1.5 py-0.5 rounded-full bg-emerald-800 text-[11px] text-emerald-200">
-                  {questions.length} câu
+                  {questions.length}
                 </span>
               )}
             </button>
@@ -2793,35 +2795,35 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 setActiveMode('presentation');
                 resetBoardQuestionInteractions();
               }}
-              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              className={`min-h-[38px] px-3 lg:px-4 py-1.5 lg:py-2 rounded-xl text-xs lg:text-sm font-bold flex items-center gap-1.5 lg:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 activeMode === 'presentation'
                   ? 'bg-amber-500 text-slate-950 font-black shadow-md'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
               }`}
               title="Trình chiếu câu hỏi lên màn hình 75 inch và gọi học sinh lên bảng làm bài ngay"
             >
-              <Tv className="w-4 h-4 text-amber-300" />
-              <span>Trình Chiếu & Lên Bảng</span>
+              <Tv className="w-4 h-4 text-amber-300 shrink-0" />
+              <span>Trình Chiếu</span>
             </button>
 
             <button
               id="exam-mode-nav-btn"
               onClick={() => setActiveMode('exam')}
-              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              className={`min-h-[38px] px-3 lg:px-4 py-1.5 lg:py-2 rounded-xl text-xs lg:text-sm font-bold flex items-center gap-1.5 lg:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 activeMode === 'exam'
                   ? 'bg-rose-600 text-white shadow-md'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
               }`}
             >
-              <ShieldCheck className="w-4 h-4 text-rose-300" />
-              <span>Chế Độ Phòng Thi</span>
+              <ShieldCheck className="w-4 h-4 text-rose-300 shrink-0" />
+              <span>Chế Độ Thi</span>
               {isExamActive ? (
                 <span className="flex h-2 w-2 relative">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-400"></span>
                 </span>
               ) : (
-                <span className="px-1.5 py-0.5 rounded-full bg-slate-700 text-[11px] text-slate-300">
+                <span className="hidden sm:inline px-1.5 py-0.5 rounded-full bg-slate-700 text-[11px] text-slate-300">
                   Khóa MH
                 </span>
               )}
@@ -2830,27 +2832,27 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             <button
               id="analytics-mode-nav-btn"
               onClick={() => setActiveMode('analytics')}
-              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              className={`min-h-[38px] px-3 lg:px-4 py-1.5 lg:py-2 rounded-xl text-xs lg:text-sm font-bold flex items-center gap-1.5 lg:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 activeMode === 'analytics'
                   ? 'bg-teal-600 text-white shadow-md'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
               }`}
             >
-              <BarChart3 className="w-4 h-4 text-teal-300" />
-              <span>Biểu Đồ Phân Tích</span>
+              <BarChart3 className="w-4 h-4 text-teal-300 shrink-0" />
+              <span>Phân Tích</span>
             </button>
 
             <button
               id="homework-mode-nav-btn"
               onClick={() => setActiveMode('homework')}
-              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              className={`min-h-[38px] px-3 lg:px-4 py-1.5 lg:py-2 rounded-xl text-xs lg:text-sm font-bold flex items-center gap-1.5 lg:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 activeMode === 'homework'
                   ? 'bg-emerald-600 text-white shadow-md'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
               }`}
             >
-              <ClipboardList className="w-4 h-4 text-emerald-300" />
-              <span>Đề Online &amp; Chấm Điểm</span>
+              <ClipboardList className="w-4 h-4 text-emerald-300 shrink-0" />
+              <span>Đề Online</span>
               {homeworkAssignmentsCount > 0 && (
                 <span className="px-1.5 py-0.5 rounded-full bg-emerald-800 text-[11px] text-emerald-100 tabular-nums">
                   {homeworkAssignmentsCount}
@@ -2859,14 +2861,14 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             </button>
           </div>
 
-          <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pl-2">
+          <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pl-2 shrink-0">
             <span>Mã phòng:</span>
             <span className="font-mono font-black text-amber-400 text-sm tracking-wider">{teacherRoomPin}</span>
           </div>
         </div>
 
         {/* Right: Quick Action Controls */}
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none w-full lg:w-auto lg:flex-wrap pb-0.5 lg:pb-0">
           {/* Nút Kho Đề Đã Lưu luôn hiển thị để mở nhanh */}
           <button
             onClick={() => {
@@ -2880,11 +2882,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 })
                 .finally(() => setIsSyncingSavedQuizzes(false));
             }}
-            className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
+            className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 whitespace-nowrap shrink-0"
             title="Mở kho bài tập trắc nghiệm đã tạo sẵn ở nhà để trình chiếu hoặc phát cho học sinh"
           >
-            <FolderOpen className="w-4 h-4 text-amber-400" />
-            <span>Kho Đề Đã Lưu ({savedQuizzesList.length})</span>
+            <FolderOpen className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Kho Đề ({savedQuizzesList.length})</span>
           </button>
 
           {/* Nút Lưu Bài Tập */}
@@ -2896,11 +2898,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 setSaveQuizGrade(selectedGrade);
                 setShowSaveQuizModal(true);
               }}
-              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
               title="Lưu bộ câu hỏi trắc nghiệm này để dùng lại ở lớp"
             >
-              <Save className="w-4 h-4 text-amber-400" />
-              <span>Lưu Bài Tập ({generatedQuestions.length > 0 ? generatedQuestions.length : questions.length} câu)</span>
+              <Save className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Lưu ({generatedQuestions.length > 0 ? generatedQuestions.length : questions.length})</span>
             </button>
           )}
 
@@ -2909,11 +2911,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             <button
               onClick={handleExportToWordDocx}
               disabled={isExportingDocx}
-              className="px-3.5 py-2 rounded-xl bg-blue-900/70 hover:bg-blue-800 text-blue-200 border border-blue-700/60 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shadow-xs"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-blue-900/70 hover:bg-blue-800 text-blue-200 border border-blue-700/60 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shadow-xs whitespace-nowrap shrink-0"
               title="Xuất bộ đề thi ra file Word .docx chuẩn cấu trúc OMML đọc tốt trên điện thoại và máy tính"
             >
-              <FileText className="w-4 h-4 text-blue-300" />
-              <span>{isExportingDocx ? 'Đang xuất Word...' : 'Xuất Word (.docx)'}</span>
+              <FileText className="w-4 h-4 text-blue-300 shrink-0" />
+              <span>{isExportingDocx ? 'Đang xuất...' : 'Word (.docx)'}</span>
             </button>
           )}
 
@@ -2926,20 +2928,20 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   setHomeworkCustomTitle('');
                   setShowHomeworkAssignModal(true);
                 }}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
                 title="Phát Đề online cho học sinh làm theo lớp hoặc qua đường link tự do (hỗ trợ trộn đề)"
               >
-                <Send className="w-3.5 h-3.5" />
+                <Send className="w-3.5 h-3.5 shrink-0" />
                 <span>Đề Online</span>
               </button>
 
               <button
                 onClick={handleDeployToStudents}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-black flex items-center gap-2 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer active:scale-95"
+                className="min-h-[38px] px-3.5 lg:px-5 py-1.5 lg:py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs lg:text-sm font-black flex items-center gap-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
               >
-                <Play className="w-4 h-4" />
-                <span>Phát Đề Cho Học Sinh ({generatedQuestions.length} câu)</span>
-                <ArrowRight className="w-4 h-4" />
+                <Play className="w-4 h-4 shrink-0" />
+                <span>Phát Đề ({generatedQuestions.length})</span>
+                <ArrowRight className="w-4 h-4 hidden sm:inline shrink-0" />
               </button>
             </>
           )}
@@ -2948,25 +2950,25 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             <>
               <button
                 onClick={() => setShowQRModal(true)}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0"
               >
-                <QrCode className="w-4 h-4 text-emerald-400" />
-                <span>Mã QR & PIN</span>
+                <QrCode className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>QR & PIN</span>
               </button>
 
               <button
                 onClick={handleSimulateClassSubmission}
-                className="px-3.5 py-2 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 text-xs font-bold flex items-center gap-1.5 transition-all"
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0"
               >
-                <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Giả lập nộp bài</span>
+                <Zap className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>Giả lập</span>
               </button>
 
               <button
                 onClick={() => setActiveMode('creator')}
-                className="px-3.5 py-2 rounded-xl bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-all"
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>Tạo đề mới</span>
               </button>
             </>
@@ -2976,24 +2978,24 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             <>
               <button
                 onClick={() => setShowQRModal(true)}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0"
               >
-                <QrCode className="w-4 h-4 text-emerald-400" />
-                <span>Mã QR & PIN</span>
+                <QrCode className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>QR & PIN</span>
               </button>
 
               <button
                 onClick={handleSimulateExamClass}
-                className="px-3.5 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0"
                 title="Mô phỏng 24 thí sinh với SBD và trạng thái khóa màn hình"
               >
-                <Users className="w-3.5 h-3.5 text-rose-300" />
-                <span>Mô phỏng 24 Thí sinh</span>
+                <Users className="w-3.5 h-3.5 text-rose-300 shrink-0" />
+                <span>Mô phỏng 24 HS</span>
               </button>
 
               <button
                 onClick={handleToggleTeacherEmergencyLock}
-                className={`px-3.5 py-2 rounded-xl border text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`min-h-[38px] px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   isTeacherEmergencyLocked
                     ? 'bg-amber-600 hover:bg-amber-500 border-amber-400 text-white animate-pulse'
                     : 'bg-rose-900/60 hover:bg-rose-800 border-rose-700 text-rose-200'
@@ -3001,13 +3003,13 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               >
                 {isTeacherEmergencyLocked ? (
                   <>
-                    <Unlock className="w-3.5 h-3.5 text-white" />
-                    <span>Đang Khóa Khẩn Cấp (Bấm mở)</span>
+                    <Unlock className="w-3.5 h-3.5 text-white shrink-0" />
+                    <span>Đang Khóa (Mở)</span>
                   </>
                 ) : (
                   <>
-                    <Lock className="w-3.5 h-3.5 text-rose-300" />
-                    <span>Khóa Khẩn Cấp MH</span>
+                    <Lock className="w-3.5 h-3.5 text-rose-300 shrink-0" />
+                    <span>Khóa Khẩn Cấp</span>
                   </>
                 )}
               </button>
@@ -3020,8 +3022,38 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       {/* VIEW 1: AI QUESTION & MATRIX CREATOR (DEFAULT) */}
       {activeMode === 'creator' && (
         <div className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-slate-50">
+          {/* Mobile Sub-Pane Switcher (< 1024px) */}
+          <div className="lg:hidden px-3 py-2 bg-white border-b border-slate-200 flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setCreatorMobilePane('setup')}
+              className={`flex-1 min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                creatorMobilePane === 'setup'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Cài Đặt & Tạo Đề</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCreatorMobilePane('questions')}
+              className={`flex-1 min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                creatorMobilePane === 'questions'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Bộ Đề ({generatedQuestions.length})</span>
+            </button>
+          </div>
+
           {/* Left Panel: Matrix Upload & Creation Settings */}
-          <div className="w-full lg:w-[460px] xl:w-[500px] border-r border-slate-200 bg-white flex flex-col h-full overflow-y-auto p-6 space-y-5">
+          <div className={`w-full lg:w-[460px] xl:w-[500px] border-r border-slate-200 bg-white flex-col flex-1 lg:flex-none lg:h-full overflow-y-auto p-3.5 sm:p-6 space-y-4 sm:space-y-5 ${
+            creatorMobilePane === 'setup' ? 'flex' : 'hidden lg:flex'
+          }`}>
             {/* Header Banner */}
             <div>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-black tracking-wide mb-2">
@@ -3355,12 +3387,14 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
           </div>
 
           {/* Right Panel: Questions Studio Preview */}
-          <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-100">
+          <div className={`flex-1 flex-col lg:h-full overflow-hidden bg-slate-100 ${
+            creatorMobilePane === 'questions' ? 'flex' : 'hidden lg:flex'
+          }`}>
             {/* Top Toolbar of Studio */}
-            <div className="px-6 py-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                  <BookOpen className="w-5 h-5 text-indigo-600" />
+            <div className="px-3.5 sm:px-6 py-3 sm:py-4 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <h3 className="text-sm sm:text-base font-black text-slate-900 flex items-center gap-1.5 sm:gap-2">
+                  <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600" />
                   <span>Bộ Câu Hỏi Đã Tạo</span>
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-xs font-extrabold font-mono">
@@ -3369,15 +3403,15 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               </div>
 
               {generatedQuestions.length > 0 && (
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none w-full sm:w-auto">
                   <button
                     onClick={handleExportToWordDocx}
                     disabled={isExportingDocx}
-                    className="px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                    className="min-h-[38px] px-3 sm:px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50 whitespace-nowrap shrink-0"
                     title="Xuất đề thi ra tệp Word (.docx) chuẩn OMML không dùng markdown"
                   >
-                    <FileText className="w-4 h-4 text-white" />
-                    <span>{isExportingDocx ? 'Đang xuất Word...' : 'Xuất File Word (.docx)'}</span>
+                    <FileText className="w-4 h-4 text-white shrink-0" />
+                    <span>{isExportingDocx ? 'Đang xuất...' : 'Xuất Word'}</span>
                   </button>
 
                   <button
@@ -3387,18 +3421,18 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       setHomeworkCustomTitle('');
                       setShowHomeworkAssignModal(true);
                     }}
-                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-md shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                    className="min-h-[38px] px-3 sm:px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs sm:text-sm flex items-center gap-1.5 shadow-md shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
                     title="Phát Đề online theo lớp hoặc gửi link làm tự do (hỗ trợ trộn đề chống quay cóp)"
                   >
-                    <Send className="w-4 h-4 text-white" />
+                    <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white shrink-0" />
                     <span>ĐỀ ONLINE</span>
                   </button>
 
                   <button
                     onClick={handleDeployToStudents}
-                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                    className="min-h-[38px] px-3.5 sm:px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm flex items-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
                   >
-                    <Play className="w-4 h-4 text-white" />
+                    <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white shrink-0" />
                     <span>THI TRỰC TIẾP</span>
                   </button>
                 </div>
@@ -3406,7 +3440,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             </div>
 
             {/* Questions List */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-3 sm:space-y-4">
               {generatedQuestions.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8 bg-white rounded-3xl border border-slate-200 shadow-sm max-w-lg mx-auto my-auto">
                   <div className="w-16 h-16 rounded-3xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mb-4 shadow-xs">
@@ -3461,12 +3495,12 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       )}
 
                       <div
-                        className="p-6 rounded-3xl bg-white border border-slate-200 shadow-xs hover:border-indigo-300 transition-all space-y-4"
+                        className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white border border-slate-200 shadow-xs hover:border-indigo-300 transition-all space-y-3 sm:space-y-4"
                       >
                         {/* Question Header */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2.5">
-                            <span className="px-3 py-1 rounded-xl bg-indigo-600 text-white text-xs font-black">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
+                            <span className="px-2.5 sm:px-3 py-1 rounded-xl bg-indigo-600 text-white text-xs font-black">
                               CÂU {idx + 1}
                             </span>
                             {q.partLabel && (
@@ -3628,35 +3662,35 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
             {/* Bottom Sticky Action Footer */}
             {generatedQuestions.length > 0 && (
-              <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between shrink-0">
-                <div className="text-xs text-slate-500 font-semibold">
+              <div className="p-3 sm:p-4 bg-white border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
+                <div className="text-xs text-slate-500 font-semibold hidden sm:block">
                   Sẵn sàng phát {generatedQuestions.length} câu hỏi cho toàn bộ học sinh trong phòng học
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto scrollbar-none w-full sm:w-auto">
                   <button
                     onClick={handleExportToWordDocx}
                     disabled={isExportingDocx}
-                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                    className="min-h-[42px] px-3 sm:px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50 whitespace-nowrap shrink-0"
                   >
-                    <FileText className="w-4 h-4 text-white" />
-                    <span>{isExportingDocx ? 'Đang xuất Word...' : 'Xuất File Word (.docx)'}</span>
+                    <FileText className="w-4 h-4 text-white shrink-0" />
+                    <span>{isExportingDocx ? 'Đang xuất...' : 'Word (.docx)'}</span>
                   </button>
 
                   <button
                     onClick={handleGenerateFastQuiz}
                     disabled={isGenerating}
-                    className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+                    className="min-h-[42px] px-3 sm:px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0"
                   >
-                    🔄 Tạo lại bộ khác
+                    🔄 Tạo lại
                   </button>
 
                   <button
                     onClick={handleDeployToStudents}
-                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
+                    className="flex-1 sm:flex-none min-h-[42px] px-4 sm:px-6 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
                   >
-                    <Play className="w-4 h-4" />
-                    <span>PHÁT ĐỀ CHO HỌC SINH THI NGAY</span>
+                    <Play className="w-4 h-4 shrink-0" />
+                    <span>PHÁT ĐỀ THI NGAY</span>
                   </button>
                 </div>
               </div>
@@ -3669,24 +3703,24 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       {activeMode === 'live' && (
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Quiz Top Status Bar on 75" TV */}
-          <div className="flex items-center justify-between px-6 py-3.5 bg-slate-50 border-b border-slate-200 z-20 shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-6 py-2.5 sm:py-3.5 bg-slate-50 border-b border-slate-200 z-20 shrink-0">
             {/* Left: Question Counter & PIN Badge */}
-            <div className="flex items-center gap-4">
-              <div className="px-4 py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-slate-900 font-mono text-base font-bold flex items-center gap-2">
-                <span className="text-indigo-600 font-bold">CÂU HỎI</span>
-                <span className="text-xl text-indigo-700 font-black">{activeIndex + 1}/{questions.length}</span>
+            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+              <div className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-slate-900 font-mono text-xs sm:text-base font-bold flex items-center gap-1.5 sm:gap-2">
+                <span className="text-indigo-600 font-bold">CÂU</span>
+                <span className="text-base sm:text-xl text-indigo-700 font-black">{activeIndex + 1}/{questions.length}</span>
               </div>
 
               {/* Room PIN for Students to Join */}
               <button
                 id="open-qr-modal-btn"
                 onClick={() => setShowQRModal(true)}
-                className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-base font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs sm:text-base font-bold flex items-center gap-1.5 sm:gap-2 transition-all shadow-xs cursor-pointer"
                 title="Mở mã QR và PIN phòng để học sinh quét điện thoại tham gia"
               >
-                <QrCode className="w-5 h-5 text-emerald-600" />
-                <span>MÃ PIN:</span>
-                <span className="font-mono text-xl text-emerald-600 font-black tracking-widest">{teacherRoomPin}</span>
+                <QrCode className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+                <span className="hidden sm:inline">MÃ PIN:</span>
+                <span className="font-mono text-sm sm:text-xl text-emerald-600 font-black tracking-widest">{teacherRoomPin}</span>
               </button>
 
               {/* Active students count */}
@@ -3698,23 +3732,23 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             </div>
 
             {/* Right: Timer & Control Actions */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3 flex-wrap">
               {/* Live Submissions Tracker */}
-              <div className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-base font-bold flex items-center gap-2 shadow-xs">
-                <TrendingUp className="w-5 h-5 text-amber-500" />
-                <span>Đã nộp:</span>
-                <span className="font-mono text-xl text-amber-600 font-black">{totalSubs}</span>
+              <div className="px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs sm:text-base font-bold flex items-center gap-1.5 sm:gap-2 shadow-xs">
+                <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500" />
+                <span className="hidden sm:inline">Đã nộp:</span>
+                <span className="font-mono text-sm sm:text-xl text-amber-600 font-black">{totalSubs}</span>
               </div>
 
               {/* Timer Countdown Badge */}
               <div
-                className={`px-4 py-2 rounded-xl font-mono font-black text-xl flex items-center gap-2 border transition-all ${
+                className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl font-mono font-black text-sm sm:text-xl flex items-center gap-1.5 sm:gap-2 border transition-all ${
                   timeLeft <= 5
                     ? 'bg-rose-50 border-rose-300 text-rose-600 animate-pulse'
                     : 'bg-white border-slate-200 text-indigo-700 shadow-xs'
                 }`}
               >
-                <Clock className="w-5 h-5" />
+                <Clock className="w-4 h-4 sm:w-5 sm:h-5" />
                 <span>{timeLeft}s</span>
               </div>
 
@@ -3724,7 +3758,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   if (timeLeft === 0) setTimeLeft(currentQ?.timeLimit || 30);
                   setIsTimerRunning((prev) => !prev);
                 }}
-                className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 ${
+                className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 ${
                   isTimerRunning
                     ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300'
                     : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 shadow-emerald-600/30'
@@ -3732,13 +3766,13 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 title={isTimerRunning ? 'Tạm dừng đếm giờ' : 'Bắt đầu đếm giờ làm bài'}
               >
                 {isTimerRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                <span>{isTimerRunning ? 'Tạm dừng' : 'Bắt đầu đếm giờ'}</span>
+                <span>{isTimerRunning ? 'Tạm dừng' : 'Đếm giờ'}</span>
               </button>
 
               {/* Button to Switch Back to AI Creator */}
               <button
                 onClick={() => setActiveMode('creator')}
-                className="px-4 py-2 rounded-xl bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 text-sm font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+                className="min-h-[38px] px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 transition-all shadow-xs cursor-pointer"
                 title="Mở giao diện AI tạo thêm câu hỏi hoặc tải ma trận đề mới"
               >
                 <Sparkles className="w-4 h-4 text-indigo-600" />
@@ -4133,13 +4167,13 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
           {/* Bottom Action Footer for Teacher on 75" TV */}
           {currentQ && (
-            <div className="px-8 py-4 bg-slate-50/95 border-t border-slate-200 flex items-center justify-between z-20 shrink-0">
-              <div className="flex items-center gap-3">
+            <div className="px-3 sm:px-8 py-2.5 sm:py-4 bg-slate-50/95 border-t border-slate-200 flex items-center justify-between gap-2 z-20 shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   id="prev-quiz-question-btn"
                   onClick={handlePrevQuestion}
                   disabled={activeIndex === 0}
-                  className="px-5 py-3 rounded-2xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-base disabled:opacity-30 disabled:pointer-events-none transition-all shadow-xs cursor-pointer"
+                  className="min-h-[42px] px-3 sm:px-5 py-2 sm:py-3 rounded-xl sm:rounded-2xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs sm:text-base disabled:opacity-30 disabled:pointer-events-none transition-all shadow-xs cursor-pointer whitespace-nowrap"
                 >
                   ← Câu trước
                 </button>
@@ -4147,34 +4181,36 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 <button
                   id="reset-quiz-room-btn"
                   onClick={onResetRoom}
-                  className="px-4 py-3 rounded-2xl bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 font-bold text-base flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+                  className="min-h-[42px] px-3 sm:px-4 py-2 sm:py-3 rounded-xl sm:rounded-2xl bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 font-bold text-xs sm:text-base flex items-center gap-1.5 sm:gap-2 transition-all shadow-xs cursor-pointer"
                   title="Làm mới lại dữ liệu nộp bài của phòng"
                 >
-                  <RotateCcw className="w-5 h-5" />
+                  <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
                   <span className="hidden sm:inline">Làm lại bài</span>
                 </button>
               </div>
 
               {/* Primary Action Button (Reveal / Next) */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 {!isRevealed ? (
                   <button
                     id="reveal-quiz-answer-btn"
                     onClick={handleRevealResults}
-                    className="px-8 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xl flex items-center gap-3 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
+                    className="min-h-[42px] px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-xl sm:rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-xl flex items-center gap-1.5 sm:gap-3 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                   >
-                    <CheckCircle2 className="w-7 h-7" />
-                    <span>Khóa Bài & Công Bố Đáp Án</span>
+                    <CheckCircle2 className="w-4 h-4 sm:w-7 sm:h-7 shrink-0" />
+                    <span className="sm:hidden">Công Bố Đáp Án</span>
+                    <span className="hidden sm:inline">Khóa Bài & Công Bố Đáp Án</span>
                   </button>
                 ) : (
                   <button
                     id="next-quiz-question-btn"
                     onClick={handleNextQuestion}
                     disabled={activeIndex >= questions.length - 1}
-                    className="px-8 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xl flex items-center gap-3 shadow-md shadow-indigo-600/20 disabled:opacity-40 disabled:pointer-events-none active:scale-95 transition-all cursor-pointer"
+                    className="min-h-[42px] px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs sm:text-xl flex items-center gap-1.5 sm:gap-3 shadow-md shadow-indigo-600/20 disabled:opacity-40 disabled:pointer-events-none active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                   >
-                    <span>Chuyển Sang Câu Kế Tiếp</span>
-                    <ChevronRight className="w-7 h-7" />
+                    <span className="sm:hidden">Câu Kế Tiếp</span>
+                    <span className="hidden sm:inline">Chuyển Sang Câu Kế Tiếp</span>
+                    <ChevronRight className="w-4 h-4 sm:w-7 sm:h-7 shrink-0" />
                   </button>
                 )}
               </div>
@@ -4219,7 +4255,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
           {/* Top Status & Controls Bar */}
           <div
-            className={`relative flex flex-wrap items-center justify-between px-4 sm:px-6 py-3 border-b z-30 shrink-0 gap-2.5 sticky top-0 shadow-[0_8px_28px_rgba(15,23,42,0.14)] ${currentBoardTheme.topBarClass}`}
+            className={`relative flex flex-wrap items-center justify-between px-2.5 sm:px-6 py-2 sm:py-3 border-b z-30 shrink-0 gap-2 sm:gap-2.5 sticky top-0 shadow-[0_8px_28px_rgba(15,23,42,0.14)] ${currentBoardTheme.topBarClass}`}
           >
             {/* Left: Question Indicator, Quiz Title & Called Student */}
             <div className="flex items-center gap-2.5 flex-wrap">
@@ -5626,11 +5662,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         const safeCount = studentList.filter((s) => s.isFocusLocked).length;
 
         return (
-          <div className="flex-1 flex flex-col overflow-y-auto bg-slate-900 text-slate-100 p-6 space-y-6">
+          <div className="flex-1 flex flex-col overflow-y-auto bg-slate-900 text-slate-100 p-3 sm:p-6 space-y-4 sm:space-y-6">
             {/* Section 1: Exam Header & Countdown Command Center */}
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 sm:gap-6">
               {/* Left: Giant Digital Countdown & Duration Controller */}
-              <div className="xl:col-span-8 p-6 md:p-8 rounded-3xl bg-slate-800/90 border border-slate-700 shadow-xl flex flex-col justify-between space-y-6 relative overflow-hidden">
+              <div className="xl:col-span-8 p-4 sm:p-6 md:p-8 rounded-3xl bg-slate-800/90 border border-slate-700 shadow-xl flex flex-col justify-between space-y-4 sm:space-y-6 relative overflow-hidden">
                 {/* Top Row: Title & PIN Badge */}
                 <div className="flex flex-wrap items-center justify-between gap-4 z-10">
                   <div className="space-y-1">

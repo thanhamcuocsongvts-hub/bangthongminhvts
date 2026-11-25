@@ -356,36 +356,36 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 md:p-6 select-none animate-fade-in">
-      <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-3 md:p-6 select-none animate-fade-in pb-safe">
+      <div className="bg-white rounded-2xl sm:rounded-3xl w-full max-w-4xl max-h-[94dvh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 bg-gradient-to-r from-purple-700 via-indigo-700 to-indigo-800 text-white flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-white/10 border border-white/20">
-              <Sparkles className="w-6 h-6 text-amber-300 animate-pulse" />
+        <div className="px-4 py-3 sm:px-6 sm:py-4 bg-gradient-to-r from-purple-700 via-indigo-700 to-indigo-800 text-white flex items-center justify-between gap-2.5 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-white/10 border border-white/20 shrink-0">
+              <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 animate-pulse" />
             </div>
-            <div>
-              <h2 className="text-lg md:text-xl font-black tracking-tight">
-                Bộ Công Cụ Tạo Đề Trắc Nghiệm Thông Minh
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-lg md:text-xl font-black tracking-tight truncate">
+                Bộ Công Cụ Tạo Đề Thông Minh
               </h2>
-              <p className="text-xs text-purple-200">
+              <p className="text-xs text-purple-200 hidden sm:block">
                 Tạo nhanh bằng AI, nhập thủ công hoặc nhập tự động từ tệp Word (.docx), Excel (.xlsx)
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+            className="min-w-[38px] min-h-[38px] p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer flex items-center justify-center shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Method Switcher Tabs */}
-        <div className="flex items-center gap-2 px-6 pt-4 pb-2 bg-slate-100/80 border-b border-slate-200 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-6 pt-3 pb-2 bg-slate-100/80 border-b border-slate-200 overflow-x-auto scrollbar-none shrink-0">
           <button
             onClick={() => setCreationMode('ai')}
-            className={`px-4 py-2 rounded-xl font-black text-xs md:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-3.5 sm:px-4 py-2 min-h-[38px] rounded-xl font-black text-xs md:text-sm flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               creationMode === 'ai'
                 ? 'bg-indigo-600 text-white shadow-md'
                 : 'bg-white text-slate-700 hover:bg-slate-200/80 border border-slate-200'
@@ -397,7 +397,7 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
 
           <button
             onClick={() => setCreationMode('manual')}
-            className={`px-4 py-2 rounded-xl font-black text-xs md:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-3.5 sm:px-4 py-2 min-h-[38px] rounded-xl font-black text-xs md:text-sm flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               creationMode === 'manual'
                 ? 'bg-indigo-600 text-white shadow-md'
                 : 'bg-white text-slate-700 hover:bg-slate-200/80 border border-slate-200'
@@ -409,19 +409,19 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
 
           <button
             onClick={() => setCreationMode('file')}
-            className={`px-4 py-2 rounded-xl font-black text-xs md:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-3.5 sm:px-4 py-2 min-h-[38px] rounded-xl font-black text-xs md:text-sm flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               creationMode === 'file'
                 ? 'bg-indigo-600 text-white shadow-md'
                 : 'bg-white text-slate-700 hover:bg-slate-200/80 border border-slate-200'
             }`}
           >
             <UploadCloud className="w-4 h-4 text-emerald-500" />
-            <span>3. Nhập Từ File (Word / Excel / TXT)</span>
+            <span>3. Nhập Từ File</span>
           </button>
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-5 md:p-6 space-y-6 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 space-y-5 sm:space-y-6 custom-scrollbar">
           {/* 1. AI Creation Panel */}
           {creationMode === 'ai' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
@@ -1099,7 +1099,7 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="px-4 py-3 sm:px-6 sm:py-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 shrink-0 pb-safe">
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
               <input
@@ -1115,20 +1115,20 @@ export const AIQuizCreatorModal: React.FC<AIQuizCreatorModalProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+              className="px-4 py-2.5 min-h-[42px] rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer shrink-0"
             >
               Hủy Bỏ
             </button>
             <button
               onClick={handleSaveAndApply}
               disabled={generatedQuestions.length === 0}
-              className="px-6 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-black text-xs md:text-sm flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
+              className="flex-1 sm:flex-initial px-5 sm:px-6 py-2.5 min-h-[42px] rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-black text-xs md:text-sm flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
             >
               <Check className="w-4 h-4" />
-              <span>Áp Dụng Vào Lớp Học & Phòng Thi</span>
+              <span>Áp Dụng Vào Lớp Học &amp; Phòng Thi</span>
             </button>
           </div>
         </div>

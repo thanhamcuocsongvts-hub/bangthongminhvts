@@ -545,28 +545,28 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
   };
 
   return (
-    <div className="flex-1 w-full h-full bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
+    <div className="flex-1 w-full h-full bg-slate-950 text-slate-100 flex flex-col overflow-hidden rounded-2xl sm:rounded-3xl">
       {/* Top Header */}
-      <div className="px-4 md:px-8 py-5 border-b border-slate-800 bg-slate-900/90 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shrink-0 shadow-lg">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-amber-600/30">
-            <Cloud className="w-6 h-6" />
+      <div className="px-3 sm:px-4 md:px-8 py-3 sm:py-5 border-b border-slate-800 bg-slate-900/90 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shrink-0 shadow-lg">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-amber-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-amber-600/30 shrink-0">
+            <Cloud className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <h1 className="text-xl md:text-2xl font-black text-white flex items-center gap-2.5">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg sm:text-xl md:text-2xl font-black text-white flex items-center gap-2 flex-wrap">
               <span>Lưu Trữ</span>
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
-                Kho Lưu Trữ & Đồng Bộ Cloud
+              <span className="text-[10px] sm:text-xs px-2 sm:px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
+                Cloud Đa Thiết Bị
               </span>
             </h1>
-            <p className="text-slate-400 text-xs md:text-sm mt-0.5">
-              Đồng bộ dữ liệu đa thiết bị (máy ở lớp, máy ở nhà) • Giới hạn tệp: <b>≤ 25MB</b>
+            <p className="text-slate-400 text-[11px] sm:text-xs md:text-sm mt-0.5 truncate">
+              Đồng bộ máy ở lớp & nhà • Tệp <b>≤ 250MB</b>
             </p>
           </div>
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           <input
             ref={fileInputRef}
             type="file"
@@ -578,28 +578,30 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
-            className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-amber-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+            className="flex-1 sm:flex-none min-h-[40px] px-3 sm:px-4 py-2 rounded-xl sm:rounded-2xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black text-xs md:text-sm flex items-center justify-center gap-1.5 sm:gap-2 shadow-lg shadow-amber-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
             title="Tải lên tệp tài liệu giáo dục dung lượng cao ≤ 250MB với tốc độ siêu tốc"
           >
-            {isUploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
-            <span>Tải Tệp Lên Siêu Tốc (&le; 250MB)</span>
+            {isUploading ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : <UploadCloud className="w-4 h-4 shrink-0" />}
+            <span className="sm:hidden">Tải Tệp Lên</span>
+            <span className="hidden sm:inline">Tải Tệp Lên Siêu Tốc (&le; 250MB)</span>
           </button>
 
           <button
             onClick={() => setShowAddLinkModal(true)}
-            className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/30 active:scale-95 transition-all cursor-pointer"
+            className="flex-1 sm:flex-none min-h-[40px] px-3 sm:px-4 py-2 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 sm:gap-2 shadow-lg shadow-indigo-600/30 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
             title="Lưu trữ đường link bên ngoài (Google Drive, YouTube, Canva, Quizizz...)"
           >
-            <Link2 className="w-4 h-4" />
-            <span>Thêm Đường Link</span>
+            <Link2 className="w-4 h-4 shrink-0" />
+            <span className="sm:hidden">Thêm Link</span>
+            <span className="hidden sm:inline">Thêm Đường Link</span>
           </button>
 
           <button
             onClick={() => setShowClearConfirmModal(true)}
-            className="px-3.5 py-2.5 rounded-2xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+            className="min-h-[40px] min-w-[40px] px-3 py-2 rounded-xl sm:rounded-2xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
             title="Dọn dẹp sạch toàn bộ kho lưu trữ trên tất cả các thiết bị"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-4 h-4 shrink-0" />
             <span className="hidden sm:inline">Dọn Sạch Kho</span>
           </button>
 
@@ -607,7 +609,7 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
             <button
               onClick={onSyncToCloud}
               disabled={isSyncing}
-              className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+              className="min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer flex items-center justify-center shrink-0"
               title="Đồng bộ thủ công với đám mây"
             >
               <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-amber-400' : ''}`} />
@@ -642,37 +644,37 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
       )}
 
       {/* Main Tabs Navigation: TỆP TÀI LIỆU vs ĐƯỜNG LINK */}
-      <div className="px-4 md:px-8 pt-4 pb-2 flex items-center justify-between gap-4 border-b border-slate-800/60 shrink-0">
+      <div className="px-3 sm:px-4 md:px-8 pt-3 pb-2.5 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 border-b border-slate-800/60 shrink-0">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveSubTab('files')}
-            className={`px-4 py-2 rounded-xl text-xs md:text-sm font-black flex items-center gap-2 transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-none min-h-[38px] px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs md:text-sm font-black flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap ${
               activeSubTab === 'files'
                 ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400/50'
                 : 'text-slate-400 hover:text-white hover:bg-slate-900'
             }`}
           >
-            <FolderOpen className="w-4 h-4" />
-            <span>Tệp Lưu Trữ ({allDocuments.length})</span>
+            <FolderOpen className="w-4 h-4 shrink-0" />
+            <span>Tệp ({allDocuments.length})</span>
           </button>
 
           <button
             onClick={() => setActiveSubTab('links')}
-            className={`px-4 py-2 rounded-xl text-xs md:text-sm font-black flex items-center gap-2 transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-none min-h-[38px] px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs md:text-sm font-black flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap ${
               activeSubTab === 'links'
                 ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-400/50'
                 : 'text-slate-400 hover:text-white hover:bg-slate-900'
             }`}
           >
-            <Link2 className="w-4 h-4" />
-            <span>Lưu Trữ Đường Link ({links.length})</span>
+            <Link2 className="w-4 h-4 shrink-0" />
+            <span>Đường Link ({links.length})</span>
           </button>
         </div>
 
         {/* Filter and Search Box */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           {activeSubTab === 'files' && (
-            <div className="hidden sm:flex items-center bg-slate-900 rounded-xl p-1 border border-slate-800 text-xs">
+            <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-800 text-xs overflow-x-auto scrollbar-none">
               {[
                 { id: 'all', label: 'Tất cả' },
                 { id: 'pdf', label: 'PDF' },
@@ -684,7 +686,7 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
                 <button
                   key={f.id}
                   onClick={() => setSelectedFormat(f.id)}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                  className={`min-h-[32px] px-2.5 py-1 rounded-lg font-bold transition-all whitespace-nowrap shrink-0 ${
                     selectedFormat === f.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -701,14 +703,14 @@ export const StorageManagementView: React.FC<StorageManagementViewProps> = ({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Tìm kiếm tài liệu / link..."
-              className="pl-9 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-44 md:w-64"
+              className="pl-9 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-full sm:w-48 md:w-64"
             />
           </div>
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-8 pb-24 sm:pb-8 custom-scrollbar">
         {/* SUBTAB 1: TỆP TÀI LIỆU (PDF, Word, PPTX, Excel, Hình ảnh) */}
         {activeSubTab === 'files' && (
           <div>

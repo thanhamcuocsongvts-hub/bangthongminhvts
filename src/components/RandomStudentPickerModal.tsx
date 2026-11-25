@@ -1163,26 +1163,40 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 md:p-6 select-none animate-in fade-in duration-200">
-      <div className="w-full max-w-5xl max-h-[92vh] flex flex-col bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-3 md:p-6 select-none animate-in fade-in duration-200 pb-safe">
+      <div className="w-full max-w-5xl max-h-[94dvh] flex flex-col bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
         {/* Header Bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-md shadow-orange-500/20">
-              <Dices className="w-5 h-5" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between px-3.5 py-3 sm:px-6 sm:py-4 gap-2.5 border-b border-slate-100 bg-slate-50/80 shrink-0">
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-md shadow-orange-500/20 shrink-0">
+                <Dices className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-lg font-black text-slate-900 truncate">
+                  VÒNG QUAY &amp; GỌI HỌC SINH
+                </h2>
+                <p className="text-xs text-slate-500 font-medium hidden sm:block">
+                  10 trò chơi ngẫu nhiên sinh động cho lớp học &amp; màn hình Tivi 75 inch
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-black text-slate-900">VÒNG QUAY MAY MẮN & GỌI HỌC SINH</h2>
-              <p className="text-xs text-slate-500 font-medium">
-                10 trò chơi ngẫu nhiên sinh động cho lớp học & màn hình Tivi 75 inch
-              </p>
-            </div>
+            <button
+              onClick={() => {
+                stopAllSpeech();
+                onClose();
+              }}
+              className="sm:hidden min-w-[38px] min-h-[38px] p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-200/70 transition-all cursor-pointer flex items-center justify-center shrink-0"
+              aria-label="Đóng"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none w-full sm:w-auto pb-0.5">
             {/* Classroom Selector */}
             {allClasses && allClasses.length > 0 && (
-              <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200/90 rounded-xl px-2.5 py-1 text-blue-900 shadow-2xs">
+              <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200/90 rounded-xl px-2.5 py-1 min-h-[38px] text-blue-900 shadow-2xs shrink-0">
                 <Users className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                 <span className="text-xs font-black text-blue-800 hidden sm:inline">Lớp:</span>
                 <select
@@ -1214,7 +1228,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                 const found = VOICE_TONE_PRESETS.find((p) => p.id === e.target.value);
                 if (found) setSelectedVoice(found);
               }}
-              className="text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 focus:outline-none hidden sm:block"
+              className="text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 focus:outline-none hidden sm:block shrink-0"
               title="Chọn phong cách giọng đọc AI"
             >
               {VOICE_TONE_PRESETS.map((p) => (
@@ -1233,7 +1247,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                   return next;
                 });
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-3 py-1.5 min-h-[38px] rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 voiceEnabled
                   ? 'bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 shadow-2xs'
                   : 'bg-slate-100 text-slate-400 border border-slate-200'
@@ -1242,11 +1256,12 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
             >
               <Volume2 className={`w-4 h-4 ${voiceEnabled ? 'text-rose-600' : 'text-slate-400'}`} />
               <span className="hidden md:inline">{voiceEnabled ? 'Giọng AI: BẬT' : 'Giọng AI: TẮT'}</span>
+              <span className="md:hidden">AI</span>
             </button>
 
             <button
               onClick={() => setSoundEnabled((prev) => !prev)}
-              className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-200/60 transition-all cursor-pointer"
+              className="min-w-[38px] min-h-[38px] p-2 rounded-xl text-slate-500 hover:bg-slate-200/60 transition-all cursor-pointer flex items-center justify-center shrink-0"
               title={soundEnabled ? 'Tắt hiệu ứng âm thanh' : 'Bật hiệu ứng âm thanh'}
             >
               {soundEnabled ? <Volume2 className="w-5 h-5 text-indigo-600" /> : <VolumeX className="w-5 h-5 text-slate-400" />}
@@ -1256,7 +1271,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                 stopAllSpeech();
                 onClose();
               }}
-              className="p-2.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-all cursor-pointer"
+              className="hidden sm:flex min-w-[38px] min-h-[38px] p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-all cursor-pointer items-center justify-center shrink-0"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1264,7 +1279,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         </div>
 
         {/* 10 Games Selection Tabs Bar */}
-        <div className="flex items-center gap-1.5 overflow-x-auto p-2 bg-slate-100 border-b border-slate-200 smooth-touch-scroll shrink-0">
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none p-2 bg-slate-100 border-b border-slate-200 smooth-touch-scroll shrink-0">
           {[
             { id: 'wheel' as GameType, icon: '🎡', label: '1. Vòng Quay' },
             { id: 'mystery_box' as GameType, icon: '🎁', label: '2. Hộp Quà' },

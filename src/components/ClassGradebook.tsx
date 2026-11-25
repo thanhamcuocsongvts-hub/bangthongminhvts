@@ -107,6 +107,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   const classes = teacher?.classes || [];
   const { isMobile } = useDeviceDetection();
   const [mobileViewMode, setMobileViewMode] = useState<'cards' | 'table'>('cards');
+  const [showMobileActions, setShowMobileActions] = useState<boolean>(false);
   const [activeClassId, setActiveClassId] = useState<string>(() => {
     try {
       const saved = localStorage.getItem('smartboard_active_class_id');
@@ -673,17 +674,17 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
   };
 
   return (
-    <div className="w-full h-full overflow-y-auto overflow-x-auto p-3 md:p-5 space-y-5 pb-16 select-none text-slate-800 animate-fade-in custom-scrollbar">
+    <div className="w-full h-full overflow-y-auto overflow-x-hidden p-2.5 sm:p-3 md:p-5 space-y-3 sm:space-y-5 pb-24 sm:pb-16 select-none text-slate-800 animate-fade-in custom-scrollbar">
       {/* Cloud Sync Status Banner */}
       {cloudSyncBanner && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs md:text-sm font-bold flex items-center justify-between shadow-sm animate-fade-in">
+        <div className="p-3 sm:p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs md:text-sm font-bold flex items-center justify-between shadow-sm animate-fade-in">
           <div className="flex items-center gap-2.5">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
             <span>{cloudSyncBanner}</span>
           </div>
           <button
             onClick={() => setCloudSyncBanner(null)}
-            className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+            className="text-slate-400 hover:text-slate-700 p-1.5 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -691,35 +692,84 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
       )}
 
       {/* Top Banner & Quick Class Actions */}
-      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-5 md:p-6 rounded-3xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-4">
-          <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-700 shadow-xs">
-            <Users className="w-7 h-7 md:w-8 md:h-8" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">
-                Sổ Điểm & Quản Lý Lớp Học Cảm Ứng
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-black border border-indigo-200">
-                Chuẩn Bộ GD&ĐT • HK1 & HK2
-              </span>
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 sm:gap-4 bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-3xl border border-slate-200 shadow-xs">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+            <div className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-700 shadow-xs shrink-0">
+              <Users className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8" />
             </div>
-            <p className="text-xs md:text-sm text-slate-600 font-medium mt-0.5">
-              Hỗ trợ đầy đủ bảng điểm Học Kỳ 1, Học Kỳ 2, Tự động tính Cả Năm (CN), nhập file Excel/Word đa năng và chấm điểm cảm ứng trực tiếp
-            </p>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <h1 className="text-base sm:text-xl md:text-2xl font-black text-slate-900 tracking-tight truncate">
+                  Sổ Điểm & Lớp Học
+                </h1>
+                <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] sm:text-xs font-black border border-indigo-200 whitespace-nowrap">
+                  HK1 & HK2
+                </span>
+              </div>
+              <p className="hidden sm:block text-xs md:text-sm text-slate-600 font-medium mt-0.5">
+                Hỗ trợ đầy đủ bảng điểm Học Kỳ 1, Học Kỳ 2, Tự động tính Cả Năm (CN), nhập file Excel/Word đa năng và chấm điểm cảm ứng trực tiếp
+              </p>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowMobileActions((v) => !v)}
+            className="sm:hidden min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 text-xs font-black shrink-0 cursor-pointer active:scale-95"
+          >
+            {showMobileActions ? 'Thu gọn' : 'Tác vụ ▾'}
+          </button>
         </div>
 
+        {/* Mobile Quick Strip (always visible on < sm when collapsed) */}
+        {!showMobileActions && (
+          <div className="flex sm:hidden items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
+            {currentClass && (
+              <button
+                onClick={() => onLaunchRandomPicker(currentClass)}
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+              >
+                <Dices className="w-3.5 h-3.5" />
+                <span>Gọi HS</span>
+              </button>
+            )}
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-indigo-600 text-white font-bold text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Nhập DS</span>
+            </button>
+            <button
+              onClick={handleManualSyncCloud}
+              disabled={isCloudSyncing}
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-sky-600 text-white font-bold text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+            >
+              <CloudUpload className={`w-3.5 h-3.5 ${isCloudSyncing ? 'animate-bounce' : ''}`} />
+              <span>{isCloudSyncing ? 'Đang đẩy...' : 'Đẩy Mây'}</span>
+            </button>
+            {currentClass && (
+              <button
+                onClick={() => exportGradebookToExcel(currentClass, teacher)}
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Excel</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Global Class Actions */}
-        <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+        <div className={`${showMobileActions ? 'flex' : 'hidden sm:flex'} flex-wrap items-center gap-2 sm:gap-2.5 w-full lg:w-auto`}>
           {currentClass && (
             <button
               onClick={() => {
                 setConductStudentId(undefined);
                 setShowConductModal(true);
               }}
-              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all active:scale-95 cursor-pointer"
+              className="min-h-[38px] px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all active:scale-95 cursor-pointer"
               title="Ghi nhận vi phạm / khen thưởng học sinh"
             >
               <AlertTriangle className="w-4 h-4 text-amber-300" />
@@ -730,7 +780,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
           {currentClass && (
             <button
               onClick={() => setShowAccumulateModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
+              className="min-h-[38px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
               title="Tổng kết điểm thi đua nề nếp cộng dồn vào cột điểm"
             >
               <TrendingUp className="w-4 h-4 text-emerald-200" />
@@ -740,7 +790,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
 
           <button
             onClick={() => setShowImportModal(true)}
-            className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all active:scale-95 cursor-pointer"
+            className="min-h-[38px] px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all active:scale-95 cursor-pointer"
             title="Tải lên danh sách học sinh từ file Excel, Word, PDF hoặc Ảnh chụp"
           >
             <FileSpreadsheet className="w-4 h-4 text-white" />
@@ -751,7 +801,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
           <button
             onClick={handleManualSyncCloud}
             disabled={isCloudSyncing}
-            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-indigo-500/25 transition-all active:scale-95 cursor-pointer"
+            className="min-h-[38px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-indigo-500/25 transition-all active:scale-95 cursor-pointer"
             title="Cập nhật toàn bộ danh sách lớp và điểm số lên Đám Mây để mở được trên máy tính ở trường học"
           >
             <CloudUpload className={`w-4 h-4 ${isCloudSyncing ? 'animate-bounce' : ''}`} />
@@ -762,7 +812,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
             <button
               onClick={handleManualPullCloud}
               disabled={isCloudSyncing}
-              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+              className="min-h-[38px] px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
               title="Tải danh sách học sinh mới nhất từ Đám Mây về máy tính này"
             >
               <CloudDownload className="w-4 h-4 text-indigo-600" />
@@ -773,7 +823,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
           {currentClass && (
             <button
               onClick={() => onLaunchRandomPicker(currentClass)}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all active:scale-95 cursor-pointer"
+              className="min-h-[38px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all active:scale-95 cursor-pointer"
               title="Mở trò chơi vòng quay may mắn gọi học sinh từ lớp này"
             >
               <Dices className="w-4 h-4" />
@@ -784,7 +834,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
           {currentClass && (
             <button
               onClick={() => exportGradebookToExcel(currentClass, teacher)}
-              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
+              className="min-h-[38px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
               title="Xuất bảng điểm ra file Excel .xlsx gồm đầy đủ HK1, HK2 và Cả Năm"
             >
               <Download className="w-4 h-4" />
@@ -796,7 +846,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
           {currentClass && (
             <button
               onClick={() => setShowDeleteClassModal(true)}
-              className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              className="min-h-[38px] px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs md:text-sm flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
               title={`Xóa hoàn toàn lớp ${currentClass.name}`}
             >
               <Trash2 className="w-4 h-4 text-rose-600" />
@@ -1027,7 +1077,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
 
       {/* MOBILE STUDENT CARDS VIEW (Clean, Ergonomic, Touch-Friendly for phones) */}
       {isMobile && mobileViewMode === 'cards' ? (
-        <div className="flex flex-col gap-2.5 pb-12">
+        <div className="flex flex-col gap-2.5 pb-24">
           {filteredStudents.length === 0 ? (
             <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center text-xs text-slate-500">
               Không tìm thấy học sinh nào phù hợp.
@@ -1151,14 +1201,14 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                       </button>
 
                       {/* Quick Adjust Buttons: -1, +1, +2 & Big 'Chấm Điểm' Action */}
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => {
                             if ('vibrate' in navigator) navigator.vibrate(25);
                             handleAdjustBonus(student.id, -1);
                           }}
-                          className="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 active:scale-90 text-rose-800 font-mono font-black text-xs border border-rose-300 cursor-pointer transition-transform"
+                          className="min-w-[38px] min-h-[38px] px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 active:scale-90 text-rose-800 font-mono font-black text-xs border border-rose-300 cursor-pointer transition-transform"
                           title="Trừ 1 điểm"
                         >
                           -1
@@ -1169,7 +1219,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                             if ('vibrate' in navigator) navigator.vibrate(25);
                             handleAdjustBonus(student.id, 1);
                           }}
-                          className="px-2.5 py-1.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 active:scale-90 text-emerald-800 font-mono font-black text-xs border border-emerald-300 cursor-pointer transition-transform"
+                          className="min-w-[38px] min-h-[38px] px-2.5 py-1.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 active:scale-90 text-emerald-800 font-mono font-black text-xs border border-emerald-300 cursor-pointer transition-transform"
                           title="Cộng 1 điểm"
                         >
                           +1
@@ -1180,7 +1230,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                             if ('vibrate' in navigator) navigator.vibrate(25);
                             handleAdjustBonus(student.id, 2);
                           }}
-                          className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-90 text-white font-mono font-black text-xs shadow-xs cursor-pointer transition-transform"
+                          className="min-w-[38px] min-h-[38px] px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-90 text-white font-mono font-black text-xs shadow-xs cursor-pointer transition-transform"
                           title="Cộng 2 điểm"
                         >
                           +2
@@ -1188,7 +1238,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                         <button
                           type="button"
                           onClick={() => setQuickPointStudent(student)}
-                          className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs shadow-xs active:scale-90 transition-transform cursor-pointer flex items-center gap-1"
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs shadow-xs active:scale-90 transition-transform cursor-pointer flex items-center gap-1"
                           title="Mở bảng cộng trừ điểm & chấm miệng chuyên sâu"
                         >
                           <Zap className="w-3.5 h-3.5 text-yellow-300" />
@@ -1200,7 +1250,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                     {/* Row 2: Quick Oral Score (Miệng: 7, 8, 9, 10) & Conduct */}
                     <div className="flex items-center justify-between gap-1.5">
                       <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-bold text-slate-400">Chấm miệng TX:</span>
+                        <span className="text-[10px] font-bold text-slate-400">TX:</span>
                         {[7, 8, 9, 10].map((score) => (
                           <button
                             key={score}
@@ -1214,7 +1264,7 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                                 score
                               );
                             }}
-                            className={`w-7 py-1 rounded-lg font-mono font-black text-xs border transition-all cursor-pointer active:scale-90 ${
+                            className={`min-w-[34px] min-h-[36px] py-1 rounded-xl font-mono font-black text-xs border transition-all cursor-pointer active:scale-90 ${
                               semData?.tx1 === score
                                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
                                 : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border-slate-200'
@@ -1233,10 +1283,10 @@ export const ClassGradebook: React.FC<ClassGradebookProps> = ({
                           setConductStudentId(student.id);
                           setShowConductModal(true);
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-200 flex items-center gap-1 cursor-pointer"
+                        className="min-h-[36px] px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-bold border border-amber-200 flex items-center gap-1 cursor-pointer active:scale-95"
                         title="Ghi nhận nề nếp thi đua"
                       >
-                        <AlertTriangle className="w-3 h-3 text-amber-600" />
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
                         <span>Nề nếp</span>
                       </button>
                     </div>

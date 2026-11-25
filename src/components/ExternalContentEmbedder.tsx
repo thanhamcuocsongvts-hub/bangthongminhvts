@@ -944,9 +944,9 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
   return (
     <div className="w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden rounded-2xl relative shadow-2xl border border-slate-800">
       {/* Top Header & Action Bar */}
-      <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0 z-30">
-        <div className="flex items-center gap-2">
-          <div className="p-2 rounded-xl bg-purple-600/20 text-purple-400 border border-purple-500/30">
+      <div className="p-2.5 sm:p-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 sm:gap-3 shrink-0 z-30">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-2 rounded-xl bg-purple-600/20 text-purple-400 border border-purple-500/30 shrink-0">
             {currentPlatform === 'youtube' ? (
               <Youtube className="w-5 h-5 text-red-400" />
             ) : currentPlatform === 'tiktok' ? (
@@ -957,11 +957,11 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
               <Globe className="w-5 h-5 text-indigo-400" />
             )}
           </div>
-          <div>
-            <h3 className="font-extrabold text-sm text-slate-100 flex items-center gap-2 flex-wrap">
-              <span>Nhúng Nội Dung Trực Tuyến & Đa Phương Tiện</span>
+          <div className="min-w-0">
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-100 flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <span className="truncate">Nhúng Nội Dung Trực Tuyến</span>
               <span
-                className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getPlatformBadgeColor(
+                className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border shrink-0 ${getPlatformBadgeColor(
                   currentPlatform
                 )}`}
               >
@@ -980,11 +980,11 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none w-full sm:w-auto pb-0.5">
           {/* Button: Kho Link Đã Lưu */}
           <button
             onClick={() => setShowSavedLinksDrawer(!showSavedLinksDrawer)}
-            className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ${
+            className={`px-3 py-1.5 min-h-[38px] rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm whitespace-nowrap shrink-0 ${
               showSavedLinksDrawer
                 ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 ring-2 ring-amber-300'
                 : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
@@ -992,13 +992,13 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
             title="Mở Kho Link bài giảng đã lưu để chiếu cho học sinh"
           >
             <Bookmark className="w-3.5 h-3.5" />
-            <span>Kho Link Đã Lưu ({savedLinks.length})</span>
+            <span>Kho Link ({savedLinks.length})</span>
           </button>
 
           {/* Pen / Annotation on top of embedded video or website */}
           <button
             onClick={() => setIsAnnotating(!isAnnotating)}
-            className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 py-1.5 min-h-[38px] rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               isAnnotating
                 ? 'bg-amber-500 text-white ring-2 ring-amber-300 shadow-md animate-pulse'
                 : 'bg-white/10 hover:bg-white/20 text-amber-300'
@@ -1006,16 +1006,16 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
             title="Bật bút vẽ, dạ quang viết trực tiếp đè lên video / trang web đang chiếu"
           >
             <Pen className="w-3.5 h-3.5" />
-            <span>{isAnnotating ? 'Đang Vẽ Chú Thích' : 'Bút Vẽ Lên Web'}</span>
+            <span>{isAnnotating ? 'Đang Vẽ' : 'Bút Vẽ Web'}</span>
           </button>
 
-          {/* Dedicated Side-by-Side Teaching Window (especially great for NotebookLM or YouTube) */}
+          {/* Dedicated Side-by-Side Teaching Window */}
           <button
             onClick={() => {
               const target = originalUrl || currentUrl;
               window.open(target, '_blank');
             }}
-            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            className="min-w-[38px] min-h-[38px] p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0"
             title="Mở trong tab trình duyệt mới"
           >
             <ExternalLink className="w-4 h-4" />
@@ -1029,7 +1029,7 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
               setIsLoading(true);
               setTimeout(() => setCurrentUrl(url), 60);
             }}
-            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            className="min-w-[38px] min-h-[38px] p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0"
             title="Tải lại nội dung"
           >
             <RefreshCw className="w-4 h-4" />
@@ -1038,7 +1038,7 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
           {onClose && (
             <button
               onClick={onClose}
-              className="p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white transition-colors cursor-pointer"
+              className="min-w-[38px] min-h-[38px] p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0"
               title="Đóng cửa sổ nhúng"
             >
               <X className="w-4 h-4" />
@@ -1048,59 +1048,65 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
       </div>
 
       {/* URL Input Bar & Clipboard Paste & Quick Action Save */}
-      <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex flex-col gap-2 shrink-0 z-30">
+      <div className="px-2.5 sm:px-3 py-2 bg-slate-900 border-b border-slate-800 flex flex-col gap-2 shrink-0 z-30">
         <form
           onSubmit={(e) => {
             e.preventDefault();
             handleApplyUrl();
           }}
-          className="flex items-center gap-2 flex-wrap sm:flex-nowrap"
+          className="flex flex-col sm:flex-row sm:items-center gap-2"
         >
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative w-full sm:flex-1 sm:min-w-[200px]">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="Dán link YouTube, TikTok, Google NotebookLM, Drive, PhET, GeoGebra..."
-              className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-800/90 border border-slate-700 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+              placeholder="Dán link YouTube, TikTok, NotebookLM, Drive, PhET..."
+              className="w-full pl-9 pr-3 py-2 min-h-[40px] rounded-xl bg-slate-800/90 border border-slate-700 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
             />
           </div>
 
-          {/* Quick Paste from Clipboard button */}
-          <button
-            type="button"
-            onClick={handlePasteClipboard}
-            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 shrink-0 transition-transform active:scale-95 cursor-pointer shadow-sm"
-            title="Dán nhanh đường link từ bộ nhớ tạm (Ctrl+V)"
-          >
-            <Clipboard className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Dán Link (Ctrl+V)</span>
-          </button>
+          <div className="grid grid-cols-3 sm:flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Quick Paste from Clipboard button */}
+            <button
+              type="button"
+              onClick={handlePasteClipboard}
+              className="px-2.5 sm:px-3 py-2 min-h-[40px] rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition-transform active:scale-95 cursor-pointer shadow-sm"
+              title="Dán nhanh đường link từ bộ nhớ tạm (Ctrl+V)"
+            >
+              <Clipboard className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <span>
+                Dán Link<span className="hidden sm:inline"> (Ctrl+V)</span>
+              </span>
+            </button>
 
-          {/* Submit Load Link */}
-          <button
-            type="submit"
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shrink-0 transition-transform active:scale-95 cursor-pointer"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span>Tải Link</span>
-          </button>
+            {/* Submit Load Link */}
+            <button
+              type="submit"
+              className="px-3 sm:px-4 py-2 min-h-[40px] rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shrink-0 transition-transform active:scale-95 cursor-pointer"
+            >
+              <Globe className="w-3.5 h-3.5 shrink-0" />
+              <span>Tải Link</span>
+            </button>
 
-          {/* Quick "Lưu link này" button */}
-          <button
-            type="button"
-            onClick={() => handleOpenSaveDialog()}
-            className="px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all cursor-pointer active:scale-95"
-            title="Lưu lại đường link này vào kho để mở lại trong giờ dạy ở trường"
-          >
-            <BookmarkPlus className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Lưu Link Này</span>
-          </button>
+            {/* Quick "Lưu link này" button */}
+            <button
+              type="button"
+              onClick={() => handleOpenSaveDialog()}
+              className="px-2.5 sm:px-3 py-2 min-h-[40px] rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition-all cursor-pointer active:scale-95"
+              title="Lưu lại đường link này vào kho để mở lại trong giờ dạy ở trường"
+            >
+              <BookmarkPlus className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>
+                Lưu Link<span className="hidden sm:inline"> Này</span>
+              </span>
+            </button>
+          </div>
         </form>
 
         {/* Quick Presets Bar */}
-        <div className="flex items-center gap-2 overflow-x-auto py-1 custom-scrollbar text-xs">
+        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none py-1 text-xs">
           <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
             <Compass className="w-3 h-3 text-indigo-400" />
             <span>Mẫu sẵn:</span>
@@ -1112,7 +1118,7 @@ export const ExternalContentEmbedder: React.FC<ExternalContentEmbedderProps> = (
                 setUrlInput(p.url);
                 handleApplyUrl(p.url);
               }}
-              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-400/50 text-slate-300 hover:text-white text-[11px] font-medium flex items-center gap-1.5 shrink-0 transition-all cursor-pointer"
+              className="px-2.5 py-1.5 min-h-[34px] rounded-lg bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-400/50 text-slate-300 hover:text-white text-[11px] font-medium flex items-center gap-1.5 shrink-0 transition-all cursor-pointer"
               title={p.description}
             >
               <span>{p.icon}</span>

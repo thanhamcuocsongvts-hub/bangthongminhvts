@@ -78,6 +78,37 @@
   scroll-behavior: smooth;
 }
 
+/* Hide scrollbars cleanly for horizontal touch toolbars */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Safe-area padding utilities for notched phones */
+.pb-safe {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.pt-safe {
+  padding-top: max(8px, env(safe-area-inset-top));
+}
+
+/* Prevent iOS Safari auto-zoom on inputs/selects/textareas and keep mobile scrollbars sleek */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+}
+
 /* Touch Whiteboard Canvas */
 .touch-canvas {
   touch-action: none;
