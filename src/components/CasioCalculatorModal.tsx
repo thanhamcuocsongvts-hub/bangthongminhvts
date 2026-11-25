@@ -334,11 +334,24 @@ const serializeNodeToLatex = (node: any, cursor: any): string => {
  * ============================================================================
  */
 const CasioMathEngine = (() => {
-  const formatNumberToLatex = (val: any, preferFraction = true) => {
+  const formatNumberToLatex = (
+    val: any,
+    preferFraction = true,
+    fmtOptions?: {
+      numberFormat?: { type: 'Norm1' | 'Norm2' | 'Fix' | 'Sci'; digits: number };
+      fractionResult?: 'ab/c' | 'd/c';
+    }
+  ) => {
     if (val === null || val === undefined || Number.isNaN(val)) return '\\text{Math ERROR}';
     if (!Number.isFinite(val)) return '\\text{Math ERROR}';
     const cleanVal = Math.abs(val) < 1e-12 ? 0 : Number(val.toPrecision(12));
-    if (cleanVal === 0) return '0';
+    const nf = fmtOptions?.numberFormat;
+
+    if (cleanVal === 0) {
+      if (!preferFraction && nf?.type === 'Fix') return (0).toFixed(nf.digits);
+      if (!preferFraction && nf?.type === 'Sci') return `0\\times 10^{0}`;
+      return '0';
+    }
 
     if (preferFraction && window.math) {
       try {
@@ -348,6 +361,11 @@ const CasioMathEngine = (() => {
         const d = Number(frac.d);
         if (d === 1) return `${s * n}`;
         if (d > 1 && d <= 99999 && n <= 9999999) {
+          if (fmtOptions?.fractionResult === 'ab/c' && n > d) {
+            const whole = Math.floor(n / d);
+            const rem = n % d;
+            return `${s < 0 ? '-' : ''}${whole}\\frac{${rem}}{${d}}`;
+          }
           return `${s < 0 ? '-' : ''}\\frac{${n}}{${d}}`;
         }
       } catch (e) {
@@ -355,7 +373,18 @@ const CasioMathEngine = (() => {
       }
     }
 
-    if (Math.abs(cleanVal) >= 1e10 || (Math.abs(cleanVal) > 0 && Math.abs(cleanVal) < 1e-7)) {
+    if (nf?.type === 'Fix') {
+      return cleanVal.toFixed(Math.max(0, Math.min(9, nf.digits)));
+    }
+    if (nf?.type === 'Sci') {
+      const sig = Math.max(0, Math.min(9, nf.digits));
+      const expStr = cleanVal.toExponential(Math.max(0, sig > 0 ? sig - 1 : 0));
+      const [mantissa, expPart] = expStr.split('e');
+      return `${mantissa}\\times 10^{${parseInt(expPart, 10)}}`;
+    }
+
+    const lowThresh = nf?.type === 'Norm2' ? 1e-9 : 1e-3;
+    if (Math.abs(cleanVal) >= 1e10 || (Math.abs(cleanVal) > 0 && Math.abs(cleanVal) < lowThresh)) {
       const expStr = cleanVal.toExponential(6);
       const [mantissa, expPart] = expStr.split('e');
       return `${parseFloat(mantissa)}\\times 10^{${parseInt(expPart, 10)}}`;
@@ -436,6 +465,11 @@ const CasioMathEngine = (() => {
   const compileSlotToMathJs = (slot: any): string => {
     if (!slot || !slot.items || slot.items.length === 0) {
       throw new Error('SYNTAX_ERROR');
+    }
+    for (const item of slot.items) {
+      if (item.type === 'token' && (item.latex === '=' || item.latex === ':')) {
+        throw new Error('SYNTAX_ERROR');
+      }
     }
     let parts: string[] = [];
     for (let i = 0; i < slot.items.length; i++) {
@@ -609,12 +643,12 @@ const CasioMathEngine = (() => {
     return (h / 3) * sum;
   };
 
-  const evaluateCompTree = (rootSlot: any, angleUnit = 'D', memoryVars: any = {}) => {
+  const evaluateCompTree = (rootSlot: any, angleUnit = 'D', memoryVars: any = {}, fmtOptions?: any) => {
     try {
       const exprStr = compileSlotToMathJs(rootSlot);
       const value = evaluateExpressionString(exprStr, angleUnit, memoryVars);
-      const exactLatex = formatNumberToLatex(value, true);
-      const decimalLatex = formatNumberToLatex(value, false);
+      const exactLatex = formatNumberToLatex(value, true, fmtOptions);
+      const decimalLatex = formatNumberToLatex(value, false, fmtOptions);
       return { ok: true, value, exactLatex, decimalLatex, compiled: exprStr };
     } catch (err: any) {
       const msg = err.message === 'SYNTAX_ERROR' ? '\\text{Syntax ERROR}' : '\\text{Math ERROR}';
@@ -622,9 +656,26 @@ const CasioMathEngine = (() => {
     }
   };
 
-  const solveSingleVariableEquation = (rootSlot: any, xInit = 1, angleUnit = 'D', memoryVars: any = {}) => {
+  const solveSingleVariableEquation = (rootSlot: any, xInit = 1, angleUnit = 'D', memoryVars: any = {}, fmtOptions?: any) => {
     try {
-      const exprStr = compileSlotToMathJs(rootSlot);
+      const items = rootSlot?.items || [];
+      if (items.length === 0) return { ok: false, errorLatex: '\\text{Syntax ERROR}' };
+
+      const eqIndex = items.findIndex((it: any) => it.type === 'token' && it.latex === '=');
+      let exprStr = '';
+      if (eqIndex !== -1) {
+        const lhsSlot = createSlot(items.slice(0, eqIndex));
+        const rhsSlot = createSlot(items.slice(eqIndex + 1));
+        if (lhsSlot.items.length === 0 || rhsSlot.items.length === 0) {
+          return { ok: false, errorLatex: '\\text{Syntax ERROR}' };
+        }
+        const lhsStr = compileSlotToMathJs(lhsSlot);
+        const rhsStr = compileSlotToMathJs(rhsSlot);
+        exprStr = `(${lhsStr})-(${rhsStr})`;
+      } else {
+        exprStr = compileSlotToMathJs(rootSlot);
+      }
+
       if (window.nerdamer && angleUnit === 'R') {
         try {
           const sol = window.nerdamer.solveEquations(`${exprStr}=0`, 'x');
@@ -635,8 +686,8 @@ const CasioMathEngine = (() => {
                 ok: true,
                 root: firstVal,
                 residual: 0,
-                exactLatex: formatNumberToLatex(firstVal, true),
-                decimalLatex: formatNumberToLatex(firstVal, false),
+                exactLatex: formatNumberToLatex(firstVal, true, fmtOptions),
+                decimalLatex: formatNumberToLatex(firstVal, false, fmtOptions),
               };
             }
           }
@@ -645,37 +696,57 @@ const CasioMathEngine = (() => {
         }
       }
 
-      let x = Number.isFinite(xInit) ? xInit : 1;
-      for (let iter = 0; iter < 60; iter++) {
-        const fx = evaluateExpressionString(exprStr, angleUnit, { ...memoryVars, x });
-        if (Math.abs(fx) < 1e-10) {
-          return {
-            ok: true,
-            root: x,
-            residual: 0,
-            exactLatex: formatNumberToLatex(x, true),
-            decimalLatex: formatNumberToLatex(x, false),
-          };
-        }
-        const dfx = evaluateDerivative(exprStr, x, angleUnit, memoryVars);
-        if (Math.abs(dfx) < 1e-12) {
-          x += 0.5;
-          continue;
-        }
-        const nextX = x - fx / dfx;
-        if (Math.abs(nextX - x) < 1e-10) {
-          const finalF = evaluateExpressionString(exprStr, angleUnit, { ...memoryVars, x: nextX });
-          if (Math.abs(finalF) < 1e-5) {
+      const startGuesses = [Number.isFinite(xInit) ? xInit : 1, 0.5, -1, 2, -3, 5];
+      for (const guess of startGuesses) {
+        let x = guess;
+        for (let iter = 0; iter < 65; iter++) {
+          let fx: number;
+          try {
+            fx = evaluateExpressionString(exprStr, angleUnit, { ...memoryVars, x });
+          } catch {
+            x += 0.37;
+            continue;
+          }
+          if (Math.abs(fx) < 1e-10) {
             return {
               ok: true,
-              root: nextX,
-              residual: Math.abs(finalF) < 1e-10 ? 0 : finalF,
-              exactLatex: formatNumberToLatex(nextX, true),
-              decimalLatex: formatNumberToLatex(nextX, false),
+              root: x,
+              residual: 0,
+              exactLatex: formatNumberToLatex(x, true, fmtOptions),
+              decimalLatex: formatNumberToLatex(x, false, fmtOptions),
             };
           }
+          let dfx = 0;
+          try {
+            dfx = evaluateDerivative(exprStr, x, angleUnit, memoryVars);
+          } catch {
+            dfx = 0;
+          }
+          if (!Number.isFinite(dfx) || Math.abs(dfx) < 1e-12) {
+            x += 0.43;
+            continue;
+          }
+          const step = Math.max(-100, Math.min(100, fx / dfx));
+          const nextX = x - step;
+          if (!Number.isFinite(nextX)) break;
+          if (Math.abs(nextX - x) < 1e-10) {
+            try {
+              const finalF = evaluateExpressionString(exprStr, angleUnit, { ...memoryVars, x: nextX });
+              if (Math.abs(finalF) < 1e-5) {
+                return {
+                  ok: true,
+                  root: nextX,
+                  residual: Math.abs(finalF) < 1e-10 ? 0 : Number(finalF.toPrecision(4)),
+                  exactLatex: formatNumberToLatex(nextX, true, fmtOptions),
+                  decimalLatex: formatNumberToLatex(nextX, false, fmtOptions),
+                };
+              }
+            } catch {
+              // ignore
+            }
+          }
+          x = nextX;
         }
-        x = nextX;
       }
       return { ok: false, errorLatex: '\\text{Can not Solve}' };
     } catch (e) {
@@ -893,10 +964,10 @@ const CasioMathEngine = (() => {
     return Array.from(vars);
   };
 
-  const evaluateVectorExpression = (slot: any, vectors: any, vctAns: any, angleUnit = 'D'): any => {
+  const evaluateVectorExpression = (slot: any, vectors: any, vctAns: any, angleUnit = 'D', fmtOptions?: any): any => {
     const getVec = (name: string) => {
       const v = name === 'VctAns' ? vctAns : vectors[name];
-      if (!v) throw new Error('MATH_ERROR');
+      if (!v || (name !== 'VctAns' && v.defined === false)) throw new Error('DIMENSION_ERROR');
       return v.coords.slice(0, v.dim).map((n: any) => Number(n) || 0);
     };
 
@@ -925,15 +996,15 @@ const CasioMathEngine = (() => {
       if (!items || items.length === 0) throw new Error('SYNTAX_ERROR');
 
       if (items.length === 1 && items[0].type === 'abs') {
-        const innerRes = evaluateVectorExpression(items[0].slots.inner, vectors, vctAns, angleUnit);
+        const innerRes = evaluateVectorExpression(items[0].slots.inner, vectors, vctAns, angleUnit, fmtOptions);
         if (!innerRes.ok || innerRes.kind !== 'vector') throw new Error('SYNTAX_ERROR');
         const val = norm(innerRes.vec);
         return {
           ok: true,
           kind: 'scalar',
           value: val,
-          exactLatex: formatNumberToLatex(val, true),
-          decimalLatex: formatNumberToLatex(val, false),
+          exactLatex: formatNumberToLatex(val, true, fmtOptions),
+          decimalLatex: formatNumberToLatex(val, false, fmtOptions),
         };
       }
 
@@ -952,10 +1023,22 @@ const CasioMathEngine = (() => {
         .replace(/\\text\{VctD\}/g, 'VctD')
         .replace(/\\text\{VctAns\}/g, 'VctAns')
         .replace(/\\text\{Angle\}\(/g, 'Angle(')
+        .replace(/\\text\{UnitVct\}\(/g, 'UnitVct(')
         .replace(/\\text\{Abs\}\(/g, 'Abs(')
         .replace(/\\boldsymbol\{\\cdot\}/g, ' DOT ')
         .replace(/\\times /g, ' CROSS ')
         .trim();
+
+      const unitMatch = rawStr.match(/^UnitVct\(\s*(Vct[A-D]|VctAns)\s*\)?$/);
+      if (unitMatch) {
+        const v = getVec(unitMatch[1]);
+        const nv = norm(v);
+        if (nv < 1e-12) throw new Error('MATH_ERROR');
+        const uVec = v.map((x: number) => x / nv);
+        const ltx = `\\begin{bmatrix} ${uVec.map((x: number) => formatNumberToLatex(x, true, fmtOptions)).join(' \\\\ ')} \\end{bmatrix}`;
+        const decLtx = `\\begin{bmatrix} ${uVec.map((x: number) => formatNumberToLatex(x, false, fmtOptions)).join(' \\\\ ')} \\end{bmatrix}`;
+        return { ok: true, kind: 'vector', vec: uVec, exactLatex: ltx, decimalLatex: decLtx };
+      }
 
       const angleMatch = rawStr.match(/^Angle\(\s*(Vct[A-D]|VctAns)\s*,\s*(Vct[A-D]|VctAns)\s*\)?$/);
       if (angleMatch) {
@@ -964,8 +1047,8 @@ const CasioMathEngine = (() => {
           ok: true,
           kind: 'scalar',
           value: ang,
-          exactLatex: formatNumberToLatex(ang, true),
-          decimalLatex: formatNumberToLatex(ang, false),
+          exactLatex: formatNumberToLatex(ang, true, fmtOptions),
+          decimalLatex: formatNumberToLatex(ang, false, fmtOptions),
         };
       }
 
@@ -976,8 +1059,8 @@ const CasioMathEngine = (() => {
           ok: true,
           kind: 'scalar',
           value: val,
-          exactLatex: formatNumberToLatex(val, true),
-          decimalLatex: formatNumberToLatex(val, false),
+          exactLatex: formatNumberToLatex(val, true, fmtOptions),
+          decimalLatex: formatNumberToLatex(val, false, fmtOptions),
         };
       }
 
@@ -988,16 +1071,16 @@ const CasioMathEngine = (() => {
           ok: true,
           kind: 'scalar',
           value: val,
-          exactLatex: formatNumberToLatex(val, true),
-          decimalLatex: formatNumberToLatex(val, false),
+          exactLatex: formatNumberToLatex(val, true, fmtOptions),
+          decimalLatex: formatNumberToLatex(val, false, fmtOptions),
         };
       }
 
       const crossMatch = rawStr.match(/^(Vct[A-D]|VctAns)\s*CROSS\s*(Vct[A-D]|VctAns)$/);
       if (crossMatch) {
         const cVec = cross(getVec(crossMatch[1]), getVec(crossMatch[2]));
-        const ltx = `\\begin{bmatrix} ${cVec.map((x) => formatNumberToLatex(x, true)).join(' \\\\ ')} \\end{bmatrix}`;
-        const decLtx = `\\begin{bmatrix} ${cVec.map((x) => formatNumberToLatex(x, false)).join(' \\\\ ')} \\end{bmatrix}`;
+        const ltx = `\\begin{bmatrix} ${cVec.map((x) => formatNumberToLatex(x, true, fmtOptions)).join(' \\\\ ')} \\end{bmatrix}`;
+        const decLtx = `\\begin{bmatrix} ${cVec.map((x) => formatNumberToLatex(x, false, fmtOptions)).join(' \\\\ ')} \\end{bmatrix}`;
         return { ok: true, kind: 'vector', vec: cVec, exactLatex: ltx, decimalLatex: decLtx };
       }
 
@@ -1020,8 +1103,8 @@ const CasioMathEngine = (() => {
       }
 
       if (resultVec && consumed.replace(/\s+/g, '').length === rawStr.replace(/\s+/g, '').length) {
-        const ltx = `\\begin{bmatrix} ${resultVec.map((x) => formatNumberToLatex(x, true)).join(' \\\\ ')} \\end{bmatrix}`;
-        const decLtx = `\\begin{bmatrix} ${resultVec.map((x) => formatNumberToLatex(x, false)).join(' \\\\ ')} \\end{bmatrix}`;
+        const ltx = `\\begin{bmatrix} ${resultVec.map((x) => formatNumberToLatex(x, true, fmtOptions)).join(' \\\\ ')} \\end{bmatrix}`;
+        const decLtx = `\\begin{bmatrix} ${resultVec.map((x) => formatNumberToLatex(x, false, fmtOptions)).join(' \\\\ ')} \\end{bmatrix}`;
         return { ok: true, kind: 'vector', vec: resultVec, exactLatex: ltx, decimalLatex: decLtx };
       }
 
@@ -1040,11 +1123,12 @@ const CasioMathEngine = (() => {
   /**
    * Xử lý Thống kê (MENU 6: Statistics - Đơn biến & Mẫu số liệu ghép nhóm)
    */
-  const calculateUngroupedStats = (rows: any[]) => {
+  const calculateUngroupedStats = (rows: any[], useFreq = true) => {
     const validRows: Array<{ x: number; freq: number }> = [];
     for (const r of rows) {
+      if (r.x === '' || r.x === undefined || r.x === null) continue;
       const x = Number(r.x);
-      const freq = r.freq === '' || r.freq === undefined ? 1 : Number(r.freq);
+      const freq = !useFreq || r.freq === '' || r.freq === undefined ? 1 : Number(r.freq);
       if (Number.isFinite(x) && Number.isFinite(freq) && freq > 0) {
         validRows.push({ x, freq: Math.round(freq) });
       }
@@ -1131,9 +1215,10 @@ const CasioMathEngine = (() => {
   const calculateGroupedStats = (rows: any[]) => {
     const groups: Array<{ L: number; U: number; freq: number; mid: number; width: number }> = [];
     for (const r of rows) {
+      if (r.L === '' || r.U === '' || r.L === undefined || r.U === undefined) continue;
       const L = Number(r.L);
       const U = Number(r.U);
-      const freq = Number(r.freq);
+      const freq = r.freq === '' || r.freq === undefined ? 0 : Number(r.freq);
       if (Number.isFinite(L) && Number.isFinite(U) && U > L && Number.isFinite(freq) && freq >= 0) {
         groups.push({ L, U, freq, mid: (L + U) / 2, width: U - L });
       }
@@ -1239,11 +1324,11 @@ const createInitialEmptyTree = () => {
  */
 const SCIENTIFIC_ROWS = [
   [
-    { id: 'optn', mainLatex: '\\mathsf{OPTN}', shiftText: 'SOLVE', alphaText: '=', shiftAction: { type: 'token', latex: '=' }, alphaAction: { type: 'token', latex: '=' } },
-    { id: 'calc', mainLatex: '\\mathsf{CALC}', shiftText: 'd/dx', alphaText: ':', shiftAction: { type: 'struct', nodeType: 'deriv' }, alphaAction: { type: 'token', latex: ':' } },
+    { id: 'optn', mainLatex: '\\mathsf{OPTN}', shiftText: '', alphaText: '' },
+    { id: 'calc', mainLatex: '\\mathsf{CALC}', shiftText: 'SOLVE', alphaText: '=', alphaAction: { type: 'token', latex: '=' } },
     null,
     null,
-    { id: 'int', mainLatex: '\\int_{\\square}^{\\square}', shiftText: 'd/dx', alphaText: '', action: { type: 'struct', nodeType: 'int' }, shiftAction: { type: 'struct', nodeType: 'deriv' } },
+    { id: 'int', mainLatex: '\\int_{\\square}^{\\square}', shiftText: 'd/dx', alphaText: ':', action: { type: 'struct', nodeType: 'int' }, shiftAction: { type: 'struct', nodeType: 'deriv' }, alphaAction: { type: 'token', latex: ':' } },
     { id: 'varx', mainLatex: 'x', shiftText: '∏', alphaText: 'e', isItalic: true, action: { type: 'token', latex: 'x' }, alphaAction: { type: 'token', latex: '\\mathrm{e}' } },
   ],
   [
@@ -1437,6 +1522,18 @@ interface CasioState {
   alpha: boolean;
   stoMode: boolean;
   angleUnit: string;
+  language: 'vi' | 'en';
+  inputOutput: 'MathI/MathO' | 'MathI/DecimalO' | 'LineI/MathO' | 'LineI/DecimalO';
+  numberFormat: { type: 'Norm1' | 'Norm2' | 'Fix' | 'Sci'; digits: number };
+  fractionResult: 'ab/c' | 'd/c';
+  statFreqOn: boolean;
+  setupReturnMode: string;
+  setupPage: number;
+  setupMenuIndex: number;
+  setupSubType: '' | 'IO' | 'ANGLE' | 'FORMAT' | 'FIX_DIGITS' | 'SCI_DIGITS' | 'NORM_TYPE' | 'FRAC' | 'STAT_FREQ' | 'LANG';
+  setupSubIndex: number;
+  menuCursorIndex: number;
+  vctOptnPage: number;
   undoStack: any[];
   promptVars: string[];
   promptVarIndex: number;
@@ -1458,7 +1555,7 @@ interface CasioState {
   tableRows: any[];
   tableHasG: boolean;
   tableScroll: number;
-  vectors: Record<string, { dim: number; coords: string[] }>;
+  vectors: Record<string, { dim: number; coords: string[]; defined?: boolean }>;
   vctAns: { dim: number; coords: any[] };
   activeVctName: string;
   vctCoordIndex: number;
@@ -1474,40 +1571,157 @@ interface CasioState {
   statResultIndex: number;
 }
 
-function getAllEqnLinesForBigScreen(state: CasioState): string[] {
-  if (state.eqnType === 'SYS') {
-    const vars = ['x', 'y', 'z', 't'].slice(0, state.eqnSize);
-    const lines: string[] = [];
-    for (let r = 0; r < state.eqnSize; r++) {
-      const row = state.eqnMatrix[r];
-      const lhs = vars
-        .map((v: string, c: number) => {
-          const cell =
-            r === state.eqnRow && c === state.eqnCol
-              ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row[c]}}$}`
-              : row[c];
-          return `${cell}${v}`;
-        })
-        .join(' + ');
-      const rhs =
-        r === state.eqnRow && state.eqnCol === state.eqnSize
-          ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row[state.eqnSize]}}$}`
-          : row[state.eqnSize];
-      lines.push(`(\\text{PT } ${r + 1})\\quad ${lhs} = ${rhs}`);
-    }
-    return lines;
-  } else {
-    const deg = state.eqnSize;
-    const terms: string[] = [];
-    for (let c = 0; c <= deg; c++) {
-      const p = deg - c;
-      const raw = state.eqnPolyCoeffs[c];
-      const cell = c === state.eqnCol ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${raw}}$}` : raw;
-      const xPart = p === 0 ? '' : p === 1 ? 'x' : `x^${p}`;
-      terms.push(`${cell}${xPart}`);
-    }
-    return [`${terms.join(' + ')} = 0`];
+const createEmptyEqnMatrix = () => [
+  ['', '', '', '', ''],
+  ['', '', '', '', ''],
+  ['', '', '', '', ''],
+  ['', '', '', '', ''],
+];
+
+const createEmptyPolyCoeffs = () => ['', '', '', ''];
+
+const createEmptyStat1VarRows = (): Stat1VarRow[] => [
+  { x: '', freq: '' },
+  { x: '', freq: '' },
+  { x: '', freq: '' },
+  { x: '', freq: '' },
+];
+
+const createEmptyStatGroupedRows = (): StatGroupedRow[] => [
+  { L: '', U: '', freq: '' },
+  { L: '', U: '', freq: '' },
+  { L: '', U: '', freq: '' },
+  { L: '', U: '', freq: '' },
+];
+
+const MENU_ITEMS = [
+  { key: 'num1', code: '1', target: 'COMP', icon: '+-×÷', vi: '1: Tính toán', en: '1: Calculate' },
+  { key: 'num5', code: '5', target: 'VCT_SELECT', icon: 'u⃗·v⃗', vi: '5: Vectơ', en: '5: Vector' },
+  { key: 'num6', code: '6', target: 'STAT_SELECT', icon: 'x̄ Q₁', vi: '6: Thống kê', en: '6: Statistics' },
+  { key: 'num8', code: '8', target: 'TABLE_F', icon: 'f(x)', vi: '8: Bảng giá trị', en: '8: Table' },
+  { key: 'num9', code: '9', target: 'EQN_SELECT', icon: 'x=y', vi: '9: PT / Hệ PT', en: '9: Equation/Func' },
+];
+
+const getSetupMainItems = (lang: 'vi' | 'en') => [
+  // Page 0
+  [
+    { id: 'IO', label: lang === 'vi' ? '1: Nhập/Xuất (Math/Line)' : '1: Input/Output' },
+    { id: 'ANGLE', label: lang === 'vi' ? '2: Đơn vị góc (D/R/G)' : '2: Angle Unit' },
+    { id: 'FORMAT', label: lang === 'vi' ? '3: Định dạng số (Fix/Sci)' : '3: Number Format' },
+    { id: 'FRAC', label: lang === 'vi' ? '4: Kết quả phân số' : '4: Fraction Result' },
+  ],
+  // Page 1
+  [
+    { id: 'STAT_FREQ', label: lang === 'vi' ? '1: Thống kê (Tần số)' : '1: Statistics (Freq)' },
+    { id: 'LANG', label: lang === 'vi' ? '2: Ngôn ngữ (VI/EN)' : '2: Language (EN/VI)' },
+    { id: 'RESET_SETUP', label: lang === 'vi' ? '3: Khôi phục cài đặt' : '3: Reset Setup' },
+  ],
+];
+
+const getSetupSubOptions = (subType: CasioState['setupSubType'], lang: 'vi' | 'en') => {
+  switch (subType) {
+    case 'IO':
+      return [
+        { code: '1', label: '1: MathI / MathO', value: 'MathI/MathO' },
+        { code: '2', label: '2: MathI / DecimalO', value: 'MathI/DecimalO' },
+        { code: '3', label: '3: LineI / MathO', value: 'LineI/MathO' },
+        { code: '4', label: '4: LineI / DecimalO', value: 'LineI/DecimalO' },
+      ];
+    case 'ANGLE':
+      return [
+        { code: '1', label: lang === 'vi' ? '1: Độ (Degree)' : '1: Degree', value: 'D' },
+        { code: '2', label: '2: Radian', value: 'R' },
+        { code: '3', label: '3: Gradian', value: 'G' },
+      ];
+    case 'FORMAT':
+      return [
+        { code: '1', label: '1: Fix (0~9)', value: 'FIX' },
+        { code: '2', label: '2: Sci (0~9)', value: 'SCI' },
+        { code: '3', label: '3: Norm (1/2)', value: 'NORM' },
+      ];
+    case 'NORM_TYPE':
+      return [
+        { code: '1', label: '1: Norm 1', value: 'Norm1' },
+        { code: '2', label: '2: Norm 2', value: 'Norm2' },
+      ];
+    case 'FRAC':
+      return [
+        { code: '1', label: lang === 'vi' ? '1: ab/c (Hỗn số)' : '1: ab/c', value: 'ab/c' },
+        { code: '2', label: lang === 'vi' ? '2: d/c (Phân số)' : '2: d/c', value: 'd/c' },
+      ];
+    case 'STAT_FREQ':
+      return [
+        { code: '1', label: lang === 'vi' ? '1: Bật tần số (On)' : '1: On', value: 'ON' },
+        { code: '2', label: lang === 'vi' ? '2: Tắt tần số (Off)' : '2: Off', value: 'OFF' },
+      ];
+    case 'LANG':
+      return [
+        { code: '1', label: '1: English', value: 'en' },
+        { code: '2', label: '2: Tiếng Việt', value: 'vi' },
+      ];
+    default:
+      return [];
   }
+};
+
+function CasioCellBox({
+  value,
+  active = false,
+  size = 'lcd',
+  onClick,
+}: {
+  value?: string;
+  active?: boolean;
+  size?: 'lcd' | 'big';
+  onClick?: () => void;
+}) {
+  const isEmpty = value === undefined || value === null || value === '';
+  const dimCls =
+    size === 'big'
+      ? 'min-w-[64px] h-[38px] px-2.5 text-lg sm:text-xl rounded-md'
+      : 'min-w-[26px] h-[18px] px-1 text-[10.5px] rounded-[2px]';
+
+  if (active) {
+    return (
+      <span
+        onClick={onClick}
+        className={`inline-flex items-center justify-center font-mono font-bold border border-[#141c14] bg-[#141c14] text-[#c8d3c5] shadow-inner ${dimCls} ${
+          onClick ? 'cursor-pointer' : ''
+        }`}
+      >
+        {isEmpty ? (
+          <span
+            className={`inline-block border border-[#c8d3c5]/85 ${
+              size === 'big' ? 'w-5 h-5 rounded-[3px]' : 'w-2.5 h-2.5 rounded-[1px]'
+            }`}
+          />
+        ) : (
+          <span>{value}</span>
+        )}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      onClick={onClick}
+      className={`inline-flex items-center justify-center font-mono font-bold border ${
+        isEmpty
+          ? 'border-[#141c14]/65 bg-white/20 text-transparent'
+          : 'border-[#141c14]/35 bg-white/30 text-[#0e140e]'
+      } ${dimCls} ${onClick ? 'cursor-pointer hover:border-[#141c14]' : ''}`}
+    >
+      {isEmpty ? (
+        <span
+          className={`inline-block border border-[#141c14]/45 ${
+            size === 'big' ? 'w-5 h-5 rounded-[3px]' : 'w-2.5 h-2.5 rounded-[1px]'
+          }`}
+        />
+      ) : (
+        <span>{value}</span>
+      )}
+    </span>
+  );
 }
 
 /**
@@ -1530,38 +1744,61 @@ function ClassroomBigScreen({
   currentLatexExpression,
   onClose,
 }: ClassroomBigScreenProps) {
+  const isVi = calcState.language !== 'en';
   const modeTitleMap: Record<string, string> = {
-    COMP: 'CHẾ ĐỘ TÍNH TOÁN CHUNG (COMP)',
-    MENU: 'DANH MỤC CHẾ ĐỘ MÁY TÍNH (MENU)',
-    STAT_SELECT: 'THỐNG KÊ (MENU 6: CHỌN LOẠI MẪU SỐ LIỆU)',
+    COMP: isVi ? 'CHẾ ĐỘ TÍNH TOÁN CHUNG (COMP)' : 'CALCULATE MODE (COMP)',
+    MENU: isVi ? 'DANH MỤC CHẾ ĐỘ MÁY TÍNH (MENU)' : 'MODE SELECTION MENU',
+    SETUP_MAIN: isVi ? 'CÀI ĐẶT HỆ THỐNG MÁY TÍNH (SHIFT + MENU)' : 'SYSTEM SETUP (SHIFT + MENU)',
+    SETUP_SUB: isVi ? 'THIẾT LẬP THÔNG SỐ HỆ THỐNG (SETUP)' : 'CONFIGURE SETUP OPTION',
+    COMP_OPTN: isVi ? 'TÙY CHỌN TÍNH TOÁN (OPTN)' : 'CALCULATE OPTIONS (OPTN)',
+    STAT_SELECT: isVi ? 'THỐNG KÊ (MENU 6: CHỌN LOẠI MẪU SỐ LIỆU)' : 'STATISTICS (MENU 6: SELECT TYPE)',
+    STAT_OPTN: isVi ? 'TÙY CHỌN THỐNG KÊ (OPTN)' : 'STATISTICS OPTIONS (OPTN)',
     STAT_INPUT:
       calcState.statType === 'GROUPED'
-        ? 'THỐNG KÊ MẪU SỐ LIỆU GHÉP NHÓM [Lᵢ ; Uᵢ)'
-        : 'THỐNG KÊ ĐƠN BIẾN (MẪU KHÔNG GHÉP NHÓM)',
+        ? isVi
+          ? 'THỐNG KÊ MẪU SỐ LIỆU GHÉP NHÓM [Lᵢ ; Uᵢ)'
+          : 'GROUPED STATISTICS [Lᵢ ; Uᵢ)'
+        : isVi
+        ? 'THỐNG KÊ ĐƠN BIẾN (MẪU KHÔNG GHÉP NHÓM)'
+        : '1-VARIABLE STATISTICS',
     STAT_RESULT:
       calcState.statType === 'GROUPED'
-        ? 'KẾT QUẢ ĐẶC TRƯNG & TỨ PHÂN VỊ MẪU GHÉP NHÓM'
-        : 'KẾT QUẢ CÁC SỐ ĐẶC TRƯNG THỐNG KÊ ĐƠN BIẾN',
-    EQN_SELECT: 'GIẢI PHƯƠNG TRÌNH & HỆ PHƯƠNG TRÌNH (MENU 9)',
-    EQN_SYS_SIZE: 'CHỌN SỐ ẨN CỦA HỆ PHƯƠNG TRÌNH (2 ~ 4 ẨN)',
-    EQN_POLY_DEG: 'CHỌN BẬC CỦA PHƯƠNG TRÌNH ĐA THỨC (BẬC 2 ~ 3)',
+        ? isVi
+          ? 'KẾT QUẢ ĐẶC TRƯNG & TỨ PHÂN VỊ MẪU GHÉP NHÓM'
+          : 'GROUPED STATISTICS RESULTS'
+        : isVi
+        ? 'KẾT QUẢ CÁC SỐ ĐẶC TRƯNG THỐNG KÊ ĐƠN BIẾN'
+        : '1-VARIABLE RESULTS',
+    EQN_SELECT: isVi ? 'GIẢI PHƯƠNG TRÌNH & HỆ PHƯƠNG TRÌNH (MENU 9)' : 'EQUATION / FUNCTION (MENU 9)',
+    EQN_SYS_SIZE: isVi ? 'CHỌN SỐ ẨN CỦA HỆ PHƯƠNG TRÌNH (2 ~ 4 ẨN)' : 'SIMUL EQUATION: NUMBER OF UNKNOWNS (2~4)',
+    EQN_POLY_DEG: isVi ? 'CHỌN BẬC CỦA PHƯƠNG TRÌNH ĐA THỨC (BẬC 2 ~ 3)' : 'POLYNOMIAL DEGREE (2~3)',
     EQN_INPUT:
       calcState.eqnType === 'SYS'
-        ? `NHẬP HỆ PHƯƠNG TRÌNH BẬC NHẤT ${calcState.eqnSize} ẨN`
-        : `NHẬP PHƯƠNG TRÌNH BẬC ${calcState.eqnSize}`,
-    EQN_RESULT: 'NGHIỆM CỦA PHƯƠNG TRÌNH / HỆ PHƯƠNG TRÌNH',
-    TABLE_F: 'BẢNG GIÁ TRỊ HÀM SỐ: NHẬP HÀM f(x)',
-    TABLE_G: 'BẢNG GIÁ TRỊ HÀM SỐ: NHẬP HÀM g(x)',
-    TABLE_PARAMS: 'THIẾT LẬP MIỀN GIÁ TRỊ BẢNG (START, END, STEP)',
-    TABLE_VIEW: 'BẢNG GIÁ TRỊ HÀM SỐ f(x), g(x)',
-    VCT_SELECT: 'CHẾ ĐỘ VECTƠ (MENU 5: CHỌN VECTƠ)',
-    VCT_DIM: `CHỌN SỐ CHIỀU CHO ${calcState.activeVctName}`,
-    VCT_EDIT: `NHẬP TỌA ĐỘ VECTƠ ${calcState.activeVctName} (${calcState.vectors[calcState.activeVctName]?.dim || 3}D)`,
-    VCT_OPTN: 'DANH MỤC PHÉP TOÁN VECTƠ (OPTN)',
-    VCT_CALC: 'TÍNH TOÁN BIỂU THỨC VECTƠ',
-    CALC_PROMPT: 'TÍNH GIÁ TRỊ BIỂU THỨC TẠI ĐIỂM (CALC)',
-    SOLVE_PROMPT: 'DÒ NGHIỆM PHƯƠNG TRÌNH (SOLVE)',
+        ? isVi
+          ? `NHẬP HỆ PHƯƠNG TRÌNH BẬC NHẤT ${calcState.eqnSize} ẨN`
+          : `${calcState.eqnSize}-UNKNOWN SIMUL EQUATION`
+        : isVi
+        ? `NHẬP PHƯƠNG TRÌNH BẬC ${calcState.eqnSize}`
+        : `DEGREE ${calcState.eqnSize} POLYNOMIAL`,
+    EQN_RESULT: isVi ? 'NGHIỆM CỦA PHƯƠNG TRÌNH / HỆ PHƯƠNG TRÌNH' : 'EQUATION SOLUTIONS',
+    TABLE_F: isVi ? 'BẢNG GIÁ TRỊ HÀM SỐ: NHẬP HÀM f(x)' : 'TABLE: ENTER FUNCTION f(x)',
+    TABLE_G: isVi ? 'BẢNG GIÁ TRỊ HÀM SỐ: NHẬP HÀM g(x)' : 'TABLE: ENTER FUNCTION g(x)',
+    TABLE_PARAMS: isVi ? 'THIẾT LẬP MIỀN GIÁ TRỊ BẢNG (START, END, STEP)' : 'TABLE RANGE (START, END, STEP)',
+    TABLE_VIEW: isVi ? 'BẢNG GIÁ TRỊ HÀM SỐ f(x), g(x)' : 'FUNCTION VALUE TABLE',
+    VCT_SELECT: isVi ? 'CHẾ ĐỘ VECTƠ (MENU 5: CHỌN VECTƠ)' : 'VECTOR MODE (MENU 5: DEFINE VECTOR)',
+    VCT_DIM: isVi ? `CHỌN SỐ CHIỀU CHO ${calcState.activeVctName}` : `SELECT DIMENSION FOR ${calcState.activeVctName}`,
+    VCT_EDIT: isVi
+      ? `NHẬP TỌA ĐỘ VECTƠ ${calcState.activeVctName} (${calcState.vectors[calcState.activeVctName]?.dim || 3}D)`
+      : `ENTER ${calcState.activeVctName} (${calcState.vectors[calcState.activeVctName]?.dim || 3}D)`,
+    VCT_OPTN: isVi ? 'DANH MỤC PHÉP TOÁN VECTƠ (OPTN)' : 'VECTOR OPTIONS (OPTN)',
+    VCT_CALC: isVi ? 'TÍNH TOÁN BIỂU THỨC VECTƠ' : 'VECTOR CALCULATION',
+    CALC_PROMPT: isVi ? 'TÍNH GIÁ TRỊ BIỂU THỨC TẠI ĐIỂM (CALC)' : 'EVALUATE EXPRESSION (CALC)',
+    SOLVE_PROMPT: isVi ? 'DÒ NGHIỆM PHƯƠNG TRÌNH (SHIFT + CALC : SOLVE)' : 'SOLVE EQUATION FOR x (SOLVE)',
   };
+
+  const setupMainPages = getSetupMainItems(calcState.language);
+  const activeSetupPageItems = setupMainPages[calcState.setupPage] || setupMainPages[0];
+  const setupSubOptions = getSetupSubOptions(calcState.setupSubType, calcState.language);
 
   return (
     <div className="w-full max-w-[680px] rounded-[28px] p-4 sm:p-6 bg-[#0b1710] border-2 border-emerald-400/40 shadow-2xl text-white flex flex-col justify-between transition-all duration-300">
@@ -1574,10 +1811,10 @@ function ClassroomBigScreen({
           </span>
           <div>
             <h2 className="text-sm sm:text-base font-extrabold tracking-wide text-emerald-300 uppercase">
-              MÀN HÌNH TRÌNH CHIẾU LỚP HỌC (PHÓNG ĐẠI)
+              {isVi ? 'MÀN HÌNH TRÌNH CHIẾU LỚP HỌC (PHÓNG ĐẠI)' : 'CLASSROOM PROJECTION DISPLAY'}
             </h2>
             <p className="text-[11px] text-white/70">
-              {modeTitleMap[calcState.mode] || 'MÀN HÌNH HIỂN THỊ CHI TIẾT CHO HỌC SINH'}
+              {modeTitleMap[calcState.mode] || (isVi ? 'MÀN HÌNH HIỂN THỊ CHI TIẾT CHO HỌC SINH' : 'DETAILED DISPLAY')}
             </p>
           </div>
         </div>
@@ -1599,37 +1836,48 @@ function ClassroomBigScreen({
             }
             className="px-3 py-1 rounded-lg bg-amber-500/25 hover:bg-amber-500/40 border border-amber-300/40 text-amber-200 text-xs font-bold transition cursor-pointer"
           >
-            S⇔D: {calcState.showingDecimal ? 'Số thập phân' : 'Phân số chuẩn'}
+            S⇔D: {calcState.showingDecimal ? (isVi ? 'Số thập phân' : 'Decimal') : isVi ? 'Phân số chuẩn' : 'Exact'}
           </button>
           <button
             type="button"
             onClick={onClose}
             className="px-3 py-1 rounded-lg bg-white/10 hover:bg-rose-500/40 border border-white/20 text-white/90 text-xs font-semibold transition cursor-pointer"
           >
-            ✕ Thu nhỏ
+            ✕ {isVi ? 'Thu nhỏ' : 'Minimize'}
           </button>
         </div>
       </div>
 
       {/* KHUNG LCD PHÓNG ĐẠI (MÀU MÀN HÌNH CASIO THẬT) */}
       <div
-        className="w-full min-h-[220px] rounded-[18px] p-4 sm:p-5 flex flex-col justify-between shadow-[inset_0_4px_12px_rgba(0,0,0,0.45)] border-2 border-[#8c9c87] text-[#0e140e]"
+        className="w-full min-h-[240px] rounded-[18px] p-4 sm:p-5 flex flex-col justify-between shadow-[inset_0_4px_12px_rgba(0,0,0,0.45)] border-2 border-[#8c9c87] text-[#0e140e]"
         style={{
           background: 'linear-gradient(180deg, #cfdacb 0%, #c2cfc0 60%, #b6c4b3 100%)',
         }}
       >
         {/* Thanh trạng thái phóng đại */}
-        <div className="flex items-center justify-between border-b-2 border-[#141c14]/20 pb-2 mb-3 text-xs sm:text-sm font-bold text-[#141c14]">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-[#141c14]/20 pb-2 mb-3 text-xs sm:text-sm font-bold text-[#141c14]">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span className={`px-2 py-0.5 rounded ${calcState.shift ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10 text-[#141c14]/40'}`}>
-              SHIFT
+              S
             </span>
             <span className={`px-2 py-0.5 rounded ${calcState.alpha ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10 text-[#141c14]/40'}`}>
-              ALPHA
+              A
             </span>
-            <span className="px-2 py-0.5 border border-[#141c14]/60 rounded">√□ MathIO</span>
+            <span className="px-2 py-0.5 border border-[#141c14]/60 rounded">
+              {calcState.inputOutput.startsWith('MathI') ? '√□ MathI' : 'LineI'}
+            </span>
             <span className="px-2.5 py-0.5 bg-[#141c14] text-[#cfdacb] rounded">
-              Đơn vị góc: {calcState.angleUnit === 'D' ? 'Độ (D)' : calcState.angleUnit === 'R' ? 'Radian (R)' : 'Gradian (G)'}
+              {calcState.angleUnit === 'D' ? 'Deg (D)' : calcState.angleUnit === 'R' ? 'Rad (R)' : 'Gra (G)'}
+            </span>
+            {calcState.numberFormat.type === 'Fix' && (
+              <span className="px-2 py-0.5 bg-[#141c14] text-[#cfdacb] rounded">FIX({calcState.numberFormat.digits})</span>
+            )}
+            {calcState.numberFormat.type === 'Sci' && (
+              <span className="px-2 py-0.5 bg-[#141c14] text-[#cfdacb] rounded">SCI({calcState.numberFormat.digits})</span>
+            )}
+            <span className="px-2 py-0.5 border border-[#141c14]/40 rounded uppercase">
+              {calcState.language === 'vi' ? 'VI' : 'EN'}
             </span>
           </div>
           <span className="font-extrabold tracking-wider uppercase">{calcState.mode}</span>
@@ -1639,7 +1887,9 @@ function ClassroomBigScreen({
         {(calcState.mode === 'COMP' || calcState.mode === 'VCT_CALC') && (
           <div className="flex-1 flex flex-col justify-between py-2">
             <div className="overflow-x-auto py-2">
-              <div className="text-xs uppercase font-bold text-[#141c14]/60 mb-1">Biểu thức đang nhập:</div>
+              <div className="text-xs uppercase font-bold text-[#141c14]/60 mb-1">
+                {isVi ? 'Biểu thức đang nhập:' : 'Input Expression:'}
+              </div>
               <KatexScreenRenderer
                 latex={`\\displaystyle ${
                   calcState.mode === 'VCT_CALC'
@@ -1652,7 +1902,9 @@ function ClassroomBigScreen({
             </div>
 
             <div className="border-t border-[#141c14]/20 pt-3 mt-2 flex items-end justify-between">
-              <span className="text-xs uppercase font-bold text-[#141c14]/65">Kết quả tính toán:</span>
+              <span className="text-xs uppercase font-bold text-[#141c14]/65">
+                {isVi ? 'Kết quả:' : 'Result:'}
+              </span>
               {calcState.resultLatex ? (
                 <KatexScreenRenderer
                   latex={`\\displaystyle ${calcState.resultLatex}`}
@@ -1660,58 +1912,263 @@ function ClassroomBigScreen({
                   className="text-3xl sm:text-4xl text-[#0b110b] font-extrabold"
                 />
               ) : (
-                <span className="text-sm italic text-[#141c14]/50">Bấm phím [=] để xem kết quả</span>
+                <span className="text-sm italic text-[#141c14]/50">
+                  {isVi ? 'Bấm [=] để tính • [SHIFT]+[CALC] để SOLVE' : 'Press [=] to calculate'}
+                </span>
               )}
             </div>
           </div>
         )}
 
-        {/* 2. CHẾ ĐỘ MENU / SELECT */}
-        {(calcState.mode === 'MENU' ||
-          calcState.mode === 'STAT_SELECT' ||
+        {/* 2. CHẾ ĐỘ MENU CHÍNH (LƯỚI ICON CASIO) */}
+        {calcState.mode === 'MENU' && (
+          <div className="flex-1 flex flex-col justify-between py-2 gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
+              {MENU_ITEMS.map((item, idx) => {
+                const active = calcState.menuCursorIndex === idx;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => {
+                      if (item.target === 'TABLE_F') {
+                        setCalcState((p) => ({
+                          ...p,
+                          mode: 'TABLE_F',
+                          menuCursorIndex: 0,
+                          cursor: { slotId: p.tableFSlot.id, index: p.tableFSlot.items.length },
+                        }));
+                      } else {
+                        setCalcState((p) => ({ ...p, mode: item.target, menuCursorIndex: 0, resultLatex: '' }));
+                      }
+                    }}
+                    className={`p-3 rounded-xl border-2 flex flex-col items-center justify-center gap-1.5 transition cursor-pointer ${
+                      active
+                        ? 'bg-[#141c14] text-[#cfdacb] border-[#141c14] shadow-md scale-[1.03]'
+                        : 'bg-[#141c14]/10 text-[#0e140e] border-[#141c14]/25 hover:bg-[#141c14]/20'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold px-1.5 py-0.5 rounded border border-current opacity-80">
+                      {item.code}
+                    </span>
+                    <span className="text-lg font-black font-mono">{item.icon}</span>
+                    <span className="text-[11px] font-bold text-center leading-tight">
+                      {isVi ? item.vi.replace(/^\d+:\s*/, '') : item.en.replace(/^\d+:\s*/, '')}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="p-2.5 rounded-lg bg-[#141c14] text-[#cfdacb] text-sm font-bold flex items-center justify-between">
+              <span>{isVi ? MENU_ITEMS[calcState.menuCursorIndex]?.vi : MENU_ITEMS[calcState.menuCursorIndex]?.en}</span>
+              <span className="text-xs opacity-80">{isVi ? 'Dùng ◀▶▲▼ + [=] hoặc phím số' : 'Use ◀▶▲▼ + [=] or number key'}</span>
+            </div>
+          </div>
+        )}
+
+        {/* 2B. CHẾ ĐỘ CÀI ĐẶT (SHIFT + MENU : SETUP) */}
+        {calcState.mode === 'SETUP_MAIN' && (
+          <div className="flex-1 flex flex-col justify-between py-1 gap-2">
+            <div className="flex items-center justify-between text-xs font-bold uppercase opacity-75">
+              <span>{isVi ? 'Cài đặt hệ thống (SETUP)' : 'System Setup'}</span>
+              <span>{isVi ? `Trang ${calcState.setupPage + 1}/2 (▲▼)` : `Page ${calcState.setupPage + 1}/2 (▲▼)`}</span>
+            </div>
+            <div className="space-y-2">
+              {activeSetupPageItems.map((it, idx) => {
+                const active = calcState.setupMenuIndex === idx;
+                return (
+                  <div
+                    key={it.id}
+                    className={`p-2.5 rounded-lg text-base font-bold flex items-center justify-between ${
+                      active ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10 text-[#0e140e]'
+                    }`}
+                  >
+                    <span>{it.label}</span>
+                    <span className="text-xs opacity-75">
+                      {it.id === 'IO' && calcState.inputOutput}
+                      {it.id === 'ANGLE' && (calcState.angleUnit === 'D' ? 'Degree' : calcState.angleUnit === 'R' ? 'Radian' : 'Gradian')}
+                      {it.id === 'FORMAT' && `${calcState.numberFormat.type}${calcState.numberFormat.type === 'Fix' || calcState.numberFormat.type === 'Sci' ? `(${calcState.numberFormat.digits})` : ''}`}
+                      {it.id === 'FRAC' && calcState.fractionResult}
+                      {it.id === 'STAT_FREQ' && (calcState.statFreqOn ? 'On' : 'Off')}
+                      {it.id === 'LANG' && (calcState.language === 'vi' ? 'Tiếng Việt' : 'English')}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {calcState.mode === 'SETUP_SUB' && (
+          <div className="flex-1 flex flex-col justify-center gap-2 py-2">
+            {(calcState.setupSubType === 'FIX_DIGITS' || calcState.setupSubType === 'SCI_DIGITS') ? (
+              <div className="p-4 rounded-xl bg-[#141c14]/10 border border-[#141c14]/30 text-center space-y-2">
+                <div className="text-xl font-extrabold">
+                  {calcState.setupSubType === 'FIX_DIGITS'
+                    ? (isVi ? 'Chọn số chữ số thập phân Fix (0 ~ 9)?' : 'Fix: Select number of digits (0 ~ 9)')
+                    : (isVi ? 'Chọn số chữ số có nghĩa Sci (0 ~ 9)?' : 'Sci: Select digits (0 ~ 9)')}
+                </div>
+                <div className="text-sm opacity-75">
+                  {isVi ? 'Bấm phím số từ [0] đến [9] trên máy tính' : 'Press number key [0] ~ [9]'}
+                </div>
+              </div>
+            ) : (
+              setupSubOptions.map((opt, idx) => {
+                const active = calcState.setupSubIndex === idx;
+                return (
+                  <div
+                    key={opt.code}
+                    className={`p-2.5 rounded-lg text-base font-bold ${
+                      active ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10 text-[#0e140e]'
+                    }`}
+                  >
+                    {opt.label}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* 2C. CÁC MENU CHỌN & OPTN */}
+        {(calcState.mode === 'STAT_SELECT' ||
+          calcState.mode === 'STAT_OPTN' ||
+          calcState.mode === 'COMP_OPTN' ||
           calcState.mode === 'EQN_SELECT' ||
           calcState.mode === 'EQN_SYS_SIZE' ||
           calcState.mode === 'EQN_POLY_DEG' ||
           calcState.mode === 'VCT_SELECT' ||
           calcState.mode === 'VCT_DIM' ||
           calcState.mode === 'VCT_OPTN') && (
-          <div className="flex-1 flex flex-col justify-center gap-3 py-2">
-            {calcState.mode === 'MENU' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-base font-bold">
-                <div className="p-2.5 rounded-lg bg-[#141c14]/10">1 : COMP (Tính toán cơ bản, Tích phân, Đạo hàm)</div>
-                <div className="p-2.5 rounded-lg bg-[#141c14]/10">5 : Vector (Phép toán Vectơ 2D / 3D)</div>
-                <div className="p-2.5 rounded-lg bg-[#141c14]/15 border border-[#141c14]/30">
-                  6 : Statistics (Thống kê & Tứ phân vị ghép nhóm)
-                </div>
-                <div className="p-2.5 rounded-lg bg-[#141c14]/10">8 : Table (Lập bảng giá trị hàm số f(x), g(x))</div>
-                <div className="p-2.5 rounded-lg bg-[#141c14]/10 sm:col-span-2">
-                  9 : Equation/Func (Giải hệ phương trình 2~4 ẩn & Phương trình bậc 2, 3)
-                </div>
+          <div className="flex-1 flex flex-col justify-center gap-2.5 py-2">
+            {calcState.mode === 'COMP_OPTN' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-base font-bold">
+                {[
+                  isVi ? '1 : SOLVE (Tìm nghiệm phương trình)' : '1 : Equation SOLVE',
+                  isVi ? '2 : d/dx (Đạo hàm tại x₀)' : '2 : Derivative d/dx',
+                  isVi ? '3 : ∫dx (Tích phân xác định)' : '3 : Definite Integral',
+                  isVi ? '4 : Abs |■| (Giá trị tuyệt đối)' : '4 : Absolute Value |■|',
+                ].map((txt, idx) => (
+                  <div key={idx} className={`p-2.5 rounded-lg ${calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'}`}>
+                    {txt}
+                  </div>
+                ))}
               </div>
             )}
             {calcState.mode === 'STAT_SELECT' && (
               <div className="space-y-3 text-lg font-bold">
-                <div className="p-3 rounded-lg bg-[#141c14]/10">
-                  Bấm phím [1] : Thống kê 1 biến không ghép nhóm (xᵢ, nᵢ)
-                </div>
-                <div className="p-3 rounded-lg bg-[#141c14] text-[#cfdacb]">
-                  Bấm phím [2] : Mẫu số liệu ghép nhóm [Lᵢ ; Uᵢ) — Tính Q₁, Q₂ (Mₑ), Q₃, ΔQ, Mₒ, x̄, s
-                </div>
+                {[
+                  isVi ? '1 : Thống kê 1 biến không ghép nhóm (xᵢ, nᵢ)' : '1 : 1-Variable (xᵢ, nᵢ)',
+                  isVi ? '2 : Mẫu số liệu ghép nhóm [Lᵢ ; Uᵢ) — Tính Q₁, Q₂, Q₃, x̄, s' : '2 : Grouped Data [Lᵢ ; Uᵢ)',
+                ].map((txt, idx) => (
+                  <div key={idx} className={`p-3 rounded-lg ${calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'}`}>
+                    {txt}
+                  </div>
+                ))}
+              </div>
+            )}
+            {calcState.mode === 'STAT_OPTN' && (
+              <div className="space-y-2.5 text-base font-bold">
+                {[
+                  isVi ? '1 : Chọn lại loại thống kê (Select Type)' : '1 : Select Type',
+                  isVi ? '2 : Nhập / Sửa bảng dữ liệu (Data)' : '2 : Data Editor',
+                  isVi ? '3 : Tính các số đặc trưng (1-Var Calc)' : '3 : 1-Variable Calc',
+                ].map((txt, idx) => (
+                  <div key={idx} className={`p-2.5 rounded-lg ${calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'}`}>
+                    {txt}
+                  </div>
+                ))}
               </div>
             )}
             {calcState.mode === 'EQN_SELECT' && (
               <div className="space-y-3 text-lg font-bold">
-                <div className="p-3 rounded-lg bg-[#141c14]/10">Bấm phím [1] : Giải Hệ phương trình bậc nhất (2, 3, 4 ẩn)</div>
-                <div className="p-3 rounded-lg bg-[#141c14]/10">Bấm phím [2] : Giải Phương trình đa thức (Bậc 2, Bậc 3)</div>
+                {[
+                  isVi ? '1 : Giải Hệ phương trình bậc nhất (2, 3, 4 ẩn)' : '1 : Simul Equation (2~4 Unknowns)',
+                  isVi ? '2 : Giải Phương trình đa thức (Bậc 2, Bậc 3)' : '2 : Polynomial (Degree 2~3)',
+                ].map((txt, idx) => (
+                  <div key={idx} className={`p-3 rounded-lg ${calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'}`}>
+                    {txt}
+                  </div>
+                ))}
               </div>
             )}
-            {(calcState.mode === 'EQN_SYS_SIZE' ||
-              calcState.mode === 'EQN_POLY_DEG' ||
-              calcState.mode === 'VCT_SELECT' ||
-              calcState.mode === 'VCT_DIM' ||
-              calcState.mode === 'VCT_OPTN') && (
-              <div className="text-lg font-bold text-center py-6">
-                Hãy bấm phím số tương ứng trên bàn phím máy tính bên trái để tiếp tục.
+            {calcState.mode === 'EQN_SYS_SIZE' && (
+              <div className="space-y-2 text-lg font-bold">
+                <div className="opacity-80">{isVi ? 'Số ẩn của hệ phương trình? (2~4)' : 'Number of Unknowns? (2~4)'}</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[2, 3, 4].map((sz, idx) => (
+                    <div key={sz} className={`p-3 rounded-lg text-center ${calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'}`}>
+                      {sz}: {sz} {isVi ? 'ẩn' : 'Unk'}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {calcState.mode === 'EQN_POLY_DEG' && (
+              <div className="space-y-2 text-lg font-bold">
+                <div className="opacity-80">{isVi ? 'Bậc của phương trình đa thức? (2~3)' : 'Polynomial Degree? (2~3)'}</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { d: 2, label: '2 : ax² + bx + c = 0' },
+                    { d: 3, label: '3 : ax³ + bx² + cx + d = 0' },
+                  ].map((item, idx) => (
+                    <div key={item.d} className={`p-3 rounded-lg text-center ${calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'}`}>
+                      {item.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {calcState.mode === 'VCT_SELECT' && (
+              <div className="grid grid-cols-2 gap-2.5 text-base font-bold">
+                {(['VctA', 'VctB', 'VctC', 'VctD'] as const).map((vName, idx) => {
+                  const vObj = calcState.vectors[vName];
+                  return (
+                    <div
+                      key={vName}
+                      className={`p-2.5 rounded-lg flex items-center justify-between ${
+                        calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'
+                      }`}
+                    >
+                      <span>{idx + 1}: {vName}</span>
+                      <span className="text-xs opacity-75">{vObj?.defined ? `${vObj.dim}D` : 'None'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {calcState.mode === 'VCT_DIM' && (
+              <div className="space-y-2 text-lg font-bold">
+                <div className="opacity-80">{calcState.activeVctName}: {isVi ? 'Chọn số chiều (2 hoặc 3)' : 'Dimension? Select 2~3'}</div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {['2 : 2D (x, y)', '3 : 3D (x, y, z)'].map((txt, idx) => (
+                    <div key={txt} className={`p-3 rounded-lg text-center ${calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'}`}>
+                      {txt}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {calcState.mode === 'VCT_OPTN' && (
+              <div className="grid grid-cols-2 gap-2 text-sm sm:text-base font-bold">
+                {(calcState.vctOptnPage === 0
+                  ? [
+                      isVi ? '1: Tạo Vectơ mới' : '1: Define Vector',
+                      isVi ? '2: Sửa tọa độ Vectơ' : '2: Edit Vector',
+                      '3: VctA',
+                      '4: VctB',
+                    ]
+                  : [
+                      '1: VctC',
+                      '2: VctD',
+                      isVi ? '3: Tích vô hướng (•)' : '3: Dot Product (•)',
+                      isVi ? '4: Góc giữa 2 vectơ' : '4: Angle(',
+                    ]
+                ).map((txt, idx) => (
+                  <div key={idx} className={`p-2.5 rounded-lg ${calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#cfdacb]' : 'bg-[#141c14]/10'}`}>
+                    {txt}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1722,10 +2179,12 @@ function ClassroomBigScreen({
           <div className="flex-1 flex flex-col justify-between">
             <div className="text-xs sm:text-sm font-bold mb-2 flex items-center justify-between">
               <span>
-                Đang chọn dòng {calcState.statRow + 1} — Nhập số rồi bấm [=] để sang ô tiếp theo
+                {isVi
+                  ? `Dòng ${calcState.statRow + 1} — Nhập số rồi bấm [=] để sang ô tiếp theo`
+                  : `Row ${calcState.statRow + 1} — Enter value & press [=]`}
               </span>
               <span className="px-2 py-0.5 rounded bg-[#141c14] text-[#cfdacb]">
-                Bấm [OPTN] để xuất kết quả Q₁, Q₂, Q₃
+                {isVi ? 'Bấm [OPTN] để tính kết quả' : 'Press [OPTN] for Calc'}
               </span>
             </div>
             <div className="overflow-x-auto max-h-[210px] rounded-lg border border-[#141c14]/30">
@@ -1733,33 +2192,34 @@ function ClassroomBigScreen({
                 <table className="w-full text-left border-collapse text-sm sm:text-base font-bold">
                   <thead>
                     <tr className="bg-[#141c14] text-[#cfdacb]">
-                      <th className="py-1.5 px-3">Nhóm</th>
-                      <th className="py-1.5 px-3">Đầu mút trái (Lᵢ)</th>
-                      <th className="py-1.5 px-3">Đầu mút phải (Uᵢ)</th>
-                      <th className="py-1.5 px-3">Giá trị đại diện (cᵢ)</th>
-                      <th className="py-1.5 px-3">Tần số (nᵢ)</th>
+                      <th className="py-1.5 px-3">{isVi ? 'Nhóm' : 'Class'}</th>
+                      <th className="py-1.5 px-3">Lᵢ</th>
+                      <th className="py-1.5 px-3">Uᵢ</th>
+                      <th className="py-1.5 px-3">cᵢ</th>
+                      <th className="py-1.5 px-3">nᵢ (Freq)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {calcState.statGroupedRows.map((r, rIdx) => {
-                      const mid = (Number(r.L) + Number(r.U)) / 2;
+                      const hasBounds = r.L !== '' && r.U !== '';
+                      const mid = hasBounds ? (Number(r.L) + Number(r.U)) / 2 : NaN;
                       return (
                         <tr
                           key={rIdx}
-                          className={`border-b border-[#141c14]/20 ${
-                            rIdx === calcState.statRow ? 'bg-[#141c14]/15' : ''
-                          }`}
+                          className={`border-b border-[#141c14]/20 ${rIdx === calcState.statRow ? 'bg-[#141c14]/10' : ''}`}
                         >
-                          <td className="py-1.5 px-3">[{r.L} ; {r.U})</td>
-                          <td className={`py-1.5 px-3 ${rIdx === calcState.statRow && calcState.statCol === 0 ? 'bg-[#141c14] text-[#cfdacb] rounded' : ''}`}>
-                            {r.L}
+                          <td className="py-1.5 px-3">
+                            [{r.L === '' ? '□' : r.L} ; {r.U === '' ? '□' : r.U})
                           </td>
-                          <td className={`py-1.5 px-3 ${rIdx === calcState.statRow && calcState.statCol === 1 ? 'bg-[#141c14] text-[#cfdacb] rounded' : ''}`}>
-                            {r.U}
+                          <td className="py-1.5 px-3">
+                            <CasioCellBox value={r.L} active={rIdx === calcState.statRow && calcState.statCol === 0} size="big" />
                           </td>
-                          <td className="py-1.5 px-3 opacity-75">{Number.isFinite(mid) ? mid : '-'}</td>
-                          <td className={`py-1.5 px-3 ${rIdx === calcState.statRow && calcState.statCol === 2 ? 'bg-[#141c14] text-[#cfdacb] rounded' : ''}`}>
-                            {r.freq}
+                          <td className="py-1.5 px-3">
+                            <CasioCellBox value={r.U} active={rIdx === calcState.statRow && calcState.statCol === 1} size="big" />
+                          </td>
+                          <td className="py-1.5 px-3 opacity-75">{Number.isFinite(mid) ? mid : '—'}</td>
+                          <td className="py-1.5 px-3">
+                            <CasioCellBox value={r.freq} active={rIdx === calcState.statRow && calcState.statCol === 2} size="big" />
                           </td>
                         </tr>
                       );
@@ -1770,26 +2230,26 @@ function ClassroomBigScreen({
                 <table className="w-full text-left border-collapse text-sm sm:text-base font-bold">
                   <thead>
                     <tr className="bg-[#141c14] text-[#cfdacb]">
-                      <th className="py-1.5 px-3">STT</th>
-                      <th className="py-1.5 px-3">Giá trị (xᵢ)</th>
-                      <th className="py-1.5 px-3">Tần số (nᵢ)</th>
+                      <th className="py-1.5 px-3">#</th>
+                      <th className="py-1.5 px-3">xᵢ</th>
+                      {calcState.statFreqOn && <th className="py-1.5 px-3">Freq (nᵢ)</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {calcState.stat1VarRows.map((r, rIdx) => (
                       <tr
                         key={rIdx}
-                        className={`border-b border-[#141c14]/20 ${
-                          rIdx === calcState.statRow ? 'bg-[#141c14]/15' : ''
-                        }`}
+                        className={`border-b border-[#141c14]/20 ${rIdx === calcState.statRow ? 'bg-[#141c14]/10' : ''}`}
                       >
                         <td className="py-1.5 px-3">#{rIdx + 1}</td>
-                        <td className={`py-1.5 px-3 ${rIdx === calcState.statRow && calcState.statCol === 0 ? 'bg-[#141c14] text-[#cfdacb]' : ''}`}>
-                          {r.x}
+                        <td className="py-1.5 px-3">
+                          <CasioCellBox value={r.x} active={rIdx === calcState.statRow && calcState.statCol === 0} size="big" />
                         </td>
-                        <td className={`py-1.5 px-3 ${rIdx === calcState.statRow && calcState.statCol === 1 ? 'bg-[#141c14] text-[#cfdacb]' : ''}`}>
-                          {r.freq}
-                        </td>
+                        {calcState.statFreqOn && (
+                          <td className="py-1.5 px-3">
+                            <CasioCellBox value={r.freq} active={rIdx === calcState.statRow && calcState.statCol === 1} size="big" />
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -1834,32 +2294,82 @@ function ClassroomBigScreen({
 
         {/* 4. CHẾ ĐỘ PHƯƠNG TRÌNH & HỆ PHƯƠNG TRÌNH (EQN) */}
         {calcState.mode === 'EQN_INPUT' && (
-          <div className="flex-1 flex flex-col justify-between py-2">
-            <div className="space-y-2">
-              {getAllEqnLinesForBigScreen(calcState).map((lineLatex, idx) => (
-                <div
-                  key={idx}
-                  className={`p-2 rounded-lg ${
-                    calcState.eqnType === 'SYS' && idx === calcState.eqnRow
-                      ? 'bg-[#141c14]/15 border border-[#141c14]/35'
-                      : ''
-                  }`}
-                >
-                  <KatexScreenRenderer
-                    latex={lineLatex}
-                    isReady={katexLoaded}
-                    className="text-xl sm:text-2xl font-bold text-[#0e140e]"
-                  />
+          <div className="flex-1 flex flex-col justify-between py-2 gap-2">
+            <div className="space-y-2.5 overflow-x-auto">
+              {calcState.eqnType === 'SYS' ? (
+                Array.from({ length: calcState.eqnSize }).map((_, r) => {
+                  const vars = ['x', 'y', 'z', 't'].slice(0, calcState.eqnSize);
+                  const row = calcState.eqnMatrix[r] || ['', '', '', '', ''];
+                  return (
+                    <div
+                      key={r}
+                      className={`p-2 rounded-lg flex flex-wrap items-center gap-1.5 text-lg font-bold ${
+                        r === calcState.eqnRow ? 'bg-[#141c14]/15 border border-[#141c14]/35' : ''
+                      }`}
+                    >
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-[#141c14]/15 mr-1">PT {r + 1}</span>
+                      {vars.map((v, c) => (
+                        <React.Fragment key={c}>
+                          <CasioCellBox
+                            value={row[c]}
+                            active={r === calcState.eqnRow && c === calcState.eqnCol}
+                            size="big"
+                            onClick={() => setCalcState((p) => ({ ...p, eqnRow: r, eqnCol: c, eqnInputBuffer: '' }))}
+                          />
+                          <span className="font-serif italic pr-1">
+                            {v}
+                            {c < vars.length - 1 ? ' +' : ''}
+                          </span>
+                        </React.Fragment>
+                      ))}
+                      <span className="px-1">=</span>
+                      <CasioCellBox
+                        value={row[calcState.eqnSize]}
+                        active={r === calcState.eqnRow && calcState.eqnCol === calcState.eqnSize}
+                        size="big"
+                        onClick={() => setCalcState((p) => ({ ...p, eqnRow: r, eqnCol: calcState.eqnSize, eqnInputBuffer: '' }))}
+                      />
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="p-3 rounded-xl bg-[#141c14]/10 border border-[#141c14]/25 flex flex-wrap items-center justify-center gap-2 text-lg font-bold">
+                  {Array.from({ length: calcState.eqnSize + 1 }).map((_, c) => {
+                    const p = calcState.eqnSize - c;
+                    return (
+                      <React.Fragment key={c}>
+                        <CasioCellBox
+                          value={calcState.eqnPolyCoeffs[c]}
+                          active={c === calcState.eqnCol}
+                          size="big"
+                          onClick={() => setCalcState((prev) => ({ ...prev, eqnCol: c, eqnInputBuffer: '' }))}
+                        />
+                        {p > 0 && (
+                          <span className="font-serif italic">
+                            x{p > 1 ? <sup>{p}</sup> : null} +
+                          </span>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                  <span className="pl-1">= 0</span>
                 </div>
-              ))}
+              )}
             </div>
-            <div className="border-t border-[#141c14]/20 pt-2 text-right font-bold text-base">
-              Hệ số đang nhập:{' '}
-              <span className="px-2 py-0.5 rounded bg-[#141c14] text-[#cfdacb]">
-                {calcState.eqnInputBuffer ||
-                  (calcState.eqnType === 'SYS'
-                    ? calcState.eqnMatrix[calcState.eqnRow][calcState.eqnCol]
-                    : calcState.eqnPolyCoeffs[calcState.eqnCol])}
+            <div className="border-t border-[#141c14]/20 pt-2 flex items-center justify-between text-sm font-bold">
+              <span className="opacity-70">{isVi ? 'Bấm [=] để chuyển ô & giải' : 'Press [=] to advance & solve'}</span>
+              <span>
+                {isVi ? 'Đang nhập:' : 'Entry:'}{' '}
+                <CasioCellBox
+                  value={
+                    calcState.eqnInputBuffer ||
+                    (calcState.eqnType === 'SYS'
+                      ? calcState.eqnMatrix[calcState.eqnRow]?.[calcState.eqnCol]
+                      : calcState.eqnPolyCoeffs[calcState.eqnCol])
+                  }
+                  active
+                  size="lcd"
+                />
               </span>
             </div>
           </div>
@@ -1868,7 +2378,7 @@ function ClassroomBigScreen({
         {calcState.mode === 'EQN_RESULT' && (
           <div className="flex-1 flex flex-col justify-center gap-2.5 py-2">
             <div className="text-xs uppercase font-bold text-[#141c14]/70">
-              Tất cả nghiệm & Giá trị cực trị:
+              {isVi ? 'Tất cả nghiệm & Giá trị cực trị:' : 'Solutions:'}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {calcState.eqnSolutions.map((sol, idx) => (
@@ -1895,9 +2405,9 @@ function ClassroomBigScreen({
 
         {/* 5. CHẾ ĐỘ BẢNG GIÁ TRỊ HÀM SỐ (TABLE) */}
         {(calcState.mode === 'TABLE_F' || calcState.mode === 'TABLE_G' || calcState.mode === 'TABLE_PARAMS') && (
-          <div className="flex-1 flex flex-col justify-between py-2">
+          <div className="flex-1 flex flex-col justify-between py-2 gap-2">
             <div className="space-y-3">
-              <div className="p-2.5 rounded-lg bg-[#141c14]/10">
+              <div className={`p-2.5 rounded-lg border ${calcState.mode === 'TABLE_F' ? 'bg-[#141c14]/15 border-[#141c14]' : 'bg-[#141c14]/5 border-[#141c14]/20'}`}>
                 <KatexScreenRenderer
                   latex={`f(x) = \\displaystyle ${serializeSlotToLatex(
                     calcState.tableFSlot,
@@ -1908,7 +2418,7 @@ function ClassroomBigScreen({
                   className="text-xl sm:text-2xl font-bold"
                 />
               </div>
-              <div className="p-2.5 rounded-lg bg-[#141c14]/10">
+              <div className={`p-2.5 rounded-lg border ${calcState.mode === 'TABLE_G' ? 'bg-[#141c14]/15 border-[#141c14]' : 'bg-[#141c14]/5 border-[#141c14]/20'}`}>
                 <KatexScreenRenderer
                   latex={`g(x) = \\displaystyle ${serializeSlotToLatex(
                     calcState.tableGSlot,
@@ -1921,9 +2431,16 @@ function ClassroomBigScreen({
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[#141c14]/20 text-sm sm:text-base font-bold">
-              <div>Start: {calcState.tableParams.start}</div>
-              <div>End: {calcState.tableParams.end}</div>
-              <div>Step: {calcState.tableParams.step}</div>
+              {(['start', 'end', 'step'] as const).map((pk, idx) => {
+                const active = calcState.mode === 'TABLE_PARAMS' && calcState.tableParamIndex === idx;
+                const val = active && calcState.tableParamBuffer !== '' ? calcState.tableParamBuffer : calcState.tableParams[pk];
+                return (
+                  <div key={pk} className="flex items-center gap-2">
+                    <span className="capitalize">{pk}:</span>
+                    <CasioCellBox value={val} active={active} size="big" />
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1963,30 +2480,46 @@ function ClassroomBigScreen({
 
         {/* 6. CHẾ ĐỘ VECTƠ EDIT & CALC/SOLVE PROMPT */}
         {(calcState.mode === 'VCT_EDIT' || calcState.mode === 'CALC_PROMPT' || calcState.mode === 'SOLVE_PROMPT') && (
-          <div className="flex-1 flex flex-col justify-center items-center py-4">
+          <div className="flex-1 flex flex-col justify-center items-center py-4 gap-3">
             {calcState.mode === 'VCT_EDIT' ? (
-              <KatexScreenRenderer
-                latex={`\\mathsf{${calcState.activeVctName}} = \\begin{bmatrix} ${(calcState.vectors[
-                  calcState.activeVctName
-                ]?.coords || [])
-                  .slice(0, calcState.vectors[calcState.activeVctName]?.dim || 3)
-                  .join(' \\\\ ')} \\end{bmatrix}`}
-                isReady={katexLoaded}
-                className="text-2xl sm:text-3xl font-bold"
-              />
+              <div className="flex items-center gap-4">
+                <span className="text-2xl sm:text-3xl font-extrabold font-sans">
+                  {calcState.activeVctName} ({calcState.vectors[calcState.activeVctName]?.dim || 3}D) =
+                </span>
+                <div className="flex items-center">
+                  <div className="w-3 self-stretch border-l-3 border-t-3 border-b-3 border-[#0e140e] rounded-l-md mr-2" />
+                  <div className="flex flex-col gap-2 py-1">
+                    {(calcState.vectors[calcState.activeVctName]?.coords || ['', '', ''])
+                      .slice(0, calcState.vectors[calcState.activeVctName]?.dim || 3)
+                      .map((val, idx) => (
+                        <CasioCellBox
+                          key={idx}
+                          value={val}
+                          active={idx === calcState.vctCoordIndex}
+                          size="big"
+                          onClick={() => setCalcState((p) => ({ ...p, vctCoordIndex: idx, vctInputBuffer: '' }))}
+                        />
+                      ))}
+                  </div>
+                  <div className="w-3 self-stretch border-r-3 border-t-3 border-b-3 border-[#0e140e] rounded-r-md ml-2" />
+                </div>
+              </div>
             ) : (
-              <KatexScreenRenderer
-                latex={`${
-                  calcState.mode === 'SOLVE_PROMPT'
-                    ? '\\text{Nhập giá trị khởi tạo } x_0 = '
-                    : `\\text{Nhập biến } ${calcState.promptVars[calcState.promptVarIndex] || 'x'} = `
-                } ${
-                  calcState.promptInputBuffer ||
-                  String(calcState.memoryVars[calcState.promptVars[calcState.promptVarIndex] || 'x'] || 0)
-                }`}
-                isReady={katexLoaded}
-                className="text-2xl sm:text-3xl font-bold"
-              />
+              <div className="flex flex-col items-center gap-3">
+                <div className="text-xl sm:text-2xl font-extrabold flex items-center gap-3">
+                  <span>
+                    {calcState.mode === 'SOLVE_PROMPT'
+                      ? isVi
+                        ? 'Nhập giá trị khởi tạo x₀ ='
+                        : 'Solve for x (Init x₀) ='
+                      : `${calcState.promptVars[calcState.promptVarIndex] || 'x'} =`}
+                  </span>
+                  <CasioCellBox value={calcState.promptInputBuffer} active size="big" />
+                </div>
+                <span className="text-xs font-semibold opacity-70">
+                  {isVi ? 'Nhập số rồi bấm [=] để thực hiện' : 'Enter value then press [=]'}
+                </span>
+              </div>
             )}
           </div>
         )}
@@ -1996,10 +2529,12 @@ function ClassroomBigScreen({
       <div className="mt-4 pt-3 border-t border-white/15 flex flex-wrap items-center justify-between gap-2 text-xs text-white/80">
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 rounded bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 font-semibold">
-            Mẹo giảng dạy
+            {isVi ? 'Mẹo giảng dạy' : 'Teaching Tip'}
           </span>
           <span>
-            Giáo viên có thể click trực tiếp vào từng ô kết quả trên Màn hình lớn để đánh dấu cho học sinh chú ý.
+            {isVi
+              ? 'Bấm [SHIFT] + [MENU] để cài đặt đơn vị góc, định dạng số, ngôn ngữ EN/VI.'
+              : 'Press [SHIFT] + [MENU] to configure Angle Unit, Format, Language.'}
           </span>
         </div>
         <span className="font-bold text-amber-300">Được phát triển bởi TTK</span>
@@ -2011,6 +2546,77 @@ function ClassroomBigScreen({
 export type CasioDisplayMode = 'standalone' | 'with_blackboard';
 
 let latestPreservedCasioState: CasioState | null = null;
+
+function createInitialCasioState(): CasioState {
+  const initial = createInitialEmptyTree();
+  return {
+    mode: 'COMP',
+    rootSlot: initial.rootSlot,
+    cursor: initial.cursor,
+    resultLatex: '',
+    exactResultLatex: '',
+    decimalResultLatex: '',
+    showingDecimal: false,
+    ansValue: 0,
+    memoryVars: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, x: 0, y: 0, z: 0, M: 0 },
+    shift: false,
+    alpha: false,
+    stoMode: false,
+    angleUnit: 'D',
+    language: 'vi',
+    inputOutput: 'MathI/MathO',
+    numberFormat: { type: 'Norm1', digits: 0 },
+    fractionResult: 'd/c',
+    statFreqOn: true,
+    setupReturnMode: 'COMP',
+    setupPage: 0,
+    setupMenuIndex: 0,
+    setupSubType: '',
+    setupSubIndex: 0,
+    menuCursorIndex: 0,
+    vctOptnPage: 0,
+    undoStack: [],
+    promptVars: [],
+    promptVarIndex: 0,
+    promptInputBuffer: '',
+    eqnType: 'SYS',
+    eqnSize: 2,
+    eqnMatrix: createEmptyEqnMatrix(),
+    eqnPolyCoeffs: createEmptyPolyCoeffs(),
+    eqnRow: 0,
+    eqnCol: 0,
+    eqnInputBuffer: '',
+    eqnSolutions: [],
+    eqnSolIndex: 0,
+    tableFSlot: createSlot(),
+    tableGSlot: createSlot(),
+    tableParams: { start: '', end: '', step: '' },
+    tableParamIndex: 0,
+    tableParamBuffer: '',
+    tableRows: [],
+    tableHasG: false,
+    tableScroll: 0,
+    vectors: {
+      VctA: { dim: 3, coords: ['', '', ''], defined: false },
+      VctB: { dim: 3, coords: ['', '', ''], defined: false },
+      VctC: { dim: 2, coords: ['', '', ''], defined: false },
+      VctD: { dim: 2, coords: ['', '', ''], defined: false },
+    },
+    vctAns: { dim: 3, coords: [0, 0, 0] },
+    activeVctName: 'VctA',
+    vctCoordIndex: 0,
+    vctInputBuffer: '',
+    vctCalcSlot: createSlot(),
+    statType: 'GROUPED',
+    stat1VarRows: createEmptyStat1VarRows(),
+    statGroupedRows: createEmptyStatGroupedRows(),
+    statRow: 0,
+    statCol: 0,
+    statInputBuffer: '',
+    statResults: [],
+    statResultIndex: 0,
+  };
+}
 
 interface CasioFx580VNXInnerProps {
   onClose?: () => void;
@@ -2040,105 +2646,115 @@ function CasioFx580VNXInner({
   }, [showBigScreen, onBigScreenChange]);
 
   const [calcState, setCalcState] = useState<CasioState>(() => {
+    const base = createInitialCasioState();
     if (latestPreservedCasioState) {
-      return latestPreservedCasioState;
+      return { ...base, ...latestPreservedCasioState };
     }
-    const initial = createInitialEmptyTree();
-    return {
-      mode: 'COMP',
-      rootSlot: initial.rootSlot,
-      cursor: initial.cursor,
-      resultLatex: '',
-      exactResultLatex: '',
-      decimalResultLatex: '',
-      showingDecimal: false,
-      ansValue: 0,
-      memoryVars: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, x: 0, y: 0, z: 0, M: 0 } as Record<string, number>,
-      shift: false,
-      alpha: false,
-      stoMode: false,
-      angleUnit: 'D',
-      undoStack: [] as any[],
-      // CALC & SOLVE
-      promptVars: [] as string[],
-      promptVarIndex: 0,
-      promptInputBuffer: '',
-      // MENU 9: EQN
-      eqnType: 'SYS',
-      eqnSize: 2,
-      eqnMatrix: [
-        ['1', '1', '5', '0'],
-        ['2', '-1', '1', '0'],
-        ['0', '0', '1', '0'],
-        ['0', '0', '0', '1'],
-      ],
-      eqnPolyCoeffs: ['1', '-5', '6', '0'],
-      eqnRow: 0,
-      eqnCol: 0,
-      eqnInputBuffer: '',
-      eqnSolutions: [] as any[],
-      eqnSolIndex: 0,
-      // MENU 8: TABLE
-      tableFSlot: createSlot([createToken('x'), createStructureNode('pow')]),
-      tableGSlot: createSlot(),
-      tableParams: { start: '1', end: '5', step: '1' } as Record<string, string>,
-      tableParamIndex: 0,
-      tableParamBuffer: '',
-      tableRows: [] as any[],
-      tableHasG: false,
-      tableScroll: 0,
-      // MENU 5: VECTOR
-      vectors: {
-        VctA: { dim: 3, coords: ['1', '2', '3'] },
-        VctB: { dim: 3, coords: ['4', '5', '6'] },
-        VctC: { dim: 2, coords: ['1', '0', '0'] },
-        VctD: { dim: 2, coords: ['0', '1', '0'] },
-      } as Record<string, { dim: number; coords: string[] }>,
-      vctAns: { dim: 3, coords: [0, 0, 0] },
-      activeVctName: 'VctA',
-      vctCoordIndex: 0,
-      vctInputBuffer: '',
-      vctCalcSlot: createSlot(),
-      // MENU 6: STATISTICS
-      statType: 'GROUPED',
-      stat1VarRows: [
-        { x: '5', freq: '2' },
-        { x: '6', freq: '5' },
-        { x: '7', freq: '8' },
-        { x: '8', freq: '3' },
-        { x: '9', freq: '2' },
-      ],
-      statGroupedRows: [
-        { L: '0', U: '10', freq: '5' },
-        { L: '10', U: '20', freq: '12' },
-        { L: '20', U: '30', freq: '18' },
-        { L: '30', U: '40', freq: '10' },
-        { L: '40', U: '50', freq: '5' },
-      ],
-      statRow: 0,
-      statCol: 0,
-      statInputBuffer: '',
-      statResults: [] as any[],
-      statResultIndex: 0,
-    };
+    return base;
   });
-
-  useEffect(() => {
-    setCalcState((prev) => {
-      if (prev.tableFSlot.items[1] && prev.tableFSlot.items[1].type === 'pow' && prev.tableFSlot.items[1].slots.exp.items.length === 0) {
-        const cloned = cloneTree(prev.tableFSlot);
-        cloned.items[1].slots.exp.items.push(createToken('2'));
-        return { ...prev, tableFSlot: cloned };
-      }
-      return prev;
-    });
-  }, []);
 
   /**
    * Điều hướng D-Pad
    */
   const moveCursor = useCallback((direction: string) => {
     setCalcState((prev) => {
+      // 0A. MENU CHÍNH (Lưới Icon 5 chế độ)
+      if (prev.mode === 'MENU') {
+        const total = MENU_ITEMS.length;
+        if (direction === 'RIGHT' || direction === 'DOWN') {
+          return { ...prev, menuCursorIndex: (prev.menuCursorIndex + 1) % total };
+        }
+        if (direction === 'LEFT' || direction === 'UP') {
+          return { ...prev, menuCursorIndex: (prev.menuCursorIndex - 1 + total) % total };
+        }
+        return prev;
+      }
+
+      // 0B. SETUP MAIN (SHIFT + MENU)
+      if (prev.mode === 'SETUP_MAIN') {
+        const pages = getSetupMainItems(prev.language);
+        const curPageLen = pages[prev.setupPage].length;
+        if (direction === 'DOWN') {
+          if (prev.setupMenuIndex < curPageLen - 1) {
+            return { ...prev, setupMenuIndex: prev.setupMenuIndex + 1 };
+          }
+          const nextPage = (prev.setupPage + 1) % pages.length;
+          return { ...prev, setupPage: nextPage, setupMenuIndex: 0 };
+        }
+        if (direction === 'UP') {
+          if (prev.setupMenuIndex > 0) {
+            return { ...prev, setupMenuIndex: prev.setupMenuIndex - 1 };
+          }
+          const prevPage = (prev.setupPage - 1 + pages.length) % pages.length;
+          return { ...prev, setupPage: prevPage, setupMenuIndex: pages[prevPage].length - 1 };
+        }
+        return prev;
+      }
+
+      // 0C. SETUP SUB
+      if (prev.mode === 'SETUP_SUB') {
+        const opts = getSetupSubOptions(prev.setupSubType, prev.language);
+        if (opts.length > 0) {
+          if (direction === 'DOWN' || direction === 'RIGHT') {
+            return { ...prev, setupSubIndex: (prev.setupSubIndex + 1) % opts.length };
+          }
+          if (direction === 'UP' || direction === 'LEFT') {
+            return { ...prev, setupSubIndex: (prev.setupSubIndex - 1 + opts.length) % opts.length };
+          }
+        }
+        return prev;
+      }
+
+      // 0D. CÁC MENU CHỌN (D-Pad UP/DOWN/LEFT/RIGHT)
+      const subMenuCounts: Record<string, number> = {
+        COMP_OPTN: 4,
+        STAT_SELECT: 2,
+        STAT_OPTN: 3,
+        EQN_SELECT: 2,
+        EQN_SYS_SIZE: 3,
+        EQN_POLY_DEG: 2,
+        VCT_SELECT: 4,
+        VCT_DIM: 2,
+      };
+      if (subMenuCounts[prev.mode]) {
+        const count = subMenuCounts[prev.mode];
+        if (direction === 'DOWN' || direction === 'RIGHT') {
+          return { ...prev, menuCursorIndex: (prev.menuCursorIndex + 1) % count };
+        }
+        if (direction === 'UP' || direction === 'LEFT') {
+          return { ...prev, menuCursorIndex: (prev.menuCursorIndex - 1 + count) % count };
+        }
+        return prev;
+      }
+
+      if (prev.mode === 'VCT_OPTN') {
+        if (direction === 'DOWN') {
+          if (prev.menuCursorIndex < 3) return { ...prev, menuCursorIndex: prev.menuCursorIndex + 1 };
+          return { ...prev, vctOptnPage: prev.vctOptnPage === 0 ? 1 : 0, menuCursorIndex: 0 };
+        }
+        if (direction === 'UP') {
+          if (prev.menuCursorIndex > 0) return { ...prev, menuCursorIndex: prev.menuCursorIndex - 1 };
+          return { ...prev, vctOptnPage: prev.vctOptnPage === 0 ? 1 : 0, menuCursorIndex: 3 };
+        }
+        if (direction === 'RIGHT') {
+          return { ...prev, vctOptnPage: prev.vctOptnPage === 0 ? 1 : 0, menuCursorIndex: 0 };
+        }
+        if (direction === 'LEFT') {
+          return { ...prev, vctOptnPage: prev.vctOptnPage === 0 ? 1 : 0, menuCursorIndex: 0 };
+        }
+        return prev;
+      }
+
+      if (prev.mode === 'TABLE_PARAMS') {
+        if (direction === 'DOWN' || direction === 'RIGHT') {
+          return { ...prev, tableParamIndex: (prev.tableParamIndex + 1) % 3, tableParamBuffer: '' };
+        }
+        if (direction === 'UP' || direction === 'LEFT') {
+          return { ...prev, tableParamIndex: (prev.tableParamIndex + 2) % 3, tableParamBuffer: '' };
+        }
+        return prev;
+      }
+
       if (prev.mode === 'EQN_RESULT') {
         const total = Math.max(1, prev.eqnSolutions.length);
         if (direction === 'DOWN' || direction === 'RIGHT') {
@@ -2198,7 +2814,7 @@ function CasioFx580VNXInner({
       if (prev.mode === 'STAT_INPUT') {
         const isGrouped = prev.statType === 'GROUPED';
         const rowsCount = isGrouped ? prev.statGroupedRows.length : prev.stat1VarRows.length;
-        const colsCount = isGrouped ? 3 : 2;
+        const colsCount = isGrouped ? 3 : prev.statFreqOn ? 2 : 1;
         let r = prev.statRow;
         let c = prev.statCol;
 
@@ -2219,17 +2835,10 @@ function CasioFx580VNXInner({
             r++;
           } else if (rowsCount < 15) {
             if (isGrouped) {
-              const lastGroup = prev.statGroupedRows[prev.statGroupedRows.length - 1];
-              const lastU = Number(lastGroup?.U || 0);
-              const lastW = Number(lastGroup?.U || 10) - Number(lastGroup?.L || 0);
-              const nextW = lastW > 0 ? lastW : 10;
-              const newRows: StatGroupedRow[] = [
-                ...prev.statGroupedRows,
-                { L: String(lastU), U: String(lastU + nextW), freq: '0' },
-              ];
-              return { ...prev, statGroupedRows: newRows, statRow: r + 1, statCol: 2, statInputBuffer: '' };
+              const newRows: StatGroupedRow[] = [...prev.statGroupedRows, { L: '', U: '', freq: '' }];
+              return { ...prev, statGroupedRows: newRows, statRow: r + 1, statCol: 0, statInputBuffer: '' };
             } else {
-              const newRows: Stat1VarRow[] = [...prev.stat1VarRows, { x: '0', freq: '1' }];
+              const newRows: Stat1VarRow[] = [...prev.stat1VarRows, { x: '', freq: '' }];
               return { ...prev, stat1VarRows: newRows, statRow: r + 1, statCol: 0, statInputBuffer: '' };
             }
           }
@@ -2337,9 +2946,46 @@ function CasioFx580VNXInner({
 
     setCalcState((prev) => {
       const keyId = keyDef.id;
+      const fmtOptions = {
+        numberFormat: prev.numberFormat,
+        fractionResult: prev.fractionResult,
+      };
 
+      // Tắt/bật SHIFT & ALPHA hoạt động trên mọi màn hình
+      if (keyId === 'shift') {
+        return { ...prev, shift: !prev.shift, alpha: false };
+      }
+      if (keyId === 'alpha') {
+        return { ...prev, alpha: !prev.alpha, shift: false };
+      }
+
+      // MENU & SHIFT+MENU (SETUP)
       if (keyId === 'menu') {
-        return { ...prev, mode: prev.mode === 'MENU' ? 'COMP' : 'MENU', shift: false, alpha: false };
+        if (prev.shift) {
+          const returnMode =
+            prev.mode === 'SETUP_MAIN' || prev.mode === 'SETUP_SUB' ? prev.setupReturnMode : prev.mode;
+          return {
+            ...prev,
+            mode: 'SETUP_MAIN',
+            setupReturnMode: returnMode || 'COMP',
+            setupPage: 0,
+            setupMenuIndex: 0,
+            setupSubType: '',
+            setupSubIndex: 0,
+            shift: false,
+            alpha: false,
+          };
+        }
+        const currentMenuIdx = MENU_ITEMS.findIndex((it) =>
+          prev.mode.startsWith(it.target.split('_')[0])
+        );
+        return {
+          ...prev,
+          mode: prev.mode === 'MENU' ? 'COMP' : 'MENU',
+          menuCursorIndex: currentMenuIdx >= 0 ? currentMenuIdx : 0,
+          shift: false,
+          alpha: false,
+        };
       }
 
       if (keyId === 'on') {
@@ -2389,56 +3035,318 @@ function CasioFx580VNXInner({
         dot: '.', neg: '-', sub: '-',
       };
 
-      // 1. MENU CHÍNH
-      if (prev.mode === 'MENU') {
-        if (keyId === 'num1' || keyId === 'eq') {
-          return { ...prev, mode: 'COMP', shift: false, alpha: false };
+      // 0. SETUP (SHIFT + MENU)
+      if (prev.mode === 'SETUP_MAIN') {
+        if (keyId === 'ac') {
+          return { ...prev, mode: prev.setupReturnMode || 'COMP', shift: false, alpha: false };
         }
-        if (keyId === 'num5') {
-          return { ...prev, mode: 'VCT_SELECT', resultLatex: '', shift: false, alpha: false };
-        }
-        if (keyId === 'num6') {
-          return { ...prev, mode: 'STAT_SELECT', resultLatex: '', shift: false, alpha: false };
-        }
-        if (keyId === 'num8') {
+        const pages = getSetupMainItems(prev.language);
+        const curPageItems = pages[prev.setupPage] || pages[0];
+        let chosenIdx = -1;
+        if (keyId === 'num1') chosenIdx = 0;
+        else if (keyId === 'num2') chosenIdx = 1;
+        else if (keyId === 'num3') chosenIdx = 2;
+        else if (keyId === 'num4') chosenIdx = 3;
+        else if (keyId === 'eq') chosenIdx = prev.setupMenuIndex;
+
+        const chosenItem = chosenIdx >= 0 ? curPageItems[chosenIdx] : null;
+        if (!chosenItem) return prev;
+
+        if (chosenItem.id === 'RESET_SETUP') {
           return {
             ...prev,
-            mode: 'TABLE_F',
-            cursor: { slotId: prev.tableFSlot.id, index: prev.tableFSlot.items.length },
+            mode: prev.setupReturnMode || 'COMP',
+            angleUnit: 'D',
+            inputOutput: 'MathI/MathO',
+            numberFormat: { type: 'Norm1', digits: 0 },
+            fractionResult: 'd/c',
+            statFreqOn: true,
+            language: 'vi',
             shift: false,
             alpha: false,
           };
         }
-        if (keyId === 'num9') {
-          return { ...prev, mode: 'EQN_SELECT', shift: false, alpha: false };
+
+        const subType = chosenItem.id as CasioState['setupSubType'];
+        let initSubIdx = 0;
+        if (subType === 'IO') {
+          initSubIdx = Math.max(
+            0,
+            ['MathI/MathO', 'MathI/DecimalO', 'LineI/MathO', 'LineI/DecimalO'].indexOf(prev.inputOutput)
+          );
+        } else if (subType === 'ANGLE') {
+          initSubIdx = prev.angleUnit === 'D' ? 0 : prev.angleUnit === 'R' ? 1 : 2;
+        } else if (subType === 'FORMAT') {
+          initSubIdx = prev.numberFormat.type === 'Fix' ? 0 : prev.numberFormat.type === 'Sci' ? 1 : 2;
+        } else if (subType === 'FRAC') {
+          initSubIdx = prev.fractionResult === 'ab/c' ? 0 : 1;
+        } else if (subType === 'STAT_FREQ') {
+          initSubIdx = prev.statFreqOn ? 0 : 1;
+        } else if (subType === 'LANG') {
+          initSubIdx = prev.language === 'en' ? 0 : 1;
         }
+
+        return {
+          ...prev,
+          mode: 'SETUP_SUB',
+          setupSubType: subType,
+          setupSubIndex: initSubIdx,
+          shift: false,
+          alpha: false,
+        };
+      }
+
+      if (prev.mode === 'SETUP_SUB') {
+        if (keyId === 'ac') {
+          return { ...prev, mode: 'SETUP_MAIN', shift: false, alpha: false };
+        }
+        if (prev.setupSubType === 'FIX_DIGITS' || prev.setupSubType === 'SCI_DIGITS') {
+          const dStr = digitMap[keyId];
+          if (dStr !== undefined && /^[0-9]$/.test(dStr)) {
+            return {
+              ...prev,
+              mode: prev.setupReturnMode || 'COMP',
+              numberFormat: {
+                type: prev.setupSubType === 'FIX_DIGITS' ? 'Fix' : 'Sci',
+                digits: Number(dStr),
+              },
+              shift: false,
+              alpha: false,
+            };
+          }
+          return prev;
+        }
+
+        const opts = getSetupSubOptions(prev.setupSubType, prev.language);
+        let chosenIdx = -1;
+        if (keyId === 'num1') chosenIdx = 0;
+        else if (keyId === 'num2') chosenIdx = 1;
+        else if (keyId === 'num3') chosenIdx = 2;
+        else if (keyId === 'num4') chosenIdx = 3;
+        else if (keyId === 'eq') chosenIdx = prev.setupSubIndex;
+
+        const chosenOpt = chosenIdx >= 0 ? opts[chosenIdx] : null;
+        if (!chosenOpt) return prev;
+
+        const retMode = prev.setupReturnMode || 'COMP';
+        if (prev.setupSubType === 'IO') {
+          return { ...prev, mode: retMode, inputOutput: chosenOpt.value as CasioState['inputOutput'] };
+        }
+        if (prev.setupSubType === 'ANGLE') {
+          return { ...prev, mode: retMode, angleUnit: chosenOpt.value };
+        }
+        if (prev.setupSubType === 'FORMAT') {
+          if (chosenOpt.value === 'FIX') {
+            return { ...prev, setupSubType: 'FIX_DIGITS', setupSubIndex: 0 };
+          }
+          if (chosenOpt.value === 'SCI') {
+            return { ...prev, setupSubType: 'SCI_DIGITS', setupSubIndex: 0 };
+          }
+          return {
+            ...prev,
+            setupSubType: 'NORM_TYPE',
+            setupSubIndex: prev.numberFormat.type === 'Norm2' ? 1 : 0,
+          };
+        }
+        if (prev.setupSubType === 'NORM_TYPE') {
+          return {
+            ...prev,
+            mode: retMode,
+            numberFormat: { type: chosenOpt.value as 'Norm1' | 'Norm2', digits: 0 },
+          };
+        }
+        if (prev.setupSubType === 'FRAC') {
+          return { ...prev, mode: retMode, fractionResult: chosenOpt.value as 'ab/c' | 'd/c' };
+        }
+        if (prev.setupSubType === 'STAT_FREQ') {
+          const nextFreqOn = chosenOpt.value === 'ON';
+          return {
+            ...prev,
+            mode: retMode,
+            statFreqOn: nextFreqOn,
+            statCol: nextFreqOn ? prev.statCol : 0,
+          };
+        }
+        if (prev.setupSubType === 'LANG') {
+          return { ...prev, mode: retMode, language: chosenOpt.value as 'vi' | 'en' };
+        }
+        return prev;
+      }
+
+      // 1. MENU CHÍNH
+      if (prev.mode === 'MENU') {
+        const selectMenuTarget = (target: string) => {
+          if (target === 'COMP') {
+            return { ...prev, mode: 'COMP', menuCursorIndex: 0, shift: false, alpha: false };
+          }
+          if (target === 'VCT_SELECT') {
+            return { ...prev, mode: 'VCT_SELECT', menuCursorIndex: 0, resultLatex: '', shift: false, alpha: false };
+          }
+          if (target === 'STAT_SELECT') {
+            return { ...prev, mode: 'STAT_SELECT', menuCursorIndex: 0, resultLatex: '', shift: false, alpha: false };
+          }
+          if (target === 'TABLE_F') {
+            return {
+              ...prev,
+              mode: 'TABLE_F',
+              menuCursorIndex: 0,
+              cursor: { slotId: prev.tableFSlot.id, index: prev.tableFSlot.items.length },
+              shift: false,
+              alpha: false,
+            };
+          }
+          if (target === 'EQN_SELECT') {
+            return { ...prev, mode: 'EQN_SELECT', menuCursorIndex: 0, shift: false, alpha: false };
+          }
+          return prev;
+        };
+
+        if (keyId === 'eq') {
+          const item = MENU_ITEMS[prev.menuCursorIndex] || MENU_ITEMS[0];
+          return selectMenuTarget(item.target);
+        }
+        const matched = MENU_ITEMS.find((it) => it.key === keyId);
+        if (matched) return selectMenuTarget(matched.target);
+        if (keyId === 'ac') return { ...prev, mode: 'COMP', shift: false, alpha: false };
+        return prev;
+      }
+
+      // 1B. COMP OPTN
+      if (prev.mode === 'COMP_OPTN') {
+        if (keyId === 'ac' || keyId === 'optn') {
+          return { ...prev, mode: 'COMP', shift: false, alpha: false };
+        }
+        let chosen = -1;
+        if (keyId === 'num1') chosen = 0;
+        else if (keyId === 'num2') chosen = 1;
+        else if (keyId === 'num3') chosen = 2;
+        else if (keyId === 'num4') chosen = 3;
+        else if (keyId === 'eq') chosen = prev.menuCursorIndex;
+
+        if (chosen === 0) {
+          return {
+            ...prev,
+            mode: 'SOLVE_PROMPT',
+            promptVars: ['x'],
+            promptVarIndex: 0,
+            promptInputBuffer: '',
+            shift: false,
+            alpha: false,
+          };
+        }
+        if (chosen >= 1 && chosen <= 3) {
+          const nodeType = chosen === 1 ? 'deriv' : chosen === 2 ? 'int' : 'abs';
+          const newRoot = cloneTree(prev.rootSlot);
+          const ctx = findSlotWithContext(newRoot, prev.cursor.slotId);
+          const targetSlot = ctx ? ctx.slot : newRoot;
+          const idx = ctx ? prev.cursor.index : targetSlot.items.length;
+          const structNode = createStructureNode(nodeType);
+          targetSlot.items.splice(idx, 0, structNode);
+          const firstSlotKey = structNode.slotOrder[0];
+          return {
+            ...prev,
+            mode: 'COMP',
+            rootSlot: newRoot,
+            cursor: { slotId: structNode.slots[firstSlotKey].id, index: 0 },
+            resultLatex: '',
+            shift: false,
+            alpha: false,
+          };
+        }
+        return prev;
       }
 
       // 2. MENU 6: STATISTICS
       if (prev.mode === 'STAT_SELECT') {
-        if (keyId === 'num1') {
-          return { ...prev, mode: 'STAT_INPUT', statType: '1VAR', statRow: 0, statCol: 0, statInputBuffer: '' };
+        if (keyId === 'num1' || (keyId === 'eq' && prev.menuCursorIndex === 0)) {
+          return {
+            ...prev,
+            mode: 'STAT_INPUT',
+            statType: '1VAR',
+            stat1VarRows: createEmptyStat1VarRows(),
+            statRow: 0,
+            statCol: 0,
+            statInputBuffer: '',
+            shift: false,
+            alpha: false,
+          };
         }
-        if (keyId === 'num2') {
-          return { ...prev, mode: 'STAT_INPUT', statType: 'GROUPED', statRow: 0, statCol: 0, statInputBuffer: '' };
+        if (keyId === 'num2' || (keyId === 'eq' && prev.menuCursorIndex === 1)) {
+          return {
+            ...prev,
+            mode: 'STAT_INPUT',
+            statType: 'GROUPED',
+            statGroupedRows: createEmptyStatGroupedRows(),
+            statRow: 0,
+            statCol: 0,
+            statInputBuffer: '',
+            shift: false,
+            alpha: false,
+          };
         }
-        if (keyId === 'ac') return { ...prev, mode: 'COMP' };
+        if (keyId === 'ac') return { ...prev, mode: 'MENU', menuCursorIndex: 2 };
+        return prev;
+      }
+
+      if (prev.mode === 'STAT_OPTN') {
+        if (keyId === 'ac' || keyId === 'optn') {
+          return { ...prev, mode: 'STAT_INPUT', statInputBuffer: '' };
+        }
+        let chosen = -1;
+        if (keyId === 'num1') chosen = 0;
+        else if (keyId === 'num2') chosen = 1;
+        else if (keyId === 'num3') chosen = 2;
+        else if (keyId === 'eq') chosen = prev.menuCursorIndex;
+
+        if (chosen === 0) {
+          return {
+            ...prev,
+            mode: 'STAT_SELECT',
+            menuCursorIndex: prev.statType === 'GROUPED' ? 1 : 0,
+          };
+        }
+        if (chosen === 1) {
+          return { ...prev, mode: 'STAT_INPUT', statInputBuffer: '' };
+        }
+        if (chosen === 2) {
+          const isGrouped = prev.statType === 'GROUPED';
+          const res: any = isGrouped
+            ? CasioMathEngine.calculateGroupedStats(prev.statGroupedRows)
+            : CasioMathEngine.calculateUngroupedStats(prev.stat1VarRows, prev.statFreqOn);
+          const resultList = res.ok
+            ? res.items
+            : [{ label: '\\text{Thông báo}', exactLatex: res.messageLatex, decimalLatex: res.messageLatex }];
+          return {
+            ...prev,
+            mode: 'STAT_RESULT',
+            statResults: resultList,
+            statResultIndex: 0,
+            showingDecimal: prev.inputOutput.endsWith('DecimalO'),
+            shift: false,
+            alpha: false,
+          };
+        }
         return prev;
       }
 
       if (prev.mode === 'STAT_INPUT') {
         const isGrouped = prev.statType === 'GROUPED';
-        const colKeys = isGrouped ? ['L', 'U', 'freq'] : ['x', 'freq'];
-        const activeColKey = colKeys[prev.statCol] || colKeys[0];
+        const colKeys = isGrouped ? ['L', 'U', 'freq'] : prev.statFreqOn ? ['x', 'freq'] : ['x'];
+        const safeCol = Math.min(prev.statCol, colKeys.length - 1);
+        const activeColKey = colKeys[safeCol] || colKeys[0];
 
         if (keyId === 'ac') {
-          return { ...prev, mode: 'STAT_SELECT', statInputBuffer: '' };
+          return { ...prev, mode: 'STAT_SELECT', menuCursorIndex: isGrouped ? 1 : 0, statInputBuffer: '' };
         }
 
-        if (keyId === 'optn' || keyId === 'calc' || (prev.shift && keyId === 'num1')) {
+        if (keyId === 'optn') {
+          return { ...prev, mode: 'STAT_OPTN', menuCursorIndex: 2, shift: false, alpha: false };
+        }
+
+        if (keyId === 'calc' || (prev.shift && keyId === 'num1')) {
           const res: any = isGrouped
             ? CasioMathEngine.calculateGroupedStats(prev.statGroupedRows)
-            : CasioMathEngine.calculateUngroupedStats(prev.stat1VarRows);
+            : CasioMathEngine.calculateUngroupedStats(prev.stat1VarRows, prev.statFreqOn);
 
           const resultList = res.ok
             ? res.items
@@ -2449,7 +3357,7 @@ function CasioFx580VNXInner({
             mode: 'STAT_RESULT',
             statResults: resultList,
             statResultIndex: 0,
-            showingDecimal: false,
+            showingDecimal: prev.inputOutput.endsWith('DecimalO'),
             shift: false,
             alpha: false,
           };
@@ -2467,9 +3375,11 @@ function CasioFx580VNXInner({
                 shift: false,
               };
             }
-            const nextBuf = prev.statInputBuffer.slice(0, -1);
+            const curVal = String((prev.statGroupedRows[prev.statRow] as any)?.[activeColKey] ?? '');
+            const src = prev.statInputBuffer !== '' ? prev.statInputBuffer : curVal;
+            const nextBuf = src.slice(0, -1);
             const nextRows = prev.statGroupedRows.map((r, idx) =>
-              idx === prev.statRow ? { ...r, [activeColKey]: nextBuf || '0' } : r
+              idx === prev.statRow ? { ...r, [activeColKey]: nextBuf } : r
             );
             return { ...prev, statInputBuffer: nextBuf, statGroupedRows: nextRows };
           } else {
@@ -2483,9 +3393,11 @@ function CasioFx580VNXInner({
                 shift: false,
               };
             }
-            const nextBuf = prev.statInputBuffer.slice(0, -1);
+            const curVal = String((prev.stat1VarRows[prev.statRow] as any)?.[activeColKey] ?? '');
+            const src = prev.statInputBuffer !== '' ? prev.statInputBuffer : curVal;
+            const nextBuf = src.slice(0, -1);
             const nextRows = prev.stat1VarRows.map((r, idx) =>
-              idx === prev.statRow ? { ...r, [activeColKey]: nextBuf || '0' } : r
+              idx === prev.statRow ? { ...r, [activeColKey]: nextBuf } : r
             );
             return { ...prev, statInputBuffer: nextBuf, stat1VarRows: nextRows };
           }
@@ -2509,25 +3421,21 @@ function CasioFx580VNXInner({
         if (keyId === 'eq') {
           const colsCount = colKeys.length;
           const rowsLength = isGrouped ? prev.statGroupedRows.length : prev.stat1VarRows.length;
-          if (prev.statCol < colsCount - 1) {
-            return { ...prev, statCol: prev.statCol + 1, statInputBuffer: '' };
+          if (safeCol < colsCount - 1) {
+            return { ...prev, statCol: safeCol + 1, statInputBuffer: '' };
           }
           if (prev.statRow < rowsLength - 1) {
             return { ...prev, statRow: prev.statRow + 1, statCol: 0, statInputBuffer: '' };
           }
           if (rowsLength < 15) {
             if (isGrouped) {
-              const lastGroup = prev.statGroupedRows[prev.statGroupedRows.length - 1];
-              const lastU = Number(lastGroup?.U || 0);
-              const lastW = Number(lastGroup?.U || 10) - Number(lastGroup?.L || 0);
-              const stepW = lastW > 0 ? lastW : 10;
               const nextRows: StatGroupedRow[] = [
                 ...prev.statGroupedRows,
-                { L: String(lastU), U: String(lastU + stepW), freq: '0' },
+                { L: '', U: '', freq: '' },
               ];
-              return { ...prev, statGroupedRows: nextRows, statRow: prev.statRow + 1, statCol: 2, statInputBuffer: '' };
+              return { ...prev, statGroupedRows: nextRows, statRow: prev.statRow + 1, statCol: 0, statInputBuffer: '' };
             } else {
-              const nextRows: Stat1VarRow[] = [...prev.stat1VarRows, { x: '0', freq: '1' }];
+              const nextRows: Stat1VarRow[] = [...prev.stat1VarRows, { x: '', freq: '' }];
               return { ...prev, stat1VarRows: nextRows, statRow: prev.statRow + 1, statCol: 0, statInputBuffer: '' };
             }
           }
@@ -2537,8 +3445,11 @@ function CasioFx580VNXInner({
       }
 
       if (prev.mode === 'STAT_RESULT') {
-        if (keyId === 'ac' || keyId === 'optn') {
+        if (keyId === 'ac') {
           return { ...prev, mode: 'STAT_INPUT', statInputBuffer: '' };
+        }
+        if (keyId === 'optn') {
+          return { ...prev, mode: 'STAT_OPTN', menuCursorIndex: 1 };
         }
         if (keyId === 'eq') {
           const total = Math.max(1, prev.statResults.length);
@@ -2550,8 +3461,13 @@ function CasioFx580VNXInner({
       // 3. MENU 5: VECTOR
       if (prev.mode === 'VCT_SELECT') {
         const vMap: Record<string, string> = { num1: 'VctA', num2: 'VctB', num3: 'VctC', num4: 'VctD' };
-        if (vMap[keyId]) {
-          return { ...prev, mode: 'VCT_DIM', activeVctName: vMap[keyId] };
+        let selectedVct = vMap[keyId];
+        if (keyId === 'eq') {
+          selectedVct = ['VctA', 'VctB', 'VctC', 'VctD'][prev.menuCursorIndex] || 'VctA';
+        }
+        if (selectedVct) {
+          const vDim = prev.vectors[selectedVct]?.dim === 2 ? 0 : 1;
+          return { ...prev, mode: 'VCT_DIM', activeVctName: selectedVct, menuCursorIndex: vDim };
         }
         if (keyId === 'ac' || keyId === 'optn') {
           return {
@@ -2564,24 +3480,40 @@ function CasioFx580VNXInner({
       }
 
       if (prev.mode === 'VCT_DIM') {
-        if (keyId === 'num2' || keyId === 'num3') {
-          const dim = keyId === 'num2' ? 2 : 3;
-          const curV = prev.vectors[prev.activeVctName];
+        let dim = 0;
+        if (keyId === 'num2') dim = 2;
+        else if (keyId === 'num3') dim = 3;
+        else if (keyId === 'eq') dim = prev.menuCursorIndex === 0 ? 2 : 3;
+
+        if (dim === 2 || dim === 3) {
           return {
             ...prev,
             mode: 'VCT_EDIT',
-            vectors: { ...prev.vectors, [prev.activeVctName]: { ...curV, dim } },
+            vectors: {
+              ...prev.vectors,
+              [prev.activeVctName]: { dim, coords: ['', '', ''], defined: true },
+            },
             vctCoordIndex: 0,
             vctInputBuffer: '',
+            menuCursorIndex: 0,
           };
         }
-        if (keyId === 'ac') return { ...prev, mode: 'VCT_SELECT' };
+        if (keyId === 'ac') return { ...prev, mode: 'VCT_SELECT', menuCursorIndex: 0 };
         return prev;
       }
 
       if (prev.mode === 'VCT_EDIT') {
         const curV = prev.vectors[prev.activeVctName];
-        if (keyId === 'ac' || keyId === 'optn') {
+        if (keyId === 'optn') {
+          return {
+            ...prev,
+            mode: 'VCT_OPTN',
+            vctOptnPage: 0,
+            menuCursorIndex: 0,
+            vctInputBuffer: '',
+          };
+        }
+        if (keyId === 'ac') {
           return {
             ...prev,
             mode: 'VCT_CALC',
@@ -2590,13 +3522,15 @@ function CasioFx580VNXInner({
           };
         }
         if (keyId === 'del') {
-          const nextBuf = prev.vctInputBuffer.slice(0, -1);
+          const curVal = curV.coords[prev.vctCoordIndex] ?? '';
+          const src = prev.vctInputBuffer !== '' ? prev.vctInputBuffer : curVal;
+          const nextBuf = src.slice(0, -1);
           const nextCoords = [...curV.coords];
-          nextCoords[prev.vctCoordIndex] = nextBuf || '0';
+          nextCoords[prev.vctCoordIndex] = nextBuf;
           return {
             ...prev,
             vctInputBuffer: nextBuf,
-            vectors: { ...prev.vectors, [prev.activeVctName]: { ...curV, coords: nextCoords } },
+            vectors: { ...prev.vectors, [prev.activeVctName]: { ...curV, coords: nextCoords, defined: true } },
           };
         }
         if (digitMap[keyId] !== undefined) {
@@ -2606,7 +3540,7 @@ function CasioFx580VNXInner({
           return {
             ...prev,
             vctInputBuffer: nextBuf,
-            vectors: { ...prev.vectors, [prev.activeVctName]: { ...curV, coords: nextCoords } },
+            vectors: { ...prev.vectors, [prev.activeVctName]: { ...curV, coords: nextCoords, defined: true } },
           };
         }
         if (keyId === 'eq') {
@@ -2624,22 +3558,14 @@ function CasioFx580VNXInner({
       }
 
       if (prev.mode === 'VCT_OPTN') {
-        if (keyId === 'num1') return { ...prev, mode: 'VCT_SELECT' };
-        if (keyId === 'num2') return { ...prev, mode: 'VCT_EDIT', vctCoordIndex: 0, vctInputBuffer: '' };
-        const insertTokenMap: Record<string, string> = {
-          num3: '\\text{VctA}',
-          num4: '\\text{VctB}',
-          num5: '\\text{VctC}',
-          num6: '\\text{VctD}',
-          num7: '\\boldsymbol{\\cdot}',
-          num8: '\\text{Angle}(',
-          ans: '\\text{VctAns}',
-        };
-        if (insertTokenMap[keyId]) {
+        if (keyId === 'ac' || keyId === 'optn') {
+          return { ...prev, mode: 'VCT_CALC' };
+        }
+        if (keyId === 'ans') {
           const newCalcSlot = cloneTree(prev.vctCalcSlot);
           const ctx = findSlotWithContext(newCalcSlot, prev.cursor.slotId);
           const curSlot = ctx ? ctx.slot : newCalcSlot;
-          curSlot.items.splice(prev.cursor.index, 0, createToken(insertTokenMap[keyId]));
+          curSlot.items.splice(prev.cursor.index, 0, createToken('\\text{VctAns}'));
           return {
             ...prev,
             mode: 'VCT_CALC',
@@ -2647,47 +3573,125 @@ function CasioFx580VNXInner({
             cursor: { slotId: curSlot.id, index: prev.cursor.index + 1 },
           };
         }
-        if (keyId === 'ac' || keyId === 'optn') return { ...prev, mode: 'VCT_CALC' };
+
+        const insertVctToken = (latexTok: string) => {
+          const newCalcSlot = cloneTree(prev.vctCalcSlot);
+          const ctx = findSlotWithContext(newCalcSlot, prev.cursor.slotId);
+          const curSlot = ctx ? ctx.slot : newCalcSlot;
+          curSlot.items.splice(prev.cursor.index, 0, createToken(latexTok));
+          return {
+            ...prev,
+            mode: 'VCT_CALC',
+            vctCalcSlot: newCalcSlot,
+            cursor: { slotId: curSlot.id, index: prev.cursor.index + 1 },
+          };
+        };
+
+        // Phím tắt 1..4 theo trang hiện tại hoặc 5..8 trực tiếp
+        let chosenSlotIdx = -1;
+        if (keyId === 'num1') chosenSlotIdx = 0;
+        else if (keyId === 'num2') chosenSlotIdx = 1;
+        else if (keyId === 'num3') chosenSlotIdx = 2;
+        else if (keyId === 'num4') chosenSlotIdx = 3;
+        else if (keyId === 'num5') return insertVctToken('\\text{VctC}');
+        else if (keyId === 'num6') return insertVctToken('\\text{VctD}');
+        else if (keyId === 'num7') return insertVctToken('\\boldsymbol{\\cdot}');
+        else if (keyId === 'num8') return insertVctToken('\\text{Angle}(');
+        else if (keyId === 'eq') chosenSlotIdx = prev.menuCursorIndex;
+
+        if (prev.vctOptnPage === 0) {
+          if (chosenSlotIdx === 0) return { ...prev, mode: 'VCT_SELECT', menuCursorIndex: 0 };
+          if (chosenSlotIdx === 1) return { ...prev, mode: 'VCT_EDIT', vctCoordIndex: 0, vctInputBuffer: '' };
+          if (chosenSlotIdx === 2) return insertVctToken('\\text{VctA}');
+          if (chosenSlotIdx === 3) return insertVctToken('\\text{VctB}');
+        } else {
+          if (chosenSlotIdx === 0) return insertVctToken('\\text{VctC}');
+          if (chosenSlotIdx === 1) return insertVctToken('\\text{VctD}');
+          if (chosenSlotIdx === 2) return insertVctToken('\\boldsymbol{\\cdot}');
+          if (chosenSlotIdx === 3) return insertVctToken('\\text{Angle}(');
+        }
         return prev;
       }
 
       // 4. MENU 9: EQN
       if (prev.mode === 'EQN_SELECT') {
-        if (keyId === 'num1') return { ...prev, mode: 'EQN_SYS_SIZE', eqnType: 'SYS' };
-        if (keyId === 'num2') return { ...prev, mode: 'EQN_POLY_DEG', eqnType: 'POLY' };
-        if (keyId === 'ac') return { ...prev, mode: 'COMP' };
+        if (keyId === 'num1' || (keyId === 'eq' && prev.menuCursorIndex === 0)) {
+          return { ...prev, mode: 'EQN_SYS_SIZE', eqnType: 'SYS', menuCursorIndex: 0 };
+        }
+        if (keyId === 'num2' || (keyId === 'eq' && prev.menuCursorIndex === 1)) {
+          return { ...prev, mode: 'EQN_POLY_DEG', eqnType: 'POLY', menuCursorIndex: 0 };
+        }
+        if (keyId === 'ac') return { ...prev, mode: 'MENU', menuCursorIndex: 4 };
         return prev;
       }
 
       if (prev.mode === 'EQN_SYS_SIZE') {
+        let sz = 0;
         if (['num2', 'num3', 'num4'].includes(keyId)) {
-          const sz = parseInt(digitMap[keyId], 10);
-          return { ...prev, mode: 'EQN_INPUT', eqnSize: sz, eqnRow: 0, eqnCol: 0, eqnInputBuffer: '' };
+          sz = parseInt(digitMap[keyId], 10);
+        } else if (keyId === 'eq') {
+          sz = [2, 3, 4][prev.menuCursorIndex] || 2;
         }
-        if (keyId === 'ac') return { ...prev, mode: 'EQN_SELECT' };
+        if (sz >= 2 && sz <= 4) {
+          return {
+            ...prev,
+            mode: 'EQN_INPUT',
+            eqnSize: sz,
+            eqnMatrix: createEmptyEqnMatrix(),
+            eqnRow: 0,
+            eqnCol: 0,
+            eqnInputBuffer: '',
+          };
+        }
+        if (keyId === 'ac') return { ...prev, mode: 'EQN_SELECT', menuCursorIndex: 0 };
         return prev;
       }
 
       if (prev.mode === 'EQN_POLY_DEG') {
+        let deg = 0;
         if (['num2', 'num3'].includes(keyId)) {
-          const deg = parseInt(digitMap[keyId], 10);
-          return { ...prev, mode: 'EQN_INPUT', eqnSize: deg, eqnRow: 0, eqnCol: 0, eqnInputBuffer: '' };
+          deg = parseInt(digitMap[keyId], 10);
+        } else if (keyId === 'eq') {
+          deg = prev.menuCursorIndex === 1 ? 3 : 2;
         }
-        if (keyId === 'ac') return { ...prev, mode: 'EQN_SELECT' };
+        if (deg === 2 || deg === 3) {
+          return {
+            ...prev,
+            mode: 'EQN_INPUT',
+            eqnSize: deg,
+            eqnPolyCoeffs: createEmptyPolyCoeffs(),
+            eqnRow: 0,
+            eqnCol: 0,
+            eqnInputBuffer: '',
+          };
+        }
+        if (keyId === 'ac') return { ...prev, mode: 'EQN_SELECT', menuCursorIndex: 1 };
         return prev;
       }
 
       if (prev.mode === 'EQN_INPUT') {
-        if (keyId === 'ac') return { ...prev, mode: 'EQN_SELECT', eqnInputBuffer: '' };
+        if (keyId === 'ac') {
+          return {
+            ...prev,
+            mode: 'EQN_SELECT',
+            menuCursorIndex: prev.eqnType === 'POLY' ? 1 : 0,
+            eqnInputBuffer: '',
+          };
+        }
         if (keyId === 'del') {
-          const nextBuf = prev.eqnInputBuffer.slice(0, -1);
           if (prev.eqnType === 'SYS') {
+            const curVal = String(prev.eqnMatrix[prev.eqnRow]?.[prev.eqnCol] ?? '');
+            const src = prev.eqnInputBuffer !== '' ? prev.eqnInputBuffer : curVal;
+            const nextBuf = src.slice(0, -1);
             const mat = prev.eqnMatrix.map((r) => [...r]);
-            mat[prev.eqnRow][prev.eqnCol] = nextBuf || '0';
+            mat[prev.eqnRow][prev.eqnCol] = nextBuf;
             return { ...prev, eqnInputBuffer: nextBuf, eqnMatrix: mat };
           } else {
+            const curVal = String(prev.eqnPolyCoeffs[prev.eqnCol] ?? '');
+            const src = prev.eqnInputBuffer !== '' ? prev.eqnInputBuffer : curVal;
+            const nextBuf = src.slice(0, -1);
             const cfs = [...prev.eqnPolyCoeffs];
-            cfs[prev.eqnCol] = nextBuf || '0';
+            cfs[prev.eqnCol] = nextBuf;
             return { ...prev, eqnInputBuffer: nextBuf, eqnPolyCoeffs: cfs };
           }
         }
@@ -2721,7 +3725,13 @@ function CasioFx580VNXInner({
             const solList = res.ok
               ? res.solutions
               : [{ label: '\\text{KL}', exactLatex: res.messageLatex, decimalLatex: res.messageLatex }];
-            return { ...prev, mode: 'EQN_RESULT', eqnSolutions: solList, eqnSolIndex: 0, showingDecimal: false };
+            return {
+              ...prev,
+              mode: 'EQN_RESULT',
+              eqnSolutions: solList,
+              eqnSolIndex: 0,
+              showingDecimal: prev.inputOutput.endsWith('DecimalO'),
+            };
           } else {
             const cols = prev.eqnSize + 1;
             if (prev.eqnCol < cols - 1) {
@@ -2731,7 +3741,13 @@ function CasioFx580VNXInner({
             const solList = res.ok
               ? res.solutions
               : [{ label: '\\text{KL}', exactLatex: res.messageLatex, decimalLatex: res.messageLatex }];
-            return { ...prev, mode: 'EQN_RESULT', eqnSolutions: solList, eqnSolIndex: 0, showingDecimal: false };
+            return {
+              ...prev,
+              mode: 'EQN_RESULT',
+              eqnSolutions: solList,
+              eqnSolIndex: 0,
+              showingDecimal: prev.inputOutput.endsWith('DecimalO'),
+            };
           }
         }
         return prev;
@@ -2762,16 +3778,25 @@ function CasioFx580VNXInner({
           const updatedMem = { ...prev.memoryVars, [currentVar]: Number.isFinite(valNum) ? valNum : 0 };
 
           if (prev.mode === 'SOLVE_PROMPT') {
-            const solved = CasioMathEngine.solveSingleVariableEquation(prev.rootSlot, updatedMem.x, prev.angleUnit, updatedMem);
+            const solved = CasioMathEngine.solveSingleVariableEquation(
+              prev.rootSlot,
+              updatedMem.x,
+              prev.angleUnit,
+              updatedMem,
+              fmtOptions
+            );
             if (solved.ok) {
+              const preferDec = prev.inputOutput.endsWith('DecimalO');
+              const exactOut = `x = ${solved.exactLatex},\\; L-R = 0`;
+              const decOut = `x = ${solved.decimalLatex},\\; L-R = 0`;
               return {
                 ...prev,
                 mode: 'COMP',
                 memoryVars: { ...updatedMem, x: solved.root },
-                exactResultLatex: `x = ${solved.exactLatex},\\; L-R = 0`,
-                decimalResultLatex: `x = ${solved.decimalLatex},\\; L-R = 0`,
-                resultLatex: `x = ${solved.exactLatex},\\; L-R = 0`,
-                showingDecimal: false,
+                exactResultLatex: exactOut,
+                decimalResultLatex: decOut,
+                resultLatex: preferDec ? decOut : exactOut,
+                showingDecimal: preferDec,
                 promptInputBuffer: '',
               };
             }
@@ -2781,8 +3806,9 @@ function CasioFx580VNXInner({
           if (prev.promptVarIndex < prev.promptVars.length - 1) {
             return { ...prev, memoryVars: updatedMem, promptVarIndex: prev.promptVarIndex + 1, promptInputBuffer: '' };
           }
-          const evalRes = CasioMathEngine.evaluateCompTree(prev.rootSlot, prev.angleUnit, updatedMem);
+          const evalRes = CasioMathEngine.evaluateCompTree(prev.rootSlot, prev.angleUnit, updatedMem, fmtOptions);
           if (evalRes.ok) {
+            const preferDec = prev.inputOutput.endsWith('DecimalO');
             return {
               ...prev,
               mode: 'COMP',
@@ -2790,8 +3816,8 @@ function CasioFx580VNXInner({
               ansValue: evalRes.value,
               exactResultLatex: evalRes.exactLatex,
               decimalResultLatex: evalRes.decimalLatex,
-              resultLatex: evalRes.exactLatex,
-              showingDecimal: false,
+              resultLatex: preferDec ? evalRes.decimalLatex : evalRes.exactLatex,
+              showingDecimal: preferDec,
               promptInputBuffer: '',
             };
           }
@@ -2812,11 +3838,13 @@ function CasioFx580VNXInner({
           };
         }
         if (keyId === 'del') {
-          const nextBuf = prev.tableParamBuffer.slice(0, -1);
+          const curVal = prev.tableParams[curKey] ?? '';
+          const src = prev.tableParamBuffer !== '' ? prev.tableParamBuffer : curVal;
+          const nextBuf = src.slice(0, -1);
           return {
             ...prev,
             tableParamBuffer: nextBuf,
-            tableParams: { ...prev.tableParams, [curKey]: nextBuf || '0' },
+            tableParams: { ...prev.tableParams, [curKey]: nextBuf },
           };
         }
         if (digitMap[keyId] !== undefined) {
@@ -2830,6 +3858,19 @@ function CasioFx580VNXInner({
         if (keyId === 'eq') {
           if (prev.tableParamIndex < 2) {
             return { ...prev, tableParamIndex: prev.tableParamIndex + 1, tableParamBuffer: '' };
+          }
+          if (
+            prev.tableParams.start === '' ||
+            prev.tableParams.end === '' ||
+            prev.tableParams.step === ''
+          ) {
+            return {
+              ...prev,
+              mode: 'TABLE_VIEW',
+              tableRows: [{ xLatex: '-', fxLatex: '\\text{Range ERROR}', gxLatex: '' }],
+              tableHasG: false,
+              tableScroll: 0,
+            };
           }
           const s = Number(prev.tableParams.start);
           const e = Number(prev.tableParams.end);
@@ -2846,7 +3887,13 @@ function CasioFx580VNXInner({
           if (tb.ok) {
             return { ...prev, mode: 'TABLE_VIEW', tableRows: tb.rows, tableHasG: tb.hasG, tableScroll: 0 };
           }
-          return { ...prev, mode: 'TABLE_VIEW', tableRows: [{ xLatex: '-', fxLatex: tb.errorLatex, gxLatex: '' }], tableHasG: false, tableScroll: 0 };
+          return {
+            ...prev,
+            mode: 'TABLE_VIEW',
+            tableRows: [{ xLatex: '-', fxLatex: tb.errorLatex, gxLatex: '' }],
+            tableHasG: false,
+            tableScroll: 0,
+          };
         }
         return prev;
       }
@@ -2863,36 +3910,59 @@ function CasioFx580VNXInner({
       }
 
       // 7. CHẾ ĐỘ SOẠN THẢO BIỂU THỨC (COMP, TABLE_F, TABLE_G, VCT_CALC)
-      if (keyId === 'shift') return { ...prev, shift: !prev.shift, alpha: false };
-      if (keyId === 'alpha') return { ...prev, alpha: !prev.alpha, shift: false };
-
       if (prev.mode === 'VCT_CALC' && keyId === 'optn' && !prev.shift) {
-        return { ...prev, mode: 'VCT_OPTN', shift: false, alpha: false };
+        return { ...prev, mode: 'VCT_OPTN', vctOptnPage: 0, menuCursorIndex: 0, shift: false, alpha: false };
       }
 
-      if (prev.mode === 'COMP' && keyId === 'calc' && !prev.shift && !prev.alpha) {
-        const vars = CasioMathEngine.extractVariablesFromTree(prev.rootSlot);
-        const targetVars = vars.length > 0 ? vars : ['x'];
-        return { ...prev, mode: 'CALC_PROMPT', promptVars: targetVars, promptVarIndex: 0, promptInputBuffer: '' };
+      if (prev.mode === 'COMP' && keyId === 'optn' && !prev.shift && !prev.alpha) {
+        return { ...prev, mode: 'COMP_OPTN', menuCursorIndex: 0, shift: false, alpha: false };
       }
 
-      if (prev.mode === 'COMP' && keyId === 'optn' && prev.shift) {
-        return { ...prev, mode: 'SOLVE_PROMPT', promptVars: ['x'], promptVarIndex: 0, promptInputBuffer: '', shift: false };
+      if (prev.mode === 'COMP' && keyId === 'calc') {
+        if (prev.shift) {
+          return {
+            ...prev,
+            mode: 'SOLVE_PROMPT',
+            promptVars: ['x'],
+            promptVarIndex: 0,
+            promptInputBuffer: '',
+            shift: false,
+            alpha: false,
+          };
+        }
+        if (!prev.alpha) {
+          const vars = CasioMathEngine.extractVariablesFromTree(prev.rootSlot);
+          const targetVars = vars.length > 0 ? vars : ['x'];
+          return {
+            ...prev,
+            mode: 'CALC_PROMPT',
+            promptVars: targetVars,
+            promptVarIndex: 0,
+            promptInputBuffer: '',
+          };
+        }
       }
 
       if (prev.stoMode && keyDef.alphaAction && keyDef.alphaAction.type === 'token') {
         const varName = keyDef.alphaAction.latex;
         if (['A', 'B', 'C', 'D', 'E', 'F', 'x', 'y', 'z', 'M'].includes(varName)) {
-          const evalRes = CasioMathEngine.evaluateCompTree(prev.rootSlot, prev.angleUnit, { ...prev.memoryVars, Ans: prev.ansValue });
+          const evalRes = CasioMathEngine.evaluateCompTree(
+            prev.rootSlot,
+            prev.angleUnit,
+            { ...prev.memoryVars, Ans: prev.ansValue },
+            fmtOptions
+          );
           const valToStore = evalRes.ok ? evalRes.value : prev.ansValue;
+          const exactStr = `${varName} = ${CasioMathEngine.formatNumberToLatex(valToStore, true, fmtOptions)}`;
+          const decStr = `${varName} = ${CasioMathEngine.formatNumberToLatex(valToStore, false, fmtOptions)}`;
           return {
             ...prev,
             stoMode: false,
             ansValue: valToStore,
             memoryVars: { ...prev.memoryVars, [varName]: valToStore },
-            exactResultLatex: `${varName} = ${CasioMathEngine.formatNumberToLatex(valToStore, true)}`,
-            decimalResultLatex: `${varName} = ${CasioMathEngine.formatNumberToLatex(valToStore, false)}`,
-            resultLatex: `${varName} = ${CasioMathEngine.formatNumberToLatex(valToStore, true)}`,
+            exactResultLatex: exactStr,
+            decimalResultLatex: decStr,
+            resultLatex: prev.inputOutput.endsWith('DecimalO') ? decStr : exactStr,
           };
         }
       }
@@ -2936,22 +4006,38 @@ function CasioFx580VNXInner({
             ...prev,
             mode: 'TABLE_G',
             cursor: { slotId: prev.tableGSlot.id, index: prev.tableGSlot.items.length },
+            shift: false,
+            alpha: false,
           };
         }
         if (prev.mode === 'TABLE_G') {
-          return { ...prev, mode: 'TABLE_PARAMS', tableParamIndex: 0, tableParamBuffer: '' };
+          return {
+            ...prev,
+            mode: 'TABLE_PARAMS',
+            tableParamIndex: 0,
+            tableParamBuffer: '',
+            shift: false,
+            alpha: false,
+          };
         }
         if (prev.mode === 'VCT_CALC') {
-          const vRes = CasioMathEngine.evaluateVectorExpression(prev.vctCalcSlot, prev.vectors, prev.vctAns, prev.angleUnit);
+          const vRes = CasioMathEngine.evaluateVectorExpression(
+            prev.vctCalcSlot,
+            prev.vectors,
+            prev.vctAns,
+            prev.angleUnit,
+            fmtOptions
+          );
           if (vRes.ok) {
+            const preferDec = prev.shift ? !prev.inputOutput.endsWith('DecimalO') : prev.inputOutput.endsWith('DecimalO');
             return {
               ...prev,
               vctAns: vRes.kind === 'vector' ? { dim: vRes.vec.length, coords: vRes.vec } : prev.vctAns,
               ansValue: vRes.kind === 'scalar' ? vRes.value : prev.ansValue,
               exactResultLatex: vRes.exactLatex,
               decimalResultLatex: vRes.decimalLatex,
-              resultLatex: prev.shift ? vRes.decimalLatex : vRes.exactLatex,
-              showingDecimal: Boolean(prev.shift),
+              resultLatex: preferDec ? vRes.decimalLatex : vRes.exactLatex,
+              showingDecimal: preferDec,
               shift: false,
               alpha: false,
             };
@@ -2959,12 +4045,15 @@ function CasioFx580VNXInner({
           return { ...prev, resultLatex: vRes.errorLatex, shift: false, alpha: false };
         }
 
-        const evalRes = CasioMathEngine.evaluateCompTree(prev.rootSlot, prev.angleUnit, {
-          ...prev.memoryVars,
-          Ans: prev.ansValue,
-        });
+        const evalRes = CasioMathEngine.evaluateCompTree(
+          prev.rootSlot,
+          prev.angleUnit,
+          { ...prev.memoryVars, Ans: prev.ansValue },
+          fmtOptions
+        );
         if (evalRes.ok) {
-          const preferDec = Boolean(prev.shift);
+          const baseDec = prev.inputOutput.endsWith('DecimalO');
+          const preferDec = prev.shift ? !baseDec : baseDec;
           return {
             ...prev,
             ansValue: evalRes.value,
@@ -3377,9 +4466,9 @@ function CasioFx580VNXInner({
                       background: 'linear-gradient(180deg, #c6d1c3 0%, #bdcab9 60%, #b3c0af 100%)',
                     }}
                   >
-                    {/* Thanh trạng thái */}
-                    <div className="relative z-10 flex items-center justify-between border-b border-[#141c14]/20 pb-[2px] text-[9.5px] text-[#141c14]">
-                      <div className="flex items-center space-x-1.5">
+                    {/* Thanh trạng thái Casio chuẩn */}
+                    <div className="relative z-10 flex items-center justify-between border-b border-[#141c14]/20 pb-[2px] text-[9px] text-[#141c14]">
+                      <div className="flex items-center space-x-1">
                         <span
                           className={`px-[3px] py-[0.5px] rounded-[2px] transition font-bold ${
                             calcState.shift ? 'bg-[#141c14] text-[#c8d3c5]' : 'bg-[#141c14]/10 text-[#141c14]/35'
@@ -3400,13 +4489,22 @@ function CasioFx580VNXInner({
                           </span>
                         )}
                         <span className="px-[3px] py-[0.5px] border border-[#141c14]/60 rounded-[2px] leading-none font-semibold">
-                          √□
+                          {calcState.inputOutput.startsWith('MathI') ? '√□' : 'Line'}
                         </span>
                         <span className="px-[3.5px] py-[0.5px] bg-[#141c14] text-[#c8d3c5] rounded-[2px] font-bold">
                           {calcState.angleUnit}
                         </span>
+                        {(calcState.numberFormat.type === 'Fix' || calcState.numberFormat.type === 'Sci') && (
+                          <span className="px-[3px] py-[0.5px] bg-[#141c14] text-[#c8d3c5] rounded-[2px] font-bold uppercase">
+                            {calcState.numberFormat.type}
+                          </span>
+                        )}
                         <span className="opacity-85 pl-0.5 font-semibold">
-                          {calcState.mode.startsWith('EQN')
+                          {calcState.mode.startsWith('SETUP')
+                            ? 'SETUP'
+                            : calcState.mode === 'MENU'
+                            ? 'MENU'
+                            : calcState.mode.startsWith('EQN')
                             ? 'EQN'
                             : calcState.mode.startsWith('TABLE')
                             ? 'TABLE'
@@ -3417,116 +4515,211 @@ function CasioFx580VNXInner({
                             : 'Math'}
                         </span>
                       </div>
-                      <div className="flex items-center space-x-1 text-[8px]">
+                      <div className="flex items-center space-x-1 text-[8px] font-bold">
+                        <span className="opacity-70">{calcState.language === 'vi' ? 'VI' : 'EN'}</span>
                         <span>▲▼</span>
                       </div>
                     </div>
 
-                    {/* MENU CHÍNH */}
+                    {/* MENU CHÍNH (ICON CASIO) */}
                     {calcState.mode === 'MENU' && (
-                      <div className="relative z-10 flex-1 grid grid-cols-2 gap-x-1 content-between py-0.5 px-1">
-                        <KatexScreenRenderer latex="\mathsf{1:COMP}" isReady={katexLoaded} className="text-[10px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{5:Vector}" isReady={katexLoaded} className="text-[10px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{6:Statistics}" isReady={katexLoaded} className="text-[10px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{8:Table}" isReady={katexLoaded} className="text-[10px] text-[#0e140e]" />
-                        <div className="col-span-2">
-                          <KatexScreenRenderer latex="\mathsf{9:Equation/Func\;(EQN)}" isReady={katexLoaded} className="text-[10px] text-[#0e140e]" />
+                      <div className="relative z-10 flex-1 flex flex-col justify-between py-0.5 px-0.5">
+                        <div className="grid grid-cols-5 gap-1">
+                          {MENU_ITEMS.map((item, idx) => {
+                            const active = calcState.menuCursorIndex === idx;
+                            return (
+                              <button
+                                key={item.key}
+                                type="button"
+                                onClick={() => handleKeyPress({ id: item.key })}
+                                className={`flex flex-col items-center justify-center rounded-[4px] py-1 px-0.5 border cursor-pointer transition ${
+                                  active
+                                    ? 'bg-[#141c14] text-[#c8d3c5] border-[#141c14]'
+                                    : 'bg-[#141c14]/10 text-[#0e140e] border-[#141c14]/25'
+                                }`}
+                              >
+                                <span className="text-[7.5px] font-extrabold leading-none opacity-80">{item.code}</span>
+                                <span className="text-[9.5px] font-black font-mono leading-tight mt-0.5">{item.icon}</span>
+                              </button>
+                            );
+                          })}
                         </div>
+                        <div className="bg-[#141c14] text-[#c8d3c5] rounded-[3px] px-1.5 py-[1px] text-[9.5px] font-bold flex items-center justify-between">
+                          <span>
+                            {calcState.language === 'vi'
+                              ? MENU_ITEMS[calcState.menuCursorIndex]?.vi
+                              : MENU_ITEMS[calcState.menuCursorIndex]?.en}
+                          </span>
+                          <span className="text-[8px] opacity-75">[=]</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SETUP MAIN (SHIFT + MENU) */}
+                    {calcState.mode === 'SETUP_MAIN' && (
+                      <div className="relative z-10 flex-1 flex flex-col justify-between py-0.5 px-0.5 overflow-hidden">
+                        <div className="flex flex-col space-y-[1.5px]">
+                          {(getSetupMainItems(calcState.language)[calcState.setupPage] || []).map((it, idx) => {
+                            const active = calcState.setupMenuIndex === idx;
+                            return (
+                              <div
+                                key={it.id}
+                                className={`px-1 py-[0.5px] rounded-[2px] text-[9px] font-bold flex items-center justify-between ${
+                                  active ? 'bg-[#141c14] text-[#c8d3c5]' : 'text-[#0e140e]'
+                                }`}
+                              >
+                                <span className="truncate">{it.label}</span>
+                                <span className="text-[8px] opacity-75">
+                                  {it.id === 'ANGLE' ? calcState.angleUnit : it.id === 'LANG' ? calcState.language.toUpperCase() : ''}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SETUP SUB */}
+                    {calcState.mode === 'SETUP_SUB' && (
+                      <div className="relative z-10 flex-1 flex flex-col justify-center py-0.5 px-0.5 overflow-hidden">
+                        {calcState.setupSubType === 'FIX_DIGITS' || calcState.setupSubType === 'SCI_DIGITS' ? (
+                          <div className="text-center text-[10px] font-bold text-[#0e140e]">
+                            <div>
+                              {calcState.setupSubType === 'FIX_DIGITS'
+                                ? calcState.language === 'vi'
+                                  ? 'Fix: Chọn số lẻ (0~9)?'
+                                  : 'Fix: Select 0~9?'
+                                : calcState.language === 'vi'
+                                ? 'Sci: Chọn số chữ số (0~9)?'
+                                : 'Sci: Select 0~9?'}
+                            </div>
+                            <div className="text-[8.5px] opacity-75 mt-1">[0] ~ [9]</div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col space-y-[1.5px]">
+                            {getSetupSubOptions(calcState.setupSubType, calcState.language).map((opt, idx) => {
+                              const active = calcState.setupSubIndex === idx;
+                              return (
+                                <div
+                                  key={opt.code}
+                                  className={`px-1 py-[0.5px] rounded-[2px] text-[9px] font-bold truncate ${
+                                    active ? 'bg-[#141c14] text-[#c8d3c5]' : 'text-[#0e140e]'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* COMP OPTN */}
+                    {calcState.mode === 'COMP_OPTN' && (
+                      <div className="relative z-10 flex-1 grid grid-cols-2 gap-1 content-center py-0.5 px-0.5">
+                        {[
+                          '1:SOLVE',
+                          '2:d/dx',
+                          '3:∫dx',
+                          '4:Abs |■|',
+                        ].map((txt, idx) => (
+                          <div
+                            key={txt}
+                            className={`px-1.5 py-1 rounded-[3px] text-[9.5px] font-bold ${
+                              calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#c8d3c5]' : 'bg-[#141c14]/10 text-[#0e140e]'
+                            }`}
+                          >
+                            {txt}
+                          </div>
+                        ))}
                       </div>
                     )}
 
                     {/* MENU 6: STATISTICS */}
                     {calcState.mode === 'STAT_SELECT' && (
-                      <div className="relative z-10 flex-1 flex flex-col justify-around py-0.5 px-1">
-                        <KatexScreenRenderer
-                          latex="\mathsf{1:1\text{-}Variable\;(x_i,\,n_i)}"
-                          isReady={katexLoaded}
-                          className="text-[10.5px] text-[#0e140e]"
-                        />
-                        <KatexScreenRenderer
-                          latex="\mathsf{2:Grouped\;Data\;[L_i;U_i)\;(Q_1,Q_2,Q_3)}"
-                          isReady={katexLoaded}
-                          className="text-[10px] text-[#0e140e] font-bold"
-                        />
+                      <div className="relative z-10 flex-1 flex flex-col justify-around py-0.5 px-0.5">
+                        {[
+                          calcState.language === 'vi' ? '1: 1-Biến (xᵢ, nᵢ)' : '1: 1-Variable',
+                          calcState.language === 'vi' ? '2: Ghép nhóm [Lᵢ; Uᵢ)' : '2: Grouped [Lᵢ; Uᵢ)',
+                        ].map((txt, idx) => (
+                          <div
+                            key={txt}
+                            className={`px-1.5 py-1 rounded-[3px] text-[10px] font-bold ${
+                              calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#c8d3c5]' : 'text-[#0e140e]'
+                            }`}
+                          >
+                            {txt}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {calcState.mode === 'STAT_OPTN' && (
+                      <div className="relative z-10 flex-1 flex flex-col justify-around py-0.5 px-0.5">
+                        {[
+                          calcState.language === 'vi' ? '1: Chọn lại loại' : '1: Select Type',
+                          calcState.language === 'vi' ? '2: Nhập dữ liệu' : '2: Data',
+                          calcState.language === 'vi' ? '3: Tính toán (1-Var)' : '3: 1-Variable Calc',
+                        ].map((txt, idx) => (
+                          <div
+                            key={txt}
+                            className={`px-1.5 py-[1px] rounded-[2px] text-[9.5px] font-bold ${
+                              calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#c8d3c5]' : 'text-[#0e140e]'
+                            }`}
+                          >
+                            {txt}
+                          </div>
+                        ))}
                       </div>
                     )}
 
                     {calcState.mode === 'STAT_INPUT' && (
                       <div className="relative z-10 flex-1 flex flex-col justify-between py-0.5 px-0.5 overflow-hidden">
-                        <div className="flex flex-col space-y-0.5 overflow-hidden">
+                        <div className="flex flex-col space-y-[2px] overflow-hidden">
                           {calcState.statType === 'GROUPED' ? (
                             calcState.statGroupedRows
                               .map((row, rIdx) => ({ row, rIdx }))
                               .slice(Math.max(0, calcState.statRow - 1), Math.max(2, calcState.statRow + 1))
-                              .map(({ row, rIdx }) => {
-                                const cL =
-                                  rIdx === calcState.statRow && calcState.statCol === 0
-                                    ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row.L}}$}`
-                                    : row.L;
-                                const cU =
-                                  rIdx === calcState.statRow && calcState.statCol === 1
-                                    ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row.U}}$}`
-                                    : row.U;
-                                const cF =
-                                  rIdx === calcState.statRow && calcState.statCol === 2
-                                    ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row.freq}}$}`
-                                    : row.freq;
-                                return (
-                                  <div key={rIdx} className="flex items-center justify-between px-0.5">
-                                    <KatexScreenRenderer
-                                      latex={`\\small ${rIdx + 1}:\\;[${cL};\\,${cU})`}
-                                      isReady={katexLoaded}
-                                      className="text-[10.5px] text-[#0e140e]"
-                                    />
-                                    <KatexScreenRenderer
-                                      latex={`\\small n_{${rIdx + 1}}=${cF}`}
-                                      isReady={katexLoaded}
-                                      className="text-[10.5px] text-[#0e140e]"
-                                    />
+                              .map(({ row, rIdx }) => (
+                                <div key={rIdx} className="flex items-center justify-between gap-1 text-[9.5px] font-bold text-[#0e140e]">
+                                  <div className="flex items-center gap-0.5">
+                                    <span className="opacity-70">{rIdx + 1}:</span>
+                                    <span>[</span>
+                                    <CasioCellBox value={row.L} active={rIdx === calcState.statRow && calcState.statCol === 0} size="lcd" />
+                                    <span>;</span>
+                                    <CasioCellBox value={row.U} active={rIdx === calcState.statRow && calcState.statCol === 1} size="lcd" />
+                                    <span>)</span>
                                   </div>
-                                );
-                              })
+                                  <div className="flex items-center gap-0.5">
+                                    <span>n=</span>
+                                    <CasioCellBox value={row.freq} active={rIdx === calcState.statRow && calcState.statCol === 2} size="lcd" />
+                                  </div>
+                                </div>
+                              ))
                           ) : (
                             calcState.stat1VarRows
                               .map((row, rIdx) => ({ row, rIdx }))
                               .slice(Math.max(0, calcState.statRow - 1), Math.max(2, calcState.statRow + 1))
-                              .map(({ row, rIdx }) => {
-                                const cX =
-                                  rIdx === calcState.statRow && calcState.statCol === 0
-                                    ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row.x}}$}`
-                                    : row.x;
-                                const cF =
-                                  rIdx === calcState.statRow && calcState.statCol === 1
-                                    ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row.freq}}$}`
-                                    : row.freq;
-                                return (
-                                  <div key={rIdx} className="flex items-center justify-between px-0.5">
-                                    <KatexScreenRenderer
-                                      latex={`\\small x_{${rIdx + 1}}=${cX}`}
-                                      isReady={katexLoaded}
-                                      className="text-[10.5px] text-[#0e140e]"
-                                    />
-                                    <KatexScreenRenderer
-                                      latex={`\\small n_{${rIdx + 1}}=${cF}`}
-                                      isReady={katexLoaded}
-                                      className="text-[10.5px] text-[#0e140e]"
-                                    />
+                              .map(({ row, rIdx }) => (
+                                <div key={rIdx} className="flex items-center justify-between gap-1 text-[9.5px] font-bold text-[#0e140e]">
+                                  <div className="flex items-center gap-1">
+                                    <span>x{rIdx + 1}=</span>
+                                    <CasioCellBox value={row.x} active={rIdx === calcState.statRow && calcState.statCol === 0} size="lcd" />
                                   </div>
-                                );
-                              })
+                                  {calcState.statFreqOn && (
+                                    <div className="flex items-center gap-1">
+                                      <span>n{rIdx + 1}=</span>
+                                      <CasioCellBox value={row.freq} active={rIdx === calcState.statRow && calcState.statCol === 1} size="lcd" />
+                                    </div>
+                                  )}
+                                </div>
+                              ))
                           )}
                         </div>
-                        <div className="flex items-center justify-between border-t border-[#141c14]/20 pt-0.5 px-0.5">
-                          <KatexScreenRenderer
-                            latex="\mathsf{[OPTN]:\;Tính\;Q_1,Q_2,Q_3,\bar{x}}"
-                            isReady={katexLoaded}
-                            className="text-[9px] text-[#0e140e]/80"
-                          />
-                          <KatexScreenRenderer
-                            latex="\mathsf{[=]:\;Tiếp}"
-                            isReady={katexLoaded}
-                            className="text-[9px] text-[#0b110b]"
-                          />
+                        <div className="flex items-center justify-between border-t border-[#141c14]/20 pt-[1px] px-0.5 text-[8.5px] font-bold text-[#0e140e]/80">
+                          <span>{calcState.language === 'vi' ? '[OPTN]: Tính' : '[OPTN]: Calc'}</span>
+                          <span>{calcState.language === 'vi' ? '[=]: Tiếp' : '[=]: Next'}</span>
                         </div>
                       </div>
                     )}
@@ -3547,7 +4740,7 @@ function CasioFx580VNXInner({
                         </div>
                         <div className="flex items-end justify-between overflow-x-auto scrollbar-none">
                           <KatexScreenRenderer
-                            latex="\scriptstyle \mathsf{\blacktriangle\blacktriangledown:Đổi\;\;S\Leftrightarrow D}"
+                            latex="\scriptstyle \mathsf{\blacktriangle\blacktriangledown:S\Leftrightarrow D}"
                             isReady={katexLoaded}
                             className="text-[8.5px] text-[#0e140e]/65"
                           />
@@ -3566,74 +4759,96 @@ function CasioFx580VNXInner({
 
                     {/* MENU 5: VECTOR */}
                     {calcState.mode === 'VCT_SELECT' && (
-                      <div className="relative z-10 flex-1 grid grid-cols-2 gap-x-2 content-around py-0.5 px-1">
-                        <KatexScreenRenderer latex="\mathsf{1:VctA}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{2:VctB}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{3:VctC}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{4:VctD}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
+                      <div className="relative z-10 flex-1 grid grid-cols-2 gap-1 content-around py-0.5 px-0.5">
+                        {(['VctA', 'VctB', 'VctC', 'VctD'] as const).map((vName, idx) => {
+                          const vObj = calcState.vectors[vName];
+                          const active = calcState.menuCursorIndex === idx;
+                          return (
+                            <div
+                              key={vName}
+                              className={`px-1.5 py-0.5 rounded-[2px] text-[9.5px] font-bold flex items-center justify-between ${
+                                active ? 'bg-[#141c14] text-[#c8d3c5]' : 'text-[#0e140e]'
+                              }`}
+                            >
+                              <span>{idx + 1}:{vName}</span>
+                              <span className="text-[8px] opacity-75">{vObj?.defined ? `${vObj.dim}D` : 'None'}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 
                     {calcState.mode === 'VCT_DIM' && (
                       <div className="relative z-10 flex-1 flex flex-col justify-around py-0.5 px-1">
-                        <KatexScreenRenderer
-                          latex={`\\mathsf{${calcState.activeVctName}\\;Dimension?}`}
-                          isReady={katexLoaded}
-                          className="text-[10.5px] text-[#0e140e]"
-                        />
-                        <div className="flex items-center space-x-4">
-                          <KatexScreenRenderer latex="\mathsf{2:2D\;(x,y)}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
-                          <KatexScreenRenderer latex="\mathsf{3:3D\;(x,y,z)}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
+                        <div className="text-[10px] font-bold text-[#0e140e]">
+                          {calcState.activeVctName} {calcState.language === 'vi' ? 'Số chiều?' : 'Dimension?'}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          {['2: 2D (x,y)', '3: 3D (x,y,z)'].map((txt, idx) => (
+                            <div
+                              key={txt}
+                              className={`px-2 py-0.5 rounded-[3px] text-[9.5px] font-bold ${
+                                calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#c8d3c5]' : 'bg-[#141c14]/10 text-[#0e140e]'
+                              }`}
+                            >
+                              {txt}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
 
                     {calcState.mode === 'VCT_EDIT' && (
-                      <div className="relative z-10 flex-1 flex flex-col justify-between py-0.5 px-1 overflow-hidden">
-                        <div className="flex items-center justify-between">
-                          <KatexScreenRenderer
-                            latex={`\\mathsf{${calcState.activeVctName}\\;(${calcState.vectors[calcState.activeVctName].dim}D)} =`}
-                            isReady={katexLoaded}
-                            className="text-[10.5px] text-[#0e140e]"
-                          />
-                          <div className="flex items-center space-x-1.5">
+                      <div className="relative z-10 flex-1 flex flex-col justify-between py-0.5 px-0.5 overflow-hidden">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-bold text-[#0e140e] whitespace-nowrap">
+                            {calcState.activeVctName}({calcState.vectors[calcState.activeVctName].dim}D)=
+                          </span>
+                          <div className="flex items-center space-x-1">
                             {calcState.vectors[calcState.activeVctName].coords
                               .slice(0, calcState.vectors[calcState.activeVctName].dim)
-                              .map((val, idx) => {
-                                const isSel = idx === calcState.vctCoordIndex;
-                                const cellLatex = isSel ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${val}}$}` : val;
-                                return (
-                                  <KatexScreenRenderer
-                                    key={idx}
-                                    latex={cellLatex}
-                                    isReady={katexLoaded}
-                                    className="text-[11.5px] text-[#0e140e]"
-                                  />
-                                );
-                              })}
+                              .map((val, idx) => (
+                                <CasioCellBox
+                                  key={idx}
+                                  value={val}
+                                  active={idx === calcState.vctCoordIndex}
+                                  size="lcd"
+                                />
+                              ))}
                           </div>
                         </div>
-                        <div className="text-right border-t border-[#141c14]/20 pt-0.5">
-                          <KatexScreenRenderer
-                            latex={`\\text{Coord } ${calcState.vctCoordIndex + 1} : ${
-                              calcState.vctInputBuffer ||
-                              calcState.vectors[calcState.activeVctName].coords[calcState.vctCoordIndex]
-                            }`}
-                            isReady={katexLoaded}
-                            className="text-[10.5px] text-[#0b110b]"
-                          />
+                        <div className="flex items-center justify-between border-t border-[#141c14]/20 pt-0.5 text-[9.5px] font-bold text-[#0b110b]">
+                          <span className="text-[8.5px] opacity-75">[OPTN]</span>
+                          <div className="flex items-center gap-1">
+                            <span>Coord {calcState.vctCoordIndex + 1}:</span>
+                            <CasioCellBox
+                              value={
+                                calcState.vctInputBuffer ||
+                                calcState.vectors[calcState.activeVctName].coords[calcState.vctCoordIndex]
+                              }
+                              active
+                              size="lcd"
+                            />
+                          </div>
                         </div>
                       </div>
                     )}
 
                     {calcState.mode === 'VCT_OPTN' && (
-                      <div className="relative z-10 flex-1 grid grid-cols-2 gap-x-2 content-between py-0.5 px-1">
-                        <KatexScreenRenderer latex="\mathsf{1:Def\;Vct}" isReady={katexLoaded} className="text-[9.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{2:Edit\;Vct}" isReady={katexLoaded} className="text-[9.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{3:VctA\;\;4:VctB}" isReady={katexLoaded} className="text-[9.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{5:VctC\;\;6:VctD}" isReady={katexLoaded} className="text-[9.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{7:Dot(\cdot)}" isReady={katexLoaded} className="text-[9.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{8:Angle}" isReady={katexLoaded} className="text-[9.5px] text-[#0e140e]" />
+                      <div className="relative z-10 flex-1 grid grid-cols-2 gap-1 content-center py-0.5 px-0.5">
+                        {(calcState.vctOptnPage === 0
+                          ? ['1:Def Vct', '2:Edit Vct', '3:VctA', '4:VctB']
+                          : ['1:VctC', '2:VctD', '3:Dot(•)', '4:Angle(']
+                        ).map((txt, idx) => (
+                          <div
+                            key={txt}
+                            className={`px-1.5 py-0.5 rounded-[2px] text-[9.5px] font-bold ${
+                              calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#c8d3c5]' : 'text-[#0e140e]'
+                            }`}
+                          >
+                            {txt}
+                          </div>
+                        ))}
                       </div>
                     )}
 
@@ -3665,48 +4880,119 @@ function CasioFx580VNXInner({
 
                     {/* MENU 9: EQN */}
                     {calcState.mode === 'EQN_SELECT' && (
-                      <div className="relative z-10 flex-1 flex flex-col justify-around py-0.5 px-1">
-                        <KatexScreenRenderer latex="\mathsf{1:Simul\;Equation\;(Hệ\;PT)}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{2:Polynomial\;(PT\;Đa\;thức)}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
+                      <div className="relative z-10 flex-1 flex flex-col justify-around py-0.5 px-0.5">
+                        {[
+                          calcState.language === 'vi' ? '1: Hệ phương trình' : '1: Simul Equation',
+                          calcState.language === 'vi' ? '2: PT Đa thức' : '2: Polynomial',
+                        ].map((txt, idx) => (
+                          <div
+                            key={txt}
+                            className={`px-1.5 py-1 rounded-[3px] text-[10px] font-bold ${
+                              calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#c8d3c5]' : 'text-[#0e140e]'
+                            }`}
+                          >
+                            {txt}
+                          </div>
+                        ))}
                       </div>
                     )}
 
                     {calcState.mode === 'EQN_SYS_SIZE' && (
                       <div className="relative z-10 flex-1 flex flex-col justify-around py-0.5 px-1">
-                        <KatexScreenRenderer latex="\mathsf{Number\;of\;Unknowns\;(2\sim 4)?}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{[2]\quad [3]\quad [4]}" isReady={katexLoaded} className="text-[11.5px] text-[#0e140e]" />
+                        <div className="text-[9.5px] font-bold text-[#0e140e]">
+                          {calcState.language === 'vi' ? 'Số ẩn (2~4)?' : 'Unknowns (2~4)?'}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {[2, 3, 4].map((sz, idx) => (
+                            <div
+                              key={sz}
+                              className={`px-2 py-0.5 rounded-[3px] text-[10px] font-bold ${
+                                calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#c8d3c5]' : 'bg-[#141c14]/10 text-[#0e140e]'
+                              }`}
+                            >
+                              {sz}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
 
                     {calcState.mode === 'EQN_POLY_DEG' && (
                       <div className="relative z-10 flex-1 flex flex-col justify-around py-0.5 px-1">
-                        <KatexScreenRenderer latex="\mathsf{Polynomial\;Degree\;(2\sim 3)?}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
-                        <KatexScreenRenderer latex="\mathsf{[2:\;ax^2+bx+c=0]\quad [3]}" isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
+                        <div className="text-[9.5px] font-bold text-[#0e140e]">
+                          {calcState.language === 'vi' ? 'Bậc đa thức (2~3)?' : 'Degree (2~3)?'}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {[
+                            { d: 2, label: '2: ax²+bx+c=0' },
+                            { d: 3, label: '3: Bậc 3' },
+                          ].map((it, idx) => (
+                            <div
+                              key={it.d}
+                              className={`px-1.5 py-0.5 rounded-[3px] text-[9.5px] font-bold ${
+                                calcState.menuCursorIndex === idx ? 'bg-[#141c14] text-[#c8d3c5]' : 'bg-[#141c14]/10 text-[#0e140e]'
+                              }`}
+                            >
+                              {it.label}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
 
                     {calcState.mode === 'EQN_INPUT' && (
                       <div className="relative z-10 flex-1 flex flex-col justify-between py-0.5 px-0.5 overflow-hidden">
-                        <div className="overflow-x-auto scrollbar-none flex flex-col space-y-0.5">
-                          {prevOrCurrentEqnLines(calcState).map((lineLatex, idx) => (
-                            <KatexScreenRenderer
-                              key={idx}
-                              latex={lineLatex}
-                              isReady={katexLoaded}
-                              className="text-[11px] text-[#0e140e] whitespace-nowrap"
-                            />
-                          ))}
+                        <div className="overflow-x-auto scrollbar-none flex items-center gap-1 text-[9.5px] font-bold text-[#0e140e]">
+                          {calcState.eqnType === 'SYS' ? (
+                            <>
+                              <span className="opacity-70 whitespace-nowrap">P{calcState.eqnRow + 1}:</span>
+                              {['x', 'y', 'z', 't'].slice(0, calcState.eqnSize).map((v, c) => (
+                                <React.Fragment key={c}>
+                                  <CasioCellBox
+                                    value={calcState.eqnMatrix[calcState.eqnRow]?.[c]}
+                                    active={c === calcState.eqnCol}
+                                    size="lcd"
+                                  />
+                                  <span>{v}{c < calcState.eqnSize - 1 ? '+' : ''}</span>
+                                </React.Fragment>
+                              ))}
+                              <span>=</span>
+                              <CasioCellBox
+                                value={calcState.eqnMatrix[calcState.eqnRow]?.[calcState.eqnSize]}
+                                active={calcState.eqnCol === calcState.eqnSize}
+                                size="lcd"
+                              />
+                            </>
+                          ) : (
+                            <>
+                              {Array.from({ length: calcState.eqnSize + 1 }).map((_, c) => {
+                                const p = calcState.eqnSize - c;
+                                return (
+                                  <React.Fragment key={c}>
+                                    <CasioCellBox
+                                      value={calcState.eqnPolyCoeffs[c]}
+                                      active={c === calcState.eqnCol}
+                                      size="lcd"
+                                    />
+                                    {p > 0 && <span>x{p > 1 ? <sup>{p}</sup> : ''}+</span>}
+                                  </React.Fragment>
+                                );
+                              })}
+                              <span>=0</span>
+                            </>
+                          )}
                         </div>
-                        <div className="text-right border-t border-[#141c14]/20 pt-0.5">
-                          <KatexScreenRenderer
-                            latex={`\\text{Input} : ${
+                        <div className="flex items-center justify-end gap-1 border-t border-[#141c14]/20 pt-0.5 text-[9.5px] font-bold text-[#0b110b]">
+                          <span>{calcState.language === 'vi' ? 'Nhập:' : 'Input:'}</span>
+                          <CasioCellBox
+                            value={
                               calcState.eqnInputBuffer ||
                               (calcState.eqnType === 'SYS'
-                                ? calcState.eqnMatrix[calcState.eqnRow][calcState.eqnCol]
+                                ? calcState.eqnMatrix[calcState.eqnRow]?.[calcState.eqnCol]
                                 : calcState.eqnPolyCoeffs[calcState.eqnCol])
-                            }`}
-                            isReady={katexLoaded}
-                            className="text-[10.5px] text-[#0b110b]"
+                            }
+                            active
+                            size="lcd"
                           />
                         </div>
                       </div>
@@ -3743,24 +5029,17 @@ function CasioFx580VNXInner({
                     {/* CALC / SOLVE PROMPT */}
                     {(calcState.mode === 'CALC_PROMPT' || calcState.mode === 'SOLVE_PROMPT') && (
                       <div className="relative z-10 flex-1 flex flex-col justify-between py-1 px-1">
-                        <div className="flex items-center justify-between">
-                          <KatexScreenRenderer
-                            latex={`${
-                              calcState.mode === 'SOLVE_PROMPT' ? '\\text{Solve for } x' : calcState.promptVars[calcState.promptVarIndex] || 'x'
-                            } = ?`}
-                            isReady={katexLoaded}
-                            className="text-[12.5px] text-[#0e140e]"
-                          />
+                        <div className="flex items-center justify-between text-[11px] font-bold text-[#0e140e]">
+                          <span>
+                            {calcState.mode === 'SOLVE_PROMPT'
+                              ? calcState.language === 'vi'
+                                ? 'Solve x₀ ='
+                                : 'Solve for x ='
+                              : `${calcState.promptVars[calcState.promptVarIndex] || 'x'} =`}
+                          </span>
                         </div>
-                        <div className="text-right">
-                          <KatexScreenRenderer
-                            latex={
-                              calcState.promptInputBuffer ||
-                              String(calcState.memoryVars[calcState.promptVars[calcState.promptVarIndex] || 'x'] || 0)
-                            }
-                            isReady={katexLoaded}
-                            className="text-[14px] text-[#0b110b]"
-                          />
+                        <div className="flex items-center justify-end">
+                          <CasioCellBox value={calcState.promptInputBuffer} active size="lcd" />
                         </div>
                       </div>
                     )}
@@ -3779,30 +5058,22 @@ function CasioFx580VNXInner({
                             className="text-[13px] text-[#0e140e] whitespace-nowrap"
                           />
                         </div>
-                        <div className="text-right">
-                          <KatexScreenRenderer
-                            latex="\mathsf{Press\;[=]\;to\;continue}"
-                            isReady={katexLoaded}
-                            className="text-[9px] text-[#0e140e]/70"
-                          />
+                        <div className="text-right text-[9px] font-bold text-[#0e140e]/70">
+                          {calcState.language === 'vi' ? 'Bấm [=] để tiếp tục' : 'Press [=] to continue'}
                         </div>
                       </div>
                     )}
 
                     {calcState.mode === 'TABLE_PARAMS' && (
                       <div className="relative z-10 flex-1 flex flex-col justify-between py-0.5 px-1">
-                        {['start', 'end', 'step'].map((pk, idx) => {
+                        {(['start', 'end', 'step'] as const).map((pk, idx) => {
                           const label = pk === 'start' ? 'Start' : pk === 'end' ? 'End' : 'Step';
                           const active = calcState.tableParamIndex === idx;
                           const val = active && calcState.tableParamBuffer !== '' ? calcState.tableParamBuffer : calcState.tableParams[pk];
                           return (
-                            <div key={pk} className="flex items-center justify-between">
-                              <KatexScreenRenderer latex={`\\text{${label}} :`} isReady={katexLoaded} className="text-[10.5px] text-[#0e140e]" />
-                              <KatexScreenRenderer
-                                latex={active ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${val}}$}` : val}
-                                isReady={katexLoaded}
-                                className="text-[11px] text-[#0e140e]"
-                              />
+                            <div key={pk} className="flex items-center justify-between text-[9.5px] font-bold text-[#0e140e]">
+                              <span>{label} :</span>
+                              <CasioCellBox value={val} active={active} size="lcd" />
                             </div>
                           );
                         })}
@@ -4011,7 +5282,9 @@ function CasioFx580VNXInner({
       {/* Thanh chuyển nhanh chế độ */}
       <div className="relative z-10 mt-2.5 w-[340px] sm:w-[364px] rounded-xl bg-[#0d1c14] border border-white/20 px-3 py-2 text-white/90 shadow-lg select-none" style={{ touchAction: 'manipulation' }}>
         <div className="flex flex-wrap items-center justify-between gap-1 text-[10px]">
-          <span className="text-emerald-300 font-semibold">Chế độ nhanh:</span>
+          <span className="text-emerald-300 font-semibold">
+            {calcState.language === 'vi' ? 'Chế độ nhanh:' : 'Quick Mode:'}
+          </span>
           <div className="flex flex-wrap gap-1">
             <button
               type="button"
@@ -4019,9 +5292,31 @@ function CasioFx580VNXInner({
               onPointerDown={(e) => { if (e.pointerType === 'touch') return; handleFastPress({ id: 'menu' }, e, 'pointer'); }}
               onClick={(e) => handleFastPress({ id: 'menu' }, e, 'click')}
               style={{ touchAction: 'manipulation' }}
-              className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 active:scale-95 transition cursor-pointer select-none"
+              className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
+                calcState.mode === 'MENU' ? 'bg-emerald-500/40 border border-emerald-300/50 text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
+              }`}
             >
               [MENU]
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setCalcState((p) => ({
+                  ...p,
+                  mode: 'SETUP_MAIN',
+                  setupReturnMode: p.mode === 'SETUP_MAIN' || p.mode === 'SETUP_SUB' ? p.setupReturnMode : p.mode,
+                  setupPage: 0,
+                  setupMenuIndex: 0,
+                  shift: false,
+                  alpha: false,
+                }))
+              }
+              style={{ touchAction: 'manipulation' }}
+              className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
+                calcState.mode.startsWith('SETUP') ? 'bg-amber-500/40 border border-amber-300/60 text-amber-100 font-semibold' : 'bg-white/10 hover:bg-white/20 text-amber-200'
+              }`}
+            >
+              SETUP
             </button>
             <button
               type="button"
@@ -4035,7 +5330,7 @@ function CasioFx580VNXInner({
             </button>
             <button
               type="button"
-              onClick={() => setCalcState((p) => ({ ...p, mode: 'VCT_SELECT', resultLatex: '' }))}
+              onClick={() => setCalcState((p) => ({ ...p, mode: 'VCT_SELECT', menuCursorIndex: 0, resultLatex: '' }))}
               style={{ touchAction: 'manipulation' }}
               className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
                 calcState.mode.startsWith('VCT') ? 'bg-emerald-500/40 border border-emerald-300/50 text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
@@ -4048,8 +5343,8 @@ function CasioFx580VNXInner({
               onClick={() => {
                 setCalcState((p) => ({
                   ...p,
-                  mode: 'STAT_INPUT',
-                  statType: 'GROUPED',
+                  mode: 'STAT_SELECT',
+                  menuCursorIndex: 1,
                   statRow: 0,
                   statCol: 0,
                   statInputBuffer: '',
@@ -4060,7 +5355,7 @@ function CasioFx580VNXInner({
                 calcState.mode.startsWith('STAT') ? 'bg-amber-500/40 border border-amber-300/60 text-amber-100 font-semibold' : 'bg-white/10 hover:bg-white/20'
               }`}
             >
-              6: STAT (Ghép nhóm Q1,Q2,Q3)
+              6: STAT
             </button>
             <button
               type="button"
@@ -4080,7 +5375,7 @@ function CasioFx580VNXInner({
             </button>
             <button
               type="button"
-              onClick={() => setCalcState((p) => ({ ...p, mode: 'EQN_SELECT' }))}
+              onClick={() => setCalcState((p) => ({ ...p, mode: 'EQN_SELECT', menuCursorIndex: 0 }))}
               style={{ touchAction: 'manipulation' }}
               className={`px-2 py-0.5 rounded active:scale-95 transition cursor-pointer select-none ${
                 calcState.mode.startsWith('EQN') ? 'bg-emerald-500/40 border border-emerald-300/50 text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
@@ -4110,36 +5405,6 @@ function CasioFx580VNXInner({
   </div>
 </div>
 );
-}
-
-function prevOrCurrentEqnLines(state: any): string[] {
-  if (state.eqnType === 'SYS') {
-    const vars = ['x', 'y', 'z', 't'].slice(0, state.eqnSize);
-    const r = state.eqnRow;
-    const row = state.eqnMatrix[r];
-    const lhs = vars
-      .map((v: string, c: number) => {
-        const cell = r === state.eqnRow && c === state.eqnCol ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row[c]}}$}` : row[c];
-        return `${cell}${v}`;
-      })
-      .join('+');
-    const rhs =
-      r === state.eqnRow && state.eqnCol === state.eqnSize
-        ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${row[state.eqnSize]}}$}`
-        : row[state.eqnSize];
-    return [`\\small (\\text{PT } ${r + 1}/${state.eqnSize})\\quad ${lhs}=${rhs}`];
-  } else {
-    const deg = state.eqnSize;
-    const terms = [];
-    for (let c = 0; c <= deg; c++) {
-      const p = deg - c;
-      const raw = state.eqnPolyCoeffs[c];
-      const cell = c === state.eqnCol ? `\\colorbox{#141c14}{$\\color{#c8d3c5}{${raw}}$}` : raw;
-      const xPart = p === 0 ? '' : p === 1 ? 'x' : `x^${p}`;
-      terms.push(`${cell}${xPart}`);
-    }
-    return [`\\small ${terms.join('+')}=0`];
-  }
 }
 
 class SafeCalculatorErrorBoundary extends React.Component<
