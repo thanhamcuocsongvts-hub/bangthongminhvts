@@ -1006,11 +1006,15 @@ export const HomeworkTrackerView: React.FC<HomeworkTrackerViewProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                         <div className="p-2.5 rounded-xl bg-white border border-slate-200">
                           <span className="text-slate-500 font-bold block mb-0.5">Học sinh chọn:</span>
-                          <span className="font-black text-slate-900">{det.selectedDisplay}</span>
+                          <div className="font-black text-slate-900">
+                            <MathFormulaRenderer content={det.selectedDisplay} />
+                          </div>
                         </div>
                         <div className="p-2.5 rounded-xl bg-white border border-emerald-200">
                           <span className="text-emerald-700 font-bold block mb-0.5">Đáp án đúng:</span>
-                          <span className="font-black text-emerald-800">{det.correctDisplay}</span>
+                          <div className="font-black text-emerald-800">
+                            <MathFormulaRenderer content={det.correctDisplay} />
+                          </div>
                         </div>
                       </div>
                     </div>

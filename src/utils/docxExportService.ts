@@ -28,6 +28,7 @@ import {
 } from 'docx';
 import { QuizQuestion } from '../types';
 import { saveBlobSafely } from './exportUtils';
+import { normalizeAllMathInText, sanitizeMathExpression } from './mathNormalization';
 import {
   extractEmbeddedDiagramAndCleanText,
   renderVariationTablePng,
@@ -164,6 +165,8 @@ export function cleanLatexSymbols(text: string): string {
       /\\(arcsin|arccos|arctan|sinh|cosh|tanh|sin|cos|tan|cot|sec|csc|ln|log|lg|exp|lim|max|min|sup|inf|det|deg|mod|gcd|lcm|arg)\b/g,
       '$1 '
     )
+    .replace(/\\vec\s*\(([^()]+)\)/g, '$1⃗')
+    .replace(/\bvec\s*\(([^()]+)\)/g, '$1⃗')
     .replace(/\\(?:vec|overrightarrow)\{([^}]+)\}/g, '$1⃗')
     .replace(/\\(?:vec|overrightarrow)\s+([a-zA-Z0-9']+)/g, '$1⃗')
     .replace(/\\(?:widehat|hat)\{([^}]+)\}/g, '$1̂')
@@ -439,6 +442,8 @@ export function parseLatexNodes(raw: string): DocxMathChild[] {
   // Pre-normalize Unicode accents and formatting hints
   src = src
     .replace(/\\displaystyle\b|\\textstyle\b|\\limits\b|\\nolimits\b/g, '')
+    .replace(/\\vec\s*\(([^()]+)\)/g, '\\overrightarrow{$1}')
+    .replace(/\bvec\s*\(([^()]+)\)/g, '\\overrightarrow{$1}')
     .replace(/([a-zA-Z0-9']+)[⃗\u20D7]/g, '\\overrightarrow{$1}')
     .replace(/([a-zA-Z0-9']+)̂/g, '\\widehat{$1}')
     .replace(/([a-zA-Z0-9']+)̄/g, '\\overline{$1}')
@@ -1061,9 +1066,8 @@ export function convertLatexToDocxMath(latex: string): DocxMath {
     src = src.slice(2, -2).trim();
   }
 
-  src = src
-    .replace(/\\vec\s*\{([^}]+)\}/g, '\\overrightarrow{$1}')
-    .replace(/\\vec\s+([a-zA-Z0-9']+)/g, '\\overrightarrow{$1}');
+  src = sanitizeMathExpression(src)
+    .replace(/\^\s*\{\s*\\circ\s*\}|\^\\circ/g, '°');
 
   try {
     const children = parseLatexNodes(src);
@@ -1265,11 +1269,13 @@ export function parseTextWithLatexToDocxRuns(
 ): (TextRun | DocxMath)[] {
   if (!text) return [];
 
-  let cleanInput = text
-    .replace(/^#+\s+/gm, '')
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .trim();
+  let cleanInput = normalizeAllMathInText(
+    text
+      .replace(/^#+\s+/gm, '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]+>/g, '')
+      .trim()
+  );
 
   const hasDelimiters = /(?<!\\)\$|\\\(|\\\[/.test(cleanInput);
   if (!hasDelimiters) {

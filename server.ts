@@ -4,6 +4,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
+import { normalizeAllMathInText } from "./src/utils/mathNormalization.ts";
 
 dotenv.config();
 
@@ -2496,9 +2497,11 @@ Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm khách quan 
 
 QUY TẮC BẮT BUỘC & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
 1. KHÔNG VIẾT CÂU HỎI CHUNG CHUNG như "Định nghĩa cốt lõi...", "Khi tìm hiểu về...". Phải đưa ra bài toán, hàm số, phương trình, công thức, hiện tượng khoa học hoặc câu hỏi thực tế cụ thể!
-2. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC BỌC TRONG $ ... $ (Ví dụ: $y = x^3 - 3x^2 + 1$, $x \\in (0; 2)$, $\\overrightarrow{F} = m\\overrightarrow{a}$, $\\text{C}_2\\text{H}_5\\text{OH}$).
-   - ĐẶC BIỆT KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (TUYỆT ĐỐI KHÔNG dùng \\vec{AB} vì mũi tên quá ngắn chỉ che chữ cái cuối; KHÔNG tự ghép ký tự unicode mũi tên rời).
-   - Nếu phương án A, B, C, D chứa véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").
+2. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC DÙNG LATEX CHUẨN BỌC TRONG $ ... $ (Ví dụ: $y = x^3 - 3x^2 + 1$, $x \\in (0; 2)$, $\\overrightarrow{F} = m\\overrightarrow{a}$, $\\text{C}_2\\text{H}_5\\text{OH}$):
+   - Phân số dùng $\\\\frac{a}{b}$, căn thức $\\\\sqrt{x}$ / $\\\\sqrt[3]{x}$, mũ/chỉ số nhiều ký tự bọc ngoặc $x^{10}, e^{-x}, C_{12}^3, u_{n+1}$, tập hợp $\\\\mathbb{R} \\\\setminus \\\\{1\\\\}$, giới hạn $\\\\lim_{x \\to +\\\\infty}$, tích phân $\\\\int_{a}^{b} f(x)dx$, góc $\\\\widehat{ABC}$, $60^{\\\\circ}$.
+   - TUYỆT ĐỐI KHÔNG viết kiểu ASCII như frac(a,b), sqrt(x), (x+1)/(x-2), 2^(x+1), <=, >=, !=, oo, hay ký tự unicode ², ³, √.
+   - ĐẶC BIỆT KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng $\\\\overrightarrow{AB}$, $\\\\overrightarrow{BC}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{AA'}$, $\\\\overrightarrow{AC'}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (TUYỆT ĐỐI KHÔNG viết vec(AB), vec(a), i - 2j + 3k hay \\vec{AB}).
+   - Nếu phương án A, B, C, D chứa công thức, phân số, véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\\\frac{2x+1}{x-1}$" hoặc "text": "$\\\\overrightarrow{a} = \\\\overrightarrow{i} - 2\\\\overrightarrow{j} + 3\\\\overrightarrow{k}$").
 3. Bốn phương án A, B, C, D phải rõ ràng, độc lập và có độ phân tán tốt. KHÔNG ghi tiền tố "A. ", "B. " vào trong trường "text".
 4. ĐÁP ÁN ĐÚNG PHÂN BỔ BẮT BUỘC THEO THỨ TỰ: [${targetSequenceHint}]. Xuất trường "correctAnswer" TRƯỚC trường "options" và đặt đúng phương án chuẩn vào vị trí chữ cái đã chỉ định cho từng câu; kèm "explanation" súc tích 1-2 câu nêu công thức/kết quả đúng (không viết cứng "Đáp án A đúng").
 5. "timeLimit" là số giây (từ 20 đến 60).
@@ -2574,21 +2577,7 @@ Trả về định dạng JSON array hợp lệ:
  * Standardize math formulas, vector accents and symbols across quiz questions
  */
 function normalizeMathInText(text: string): string {
-  if (!text || typeof text !== 'string') return text || '';
-  return text
-    // Replace \vec{...} with \overrightarrow{...}
-    .replace(/\\vec\s*\{([^}]+)\}/g, '\\overrightarrow{$1}')
-    .replace(/\\vec\s+([a-zA-Z0-9']+)/g, '\\overrightarrow{$1}')
-    // Replace unicode combining arrow / inline arrows with \overrightarrow
-    .replace(/([a-zA-Z0-9']+)[⃗\u20D7]/g, '\\overrightarrow{$1}')
-    // Replace \hat{...} with \widehat{...}
-    .replace(/\\hat\s*\{([^}]+)\}/g, '\\widehat{$1}')
-    .replace(/\\hat\s+([a-zA-Z0-9']+)/g, '\\widehat{$1}')
-    .replace(/([a-zA-Z0-9']+)̂/g, '\\widehat{$1}')
-    // Replace \bar{...} with \overline{...}
-    .replace(/\\bar\s*\{([^}]+)\}/g, '\\overline{$1}')
-    .replace(/\\bar\s+([a-zA-Z0-9']+)/g, '\\overline{$1}')
-    .replace(/([a-zA-Z0-9']+)̄/g, '\\overline{$1}');
+  return normalizeAllMathInText(text);
 }
 
 function normalizeQuizQuestionsMath(questions: any[]): any[] {
@@ -2598,6 +2587,15 @@ function normalizeQuizQuestionsMath(questions: any[]): any[] {
     const cleanQ = { ...q };
     cleanQ.question = normalizeMathInText(cleanQ.question);
     cleanQ.explanation = normalizeMathInText(cleanQ.explanation);
+    if (typeof cleanQ.shortAnswerKey === 'string') {
+      cleanQ.shortAnswerKey = normalizeMathInText(cleanQ.shortAnswerKey);
+    }
+    if (typeof cleanQ.essayRubric === 'string') {
+      cleanQ.essayRubric = normalizeMathInText(cleanQ.essayRubric);
+    }
+    if (cleanQ.partType === 'part_3_short_answer' && typeof cleanQ.correctAnswer === 'string') {
+      cleanQ.correctAnswer = normalizeMathInText(cleanQ.correctAnswer);
+    }
     if (Array.isArray(cleanQ.options)) {
       cleanQ.options = cleanQ.options.map((opt: any) => {
         if (typeof opt === 'string') return normalizeMathInText(opt);
@@ -2801,6 +2799,13 @@ function balanceQuizAnswerDistributionServer(questions: any[], seedInput?: strin
   return out;
 }
 
+function escapeUnescapedLatexInJsonServer(text: string): string {
+  return text.replace(
+    /((?:^|[^\\])(?:\\\\)*)\\(?=(?:frac|forall|times|tan|theta|tau|text|tfrac|triangle|tilde|to(?![a-zA-Z])|beta|binom|bar|begin|big|backslash|bullet|right|rightarrow|rho|rangle|rbrace|rceil|rfloor|neq|notin|nabla)|[^"\\/bfnrtu])/g,
+    "$1\\\\"
+  );
+}
+
 // Helper to extract complete JSON objects from a partially truncated JSON array string
 function extractCompleteObjectsFromJsonArray(text: string): any[] | null {
   const startArr = text.indexOf("[");
@@ -2834,11 +2839,10 @@ function extractCompleteObjectsFromJsonArray(text: string): any[] | null {
       if (depth === 0 && objStart !== -1) {
         const chunk = text.slice(objStart, idx + 1);
         try {
-          items.push(JSON.parse(chunk));
+          items.push(JSON.parse(escapeUnescapedLatexInJsonServer(chunk)));
         } catch {
           try {
-            const fixedChunk = chunk.replace(/(?<!\\)\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, "\\\\");
-            items.push(JSON.parse(fixedChunk));
+            items.push(JSON.parse(chunk));
           } catch (_) {}
         }
         objStart = -1;
@@ -2852,19 +2856,18 @@ function extractCompleteObjectsFromJsonArray(text: string): any[] | null {
 function safeParseJsonWithLatex(raw: string): any {
   if (!raw) return null;
   const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const escaped = escapeUnescapedLatexInJsonServer(text);
   try {
-    return JSON.parse(text);
+    return JSON.parse(escaped);
   } catch (e1) {
     try {
-      // Replace single backslash before letters with double backslash (e.g. \frac -> \\frac)
-      const fixed = text.replace(/(?<!\\)\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, "\\\\");
-      return JSON.parse(fixed);
+      return JSON.parse(text);
     } catch (e2) {
       try {
         const fixed2 = text.replace(/\\([a-zA-Z]+|\{|\})/g, "\\\\$1");
         return JSON.parse(fixed2);
       } catch (e3) {
-        return extractCompleteObjectsFromJsonArray(text);
+        return extractCompleteObjectsFromJsonArray(escaped) || extractCompleteObjectsFromJsonArray(text);
       }
     }
   }
@@ -2921,7 +2924,7 @@ Yêu cầu:
     }
     const questions = Array.isArray(parsed) ? parsed : (parsed?.questions || []);
     if (questions.length > 0) {
-      return res.json({ success: true, questions });
+      return res.json({ success: true, questions: normalizeQuizQuestionsMath(questions) });
     }
   } catch (err: any) {
     console.warn("AI parse quiz file fallback:", err?.message || err);
@@ -2965,9 +2968,9 @@ Yêu cầu:
     success: true,
     questions:
       parsedQuestions.length > 0
-        ? balanceQuizAnswerDistributionServer(parsedQuestions, `parse_fallback_${Date.now()}`)
+        ? balanceQuizAnswerDistributionServer(normalizeQuizQuestionsMath(parsedQuestions), `parse_fallback_${Date.now()}`)
         : balanceQuizAnswerDistributionServer(
-            generateSmartCurriculumQuestions("Đề thi tải lên", subject, 5, "Thông hiểu"),
+            normalizeQuizQuestionsMath(generateSmartCurriculumQuestions("Đề thi tải lên", subject, 5, "Thông hiểu")),
             `parse_smart_${Date.now()}`
           )
   });
@@ -3190,7 +3193,7 @@ QUY TẮC BẮT BUỘC:
 1. TÍNH TOÁN CHÍNH XÁC 100% trước khi xuất JSON. Không ra câu vô nghiệm/sai số liệu.
 2. VỚI CÂU PHẦN I (part_1_choice): Xuất trường "correctAnswer" TRƯỚC trường "options". Đặt ĐÚNG đáp án chính xác vào đúng chữ cái "targetKey" đã chỉ định cho mỗi câu (tuyệt đối không tự ý chuyển về A); 3 phương án còn lại là nhiễu hợp lý gần giống kết quả thật. KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
 3. VỚI CÂU PHẦN II (part_2_true_false): Đủ 4 ý a, b, c, d với tỷ lệ Đúng/Sai đa dạng tự nhiên (không phải câu nào cũng toàn Đúng).
-4. CÔNG THỨC TOÁN/LÝ/HÓA: Bọc trong $...$, dùng \\overrightarrow{AB} cho véctơ, escape \\\\ trong JSON.
+4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.
 5. "explanation" súc tích 1-2 câu nêu rõ công thức & phép tính ra đáp số (KHÔNG viết cứng "Chọn đáp án A" hay tên chữ cái đáp án).
 6. Nếu có bảng biến thiên/đồ thị/bảng số liệu: gắn thêm diagramType + diagramData chuẩn JSON.`;
 
@@ -3447,7 +3450,7 @@ QUY TẮC BẮT BUỘC:
 1. Mỗi mã đề phải giữ nguyên đủ ${compactSource.length} câu theo đúng thứ tự partType tương ứng đề gốc.
 2. Tính toán lại chính xác 100% đáp án đúng và lời giải chi tiết cho số liệu mới.
 3. Với câu Phần I (part_1_choice), phân bổ ĐỀU đáp án đúng qua cả A, B, C, D (tuyệt đối không dồn vào A).
-4. Công thức Toán/Lý/Hóa bọc trong $...$, dùng \\overrightarrow{AB} cho véctơ, escape \\\\ trong JSON.
+4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.
 5. Trả về đúng JSON object: { "variants": [ { "questions": [...] }, ... ] } gồm đúng ${extraCount} phần tử trong mảng "variants".`;
 
     const response = await generateWithGemini(ai, {

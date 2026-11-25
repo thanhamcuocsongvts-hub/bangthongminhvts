@@ -1038,12 +1038,16 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                         <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
                           <span className="font-bold text-slate-500 block mb-1">Bài làm của em:</span>
-                          <span className="font-black text-slate-900">{det.selectedDisplay}</span>
+                          <div className="font-black text-slate-900">
+                            <MathFormulaRenderer content={det.selectedDisplay} />
+                          </div>
                         </div>
                         {assignment.showAnswersAfterSubmit && (
                           <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200">
                             <span className="font-bold text-emerald-800 block mb-1">Đáp án chuẩn:</span>
-                            <span className="font-black text-emerald-900">{det.correctDisplay}</span>
+                            <div className="font-black text-emerald-900">
+                              <MathFormulaRenderer content={det.correctDisplay} />
+                            </div>
                           </div>
                         )}
                       </div>

@@ -2,13 +2,17 @@
  * Saved Quizzes & Games Storage Service for SmartBoard 75 Pro
  * Strictly isolated per teacher account (`teacherId`):
  * - Each teacher can only view, store, manage, and assign their own saved exams & games.
- * - Cross-device sync (PC <-> Phone) syncs only within the same teacher's account namespace.
+ * - Cross-device sync (PC <-> Phone <-> School 75" TV) syncs within the same teacher's account namespace.
  */
 
 import { QuizQuestion } from '../types';
-import { db } from '../lib/firebase';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { safeSetDoc } from './firebaseSafe';
+import { auth, db } from '../lib/firebase';
+import { doc, getDoc, getDocFromServer, onSnapshot, setDoc } from 'firebase/firestore';
+import {
+  isFirestoreQuotaExhausted,
+  isQuotaError,
+  markFirestoreQuotaExhausted,
+} from './firebaseSafe';
 import { normalizeTeacherOwnerId } from './teacherPrivacy';
 
 export interface SavedEducationalItem {
@@ -28,11 +32,115 @@ export interface SavedEducationalItem {
   notes?: string;
 }
 
+export interface SyncResult {
+  cloudSynced: boolean;
+  serverSynced: boolean;
+  error?: string;
+}
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: Array<{
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }>;
+  };
+}
+
+function logFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const errInfo: FirestoreErrorInfo = {
+    error: message,
+    authInfo: {
+      userId: auth?.currentUser?.uid,
+      email: auth?.currentUser?.email,
+      emailVerified: auth?.currentUser?.emailVerified,
+      isAnonymous: auth?.currentUser?.isAnonymous,
+      tenantId: auth?.currentUser?.tenantId,
+      providerInfo:
+        auth?.currentUser?.providerData?.map((provider: any) => ({
+          providerId: provider.providerId,
+          displayName: provider.displayName,
+          email: provider.email,
+          photoUrl: provider.photoURL,
+        })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error:', JSON.stringify(errInfo));
+  return message;
+}
+
+let connectionTested = false;
+async function testFirestoreConnection(): Promise<void> {
+  if (connectionTested) return;
+  connectionTested = true;
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Please check your Firebase configuration: the client is offline.');
+    }
+  }
+}
+
 const LEGACY_STORAGE_KEY = 'smartboard_saved_quizzes_and_games';
 const SCOPED_STORAGE_PREFIX = 'smartboard_saved_quizzes_v2_';
+const SCOPED_DELETED_PREFIX = 'smartboard_saved_quizzes_deleted_v2_';
+const STARTER_TIMESTAMP = '2026-01-01T00:00:00.000Z';
 
 function getScopedStorageKey(teacherId?: string | null): string {
   return `${SCOPED_STORAGE_PREFIX}${normalizeTeacherOwnerId(teacherId)}`;
+}
+
+function getScopedDeletedKey(teacherId?: string | null): string {
+  return `${SCOPED_DELETED_PREFIX}${normalizeTeacherOwnerId(teacherId)}`;
+}
+
+function getDeletedIds(ownerId: string): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(getScopedDeletedKey(ownerId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((id) => typeof id === 'string' && id.length > 0).slice(0, 500)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDeletedIds(ownerId: string, ids: string[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const unique = Array.from(new Set(ids.filter((id) => typeof id === 'string' && id.length > 0))).slice(-500);
+    localStorage.setItem(getScopedDeletedKey(ownerId), JSON.stringify(unique));
+  } catch {}
 }
 
 // Bộ bài tập mẫu chuẩn sư phạm mặc định cho tài khoản mới (phân bố đều A, B, C, D)
@@ -44,8 +152,8 @@ export const INITIAL_SAVED_ITEMS: SavedEducationalItem[] = [
     subject: 'Toán học',
     grade: 'Lớp 12',
     questionCount: 4,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: STARTER_TIMESTAMP,
+    updatedAt: STARTER_TIMESTAMP,
     notes: 'Bộ câu hỏi chuẩn bị cho tiết học ôn tập chuyên đề Khảo sát hàm số.',
     questions: [
       {
@@ -118,8 +226,8 @@ export const INITIAL_SAVED_ITEMS: SavedEducationalItem[] = [
     subject: 'Vật lý',
     grade: 'Lớp 11',
     questionCount: 4,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: STARTER_TIMESTAMP,
+    updatedAt: STARTER_TIMESTAMP,
     notes: 'Trò chơi đầu giờ khởi động lớp học bằng Vòng Quay May Mắn trên màn hình tương tác.',
     questions: [
       {
@@ -186,8 +294,8 @@ export const INITIAL_SAVED_ITEMS: SavedEducationalItem[] = [
     subject: 'Lịch sử',
     grade: 'Lớp 12',
     questionCount: 4,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: STARTER_TIMESTAMP,
+    updatedAt: STARTER_TIMESTAMP,
     notes: 'Trò chơi đua xe chia đội tranh tài giữa các tổ trong lớp.',
     questions: [
       {
@@ -271,6 +379,136 @@ function filterOwnedItems(
     }));
 }
 
+function sanitizeForFirestore<T>(val: T): T {
+  if (val === undefined) return undefined as any;
+  if (val === null || typeof val !== 'object') {
+    if (typeof val === 'number' && !Number.isFinite(val)) return 0 as any;
+    return val;
+  }
+  if (Array.isArray(val)) {
+    return val
+      .map((item) => sanitizeForFirestore(item))
+      .filter((item) => item !== undefined) as any;
+  }
+  const clean: Record<string, any> = {};
+  for (const [k, v] of Object.entries(val as Record<string, any>)) {
+    if (v === undefined) continue;
+    const cleaned = sanitizeForFirestore(v);
+    if (cleaned !== undefined) {
+      clean[k] = cleaned;
+    }
+  }
+  return clean as T;
+}
+
+function getItemTimestamp(it?: SavedEducationalItem | null): number {
+  if (!it) return 0;
+  const t = new Date(it.updatedAt || it.createdAt || 0).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Hợp nhất danh sách bài tập cục bộ và trên Đám mây theo ID & updatedAt, tôn trọng deletedIds.
+ * Đảm bảo đề tạo offline/cũ trên máy nhà không bao giờ bị ghi đè mất khi mở app hoặc chuyển thiết bị.
+ */
+function mergeSavedEducationalItems(
+  localItems: SavedEducationalItem[],
+  cloudItems: SavedEducationalItem[],
+  deletedSet: Set<string>,
+  ownerId: string
+): { merged: SavedEducationalItem[]; needsCloudPush: boolean } {
+  const map = new Map<string, SavedEducationalItem>();
+  const cloudMap = new Map<string, SavedEducationalItem>();
+
+  for (const it of filterOwnedItems(cloudItems, ownerId)) {
+    if (!deletedSet.has(it.id)) {
+      map.set(it.id, it);
+      cloudMap.set(it.id, it);
+    }
+  }
+
+  let needsCloudPush = false;
+
+  for (const it of filterOwnedItems(localItems, ownerId)) {
+    if (deletedSet.has(it.id)) continue;
+
+    const existing = map.get(it.id);
+    if (!existing) {
+      const isStarter = DEFAULT_SAMPLE_IDS.has(it.id);
+      // Only treat custom local items as needing cloud push (unless cloud is completely empty)
+      if (!isStarter || cloudItems.length === 0) {
+        map.set(it.id, it);
+        if (!isStarter) {
+          needsCloudPush = true;
+        }
+      }
+    } else {
+      const localTs = getItemTimestamp(it);
+      const cloudTs = getItemTimestamp(existing);
+      if (localTs > cloudTs) {
+        map.set(it.id, it);
+        needsCloudPush = true;
+      }
+    }
+  }
+
+  // Ensure newer items stay near top while preserving custom order
+  const merged = Array.from(map.values())
+    .sort((a, b) => {
+      const aStarter = DEFAULT_SAMPLE_IDS.has(a.id) ? 1 : 0;
+      const bStarter = DEFAULT_SAMPLE_IDS.has(b.id) ? 1 : 0;
+      if (aStarter !== bStarter) return aStarter - bStarter;
+      return getItemTimestamp(b) - getItemTimestamp(a);
+    })
+    .slice(0, 500);
+
+  return { merged, needsCloudPush };
+}
+
+/**
+ * Giới hạn dung lượng tài liệu dưới 900KB để luôn vừa khít giới hạn 1MB của Firestore.
+ */
+function enforceFirestorePayloadBudget(
+  items: SavedEducationalItem[],
+  maxBytes: number = 900_000
+): SavedEducationalItem[] {
+  const clean = sanitizeForFirestore(items).slice(0, 500);
+  const measure = (arr: any[]) => {
+    try {
+      return new Blob([JSON.stringify(arr)]).size;
+    } catch {
+      return JSON.stringify(arr).length * 2;
+    }
+  };
+
+  if (measure(clean) <= maxBytes) return clean;
+
+  // Step 1: Drop heavy optional imageDataUrl blobs from questions if payload is oversized
+  const trimmed = clean.map((item) => ({
+    ...item,
+    questions: (item.questions || []).map((q: any) => {
+      if (!q || typeof q !== 'object') return q;
+      const copy = { ...q };
+      if (typeof copy.imageUrl === 'string' && copy.imageUrl.startsWith('data:') && copy.imageUrl.length > 10000) {
+        delete copy.imageUrl;
+      }
+      return copy;
+    }),
+  }));
+  if (measure(trimmed) <= maxBytes) return trimmed;
+
+  // Step 2: Retain newest items up to budget (dropping oldest sample/old items first)
+  const kept: SavedEducationalItem[] = [];
+  for (const item of trimmed) {
+    kept.push(item);
+    if (measure(kept) > maxBytes) {
+      kept.pop();
+      break;
+    }
+  }
+  return kept;
+}
+
 function dispatchSavedQuizzesEvent(ownerId: string, items: SavedEducationalItem[]) {
   try {
     window.dispatchEvent(
@@ -346,9 +584,11 @@ export async function syncSavedEducationalItemsToCloud(
   items: SavedEducationalItem[],
   teacherId?: string | null,
   immediate: boolean = true
-): Promise<void> {
+): Promise<SyncResult> {
   const ownerId = normalizeTeacherOwnerId(teacherId);
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') {
+    return { cloudSynced: false, serverSynced: false };
+  }
 
   const scopedItems = filterOwnedItems(items, ownerId);
   const scopedKey = getScopedStorageKey(ownerId);
@@ -359,56 +599,86 @@ export async function syncSavedEducationalItemsToCloud(
   } catch (_) {}
 
   if (ownerId === 'guest') {
-    // Tài khoản Khách dùng thử không đồng bộ lên Cloud
-    return;
+    return {
+      cloudSynced: false,
+      serverSynced: false,
+      error: 'Tài khoản Khách chỉ lưu tạm trên thiết bị này. Hãy đăng nhập tài khoản giáo viên để đồng bộ.',
+    };
   }
 
-  const runCloudSync = async () => {
-    try {
-      const sanitized = JSON.parse(JSON.stringify(scopedItems));
-      const payload = {
-        teacherId: ownerId,
-        items: sanitized,
-        updatedAt: new Date().toISOString(),
-      };
+  const runCloudSync = async (): Promise<SyncResult> => {
+    let cloudSynced = false;
+    let serverSynced = false;
+    let lastError: string | undefined;
 
-      // 1. Lưu vào Firestore doc riêng của đúng tài khoản giáo viên này
-      try {
-        await safeSetDoc(doc(db, 'teacher_saved_quizzes', ownerId), payload);
-      } catch (fsErr) {
-        console.warn('[Cloud Sync] Firestore teacher_saved_quizzes notice:', fsErr);
+    try {
+      await testFirestoreConnection();
+      const budgetItems = enforceFirestorePayloadBudget(scopedItems);
+      const deletedIds = getDeletedIds(ownerId);
+      const payload = sanitizeForFirestore({
+        teacherId: ownerId,
+        items: budgetItems,
+        deletedIds,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // 1. Lưu trực tiếp vào Firestore doc riêng của đúng tài khoản giáo viên này
+      if (!isFirestoreQuotaExhausted()) {
+        const docPath = `teacher_saved_quizzes/${ownerId}`;
+        try {
+          await setDoc(doc(db, 'teacher_saved_quizzes', ownerId), payload);
+          cloudSynced = true;
+        } catch (fsErr: any) {
+          if (isQuotaError(fsErr)) {
+            markFirestoreQuotaExhausted(fsErr?.message);
+            lastError = 'Firestore hết hạn mức ghi trong ngày.';
+          } else {
+            lastError = logFirestoreError(fsErr, OperationType.WRITE, docPath);
+          }
+        }
       }
 
-      // 2. Sao lưu theo đúng teacherId lên Express backend server
+      // 2. Sao lưu bổ sung theo đúng teacherId lên backend server (nếu chạy Express local/node)
       try {
-        await fetch('/api/quizzes/sync', {
+        const res = await fetch('/api/quizzes/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             teacherId: ownerId,
-            items: sanitized,
+            items: budgetItems,
             replaceAll: true,
           }),
         });
+        if (res.ok) {
+          serverSynced = true;
+        }
       } catch (_) {}
-    } catch (e) {
-      console.warn('[Cloud Sync] Error syncing saved items to cloud:', e);
+    } catch (e: any) {
+      lastError = e?.message || String(e);
+      console.warn('[Cloud Sync] Error syncing saved items to cloud:', lastError);
     }
+
+    return { cloudSynced, serverSynced, error: lastError };
   };
 
   if (immediate) {
-    await runCloudSync();
+    return await runCloudSync();
   } else {
     const timerKey = `_savedQuizzesSyncTimer_${ownerId}`;
     if ((window as any)[timerKey]) {
       clearTimeout((window as any)[timerKey]);
     }
-    (window as any)[timerKey] = setTimeout(runCloudSync, 500);
+    return new Promise((resolve) => {
+      (window as any)[timerKey] = setTimeout(async () => {
+        resolve(await runCloudSync());
+      }, 500);
+    });
   }
 }
 
 /**
- * Tải danh sách bài tập ĐÃ LƯU thuộc riêng tài khoản hiện tại từ Đám mây.
+ * Tải và hợp nhất danh sách bài tập ĐÃ LƯU thuộc riêng tài khoản hiện tại từ Đám mây.
+ * Tự động đẩy các đề cục bộ chưa đồng bộ lên Firestore để cứu dữ liệu giữa các thiết bị.
  */
 export async function pullSavedQuizzesFromCloud(
   teacherId?: string | null,
@@ -421,19 +691,29 @@ export async function pullSavedQuizzesFromCloud(
     return localItems;
   }
 
+  await testFirestoreConnection();
+
   let cloudItems: SavedEducationalItem[] | null = null;
+  let cloudDeletedIds: string[] = [];
+  const docPath = `teacher_saved_quizzes/${ownerId}`;
 
   // 1. Tải từ Firestore doc riêng của tài khoản
   try {
     const snap = await getDoc(doc(db, 'teacher_saved_quizzes', ownerId));
-    if (snap.exists() && Array.isArray(snap.data()?.items)) {
-      cloudItems = filterOwnedItems(snap.data()?.items as SavedEducationalItem[], ownerId);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data?.items)) {
+        cloudItems = filterOwnedItems(data.items as SavedEducationalItem[], ownerId);
+      }
+      if (Array.isArray(data?.deletedIds)) {
+        cloudDeletedIds = data.deletedIds.filter((id: any) => typeof id === 'string');
+      }
     }
   } catch (err) {
-    console.warn('[Cloud Pull] Firestore pull warning:', err);
+    logFirestoreError(err, OperationType.GET, docPath);
   }
 
-  // 2. Fallback: Lấy đúng slice của teacherId từ backend server
+  // 2. Fallback: Lấy đúng slice của teacherId từ backend server nếu chưa có trên Firestore
   if (cloudItems === null) {
     try {
       const res = await fetch(
@@ -449,26 +729,40 @@ export async function pullSavedQuizzesFromCloud(
   }
 
   const scopedKey = getScopedStorageKey(ownerId);
+  const localDeletedIds = getDeletedIds(ownerId);
+  const mergedDeletedIds = Array.from(new Set([...localDeletedIds, ...cloudDeletedIds])).slice(-500);
+  saveDeletedIds(ownerId, mergedDeletedIds);
+  const deletedSet = new Set(mergedDeletedIds);
 
   if (cloudItems !== null) {
+    const { merged, needsCloudPush } = mergeSavedEducationalItems(
+      localItems,
+      cloudItems,
+      deletedSet,
+      ownerId
+    );
     try {
-      localStorage.setItem(scopedKey, JSON.stringify(cloudItems));
-      dispatchSavedQuizzesEvent(ownerId, cloudItems);
+      localStorage.setItem(scopedKey, JSON.stringify(merged));
+      dispatchSavedQuizzesEvent(ownerId, merged);
     } catch (_) {}
-    return cloudItems;
+
+    if (needsCloudPush) {
+      await syncSavedEducationalItemsToCloud(merged, ownerId, true);
+    }
+    return merged;
   }
 
-  // Nếu tài khoản này chưa từng đồng bộ doc riêng lên Cloud, nhưng đang có đề tự tạo cục bộ -> đồng bộ lên doc riêng
+  // Nếu tài khoản này chưa từng tạo doc trên Cloud nhưng đang có đề tự tạo cục bộ -> đồng bộ ngay lên Firestore
   const hasCustomLocal = localItems.some((it) => !DEFAULT_SAMPLE_IDS.has(it.id));
   if (hasCustomLocal) {
-    syncSavedEducationalItemsToCloud(localItems, ownerId, false);
+    await syncSavedEducationalItemsToCloud(localItems, ownerId, true);
   }
 
   return localItems;
 }
 
 /**
- * Lắng nghe cập nhật thời gian thực CHỈ trong tài khoản của chính giáo viên đó (PC <-> Điện thoại của cùng 1 tài khoản).
+ * Lắng nghe cập nhật thời gian thực CHỈ trong tài khoản của chính giáo viên đó (PC <-> Điện thoại <-> TV 75").
  */
 export function initSavedQuizzesRealtimeSync(
   teacherId?: string | null,
@@ -485,6 +779,7 @@ export function initSavedQuizzesRealtimeSync(
   let unsub: (() => void) | null = null;
   let active = true;
   const scopedKey = getScopedStorageKey(ownerId);
+  const docPath = `teacher_saved_quizzes/${ownerId}`;
 
   try {
     unsub = onSnapshot(
@@ -498,17 +793,37 @@ export function initSavedQuizzesRealtimeSync(
               data.items as SavedEducationalItem[],
               ownerId
             );
+            const cloudDeletedIds: string[] = Array.isArray(data.deletedIds)
+              ? data.deletedIds.filter((id: any) => typeof id === 'string')
+              : [];
+            const localDeletedIds = getDeletedIds(ownerId);
+            const mergedDeletedIds = Array.from(new Set([...localDeletedIds, ...cloudDeletedIds])).slice(-500);
+            saveDeletedIds(ownerId, mergedDeletedIds);
+            const deletedSet = new Set(mergedDeletedIds);
+
+            const localItems = getSavedEducationalItems(ownerId, teacherName);
+            const { merged, needsCloudPush } = mergeSavedEducationalItems(
+              localItems,
+              cloudItems,
+              deletedSet,
+              ownerId
+            );
+
             try {
-              localStorage.setItem(scopedKey, JSON.stringify(cloudItems));
-              dispatchSavedQuizzesEvent(ownerId, cloudItems);
+              localStorage.setItem(scopedKey, JSON.stringify(merged));
+              dispatchSavedQuizzesEvent(ownerId, merged);
             } catch (_) {}
 
-            onUpdate?.(cloudItems);
+            onUpdate?.(merged);
+
+            if (needsCloudPush) {
+              syncSavedEducationalItemsToCloud(merged, ownerId, false);
+            }
           }
         }
       },
       (err) => {
-        console.warn('[Realtime Sync] Saved quizzes listener warning:', err);
+        logFirestoreError(err, OperationType.GET, docPath);
       }
     );
   } catch (e) {
@@ -527,14 +842,11 @@ export function initSavedQuizzesRealtimeSync(
   };
 }
 
-/**
- * Lưu bài tập hoặc trò chơi mới gắn chặt với teacherId đang đăng nhập.
- */
-export function saveEducationalItem(
+function upsertItemLocally(
   item: Omit<SavedEducationalItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
   teacherId?: string | null,
   teacherName?: string | null
-): SavedEducationalItem {
+): { ownerId: string; finalItem: SavedEducationalItem; nextList: SavedEducationalItem[] } {
   const ownerId = normalizeTeacherOwnerId(teacherId || item.teacherId);
   const all = getSavedEducationalItems(ownerId, teacherName);
   const now = new Date().toISOString();
@@ -564,16 +876,59 @@ export function saveEducationalItem(
     next = [finalItem, ...all];
   }
 
-  syncSavedEducationalItemsToCloud(next, ownerId, true);
+  // If re-saving an item ID, remove it from deletedIds tombstone list
+  const deleted = getDeletedIds(ownerId).filter((did) => did !== finalItem.id);
+  saveDeletedIds(ownerId, deleted);
+
+  return { ownerId, finalItem, nextList: next };
+}
+
+/**
+ * Lưu bài tập hoặc trò chơi mới gắn chặt với teacherId đang đăng nhập và đồng bộ Đám mây (bất đồng bộ trả kết quả).
+ */
+export async function saveEducationalItemAndSync(
+  item: Omit<SavedEducationalItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
+  teacherId?: string | null,
+  teacherName?: string | null
+): Promise<{ item: SavedEducationalItem; sync: SyncResult }> {
+  const { ownerId, finalItem, nextList } = upsertItemLocally(item, teacherId, teacherName);
+  const sync = await syncSavedEducationalItemsToCloud(nextList, ownerId, true);
+  return { item: finalItem, sync };
+}
+
+/**
+ * Lưu bài tập hoặc trò chơi mới (tương thích đồng bộ, tự động đẩy lên Đám mây ở nền).
+ */
+export function saveEducationalItem(
+  item: Omit<SavedEducationalItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
+  teacherId?: string | null,
+  teacherName?: string | null
+): SavedEducationalItem {
+  const { ownerId, finalItem, nextList } = upsertItemLocally(item, teacherId, teacherName);
+  void syncSavedEducationalItemsToCloud(nextList, ownerId, true);
   return finalItem;
+}
+
+/**
+ * Xóa một bài tập hoặc trò chơi trong kho riêng của tài khoản hiện tại và đồng bộ xóa lên Đám mây.
+ */
+export async function deleteEducationalItemAndSync(
+  id: string,
+  teacherId?: string | null
+): Promise<SyncResult> {
+  const ownerId = normalizeTeacherOwnerId(teacherId);
+  const all = getSavedEducationalItems(ownerId);
+  const next = all.filter((x) => x.id !== id);
+  const deleted = getDeletedIds(ownerId);
+  if (!deleted.includes(id)) {
+    saveDeletedIds(ownerId, [...deleted, id]);
+  }
+  return await syncSavedEducationalItemsToCloud(next, ownerId, true);
 }
 
 /**
  * Xóa một bài tập hoặc trò chơi trong kho riêng của tài khoản hiện tại.
  */
 export function deleteEducationalItem(id: string, teacherId?: string | null): void {
-  const ownerId = normalizeTeacherOwnerId(teacherId);
-  const all = getSavedEducationalItems(ownerId);
-  const next = all.filter((x) => x.id !== id);
-  syncSavedEducationalItemsToCloud(next, ownerId, true);
+  void deleteEducationalItemAndSync(id, teacherId);
 }

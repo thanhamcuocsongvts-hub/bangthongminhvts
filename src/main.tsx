@@ -4,6 +4,7 @@ import './utils/firebaseSafe';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { AuthProvider } from './lib/AuthContext';
+import 'katex/dist/katex.min.css';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(

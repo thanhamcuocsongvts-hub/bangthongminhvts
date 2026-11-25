@@ -89,18 +89,23 @@ service cloud.firestore {
     }
 
     function isValidTeacherQuizBank(data, teacherId) {
-      return data.teacherId == teacherId
+      return data.keys().hasAll(['teacherId', 'items', 'updatedAt'])
+        && data.keys().hasOnly(['teacherId', 'items', 'updatedAt', 'deletedIds'])
+        && data.teacherId == teacherId
         && data.items is list && data.items.size() <= 500
-        && data.updatedAt is string && data.updatedAt.size() <= 64;
+        && data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64
+        && (!('deletedIds' in data) || (data.deletedIds is list && data.deletedIds.size() <= 500));
     }
 
     // Per-teacher private quiz & game repository (strictly scoped by teacherId, never listable)
     match /teacher_saved_quizzes/{teacherId} {
-      allow get: if isAuthenticated() && isValidId(teacherId);
+      allow get: if isValidId(teacherId);
       allow list: if false;
-      allow create: if isAuthenticated() && isValidId(teacherId) && isValidTeacherQuizBank(request.resource.data, teacherId);
-      allow update: if isAuthenticated() && isValidId(teacherId) && isValidTeacherQuizBank(request.resource.data, teacherId);
-      allow delete: if isAuthenticated() && isValidId(teacherId);
+      allow create: if isValidId(teacherId) && isValidTeacherQuizBank(request.resource.data, teacherId);
+      allow update: if isValidId(teacherId)
+        && isValidTeacherQuizBank(request.resource.data, teacherId)
+        && request.resource.data.teacherId == resource.data.teacherId;
+      allow delete: if isValidId(teacherId);
     }
 
     // Homework Assignments & Student Submissions (Đề online theo lớp hoặc link tự do)

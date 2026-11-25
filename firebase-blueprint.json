@@ -125,6 +125,7 @@
       "fields": [
         { "name": "teacherId", "type": "string" },
         { "name": "items", "type": "array" },
+        { "name": "deletedIds", "type": "array" },
         { "name": "updatedAt", "type": "string" }
       ],
       "rules": "Per-teacher private saved quiz & game bank; no collection listing permitted."

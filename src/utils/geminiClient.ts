@@ -7,6 +7,7 @@ import {
   inferPartType,
   stripLeadingChoicePrefix,
 } from './quizDistribution';
+import { normalizeAllMathInText } from './mathNormalization';
 
 /**
  * Retrieve Gemini API Key from multiple sources:
@@ -89,6 +90,13 @@ function isFatalAuthError(msg: string): boolean {
   );
 }
 
+function escapeUnescapedLatexInJson(text: string): string {
+  return text.replace(
+    /((?:^|[^\\])(?:\\\\)*)\\(?=(?:frac|forall|times|tan|theta|tau|text|tfrac|triangle|tilde|to(?![a-zA-Z])|beta|binom|bar|begin|big|backslash|bullet|right|rightarrow|rho|rangle|rbrace|rceil|rfloor|neq|notin|nabla)|[^"\\/bfnrtu])/g,
+    '$1\\\\'
+  );
+}
+
 function extractCompleteObjectsFromClientArray(text: string): any[] | null {
   const startArr = text.indexOf('[');
   if (startArr === -1) return null;
@@ -121,11 +129,10 @@ function extractCompleteObjectsFromClientArray(text: string): any[] | null {
       if (depth === 0 && objStart !== -1) {
         const chunk = text.slice(objStart, idx + 1);
         try {
-          items.push(JSON.parse(chunk));
+          items.push(JSON.parse(escapeUnescapedLatexInJson(chunk)));
         } catch {
           try {
-            const fixedChunk = chunk.replace(/(?<!\\)\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\');
-            items.push(JSON.parse(fixedChunk));
+            items.push(JSON.parse(chunk));
           } catch (_) {}
         }
         objStart = -1;
@@ -138,14 +145,14 @@ function extractCompleteObjectsFromClientArray(text: string): any[] | null {
 function safeParseClientJsonWithLatex(raw: string): any {
   if (!raw) return null;
   const text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const escaped = escapeUnescapedLatexInJson(text);
   try {
-    return JSON.parse(text);
+    return JSON.parse(escaped);
   } catch {
     try {
-      const fixed = text.replace(/(?<!\\)\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\');
-      return JSON.parse(fixed);
+      return JSON.parse(text);
     } catch {
-      return extractCompleteObjectsFromClientArray(text);
+      return extractCompleteObjectsFromClientArray(escaped) || extractCompleteObjectsFromClientArray(text);
     }
   }
 }
@@ -280,24 +287,10 @@ Người bình thường có thể đọc và đoán được từ ngữ dù ch�
 }
 
 /**
- * Normalize and clean mathematical notation in quiz questions (standard vectors, KaTeX compat, etc.)
+ * Normalize and clean all mathematical notation in quiz questions (vectors, fractions, radicals, integrals, limits, sets, KaTeX compat)
  */
 export function normalizeMathInText(text: string): string {
-  if (!text || typeof text !== 'string') return text || '';
-  return text
-    // Replace \vec{...} with \overrightarrow{...}
-    .replace(/\\vec\s*\{([^}]+)\}/g, '\\overrightarrow{$1}')
-    .replace(/\\vec\s+([a-zA-Z0-9']+)/g, '\\overrightarrow{$1}')
-    // Replace unicode combining arrow / inline arrows with \overrightarrow
-    .replace(/([a-zA-Z0-9']+)[⃗\u20D7]/g, '\\overrightarrow{$1}')
-    // Replace \hat{...} with \widehat{...}
-    .replace(/\\hat\s*\{([^}]+)\}/g, '\\widehat{$1}')
-    .replace(/\\hat\s+([a-zA-Z0-9']+)/g, '\\widehat{$1}')
-    .replace(/([a-zA-Z0-9']+)̂/g, '\\widehat{$1}')
-    // Replace \bar{...} with \overline{...}
-    .replace(/\\bar\s*\{([^}]+)\}/g, '\\overline{$1}')
-    .replace(/\\bar\s+([a-zA-Z0-9']+)/g, '\\overline{$1}')
-    .replace(/([a-zA-Z0-9']+)̄/g, '\\overline{$1}');
+  return normalizeAllMathInText(text);
 }
 
 export function sanitizeQuizQuestionMath(q: any): any {
@@ -305,6 +298,15 @@ export function sanitizeQuizQuestionMath(q: any): any {
   const cleanQ = { ...q };
   cleanQ.question = normalizeMathInText(cleanQ.question);
   cleanQ.explanation = normalizeMathInText(cleanQ.explanation);
+  if (typeof cleanQ.shortAnswerKey === 'string') {
+    cleanQ.shortAnswerKey = normalizeMathInText(cleanQ.shortAnswerKey);
+  }
+  if (typeof cleanQ.essayRubric === 'string') {
+    cleanQ.essayRubric = normalizeMathInText(cleanQ.essayRubric);
+  }
+  if (cleanQ.partType === 'part_3_short_answer' && typeof cleanQ.correctAnswer === 'string') {
+    cleanQ.correctAnswer = normalizeMathInText(cleanQ.correctAnswer);
+  }
 
   if (Array.isArray(cleanQ.options)) {
     cleanQ.options = cleanQ.options.map((opt: any) => {
@@ -354,10 +356,12 @@ YÊU CẦU ĐẶC BIỆT & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
 1. Mỗi câu hỏi gồm đúng 4 lựa chọn (A, B, C, D). KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
 2. Đáp án đúng "correctAnswer" PHẢI TUÂN THỦ THỨ TỰ PHÂN BỔ: [${targetSequenceHint}]. Xuất trường "correctAnswer" TRƯỚC trường "options" và đặt phương án đúng vào đúng chữ cái đã chỉ định cho mỗi câu.
 3. Có phần giải thích ngắn gọn (1-2 câu), chuẩn xác công thức/kết quả đúng (không viết cứng "Đáp án A đúng").
-4. MỌI CÔNG THỨC TOÁN, LÝ, HÓA, BIỂU THỨC BẮT BUỘC BỌC TRONG CẶP DẤU $...$ (ví dụ: $x^2 + 2x - 3 = 0$, $y = f(x)$).
+4. MỌI CÔNG THỨC TOÁN, LÝ, HÓA, BIỂU THỨC BẮT BUỘC DÙNG LATEX CHUẨN BỌC TRONG $...$ (escape \\\\ trong JSON):
+   - Phân số dùng $\\\\frac{a}{b}$, căn thức dùng $\\\\sqrt{x}$ hoặc $\\\\sqrt[3]{x}$, số mũ nhiều ký tự bọc ngoặc $x^{10}, e^{-x}$, chỉ số $C_{12}^3, u_{n+1}$, tập hợp $\\\\mathbb{R} \\\\setminus \\\\{1\\\\}$, giới hạn $\\\\lim_{x \\to +\\\\infty}$, tích phân $\\\\int_{a}^{b} f(x)dx$, góc $\\\\widehat{ABC}$, $60^{\\\\circ}$.
+   - TUYỆT ĐỐI KHÔNG viết kiểu ASCII như frac(a,b), sqrt(x), (x+1)/(x-2), 2^(x+1), <=, >=, !=, oo, hay ký tự unicode ², ³, √.
 5. ĐẶC BIỆT VỚI KÝ HIỆU VÉC-TƠ:
-   - BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (KHÔNG dùng \\vec{AB} vì mũi tên không bao phủ hết hai chữ cái; KHÔNG tự ghép ký tự unicode mũi tên rời).
-   - Nếu phương án A, B, C, D chứa véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").
+   - BẮT BUỘC dùng $\\\\overrightarrow{AB}$, $\\\\overrightarrow{BC}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{AA'}$, $\\\\overrightarrow{AC'}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (TUYỆT ĐỐI KHÔNG viết vec(AB), vec(a), i - 2j + 3k hay \\vec{AB}).
+   - Nếu phương án A, B, C, D chứa công thức, phân số, véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\\\frac{2x+1}{x-1}$" hoặc "text": "$\\\\overrightarrow{a} = \\\\overrightarrow{i} - 2\\\\overrightarrow{j} + 3\\\\overrightarrow{k}$").
 6. BẮT BUỘC chỉ trả về định dạng JSON thuần túy (không bọc trong markdown code block, không giải thích ngoài lề):
 [
   {
@@ -703,7 +707,7 @@ QUY TẮC BẮT BUỘC:
 1. TÍNH TOÁN CHÍNH XÁC 100% trước khi xuất JSON. Không ra câu vô nghiệm/sai số liệu.
 2. VỚI CÂU PHẦN I (part_1_choice): Xuất trường "correctAnswer" TRƯỚC trường "options". Đặt ĐÚNG đáp án chính xác vào đúng chữ cái "targetKey" đã chỉ định cho mỗi câu (tuyệt đối không tự ý chuyển về A); 3 phương án còn lại là nhiễu hợp lý gần giống kết quả thật. KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
 3. VỚI CÂU PHẦN II (part_2_true_false): Đủ 4 ý a, b, c, d với tỷ lệ Đúng/Sai đa dạng tự nhiên.
-4. CÔNG THỨC TOÁN/LÝ/HÓA: Bọc trong $...$, dùng \\overrightarrow{AB} cho véctơ, escape \\\\ trong JSON.
+4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.
 5. "explanation" súc tích 1-2 câu nêu rõ công thức & phép tính ra đáp số (KHÔNG viết cứng "Chọn đáp án A" hay tên chữ cái đáp án).`;
 
   const parseBatch = (raw: string): any[] => {

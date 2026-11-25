@@ -148,8 +148,8 @@ import { doc } from 'firebase/firestore';
 import { safeSetDoc } from '../utils/firebaseSafe';
 import {
   getSavedEducationalItems,
-  saveEducationalItem,
-  deleteEducationalItem,
+  saveEducationalItemAndSync,
+  deleteEducationalItemAndSync,
   pullSavedQuizzesFromCloud,
   initSavedQuizzesRealtimeSync,
   SavedEducationalItem,
@@ -1226,6 +1226,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz')
   );
   const [isSyncingSavedQuizzes, setIsSyncingSavedQuizzes] = useState<boolean>(false);
+  const [isSavingQuizToCloud, setIsSavingQuizToCloud] = useState<boolean>(false);
   const [showSavedQuizzesModal, setShowSavedQuizzesModal] = useState<boolean>(false);
   const [showSaveQuizModal, setShowSaveQuizModal] = useState<boolean>(false);
   const [saveQuizTitle, setSaveQuizTitle] = useState<string>('');
@@ -2531,9 +2532,9 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   }, [isPresentationFullScreen]);
 
   // Handlers cho tính năng Lưu và Mở bài tập trắc nghiệm
-  const handleSaveQuizSubmit = (e: React.FormEvent) => {
+  const handleSaveQuizSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!saveQuizTitle.trim()) return;
+    if (!saveQuizTitle.trim() || isSavingQuizToCloud) return;
 
     const targetQuestions = generatedQuestions.length > 0 ? generatedQuestions : questions;
     if (targetQuestions.length === 0) {
@@ -2542,28 +2543,40 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       return;
     }
 
-    const savedItem = saveEducationalItem(
-      {
-        title: saveQuizTitle.trim(),
-        type: 'quiz',
-        subject: saveQuizSubject,
-        grade: saveQuizGrade,
-        questionCount: targetQuestions.length,
-        questions: targetQuestions,
-        notes: saveQuizNotes.trim() || undefined,
-      },
-      teacher?.id,
-      teacher?.name
-    );
+    setIsSavingQuizToCloud(true);
+    try {
+      const { item: savedItem, sync } = await saveEducationalItemAndSync(
+        {
+          title: saveQuizTitle.trim(),
+          type: 'quiz',
+          subject: saveQuizSubject,
+          grade: saveQuizGrade,
+          questionCount: targetQuestions.length,
+          questions: targetQuestions,
+          notes: saveQuizNotes.trim() || undefined,
+        },
+        teacher?.id,
+        teacher?.name
+      );
 
-    const updated = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz');
-    setSavedQuizzesList(updated);
-    setShowSaveQuizModal(false);
-    setSaveQuizTitle('');
-    setSaveQuizNotes('');
-    setQuizToast(`Đã lưu bài tập "${savedItem.title}" (${targetQuestions.length} câu) vào kho riêng của Thầy/Cô!`);
-    gameSounds.playVictoryFanfare();
-    setTimeout(() => setQuizToast(null), 4500);
+      const updated = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz');
+      setSavedQuizzesList(updated);
+      setShowSaveQuizModal(false);
+      setSaveQuizTitle('');
+      setSaveQuizNotes('');
+
+      if (sync.cloudSynced) {
+        setQuizToast(`☁️ Đã lưu & đồng bộ Đám Mây "${savedItem.title}" (${targetQuestions.length} câu)! Mở trên điện thoại hay Tivi 75" sẽ thấy ngay.`);
+      } else if (sync.serverSynced) {
+        setQuizToast(`Đã lưu "${savedItem.title}" (${targetQuestions.length} câu) vào máy & máy chủ nội bộ.`);
+      } else {
+        setQuizToast(`Đã lưu "${savedItem.title}" (${targetQuestions.length} câu) trên thiết bị này${sync.error ? ` (${sync.error})` : ''}.`);
+      }
+      gameSounds.playVictoryFanfare();
+      setTimeout(() => setQuizToast(null), 5000);
+    } finally {
+      setIsSavingQuizToCloud(false);
+    }
   };
 
   const applySelectedSavedQuiz = async (item: SavedEducationalItem, targetMode: 'presentation' | 'live' | 'exam' | 'creator') => {
@@ -2615,10 +2628,12 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     setTimeout(() => setQuizToast(null), 3500);
   };
 
-  const handleDeleteSavedQuiz = (id: string, e: React.MouseEvent) => {
+  const handleDeleteSavedQuiz = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('Thầy/Cô có chắc chắn muốn xóa bài tập trắc nghiệm này không?')) {
-      deleteEducationalItem(id, teacher?.id);
+      const updatedBefore = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz' && x.id !== id);
+      setSavedQuizzesList(updatedBefore);
+      await deleteEducationalItemAndSync(id, teacher?.id);
       const updated = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'quiz');
       setSavedQuizzesList(updated);
     }
@@ -2854,7 +2869,17 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         <div className="flex items-center gap-2.5 flex-wrap">
           {/* Nút Kho Đề Đã Lưu luôn hiển thị để mở nhanh */}
           <button
-            onClick={() => setShowSavedQuizzesModal(true)}
+            onClick={() => {
+              setShowSavedQuizzesModal(true);
+              setIsSyncingSavedQuizzes(true);
+              pullSavedQuizzesFromCloud(teacher?.id, teacher?.name)
+                .then((items) => {
+                  if (Array.isArray(items)) {
+                    setSavedQuizzesList(items.filter((x) => x.type === 'quiz'));
+                  }
+                })
+                .finally(() => setIsSyncingSavedQuizzes(false));
+            }}
             className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
             title="Mở kho bài tập trắc nghiệm đã tạo sẵn ở nhà để trình chiếu hoặc phát cho học sinh"
           >
@@ -3530,8 +3555,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                               <span>Đáp Án Điền Khuyết / Trả Lời Ngắn:</span>
                             </div>
                             <div className="flex items-center gap-3">
-                              <span className="px-4 py-2 rounded-xl bg-white border-2 border-cyan-400 text-slate-900 font-mono font-black text-base shadow-xs">
-                                {q.shortAnswerKey || q.correctAnswer || 'Chưa cung cấp'}
+                              <span className="px-4 py-2 rounded-xl bg-white border-2 border-cyan-400 text-slate-900 font-bold text-base shadow-xs">
+                                <MathFormulaRenderer content={q.shortAnswerKey || q.correctAnswer || 'Chưa cung cấp'} />
                               </span>
                               <span className="text-xs text-slate-500 font-medium">
                                 (Học sinh nhập chính xác số hoặc cụm từ ngắn trên máy tính/điện thoại)
@@ -3909,8 +3934,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                           {isRevealed ? 'Đáp án trả lời ngắn:' : 'Học sinh tính toán và điền đáp số ngắn trên thiết bị'}
                         </span>
                         {isRevealed && (
-                          <span className="px-4 py-1.5 rounded-xl bg-white border-2 border-cyan-500 font-mono font-black text-lg text-slate-900">
-                            {currentQ.shortAnswerKey || currentQ.correctAnswer || 'Chưa có'}
+                          <span className="px-4 py-1.5 rounded-xl bg-white border-2 border-cyan-500 font-black text-lg text-slate-900">
+                            <MathFormulaRenderer content={currentQ.shortAnswerKey || currentQ.correctAnswer || 'Chưa có'} />
                           </span>
                         )}
                       </div>
@@ -5146,10 +5171,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
                             {boardShortAnswerRevealed ? (
                               <div
-                                className="px-7 py-3.5 rounded-2xl bg-emerald-500 text-slate-950 font-mono font-black shadow-xl border-2 border-emerald-200 tabular-nums"
+                                className="px-7 py-3.5 rounded-2xl bg-emerald-500 text-slate-950 font-black shadow-xl border-2 border-emerald-200 tabular-nums"
                                 style={{ fontSize: `${boardShortAnswerFontSize}px` }}
                               >
-                                {currentQ.shortAnswerKey || currentQ.correctAnswer || 'Chưa cung cấp'}
+                                <MathFormulaRenderer content={currentQ.shortAnswerKey || currentQ.correctAnswer || 'Chưa cung cấp'} />
                               </div>
                             ) : (
                               <button
@@ -6246,10 +6271,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20"
+                  disabled={isSavingQuizToCloud}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-60 text-white font-black text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20"
                 >
                   <Save className="w-4 h-4" />
-                  <span>Xác Nhận Lưu Bài Tập</span>
+                  <span>{isSavingQuizToCloud ? 'Đang lưu & đồng bộ...' : 'Xác Nhận Lưu Bài Tập'}</span>
                 </button>
               </div>
             </form>

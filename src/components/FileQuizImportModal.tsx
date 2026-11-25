@@ -290,9 +290,9 @@ export const FileQuizImportModal: React.FC<FileQuizImportModalProps> = ({
                     </div>
 
                     {q.explanation && (
-                      <p className="text-[11px] text-slate-500 italic pt-1">
-                        Giải thích: {q.explanation}
-                      </p>
+                      <div className="text-[11px] text-slate-500 italic pt-1">
+                        Giải thích: <MathFormulaRenderer text={q.explanation} />
+                      </div>
                     )}
                   </div>
                 ))}

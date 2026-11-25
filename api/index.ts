@@ -22,6 +22,13 @@ function isServerlessFatalAuthErr(msg: string): boolean {
   return msg.includes('API_KEY_INVALID') || msg.includes('PERMISSION_DENIED') || msg.includes('API key should be set');
 }
 
+function escapeUnescapedLatexInJsonServerless(text: string): string {
+  return text.replace(
+    /((?:^|[^\\])(?:\\\\)*)\\(?=(?:frac|forall|times|tan|theta|tau|text|tfrac|triangle|tilde|to(?![a-zA-Z])|beta|binom|bar|begin|big|backslash|bullet|right|rightarrow|rho|rangle|rbrace|rceil|rfloor|neq|notin|nabla)|[^"\\/bfnrtu])/g,
+    '$1\\\\'
+  );
+}
+
 function extractCompleteObjectsServerless(text: string): any[] | null {
   const startArr = text.indexOf('[');
   if (startArr === -1) return null;
@@ -53,11 +60,10 @@ function extractCompleteObjectsServerless(text: string): any[] | null {
       if (depth === 0 && objStart !== -1) {
         const chunk = text.slice(objStart, idx + 1);
         try {
-          items.push(JSON.parse(chunk));
+          items.push(JSON.parse(escapeUnescapedLatexInJsonServerless(chunk)));
         } catch {
           try {
-            const fixedChunk = chunk.replace(/(?<!\\)\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\');
-            items.push(JSON.parse(fixedChunk));
+            items.push(JSON.parse(chunk));
           } catch (_) {}
         }
         objStart = -1;
@@ -70,28 +76,274 @@ function extractCompleteObjectsServerless(text: string): any[] | null {
 function safeParseServerlessJsonWithLatex(raw: string): any {
   if (!raw) return null;
   const text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const escaped = escapeUnescapedLatexInJsonServerless(text);
   try {
-    return JSON.parse(text);
+    return JSON.parse(escaped);
   } catch {
     try {
-      const fixed = text.replace(/(?<!\\)\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\');
-      return JSON.parse(fixed);
+      return JSON.parse(text);
     } catch {
-      return extractCompleteObjectsServerless(text);
+      return extractCompleteObjectsServerless(escaped) || extractCompleteObjectsServerless(text);
     }
   }
 }
 
-function normalizeServerlessMathInText(text: string): string {
-  if (!text || typeof text !== 'string') return text || '';
-  return text
+const SL_KNOWN_LATEX = new Set([
+  'frac', 'dfrac', 'tfrac', 'cfrac', 'sqrt', 'vec', 'overrightarrow', 'overleftarrow',
+  'overleftrightarrow', 'widehat', 'overline', 'underline', 'hat', 'bar', 'tilde', 'widetilde',
+  'mathbb', 'mathcal', 'mathbf', 'mathrm', 'mathit', 'mathsf', 'text', 'textbf', 'textit',
+  'operatorname', 'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'tg', 'cotg', 'arctg',
+  'arcsin', 'arccos', 'arctan', 'ln', 'log', 'lg', 'exp', 'lim', 'int', 'iint', 'oint',
+  'sum', 'prod', 'infty', 'alpha', 'beta', 'gamma', 'delta', 'Delta', 'epsilon', 'varepsilon',
+  'theta', 'lambda', 'mu', 'pi', 'Pi', 'rho', 'sigma', 'tau', 'phi', 'varphi', 'Phi', 'psi',
+  'omega', 'Omega', 'in', 'notin', 'subset', 'subseteq', 'supset', 'cup', 'cap', 'setminus',
+  'backslash', 'emptyset', 'varnothing', 'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'approx',
+  'equiv', 'pm', 'mp', 'times', 'cdot', 'div', 'to', 'rightarrow', 'leftarrow', 'leftrightarrow',
+  'Rightarrow', 'Leftarrow', 'Leftrightarrow', 'forall', 'exists', 'perp', 'parallel', 'angle',
+  'triangle', 'circ', 'binom', 'begin', 'end', 'quad', 'qquad', 'ldots', 'cdots', 'dots',
+]);
+
+function recoverServerlessJsonControlChars(text: string, inMathMode: boolean): string {
+  if (!text) return text;
+  let out = text
+    .replace(/\u000c(rac|orall)\b/g, '\\f$1')
+    .replace(/\u0009(imes|an|heta|au|ext|frac|riangle|ilde|o(?![a-zA-Z]))/g, '\\t$1')
+    .replace(/\u0008(eta|inom|ar|egin|ig|igg|igl|igr|ackslash|ullet)/g, '\\b$1')
+    .replace(/\u000d(ightarrow|ight|ho|angle|brace|ceil|floor)/g, '\\r$1');
+  if (inMathMode) {
+    out = out.replace(/\n(eq(?![a-zA-Z])|e(?![a-zA-Z])|otin|abla|exists|mid)/g, '\\n$1');
+  }
+  return out;
+}
+
+function findMatchingParenServerless(str: string, openIdx: number): number {
+  let depth = 0;
+  for (let i = openIdx; i < str.length; i++) {
+    if (str[i] === '(') depth++;
+    else if (str[i] === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function normalizeServerlessMathSegment(segment: string, isInsideMath: boolean): string {
+  if (!segment) return segment;
+  let out = recoverServerlessJsonControlChars(segment, isInsideMath);
+  if (out.includes('\\\\')) {
+    out = out.replace(/\\\\([a-zA-Z]{2,})/g, (full, cmd) => (SL_KNOWN_LATEX.has(cmd) ? `\\${cmd}` : full));
+  }
+
+  // Radicals & AsciiMath function calls
+  out = out
+    .replace(/∛\s*\(([^()]+)\)/g, '\\sqrt[3]{$1}')
+    .replace(/∛\s*([a-zA-Z0-9]+)/g, '\\sqrt[3]{$1}')
+    .replace(/√\s*\(([^()]+)\)/g, '\\sqrt{$1}')
+    .replace(/√\s*([a-zA-Z0-9]+)/g, '\\sqrt{$1}')
+    .replace(/(?:\\)?\broot\s*\(([^()]+)\)\s*\(([^()]+)\)/g, (_, n, x) => `\\sqrt[${n.trim()}]{${x.trim()}}`)
+    .replace(/(?:\\frac|\bfrac)\s*\(([^()]+)\)\s*\(([^()]+)\)/g, (_, a, b) => `\\frac{${a.trim()}}{${b.trim()}}`)
+    .replace(/(?:\\frac|\bfrac)\s*\(([^(),]+),([^()]+)\)/g, (_, a, b) => `\\frac{${a.trim()}}{${b.trim()}}`);
+
+  const unaryMap: Record<string, (a: string) => string> = {
+    '\\vec': (a) => `\\overrightarrow{${a}}`,
+    vec: (a) => `\\overrightarrow{${a}}`,
+    '\\hat': (a) => `\\widehat{${a}}`,
+    hat: (a) => `\\widehat{${a}}`,
+    widehat: (a) => `\\widehat{${a}}`,
+    '\\overline': (a) => `\\overline{${a}}`,
+    overline: (a) => `\\overline{${a}}`,
+    '\\bar': (a) => `\\overline{${a}}`,
+    bar: (a) => `\\overline{${a}}`,
+    '\\sqrt': (a) => `\\sqrt{${a}}`,
+    sqrt: (a) => `\\sqrt{${a}}`,
+    cbrt: (a) => `\\sqrt[3]{${a}}`,
+  };
+  for (let pass = 0; pass < 2; pass++) {
+    const callRe = /(\\?(?:vec|hat|widehat|overline|bar|sqrt|cbrt))\s*\(/g;
+    let res = '';
+    let idx = 0;
+    let match: RegExpExecArray | null;
+    while ((match = callRe.exec(out)) !== null) {
+      const fnName = match[1];
+      const matchStart = match.index;
+      if (!fnName.startsWith('\\') && matchStart > 0 && /[a-zA-Z0-9_\\]/.test(out[matchStart - 1])) continue;
+      const openIdx = matchStart + match[0].length - 1;
+      const closeIdx = findMatchingParenServerless(out, openIdx);
+      if (closeIdx !== -1 && unaryMap[fnName]) {
+        res += out.slice(idx, matchStart) + unaryMap[fnName](out.slice(openIdx + 1, closeIdx).trim());
+        idx = closeIdx + 1;
+        callRe.lastIndex = idx;
+      }
+    }
+    if (idx > 0) out = res + out.slice(idx);
+
+    const scriptRe = /([\^_])\s*\(/g;
+    let sRes = '';
+    let sIdx = 0;
+    while ((match = scriptRe.exec(out)) !== null) {
+      const openIdx = match.index + match[0].length - 1;
+      const closeIdx = findMatchingParenServerless(out, openIdx);
+      if (closeIdx !== -1) {
+        sRes += out.slice(sIdx, match.index) + `${match[1]}{${out.slice(openIdx + 1, closeIdx).trim()}}`;
+        sIdx = closeIdx + 1;
+        scriptRe.lastIndex = sIdx;
+      }
+    }
+    if (sIdx > 0) out = sRes + out.slice(sIdx);
+  }
+
+  const supMap: Record<string, string> = { '⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','⁺':'+','⁻':'-','ⁿ':'n','ⁱ':'i' };
+  const subMap: Record<string, string> = { '₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9','₊':'+','₋':'-','ₙ':'n','ᵢ':'i','ⱼ':'j' };
+  out = out
     .replace(/\\vec\s*\{([^}]+)\}/g, '\\overrightarrow{$1}')
-    .replace(/\\vec\s+([a-zA-Z0-9']+)/g, '\\overrightarrow{$1}')
+    .replace(/\\vec\s+([a-zA-Z][a-zA-Z0-9']*)/g, '\\overrightarrow{$1}')
     .replace(/([a-zA-Z0-9']+)[⃗\u20D7]/g, '\\overrightarrow{$1}')
     .replace(/\\hat\s*\{([^}]+)\}/g, '\\widehat{$1}')
     .replace(/\\hat\s+([a-zA-Z0-9']+)/g, '\\widehat{$1}')
     .replace(/\\bar\s*\{([^}]+)\}/g, '\\overline{$1}')
-    .replace(/\\bar\s+([a-zA-Z0-9']+)/g, '\\overline{$1}');
+    .replace(/\\bar\s+([a-zA-Z0-9']+)/g, '\\overline{$1}')
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ⁿⁱ]+/g, (m) => `^{${m.split('').map((c) => supMap[c] || c).join('')}}`)
+    .replace(/[₀₁₂₃₄₅₆₇₈₉₊₋ₙᵢⱼ]+/g, (m) => `_{${m.split('').map((c) => subMap[c] || c).join('')}}`)
+    .replace(/(\\mathbb\s*\{[A-Z]\}|ℝ|ℕ|ℤ|ℚ)\s*\\\s*(\\{[^}]*\\\}|\{[^}]*\})/g, '$1 \\setminus $2')
+    .replace(/(?<![\\a-zA-Z])([RNZQ])\s*\\\s*(\\{[^}]*\\\}|\{[^}]*\})/g, '\\mathbb{$1} \\setminus $2')
+    .replace(/\\setminus\s*(?<!\\)\{([^{}]+)(?<!\\)\}/g, '\\setminus \\{$1\\}')
+    .replace(/\^\s*\{\s*\\circ\s*\}|\^\\circ|\\degree\b/g, '^{\\circ}')
+    .replace(/([0-9a-zA-Z)'}\]])\s*°/g, '$1^{\\circ}');
+
+  if (isInsideMath) {
+    out = out
+      .replace(/<=>/g, '\\Leftrightarrow ')
+      .replace(/=>/g, '\\Rightarrow ')
+      .replace(/->/g, '\\to ')
+      .replace(/<=/g, '\\le ')
+      .replace(/>=/g, '\\ge ')
+      .replace(/!=/g, '\\neq ')
+      .replace(/\+-/g, '\\pm ')
+      .replace(/(?<![a-zA-Z\\])([+-]?)\s*oo(?![a-zA-Z])/g, '$1\\infty')
+      .replace(/\^([+-]\d+|\d{2,}|-[a-zA-Z])/g, '^{$1}')
+      .replace(/_([a-zA-Z]\d+|\d{2,}|-[a-zA-Z0-9])/g, '_{$1}')
+      .replace(/(?<![a-zA-Z_])\(([^()$]+)\)\s*\/\s*\(([^()$]+)\)/g, (_, a, b) => `\\frac{${a.trim()}}{${b.trim()}}`)
+      .replace(/(?<![a-zA-Z_])\(([^()$]+)\)\s*\/\s*(\\[a-zA-Z]+(?:\{[^{}]*\})?|[a-zA-Z0-9]+)/g, (_, a, b) => `\\frac{${a.trim()}}{${b.trim()}}`)
+      .replace(/ℝ/g, '\\mathbb{R}').replace(/ℕ/g, '\\mathbb{N}').replace(/ℤ/g, '\\mathbb{Z}').replace(/ℚ/g, '\\mathbb{Q}')
+      .replace(/∈/g, '\\in ').replace(/∉/g, '\\notin ').replace(/∞/g, '\\infty').replace(/≤/g, '\\le ').replace(/≥/g, '\\ge ').replace(/≠/g, '\\neq ')
+      .replace(/\\tg\b/g, '\\tan').replace(/\\cotg\b/g, '\\cot').replace(/\\arctg\b/g, '\\arctan')
+      .replace(/(?<![a-zA-Z\\])(int|iint|sum|prod)(?=\s*[_^])/g, '\\$1')
+      .replace(/(?<![a-zA-Z\\])(arcsin|arccos|arctan|sin|cos|tan|cot|ln|log|lg|lim)(?![a-zA-Z])/g, '\\$1')
+      .replace(/(?<!\\)%/g, '\\%');
+  }
+
+  const held: string[] = [];
+  const hold = (s: string) => {
+    const idx = held.length;
+    held.push(s);
+    return `__VLTOK_${idx}__`;
+  };
+  let prot = out
+    .replace(/\\text\s*\{[^{}]*\}/g, hold)
+    .replace(/\\(?:overrightarrow|overleftarrow|overleftrightarrow|widehat|overline|vec)\s*\{[^{}]*\}/g, hold)
+    .replace(/\\[a-zA-Z]+/g, hold);
+
+  const hasVec = out.includes('\\overrightarrow') || out.includes('\\vec');
+  const hasUnitCombo =
+    /(?:^|[^a-zA-Z_])[+-]?\s*\d*\s*[ijk]\s*[+-]\s*\d*\s*[jk](?![a-zA-Z0-9_])/.test(prot) ||
+    /(?:^|[^a-zA-Z_])[+-]?\s*\d*\s*[ij]\s*[+-]\s*\d*\s*[ijk](?![a-zA-Z0-9_])/.test(prot) ||
+    (hasVec && /=\s*[+-]?\s*\d*\s*[ijk](?:\s*[+-]|[^a-zA-Z0-9_]|$)/.test(prot));
+
+  if (hasUnitCombo) {
+    prot = prot.replace(/(?<![a-zA-Z_\\])([ijk])(?![a-zA-Z0-9_])/g, '\\overrightarrow{$1}');
+  }
+
+  return prot.replace(/__VLTOK_(\d+)__/g, (_, i) => held[Number(i)] || '');
+}
+
+function normalizeServerlessMathInText(text: string): string {
+  if (!text || typeof text !== 'string') return text || '';
+  const prepared = text
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+
+  if (!prepared.includes('$')) {
+    const converted = normalizeServerlessMathSegment(prepared, false);
+    const hasVn = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(converted);
+    if (!hasVn && (/\\(?:overrightarrow|frac|dfrac|sqrt|widehat|overline|mathbb|in|infty|int|sum|lim|le|ge|neq)/.test(converted) || /\^[0-9{+-]|_[0-9{]/.test(converted))) {
+      const m = converted.match(/^([\s\S]*?)([.,;!?]+)?$/);
+      const body = m?.[1]?.trim() || converted.trim();
+      const punct = m?.[2] || '';
+      return `$${normalizeServerlessMathSegment(body, true)}$${punct}`;
+    }
+    return converted;
+  }
+  return prepared
+    .split(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g)
+    .map((seg) => {
+      if (seg.startsWith('$$') && seg.endsWith('$$')) {
+        return `$$${normalizeServerlessMathSegment(seg.slice(2, -2), true)}$$`;
+      }
+      if (seg.startsWith('$') && seg.endsWith('$')) {
+        return `$${normalizeServerlessMathSegment(seg.slice(1, -1), true)}$`;
+      }
+      return normalizeServerlessMathSegment(seg, false);
+    })
+    .join('');
+}
+
+function balanceServerlessAnswerDistribution(questions: any[], seedInput: string): any[] {
+  if (!Array.isArray(questions) || questions.length === 0) return questions || [];
+  const KEYS = ['A', 'B', 'C', 'D'];
+  let h = 2166136261;
+  for (let i = 0; i < seedInput.length; i++) {
+    h ^= seedInput.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let state = (h >>> 0) || 1337;
+  const rng = () => {
+    state += 0x6d2b79f5;
+    let r = Math.imul(state ^ (state >>> 15), 1 | state);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+  const shuffleArr = <T,>(arr: T[]): T[] => {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  };
+
+  const eligibleIndices: number[] = [];
+  questions.forEach((q, idx) => {
+    const isMcq = (!q.partType || q.partType === 'part_1_choice') && Array.isArray(q.options) && q.options.length >= 4;
+    if (isMcq) {
+      const optsText = q.options.map((o: any) => o?.text || '').join(' ');
+      if (!/cả\s+[A-D]|tất\s*cả\s*(?:các)?\s*(?:phương\s*án|đáp\s*án)|(?:phương\s*án|đáp\s*án)\s*[A-D]/i.test(optsText)) {
+        eligibleIndices.push(idx);
+      }
+    }
+  });
+  if (eligibleIndices.length === 0) return questions;
+
+  const targets: string[] = [];
+  while (targets.length < eligibleIndices.length) {
+    targets.push(...shuffleArr(KEYS));
+  }
+
+  return questions.map((q, qIdx) => {
+    const pos = eligibleIndices.indexOf(qIdx);
+    if (pos === -1) return q;
+    const targetKey = targets[pos];
+    const oldKey = String(q.correctAnswer || 'A').trim().toUpperCase().replace(/[^A-D]/g, '').slice(0, 1) || 'A';
+    const correctItem = q.options.find((o: any) => o.key === oldKey) || q.options[0];
+    const distractors = shuffleArr(q.options.filter((o: any) => o.key !== correctItem.key).map((o: any) => o.text));
+    let dc = 0;
+    const nextOptions = KEYS.map((k) => ({ key: k, text: k === targetKey ? correctItem.text : (distractors[dc++] ?? '') }));
+    return {
+      ...q,
+      options: nextOptions,
+      correctAnswer: targetKey,
+    };
+  });
 }
 
 function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, subject: string, timeLimit: number) {
@@ -146,6 +398,10 @@ function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, su
         ];
   }
 
+  const normalizedShortKey = typeof q.shortAnswerKey === 'string'
+    ? normalizeServerlessMathInText(q.shortAnswerKey)
+    : undefined;
+  const rawCorrect = String(q.correctAnswer || (isShortAnswer ? q.shortAnswerKey : (isTrueFalse ? 'a:Đ, b:S, c:Đ, d:S' : 'A')));
   return {
     id: q.id || `ai_fast_q_${Date.now()}_${idx + 1}`,
     question: normalizeServerlessMathInText(q.question || `Câu hỏi ${idx + 1}`),
@@ -153,9 +409,9 @@ function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, su
     partLabel,
     options,
     subStatements,
-    shortAnswerKey: q.shortAnswerKey || (isShortAnswer ? (q.correctAnswer || '') : undefined),
-    essayRubric: q.essayRubric || (isEssay ? (q.explanation || 'Hướng dẫn chấm') : undefined),
-    correctAnswer: String(q.correctAnswer || (isShortAnswer ? q.shortAnswerKey : (isTrueFalse ? 'a:Đ, b:S, c:Đ, d:S' : 'A'))),
+    shortAnswerKey: normalizedShortKey || (isShortAnswer ? normalizeServerlessMathInText(rawCorrect) : undefined),
+    essayRubric: q.essayRubric ? normalizeServerlessMathInText(String(q.essayRubric)) : (isEssay ? normalizeServerlessMathInText(q.explanation || 'Hướng dẫn chấm') : undefined),
+    correctAnswer: isShortAnswer ? normalizeServerlessMathInText(rawCorrect) : rawCorrect,
     explanation: normalizeServerlessMathInText(q.explanation || 'Lời giải chi tiết theo chuẩn sư phạm.'),
     diagramType: q.diagramType,
     diagramData: q.diagramData,
@@ -634,13 +890,20 @@ TUYỆT ĐỐI KHÔNG mở đầu bằng 'Ảnh 1:', 'Hình 1:', 'Ảnh 1', 'Ima
           const response = await ai.models.generateContent({
             model,
             contents: `Soạn ${numQuestions} câu hỏi trắc nghiệm chất lượng cao về chủ đề: "${topic}". Môn: ${subject}, Khối: ${grade}, Mức độ: ${difficulty}.
-Trả về JSON array thuần túy: [{"id":"q1","question":"...","options":[{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}],"correctAnswer":"A","explanation":"...","timeLimit":30}]`,
+QUY TẮC: Toàn bộ công thức toán/lý/hóa dùng LaTeX chuẩn bọc trong $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ $\\\\overrightarrow{AB}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (TUYỆT ĐỐI KHÔNG viết ASCII vec(AB), frac(a,b), sqrt(x), <=, >=, oo); phân bố đều đáp án A, B, C, D.
+Trả về JSON array thuần túy: [{"id":"q1","correctAnswer":"C","question":"...","options":[{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}],"explanation":"...","timeLimit":30}]`,
             config: buildServerlessModelConfig(model, { responseMimeType: 'application/json', temperature: 0.2 }),
           });
           const parsed = safeParseServerlessJsonWithLatex(response.text || '[]');
-          const questions = Array.isArray(parsed) ? parsed : parsed?.questions || [];
-          if (questions && questions.length > 0) {
-            return res.status(200).json({ success: true, questions });
+          const rawQuestions = Array.isArray(parsed) ? parsed : parsed?.questions || [];
+          if (rawQuestions && rawQuestions.length > 0) {
+            const normalized = rawQuestions.map((q: any, idx: number) =>
+              normalizeServerlessQuestion(q, idx, difficulty, subject, 30)
+            );
+            return res.status(200).json({
+              success: true,
+              questions: balanceServerlessAnswerDistribution(normalized, `${topic}_${Date.now()}`),
+            });
           }
         } catch (e: any) {
           lastErr = e?.message || String(e);
@@ -712,7 +975,8 @@ ${
       : ''
 }
 ĐỊNH DẠNG JSON MỖI CÂU HỎI (BẮT BUỘC TRẢ VỀ MẢNG JSON THUẦN TÚY [ { ... } ]):
-1. Phần I: { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "A", "explanation": "...", "timeLimit": ${timeLimit} }
+LƯU Ý TOÁN HỌC & ĐÁP ÁN: Toàn bộ công thức toán/lý/hóa dùng LaTeX chuẩn bọc trong $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k} (TUYỆT ĐỐI KHÔNG viết ASCII vec(AB), frac(a,b), sqrt(x), <=, >=, oo); phân bố đều đáp án đúng ở A, B, C, D (không dồn hết về A).
+1. Phần I: { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "correctAnswer": "C", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "explanation": "...", "timeLimit": ${timeLimit} }
 2. Phần II: { "id": "q2", "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "...", "timeLimit": 60 }
 3. Phần III: { "id": "q3", "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "explanation": "...", "timeLimit": 45 }
 4. Phần IV: { "id": "q4", "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "Thang điểm...", "correctAnswer": "Lời giải mẫu", "options": [], "explanation": "...", "timeLimit": 120 }`;
@@ -763,8 +1027,11 @@ ${
         }
 
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const questions = parsed.map((q: any, idx: number) =>
-            normalizeServerlessQuestion(q, idx, difficulty, subject, Number(timeLimit) || 30)
+          const questions = balanceServerlessAnswerDistribution(
+            parsed.map((q: any, idx: number) =>
+              normalizeServerlessQuestion(q, idx, difficulty, subject, Number(timeLimit) || 30)
+            ),
+            `${userPrompt || matrixFile?.fileName || grade}_${Date.now()}`
           );
           return res.status(200).json({ success: true, questions });
         }

@@ -1,5 +1,13 @@
 import React, { useMemo } from 'react';
 import katex from 'katex';
+import {
+  normalizeAccentsAndUnicodeScripts,
+  normalizeAllMathInText,
+  sanitizeMathExpression,
+  splitMathDelimiters,
+} from '../utils/mathNormalization';
+
+export { sanitizeMathExpression };
 
 interface MathFormulaRendererProps {
   content?: string;
@@ -28,74 +36,14 @@ export function formatScienceFormulaToLatex(text: string): string {
   // Format chemical formulas with numbers into subscripts, e.g., H2O -> H_2O, C6H12O6 -> C_6H_{12}O_6
   formatted = formatted.replace(/\b([A-Z][a-z]?)(\d+)\b/g, '$1_{$2}');
   formatted = formatted.replace(/\b([A-Z][a-z]?)(\d+)([A-Z][a-z]?)(\d+)\b/g, '$1_{$2}$3_{$4}');
-  formatted = formatted.replace(/\b([A-Z][a-z]?)(\d+)([A-Z][a-z]?)(\d+)\b/g, '$1_{$2}$3_{$4}$5_{$6}');
 
   return formatted;
 }
 
-// Sanitize and adapt math expressions to guarantee 100% KaTeX compatibility without parse errors
-export function sanitizeMathExpression(raw: string): string {
-  if (!raw) return '';
-  let math = raw.trim();
-
-  // Normalize excessive backslashes (e.g. \\\\frac -> \\frac)
-  math = math.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
-
-  // 1. Normalize all vector expressions into standard SGK \overrightarrow{...}
-  // Ensures KaTeX renders an authentic, wide, stretchy arrow over whole vector names (AB, BC, AA', A'B', etc.)
-  math = math.replace(/\\vec\s*\{([^{}]+)\}/g, '\\overrightarrow{$1}');
-  math = math.replace(/\\vec\s+([A-Z][a-zA-Z0-9']?)/g, '\\overrightarrow{$1}');
-  // Unicode combining arrow or single arrow attached to letters (e.g. AB⃗ or u⃗) -> \overrightarrow{...}
-  math = math.replace(/([A-Z][a-zA-Z0-9']*)(?:\u20D7|[\u2192\u27F6])/g, '\\overrightarrow{$1}');
-
-  // Normalize unicode math symbols to LaTeX equivalents
-  math = math
-    .replace(/ℝ/g, '\\mathbb{R}')
-    .replace(/ℕ/g, '\\mathbb{N}')
-    .replace(/ℤ/g, '\\mathbb{Z}')
-    .replace(/ℚ/g, '\\mathbb{Q}')
-    .replace(/∈/g, '\\in ')
-    .replace(/∉/g, '\\notin ')
-    .replace(/⊂/g, '\\subset ')
-    .replace(/⊃/g, '\\supset ')
-    .replace(/∪/g, '\\cup ')
-    .replace(/∩/g, '\\cap ')
-    .replace(/∅/g, '\\emptyset')
-    .replace(/∞/g, '\\infty')
-    .replace(/±/g, '\\pm ')
-    .replace(/≤/g, '\\le ')
-    .replace(/≥/g, '\\ge ')
-    .replace(/≠/g, '\\neq ')
-    .replace(/≈/g, '\\approx ')
-    .replace(/⇔/g, '\\Leftrightarrow ')
-    .replace(/⇒/g, '\\Rightarrow ')
-    .replace(/→/g, '\\to ')
-    .replace(/⊥|⟂/g, '\\perp ')
-    .replace(/∥/g, '\\parallel ')
-    .replace(/∠/g, '\\angle ')
-    .replace(/\\mathbb\s+([A-Z])/g, '\\mathbb{$1}')
-    .replace(/\\degree/g, '^{\\circ}')
-    .replace(/\\tg\b/g, '\\tan')
-    .replace(/\\cotg\b/g, '\\cot')
-    .replace(/\\arctg\b/g, '\\arctan')
-    .replace(/\\varDelta\b/g, '\\Delta')
-    .replace(/\\empty\b/g, '\\emptyset')
-    .replace(/\\parallel/g, '\\parallel ')
-    .replace(/\\rightarrow/g, '\\to ')
-    .replace(/\\leftrightarrow/g, '\\longleftrightarrow ')
-    .replace(/\\le\b/g, '\\le ')
-    .replace(/\\ge\b/g, '\\ge ')
-    .replace(/\\ne\b/g, '\\neq ');
-
-  // Wrap Vietnamese words inside math mode in \text{...} so KaTeX does not crash on non-ASCII characters
-  const vietnameseWordRegex = /([a-zA-Z0-9]*[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđÀÁẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÈÉẺẸÊẾỀỂỄỆÌÍỈĨỊÒÓỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÙÚỦŨỤƯỨỪỬỮỰỲÝỶỸỴĐ]+[a-zA-Z0-9]*)/g;
-
-  // Protect existing \text{...} blocks from double-wrapping
-  math = math.replace(/\\text\{[^{}]*\}/g, (m) => m.replace(/./g, (c) => `__K_${c.charCodeAt(0)}__`));
-  math = math.replace(vietnameseWordRegex, (word) => `\\text{ ${word} }`);
-  math = math.replace(/__K_(\d+)__/g, (_, code) => String.fromCharCode(Number(code)));
-
-  return math;
+// Normalize all vector syntaxes (vec(AB), \vec{AB}, \vec a, AB⃗) to standard SGK \overrightarrow{...}
+export function normalizeVectorSyntax(text: string): string {
+  if (!text) return '';
+  return normalizeAccentsAndUnicodeScripts(text);
 }
 
 export const MathFormulaRenderer: React.FC<MathFormulaRendererProps> = ({
@@ -108,106 +56,63 @@ export const MathFormulaRenderer: React.FC<MathFormulaRendererProps> = ({
     const rawInput = content ?? text ?? '';
     if (!rawInput) return '';
 
-    let normalized = rawInput.trim();
+    const inputStr = String(rawInput);
+    if (!inputStr.trim()) return '';
 
-    // Auto-detect pure fractions like "3/8", "-5/8", "1/2" and format to LaTeX fraction
-    if (/^-?\d+\/\d+$/.test(normalized)) {
-      normalized = `$${normalized.replace(/^(-?)(\d+)\/(\d+)$/, '$1\\frac{$2}{$3}')}$`;
-    }
-
-    // Normalize LaTeX brackets \( \) -> $, \[ \] -> $$
-    normalized = normalized
-      .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-      .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-
-    // Automatically wrap bare LaTeX array/matrix/cases blocks that lack $ or $$ delimiters
-    normalized = normalized.replace(
-      /(?<!\$|\\begin\{)(\\begin\{(?:array|matrix|pmatrix|bmatrix|vmatrix|cases|aligned)\}[\s\S]*?\\end\{(?:array|matrix|pmatrix|bmatrix|vmatrix|cases|aligned)\})(?!\$)/gi,
-      '$$$$$1$$$$'
-    );
-
-    // Auto-detect math formulas that were written without $ delimiters
-    if (!normalized.includes('$')) {
-      // If it contains LaTeX commands like \frac, \sqrt, \mathbb, \in, \int, \vec, \overrightarrow etc.
-      if (/\\(frac|dfrac|sqrt|int|lim|vec|overrightarrow|widehat|overline|alpha|beta|gamma|theta|lambda|pi|Delta|infty|sum|times|cdot|le|ge|neq|approx|rightarrow|leftarrow|mathbb|setminus|cup|cap|subset|Leftrightarrow|Rightarrow)/.test(normalized)) {
-        // If the string contains no Vietnamese accented words, wrap the whole string as a math formula!
-        if (!/[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(normalized)) {
-          normalized = `$${normalized}$`;
-        } else {
-          normalized = normalized.replace(/([a-zA-Z0-9+\-*=><\s\\{}^_'()]{3,})/g, (match) => {
-            if (/\\(frac|dfrac|sqrt|int|lim|vec|overrightarrow|widehat|overline|alpha|beta|Delta|infty|sum|mathbb|setminus|cup|cap|subset|le|ge|neq|Leftrightarrow|Rightarrow)/.test(match)) {
-              return `$${match.trim()}$`;
-            }
-            return match;
-          });
-        }
-      }
-      // If it is a polynomial equation or function like y = x^3 - 3x^2 + 1, f(x) = x^2 - 4
-      else if (/^(?:y|f\(x\)|g\(x\)|h\(x\)|y'|f'\(x\))\s*=\s*[^$.]+$/i.test(normalized)) {
-        normalized = `$${normalized}$`;
-      }
-      // If it contains vector expressions with unicode arrows like AB⃗ + BC⃗ = AC⃗
-      else if (/[A-Z][a-zA-Z0-9']*(?:\u20D7|[\u2192\u27F6])/.test(normalized)) {
-        normalized = `$${normalized}$`;
-      }
-      // If it contains power caret like x^3, x^2 or subscript like x_1, x_2
-      else if (/\b[a-zA-Z]\^[0-9{]/.test(normalized) || /\b[a-zA-Z]_[0-9{]/.test(normalized)) {
-        normalized = normalized.replace(/([a-zA-Z0-9_^{}'+=\-/*<>(),\s]+)/g, (match) => {
-          if (match.includes('^') || match.includes('_')) {
-            return `$${match.trim()}$`;
-          }
-          return match;
-        });
-      }
-    }
-
-    // Check if the content contains explicit LaTeX $ or $$
-    const hasMathDelimiters = normalized.includes('$');
+    const normalized = normalizeAllMathInText(inputStr).trim();
+    const segments = splitMathDelimiters(normalized);
+    const hasMathDelimiters = segments.some((s) => s.type === 'math' || s.type === 'display');
 
     if (hasMathDelimiters) {
-      // Parse chunks of text and math
-      const parts = normalized.split(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g);
-
-      return parts
-        .map((part) => {
-          if (part.startsWith('$$') && part.endsWith('$$')) {
-            const math = part.slice(2, -2).trim();
-            const cleanMath = sanitizeMathExpression(math);
+      return segments
+        .map((seg) => {
+          if (seg.type === 'display') {
+            const cleanMath = sanitizeMathExpression(seg.inner);
             try {
-              const rendered = katex.renderToString(cleanMath, { displayMode: true, throwOnError: false, strict: false });
-              return rendered;
+              return katex.renderToString(cleanMath, {
+                displayMode: true,
+                throwOnError: false,
+                strict: false,
+                trust: true,
+              });
             } catch {
-              return `<div class="my-2 p-2 font-mono text-center text-indigo-800 bg-indigo-50/70 rounded-xl">${escapeHtml(math)}</div>`;
+              return `<div class="my-2 p-2 font-mono text-center text-indigo-800 bg-indigo-50/70 rounded-xl">${escapeHtml(seg.inner)}</div>`;
             }
-          } else if (part.startsWith('$') && part.endsWith('$')) {
-            const math = part.slice(1, -1).trim();
-            const cleanMath = sanitizeMathExpression(math);
-            try {
-              const rendered = katex.renderToString(cleanMath, { displayMode: false, throwOnError: false, strict: false });
-              return rendered;
-            } catch {
-              return `<span class="font-mono text-indigo-700 bg-indigo-50/50 px-1 py-0.5 rounded font-medium">${escapeHtml(math)}</span>`;
-            }
-          } else {
-            return escapeHtml(part);
           }
+          if (seg.type === 'math') {
+            const cleanMath = sanitizeMathExpression(seg.inner);
+            try {
+              return katex.renderToString(cleanMath, {
+                displayMode: isBlock,
+                throwOnError: false,
+                strict: false,
+                trust: true,
+              });
+            } catch {
+              return `<span class="font-mono text-indigo-700 bg-indigo-50/50 px-1 py-0.5 rounded font-medium">${escapeHtml(seg.inner)}</span>`;
+            }
+          }
+          return escapeHtml(seg.value);
         })
         .join('');
     }
 
-    // If it's a designated block formula (e.g. from slide formula or quiz formula)
+    // If designated block formula (e.g. from slide formula or quiz formula card)
     if (isBlock) {
       const latex = formatScienceFormulaToLatex(normalized);
       const cleanMath = sanitizeMathExpression(latex);
       try {
-        const rendered = katex.renderToString(cleanMath, { displayMode: true, throwOnError: false, strict: false });
-        return rendered;
+        return katex.renderToString(cleanMath, {
+          displayMode: true,
+          throwOnError: false,
+          strict: false,
+          trust: true,
+        });
       } catch {
         return escapeHtml(normalized);
       }
     }
 
-    // Standard text
     return escapeHtml(normalized);
   }, [content, text, isBlock]);
 

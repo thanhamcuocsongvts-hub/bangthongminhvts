@@ -60,9 +60,10 @@ import {
 } from '../utils/aiSpeechService';
 import {
   getSavedEducationalItems,
-  saveEducationalItem,
-  deleteEducationalItem,
+  saveEducationalItemAndSync,
+  deleteEducationalItemAndSync,
   pullSavedQuizzesFromCloud,
+  initSavedQuizzesRealtimeSync,
   SavedEducationalItem,
 } from '../utils/savedQuizzesService';
 import { normalizeTeacherOwnerId } from '../utils/teacherPrivacy';
@@ -289,7 +290,7 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
 
   useEffect(() => {
     setSavedGamesList(getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'game'));
-    pullSavedQuizzesFromCloud(teacher?.id, teacher?.name).then((items) => {
+    const unsub = initSavedQuizzesRealtimeSync(teacher?.id, teacher?.name, (items) => {
       if (items && Array.isArray(items)) {
         setSavedGamesList(items.filter((x) => x.type === 'game'));
       }
@@ -308,7 +309,10 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
       }
     };
     window.addEventListener('saved-quizzes-updated', handleUpdate);
-    return () => window.removeEventListener('saved-quizzes-updated', handleUpdate);
+    return () => {
+      unsub();
+      window.removeEventListener('saved-quizzes-updated', handleUpdate);
+    };
   }, [ownerTeacherId, teacher?.id, teacher?.name]);
 
   const [gameTopic, setGameTopic] = useState<string>(lessonTitle || '');
@@ -419,11 +423,11 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
     }
   };
 
-  const handleSaveGameSubmit = (e: React.FormEvent) => {
+  const handleSaveGameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!saveGameTitle.trim()) return;
 
-    const gameItem = saveEducationalItem(
+    const { item: gameItem, sync } = await saveEducationalItemAndSync(
       {
         title: saveGameTitle.trim(),
         type: 'game',
@@ -443,7 +447,11 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
     setShowSaveGameModal(false);
     setSaveGameTitle('');
     setSaveGameNotes('');
-    setGameToast(`Đã lưu game "${gameItem.title}" thành công! Khi đến trường, Thầy/Cô chỉ cần mở "Game Đã Lưu" để bật chơi ngay.`);
+    setGameToast(
+      sync.cloudSynced
+        ? `☁️ Đã lưu & đồng bộ Đám Mây game "${gameItem.title}"! Mở trên Tivi 75" hay điện thoại sẽ thấy ngay.`
+        : `Đã lưu game "${gameItem.title}" thành công!`
+    );
     gameSounds.playVictoryFanfare();
     setTimeout(() => setGameToast(null), 4500);
   };
@@ -461,10 +469,11 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
     setTimeout(() => setGameToast(null), 3500);
   };
 
-  const handleDeleteSavedGame = (id: string, e: React.MouseEvent) => {
+  const handleDeleteSavedGame = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('Thầy/Cô có chắc chắn muốn xóa game này không?')) {
-      deleteEducationalItem(id, teacher?.id);
+      setSavedGamesList((prev) => prev.filter((x) => x.id !== id));
+      await deleteEducationalItemAndSync(id, teacher?.id);
       const updated = getSavedEducationalItems(teacher?.id, teacher?.name).filter((x) => x.type === 'game');
       setSavedGamesList(updated);
     }
@@ -623,7 +632,14 @@ export const EducationalGamesHub: React.FC<EducationalGamesHubProps> = ({
           </button>
 
           <button
-            onClick={() => setShowSavedGamesModal(true)}
+            onClick={() => {
+              setShowSavedGamesModal(true);
+              pullSavedQuizzesFromCloud(teacher?.id, teacher?.name).then((items) => {
+                if (Array.isArray(items)) {
+                  setSavedGamesList(items.filter((x) => x.type === 'game'));
+                }
+              });
+            }}
             className="px-3 py-2 rounded-2xl font-bold text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
             title="Mở kho game đã lưu để học sinh chơi ngay"
           >
