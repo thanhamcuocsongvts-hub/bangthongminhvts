@@ -22,12 +22,14 @@ import {
   ChevronDown,
   Check,
   Users,
+  Calculator,
 } from 'lucide-react';
 import { TouchWhiteboard } from './TouchWhiteboard';
 import { RandomStudentPickerModal } from './RandomStudentPickerModal';
 import { ClassRoom } from '../types';
 import { speakText, stopAllSpeech, unlockWebAudio, VOICE_TONE_PRESETS, VoiceTonePreset } from '../utils/aiSpeechService';
 import { cleanPdfVietnameseText, extractCleanPdfText } from '../utils/pdfTextExtractor';
+import { toggleCasioCalculator, useCasioGlobalState } from '../utils/casioEvents';
 import 'pdfjs-dist/web/pdf_viewer.css';
 
 const persistUpdatedClassrooms = (updatedClasses: ClassRoom[]) => {
@@ -165,6 +167,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   const [isSpeakingPage, setIsSpeakingPage] = useState<boolean>(false);
   const [selectedVoice, setSelectedVoice] = useState<VoiceTonePreset>(VOICE_TONE_PRESETS[0]);
   const [showVoiceMenu, setShowVoiceMenu] = useState<boolean>(false);
+  const casioState = useCasioGlobalState();
 
   // Helper to reconstruct clean Vietnamese text from PDF items without artificial kerning splits
   const extractCleanPageText = useCallback((textContent: any): string => {
@@ -564,8 +567,8 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
     const nextVal = !isFullscreen;
     setIsFullscreen(nextVal);
     if (nextVal) {
-      if (containerRef.current && !document.fullscreenElement && containerRef.current.requestFullscreen) {
-        containerRef.current.requestFullscreen().catch(() => {});
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
       }
     } else {
       wasNativeFsRef.current = false;
@@ -660,7 +663,9 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
       id="pdf-viewer-root-container"
       className={
         isFullscreen
-          ? 'fixed inset-0 z-[9990] w-screen h-dvh flex flex-col overflow-hidden bg-slate-950 text-slate-100 select-text'
+          ? casioState.isDocked
+            ? 'fixed inset-0 z-[9990] w-full h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 select-text'
+            : 'fixed inset-0 z-[9990] w-screen h-dvh flex flex-col overflow-hidden bg-slate-950 text-slate-100 select-text'
           : 'flex-1 w-full h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 relative select-text'
       }
     >
@@ -943,6 +948,21 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
           >
             <Pen className="w-3.5 h-3.5" />
             <span>{effectiveAnnotating ? 'Đang Viết Vẽ' : 'Bút Viết Lên Bài Giảng'}</span>
+          </button>
+
+          {/* Casio 580 Toggle Button */}
+          <button
+            type="button"
+            onClick={() => toggleCasioCalculator('side_by_side')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              casioState.isOpen
+                ? 'bg-cyan-500 text-slate-950 border-cyan-300 ring-2 ring-cyan-300/60 shadow-md'
+                : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border-cyan-500/30'
+            }`}
+            title="Chèn / Tắt máy tính Casio fx-580VN X song song"
+          >
+            <Calculator className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">{casioState.isOpen ? 'Đang Chèn 580' : 'Casio 580'}</span>
           </button>
 
           {/* Fullscreen Button */}

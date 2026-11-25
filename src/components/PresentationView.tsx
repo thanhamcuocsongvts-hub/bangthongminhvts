@@ -32,6 +32,7 @@ import {
   Minus,
   Plus,
   Check,
+  Calculator,
 } from 'lucide-react';
 import { LessonDoc, SlideItem, TextScale, TeacherProfile } from '../types';
 import { TouchWhiteboard } from './TouchWhiteboard';
@@ -40,6 +41,7 @@ import { UniversalDocumentViewer } from './UniversalDocumentViewer';
 import { TeacherFileManager } from './TeacherFileManager';
 import { ScopeConstraintModal, ScopeActionType } from './ScopeConstraintModal';
 import { parseUploadedFileToLesson } from '../utils/fileParser';
+import { toggleCasioCalculator, useCasioGlobalState } from '../utils/casioEvents';
 
 interface PresentationViewProps {
   lesson: LessonDoc;
@@ -82,6 +84,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   const [presentationMode, setPresentationMode] = useState<'original' | 'slides'>('original');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState<boolean>(false);
+  const casioState = useCasioGlobalState();
 
   // Slide Typography & PowerPoint Theme state (for Chiếu Slide mode)
   const [slideFontId, setSlideFontId] = useState<string>(() => {
@@ -306,7 +309,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   }, [isOverlayAnnotation, isSplitMode, isFullscreen]);
 
   const togglePresentationFullscreen = () => {
-    const el = document.getElementById('presentation-viewport');
+    const el = document.documentElement;
     const nextVal = !isFullscreen;
     setIsFullscreen(nextVal);
     if (nextVal) {
@@ -505,20 +508,37 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
       onDrop={handleDrop}
       className={`${
         isFullscreen
-          ? 'fixed inset-0 z-[9990] w-screen h-dvh rounded-none border-0'
+          ? casioState.isDocked
+            ? 'relative w-full h-full rounded-none border-0'
+            : 'fixed inset-0 z-[9990] w-screen h-dvh rounded-none border-0'
+          : casioState.isDocked
+          ? 'relative w-full h-full rounded-3xl border border-slate-800 shadow-2xl'
           : 'relative w-full h-[calc(100vh-100px)] rounded-3xl border border-slate-800 shadow-2xl'
       } flex flex-col bg-slate-950 overflow-hidden transition-all select-none`}
     >
       {/* Hidden File Input for Teacher Uploads */}
       {/* Floating expand button when collapsed */}
       {isToolbarCollapsed && (
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-50 p-1">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-50 p-1 flex items-center gap-1.5">
           <button
             onClick={() => setIsToolbarCollapsed(false)}
             className="px-4 py-1 rounded-b-xl bg-slate-900/90 border border-t-0 border-slate-700 text-slate-300 hover:text-white shadow-lg backdrop-blur-md flex items-center justify-center cursor-pointer transition-all hover:bg-slate-800"
             title="Hiện thanh công cụ (Toolbar)"
           >
             <ChevronDown className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleCasioCalculator('side_by_side')}
+            className={`px-3 py-1 rounded-b-xl border border-t-0 shadow-lg backdrop-blur-md text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+              casioState.isOpen
+                ? 'bg-cyan-500 text-slate-950 border-cyan-300'
+                : 'bg-slate-900/90 text-cyan-300 border-slate-700 hover:bg-slate-800'
+            }`}
+            title="Chèn / Tắt máy tính Casio 580"
+          >
+            <Calculator className="w-3.5 h-3.5" />
+            <span>{casioState.isOpen ? 'Tắt 580' : 'Casio 580'}</span>
           </button>
         </div>
       )}
@@ -763,6 +783,21 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
           >
             <ChevronUp className="w-4 h-4 stroke-[2.5]" />
             <span className="hidden sm:inline">Ẩn Thanh Công Cụ</span>
+          </button>
+
+          {/* Casio 580 Toggle Button */}
+          <button
+            type="button"
+            onClick={() => toggleCasioCalculator('side_by_side')}
+            className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              casioState.isOpen
+                ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow-md ring-2 ring-cyan-300/60 font-black'
+                : 'bg-slate-800 border-slate-700 text-cyan-300 hover:bg-slate-700 hover:text-white'
+            }`}
+            title="Chèn / Tắt máy tính Casio fx-580VN X song song khi trình chiếu"
+          >
+            <Calculator className="w-4 h-4" />
+            <span className="hidden lg:inline">{casioState.isOpen ? 'Đang Chèn 580' : 'Máy tính 580'}</span>
           </button>
 
           {/* Fullscreen Toggle Button */}

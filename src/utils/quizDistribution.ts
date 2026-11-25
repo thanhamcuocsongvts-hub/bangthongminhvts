@@ -37,24 +37,81 @@ function shuffleWithRng<T>(arr: T[], rng: () => number): T[] {
 export function inferPartType(
   q: Partial<QuizQuestion>
 ): 'part_1_choice' | 'part_2_true_false' | 'part_3_short_answer' | 'part_4_essay' {
-  if (q.partType) return q.partType;
-  if (Array.isArray(q.subStatements) && q.subStatements.length > 0) return 'part_2_true_false';
-  if (q.shortAnswerKey) return 'part_3_short_answer';
-  if (q.essayRubric) return 'part_4_essay';
+  const rawPt = String(q.partType || '').trim().toLowerCase();
+  if (rawPt === 'part_2_true_false' || rawPt.includes('true_false') || rawPt.includes('dung_sai') || (Array.isArray(q.subStatements) && q.subStatements.length > 0)) {
+    return 'part_2_true_false';
+  }
+  if (rawPt === 'part_3_short_answer' || rawPt.includes('short_answer') || rawPt.includes('tra_loi_ngan') || Boolean(q.shortAnswerKey)) {
+    return 'part_3_short_answer';
+  }
+  if (rawPt === 'part_4_essay' || rawPt.includes('essay') || rawPt.includes('tu_luan') || Boolean(q.essayRubric)) {
+    return 'part_4_essay';
+  }
   return 'part_1_choice';
 }
 
 /**
+ * Extracts canonical choice letter A/B/C/D from strings like "C", "C.", "Đáp án C", "C. 12"
+ */
+export function extractChoiceKey(rawAnswer: any): ChoiceKey {
+  const s = String(rawAnswer || '').trim().toUpperCase();
+  if (CHOICE_KEYS.includes(s as ChoiceKey)) return s as ChoiceKey;
+  const directPrefix = s.match(/^([A-D])(?:[\.\)\:\s]|$)/);
+  if (directPrefix) return directPrefix[1] as ChoiceKey;
+  const phraseMatch = s.match(/(?:ĐÁP\s*ÁN|PHƯƠNG\s*ÁN|LỰA\s*CHỌN|CHỌN)\s*[:\-]?\s*([A-D])\b/i);
+  if (phraseMatch) return phraseMatch[1].toUpperCase() as ChoiceKey;
+  const anyKey = s.match(/\b([A-D])\b/);
+  if (anyKey) return anyKey[1] as ChoiceKey;
+  return 'A';
+}
+
+export function stripLeadingChoicePrefix(text: string): string {
+  return String(text || '').replace(/^\s*[A-D]\s*[\.\)\:]\s+(?=\S)/, '').trim();
+}
+
+export function buildBalancedChoiceTargets(
+  count: number,
+  seedInput?: number | string
+): ChoiceKey[] {
+  const seed =
+    typeof seedInput === 'number'
+      ? seedInput
+      : typeof seedInput === 'string'
+      ? hashStringToSeed(seedInput)
+      : Math.floor(Date.now() % 1_000_000_000) ^ (count * 2654435761);
+  const rng = mulberry32(seed);
+  const targets: ChoiceKey[] = [];
+  let prevKey: ChoiceKey | null = null;
+  let prevPrevKey: ChoiceKey | null = null;
+
+  while (targets.length < count) {
+    const block = shuffleWithRng([...CHOICE_KEYS], rng);
+    if (prevKey && prevKey === prevPrevKey && block[0] === prevKey) {
+      const swapIdx = block.findIndex((k) => k !== prevKey);
+      if (swapIdx > 0) {
+        [block[0], block[swapIdx]] = [block[swapIdx], block[0]];
+      }
+    }
+    for (const k of block) {
+      if (targets.length >= count) break;
+      targets.push(k);
+      prevPrevKey = prevKey;
+      prevKey = k;
+    }
+  }
+  return targets;
+}
+
+/**
  * Protects questions whose options reference option letters by position
- * (e.g. "Cả A và B đều đúng", "Tất cả các phương án trên", "Đáp án A sai")
+ * (only inspects option texts so math symbols like "tam giác ABC" or "cả A và B" in the question stem never block balancing).
  */
 export function hasPositionalOptionReference(q: Partial<QuizQuestion>): boolean {
   const combinedOptionsText = (q.options || [])
     .map((o: any) => (typeof o === 'string' ? o : o?.text || ''))
     .join(' ');
-  const combined = `${q.question || ''} ${combinedOptionsText}`;
   return (
-    /cả\s+[A-D]\s*(?:,|và|&|lẫn)\s*[A-D]/i.test(combined) ||
+    /cả\s+[A-D]\s*(?:,|và|&|lẫn)\s*[A-D]/i.test(combinedOptionsText) ||
     /\b(?:phương\s*án|đáp\s*án|câu|lựa\s*chọn)\s*[A-D]\b/i.test(combinedOptionsText) ||
     /tất\s*cả\s*(?:các)?\s*(?:phương\s*án|đáp\s*án|câu|ý)\s*(?:trên|nêu\s*trên)/i.test(combinedOptionsText) ||
     /cả\s*(?:2|3|4|hai|ba|bốn)\s*(?:phương\s*án|đáp\s*án|ý|câu)\s*(?:trên|nêu\s*trên)/i.test(
@@ -87,10 +144,12 @@ export function rewriteExplanationAnswerLetter(
 function normalizeOptionsList(options: QuizOption[] = []): Array<{ key: ChoiceKey; text: string }> {
   return CHOICE_KEYS.map((key, idx) => {
     const found =
-      options.find((o) => String(o?.key || '').trim().toUpperCase() === key) || options[idx];
+      options.find((o) => String((o as any)?.key || '').trim().toUpperCase().replace(/[\.\)]$/, '') === key) ||
+      options[idx];
+    const rawText = typeof found === 'string' ? found : String((found as any)?.text || `Phương án ${key}`);
     return {
       key,
-      text: typeof found === 'string' ? found : String(found?.text || `Phương án ${key}`),
+      text: stripLeadingChoicePrefix(rawText) || rawText,
     };
   });
 }
@@ -101,10 +160,7 @@ function reorderQuestionToTargetKey(
   rng: () => number
 ): QuizQuestion {
   const normOpts = normalizeOptionsList(q.options);
-  const oldKeyRaw = String(q.correctAnswer || 'A').trim().toUpperCase();
-  const oldKey: ChoiceKey = (CHOICE_KEYS.includes(oldKeyRaw as ChoiceKey)
-    ? oldKeyRaw
-    : 'A') as ChoiceKey;
+  const oldKey = extractChoiceKey(q.correctAnswer);
 
   const correctItem = normOpts.find((o) => o.key === oldKey) || normOpts[0];
   const distractors = shuffleWithRng(
@@ -123,20 +179,46 @@ function reorderQuestionToTargetKey(
 
   return {
     ...q,
+    partType: 'part_1_choice',
     options: newOptions,
     correctAnswer: targetKey,
     explanation: rewriteExplanationAnswerLetter(q.explanation || '', oldKey, targetKey),
   };
 }
 
+function isChoiceDistributionBalanced(questions: QuizQuestion[], eligibleIndices: number[]): boolean {
+  const n = eligibleIndices.length;
+  if (n <= 1) return n === 0 || extractChoiceKey(questions[eligibleIndices[0]].correctAnswer) !== 'A';
+  const counts: Record<ChoiceKey, number> = { A: 0, B: 0, C: 0, D: 0 };
+  let streak = 1;
+  let prev: ChoiceKey | null = null;
+
+  for (const idx of eligibleIndices) {
+    const k = extractChoiceKey(questions[idx].correctAnswer);
+    counts[k]++;
+    if (k === prev) {
+      streak++;
+      if (streak >= 3) return false;
+    } else {
+      streak = 1;
+      prev = k;
+    }
+  }
+
+  const minAllowed = Math.floor(n / 4);
+  const maxAllowed = Math.ceil(n / 4);
+  return CHOICE_KEYS.every((k) => counts[k] >= minAllowed && counts[k] <= maxAllowed);
+}
+
 /**
  * Re-balances multiple-choice answer keys across A, B, C, D so generated exams
  * never cluster on 'A' (or any single option letter).
- * Runs in O(N) while preserving BGD parts, non-MCQ questions, diagrams, and math formulas.
+ * If already balanced, preserves original aligned options and explanations untouched.
  */
 export function balanceQuizAnswerDistribution(
   questions: QuizQuestion[],
-  seedInput?: number | string
+  seedInput?: number | string,
+  forceReshuffle = false
 ): QuizQuestion[] {
   if (!Array.isArray(questions) || questions.length === 0) return questions || [];
 
@@ -162,29 +244,26 @@ export function balanceQuizAnswerDistribution(
 
   if (eligibleIndices.length === 0) return questions;
 
-  // Build balanced block-permuted target keys: every 4 items contain A, B, C, D once.
-  const targets: ChoiceKey[] = [];
-  let prevKey: ChoiceKey | null = null;
-  let prevPrevKey: ChoiceKey | null = null;
+  // Normalize option keys/labels & clean correctAnswer strings first
+  const normalized = questions.map((q) => {
+    if (inferPartType(q) !== 'part_1_choice' || !Array.isArray(q.options) || q.options.length < 4) {
+      return q;
+    }
+    return {
+      ...q,
+      partType: 'part_1_choice' as const,
+      options: normalizeOptionsList(q.options),
+      correctAnswer: extractChoiceKey(q.correctAnswer),
+    };
+  });
 
-  while (targets.length < eligibleIndices.length) {
-    const block = shuffleWithRng([...CHOICE_KEYS], rng);
-    // Avoid 3 consecutive identical letters across block boundaries
-    if (prevKey && prevKey === prevPrevKey && block[0] === prevKey) {
-      const swapIdx = block.findIndex((k) => k !== prevKey);
-      if (swapIdx > 0) {
-        [block[0], block[swapIdx]] = [block[swapIdx], block[0]];
-      }
-    }
-    for (const k of block) {
-      if (targets.length >= eligibleIndices.length) break;
-      targets.push(k);
-      prevPrevKey = prevKey;
-      prevKey = k;
-    }
+  if (!forceReshuffle && isChoiceDistributionBalanced(normalized, eligibleIndices)) {
+    return normalized;
   }
 
-  const result = questions.map((q) => ({ ...q }));
+  const targets = buildBalancedChoiceTargets(eligibleIndices.length, seed);
+
+  const result = [...normalized];
   eligibleIndices.forEach((qIdx, pos) => {
     result[qIdx] = reorderQuestionToTargetKey(result[qIdx], targets[pos], rng);
   });

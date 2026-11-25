@@ -24,6 +24,7 @@ import {
   MonitorPlay,
   Share2,
   FileUp,
+  Calculator,
 } from 'lucide-react';
 import { LessonDoc, SlideItem } from '../types';
 import JSZip from 'jszip';
@@ -31,6 +32,7 @@ import { init } from 'pptx-preview';
 import { exportOriginalLessonFile } from '../utils/exportUtils';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { decodeXmlEntities, convertOmmlToLatex } from '../utils/fileParser';
+import { toggleCasioCalculator, useCasioGlobalState } from '../utils/casioEvents';
 
 /**
  * Ensures all text in PPTX rendered DOM has high contrast and is completely visible.
@@ -127,6 +129,7 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
 
   // 75" TV presentation controls
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const casioState = useCasioGlobalState();
   const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
   const [blackoutMode, setBlackoutMode] = useState<'none' | 'black' | 'white'>('none');
   const [showControls, setShowControls] = useState<boolean>(true);
@@ -573,7 +576,7 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
 
   // Toggle Fullscreen
   const toggleFullscreen = () => {
-    const target = containerRef.current;
+    const target = document.documentElement;
     const nextVal = !isFullscreen;
     setIsFullscreen(nextVal);
 
@@ -686,7 +689,11 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
       ref={containerRef}
       onMouseMove={handleMouseMove}
       className={`w-full h-full bg-slate-950 text-white relative select-none overflow-hidden flex flex-col items-center justify-center ${
-        isFullscreen ? 'fixed inset-0 z-[9999]' : 'rounded-2xl border border-slate-800 shadow-2xl'
+        isFullscreen
+          ? casioState.isDocked
+            ? 'fixed inset-0 z-[9990]'
+            : 'fixed inset-0 z-[9999]'
+          : 'rounded-2xl border border-slate-800 shadow-2xl'
       }`}
     >
       {/* Blackout / Whiteout screens (PowerPoint feature B/W) */}
@@ -1093,6 +1100,21 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
             <Download className="w-5 h-5 text-orange-400" />
           </button>
         )}
+
+        {/* Casio 580 Toggle Button */}
+        <button
+          type="button"
+          onClick={() => toggleCasioCalculator('side_by_side')}
+          className={`px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border ${
+            casioState.isOpen
+              ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow-lg ring-2 ring-cyan-300/60'
+              : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border-cyan-500/30'
+          }`}
+          title="Chèn / Tắt máy tính Casio fx-580VN X song song"
+        >
+          <Calculator className="w-4 h-4" />
+          <span className="hidden sm:inline">{casioState.isOpen ? 'Tắt 580' : 'Casio 580'}</span>
+        </button>
 
         {/* Fullscreen Button */}
         <button

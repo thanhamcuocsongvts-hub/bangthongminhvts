@@ -570,6 +570,53 @@ export default function App() {
   };
 
   const isCasioDockedActive = casioDisplayMode === 'with_blackboard' && isCasioDockedOpen;
+  const isCasioAnyOpen = showCasioModal || isCasioDockedActive;
+
+  useEffect(() => {
+    document.documentElement.dataset.casioDocked = isCasioDockedActive ? 'true' : 'false';
+    document.documentElement.dataset.casioOpen = isCasioAnyOpen ? 'true' : 'false';
+    window.dispatchEvent(
+      new CustomEvent('casio-state-changed', {
+        detail: {
+          isOpen: isCasioAnyOpen,
+          isDocked: isCasioDockedActive,
+        },
+      })
+    );
+  }, [isCasioDockedActive, isCasioAnyOpen]);
+
+  useEffect(() => {
+    const handleToggleCasio = (e: Event) => {
+      const detail = (e as CustomEvent<{ mode?: 'side_by_side' | 'standalone' | 'auto' }>).detail;
+      const requestedMode = detail?.mode;
+      if (requestedMode === 'side_by_side') {
+        setCasioDisplayMode((prevMode) => {
+          if (prevMode === 'with_blackboard') {
+            setIsCasioDockedOpen((prevOpen) => !prevOpen);
+          } else {
+            setShowCasioModal(false);
+            setIsCasioDockedOpen(true);
+          }
+          return 'with_blackboard';
+        });
+      } else if (requestedMode === 'standalone') {
+        setCasioDisplayMode('standalone');
+        setIsCasioDockedOpen(false);
+        setShowCasioModal((prev) => !prev);
+      } else {
+        setCasioDisplayMode((prevMode) => {
+          if (prevMode === 'with_blackboard') {
+            setIsCasioDockedOpen((prevOpen) => !prevOpen);
+          } else {
+            setShowCasioModal((prevOpen) => !prevOpen);
+          }
+          return prevMode;
+        });
+      }
+    };
+    window.addEventListener('toggle-casio-calculator', handleToggleCasio);
+    return () => window.removeEventListener('toggle-casio-calculator', handleToggleCasio);
+  }, []);
 
   // AI Chat Messages
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -1555,7 +1602,9 @@ export default function App() {
       {/* Main Interactive Screen Content */}
       <main className={`flex-1 ${
         isFeatureFullscreen
-          ? 'p-0 overflow-hidden bg-slate-950'
+          ? isCasioDockedActive
+            ? 'p-1.5 sm:p-2 overflow-hidden bg-slate-950'
+            : 'p-0 overflow-hidden bg-slate-950'
           : activeTab === 'whiteboard'
           ? 'p-2 sm:p-3 md:p-4 overflow-hidden bg-white'
           : isMobile
@@ -1570,7 +1619,8 @@ export default function App() {
           } gap-2 sm:gap-3 overflow-hidden`}
         >
           <div
-            className={`flex-1 min-w-0 min-h-0 h-full ${
+            style={isFeatureFullscreen && isCasioDockedActive ? { transform: 'translateZ(0)' } : undefined}
+            className={`flex-1 min-w-0 min-h-0 h-full relative ${
               activeTab === 'whiteboard' || activeTab === 'reader' || activeTab === 'quiz' || activeTab === 'games'
                 ? 'overflow-hidden'
                 : 'overflow-y-auto'

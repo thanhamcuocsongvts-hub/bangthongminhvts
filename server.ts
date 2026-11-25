@@ -418,14 +418,15 @@ const getGeminiClient = (customKey?: string) => {
 
 // Resilient AI caller using official active Gemini 4 & 3.1 models
 async function generateWithGemini(ai: any, params: any) {
-  const timeoutMs = Number(params?.timeoutMs) || 65000;
-  const modelsToTry = [
-    "gemini-4-hydrogen",
-    "gemini-3.1-flash-lite",
-  ];
+  const timeoutMs = Number(params?.timeoutMs) || 35000;
+  const preferLite = Boolean(params?.preferLiteModel);
+  const modelsToTry = preferLite
+    ? ["gemini-3.1-flash-lite", "gemini-4-hydrogen"]
+    : ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
+  const maxAttempts = Number(params?.maxAttempts) || 2;
   let lastError: any = null;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     for (const model of modelsToTry) {
       try {
         const timeoutPromise = new Promise((_, reject) =>
@@ -444,7 +445,7 @@ async function generateWithGemini(ai: any, params: any) {
             delete callConfig.thinkingConfig;
           }
         }
-        const { timeoutMs: _ignoreTimeout, ...restParams } = params || {};
+        const { timeoutMs: _ignoreTimeout, preferLiteModel: _ignoreLite, maxAttempts: _ignoreMaxAttempts, ...restParams } = params || {};
         const callPromise = ai.models.generateContent({
           ...restParams,
           ...(callConfig ? { config: callConfig } : {}),
@@ -471,14 +472,14 @@ async function generateWithGemini(ai: any, params: any) {
 
         if (isTransient) {
           console.warn(`[AI Notice] Model ${model} busy/rate-limited, trying next candidate...`);
-          await new Promise((r) => setTimeout(r, 350));
+          await new Promise((r) => setTimeout(r, 200));
         } else {
           console.warn(`[AI Notice] Model ${model} unavailable (${msg.slice(0, 120)}), trying alternative...`);
         }
       }
     }
-    if (attempt === 0) {
-      await new Promise((r) => setTimeout(r, 500));
+    if (attempt === 0 && maxAttempts > 1) {
+      await new Promise((r) => setTimeout(r, 250));
     }
   }
   throw lastError;
@@ -2279,7 +2280,7 @@ function generateFullMatrixExamCurriculum(subject: string = "Toán học", grade
       difficulty: "Vận dụng"
     }));
 
-    return [...part1, ...part2, ...part3];
+    return balanceQuizAnswerDistributionServer([...part1, ...part2, ...part3], `phys_curriculum_${now}`);
   }
 
   // DEFAULT: MATH 12 EXAM MATRIX ACCORDING TO BGD&ĐT 2025 (22 QUESTIONS TOTAL)
@@ -2461,7 +2462,7 @@ function generateFullMatrixExamCurriculum(subject: string = "Toán học", grade
     difficulty: "Vận dụng"
   }));
 
-  return [...part1Math, ...part2Math, ...part3Math];
+  return balanceQuizAnswerDistributionServer([...part1Math, ...part2Math, ...part3Math], `math_curriculum_${now}`);
 }
 
 // AI Generate Quiz from Document Content or Custom Topic
@@ -2478,6 +2479,14 @@ app.post("/api/ai/generate-quiz", async (req, res) => {
       ? `\n- PHẠM VI KIẾN THỨC BẮT BUỘC THEO YÊU CẦU CỦA GIÁO VIÊN: "${scopeConstraint.trim()}". Toàn bộ các câu hỏi BẮT BUỘC phải nằm chính xác trong phạm vi này, tuyệt đối không hỏi lan man ngoài phạm vi!`
       : '';
 
+    const preAssignedTargets = buildBalancedChoiceTargetsServer(
+      numQuestions,
+      `${targetTopic}_${Date.now()}`
+    );
+    const targetSequenceHint = preAssignedTargets
+      .map((k, idx) => `Câu ${idx + 1}: ${k}`)
+      .join(', ');
+
     const prompt = `Bạn là chuyên gia biên soạn đề thi khảo thí trắc nghiệm hàng đầu Việt Nam theo bộ Sách giáo khoa Kết nối tri thức, Cánh Diều, Chân trời sáng tạo.
 Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm khách quan 4 lựa chọn (A, B, C, D) chất lượng cao, đúng 100% chuyên môn sư phạm:
 - Chủ đề / Trọng tâm bài học: "${targetTopic}"
@@ -2490,8 +2499,8 @@ QUY TẮC BẮT BUỘC & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
 2. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC BỌC TRONG $ ... $ (Ví dụ: $y = x^3 - 3x^2 + 1$, $x \\in (0; 2)$, $\\overrightarrow{F} = m\\overrightarrow{a}$, $\\text{C}_2\\text{H}_5\\text{OH}$).
    - ĐẶC BIỆT KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng \\overrightarrow{AB}, \\overrightarrow{BC}, \\overrightarrow{a}, \\overrightarrow{AA'}, \\overrightarrow{AC'} (TUYỆT ĐỐI KHÔNG dùng \\vec{AB} vì mũi tên quá ngắn chỉ che chữ cái cuối; KHÔNG tự ghép ký tự unicode mũi tên rời).
    - Nếu phương án A, B, C, D chứa véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$").
-3. Bốn phương án A, B, C, D phải rõ ràng, độc lập và có độ phân tán tốt.
-4. Chỉ định đúng "correctAnswer" (A, B, C, hoặc D). PHẢI PHÂN BỔ ĐỀU các đáp án đúng qua đầy đủ A, B, C, D (tuyệt đối KHÔNG dồn toàn bộ vào A hay một đáp án cố định), kèm phần "explanation" chi tiết giải thích công thức/giá trị đúng (không viết cứng "Đáp án A đúng").
+3. Bốn phương án A, B, C, D phải rõ ràng, độc lập và có độ phân tán tốt. KHÔNG ghi tiền tố "A. ", "B. " vào trong trường "text".
+4. ĐÁP ÁN ĐÚNG PHÂN BỔ BẮT BUỘC THEO THỨ TỰ: [${targetSequenceHint}]. Xuất trường "correctAnswer" TRƯỚC trường "options" và đặt đúng phương án chuẩn vào vị trí chữ cái đã chỉ định cho từng câu; kèm "explanation" súc tích 1-2 câu nêu công thức/kết quả đúng (không viết cứng "Đáp án A đúng").
 5. "timeLimit" là số giây (từ 20 đến 60).
 6. TRONG CHUỖI JSON: MỌI DẤU GẠCH CHÉO LATEX BẮT BUỘC VIẾT THÀNH HAI DẤU GẠCH CHÉO \\\\ (ví dụ \\\\frac, \\\\sqrt, \\\\Delta) để JSON hợp lệ 100%!
 7. ĐẶC BIỆT KHI SOẠN BÀI TOÁN CÓ BẢNG BIẾN THIÊN, BẢNG XÉT DẤU HOẶC ĐỒ THỊ HÀM SỐ:
@@ -2503,6 +2512,7 @@ Trả về định dạng JSON array hợp lệ:
 [
   {
     "id": "q1",
+    "correctAnswer": "${preAssignedTargets[0] || "B"}",
     "question": "Cho hàm số $y = f(x)$ có bảng biến thiên như hình bên dưới. Hàm số đã cho đồng biến trên khoảng nào?",
     "diagramType": "variation_table",
     "diagramData": {
@@ -2521,7 +2531,6 @@ Trả về định dạng JSON array hợp lệ:
       { "key": "C", "text": "$(-1; 2)$" },
       { "key": "D", "text": "$(0; 1)$" }
     ],
-    "correctAnswer": "B",
     "explanation": "Từ bảng biến thiên, ta thấy $y' > 0$ trên $(-\\infty; -1)$ và $(1; +\\infty)$, do đó hàm số đồng biến trên khoảng $(-\\infty; -1)$.",
     "timeLimit": 35,
     "difficulty": "${difficulty}"
@@ -2530,10 +2539,11 @@ Trả về định dạng JSON array hợp lệ:
 
     const response = await generateWithGemini(ai, {
       contents: prompt,
+      timeoutMs: 28000,
+      maxAttempts: 2,
       config: {
         responseMimeType: "application/json",
-        systemInstruction: "Bạn là chuyên gia khảo thí ra đề trắc nghiệm chuẩn Bộ GD&ĐT Việt Nam. Luôn xuất đúng JSON array với câu hỏi cụ thể, phân bổ đều đáp án A, B, C, D, công thức KaTeX đẹp, dùng double backslash \\\\ trong JSON.",
-        temperature: 0.3,
+        systemInstruction: "Bạn là chuyên gia khảo thí ra đề trắc nghiệm chuẩn Bộ GD&ĐT Việt Nam. Luôn xuất đúng JSON array với câu hỏi cụ thể, tính toán chính xác, đặt correctAnswer đúng chữ cái được giao, công thức KaTeX đẹp, dùng double backslash \\\\ trong JSON.",
       },
     });
 
@@ -2608,11 +2618,84 @@ function normalizeQuizQuestionsMath(questions: any[]): any[] {
   });
 }
 
-function balanceQuizAnswerDistributionServer(questions: any[], seedInput?: string): any[] {
+function buildBalancedChoiceTargetsServer(count: number, seedInput?: string): string[] {
+  const KEYS = ["A", "B", "C", "D"];
+  let h = 2166136261;
+  const seedStr = seedInput || `${Date.now()}_${Math.random()}`;
+  for (let i = 0; i < seedStr.length; i++) {
+    h ^= seedStr.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let state = (h >>> 0) || 1337;
+  const rng = () => {
+    state += 0x6d2b79f5;
+    let r = Math.imul(state ^ (state >>> 15), 1 | state);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+  const shuffleArr = <T,>(arr: T[]): T[] => {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  };
+  const targets: string[] = [];
+  let prev = "";
+  let prevPrev = "";
+  while (targets.length < count) {
+    const block = shuffleArr(KEYS);
+    if (prev && prev === prevPrev && block[0] === prev) {
+      const sw = block.findIndex((k) => k !== prev);
+      if (sw > 0) [block[0], block[sw]] = [block[sw], block[0]];
+    }
+    for (const k of block) {
+      if (targets.length >= count) break;
+      targets.push(k);
+      prevPrev = prev;
+      prev = k;
+    }
+  }
+  return targets;
+}
+
+function inferServerPartType(q: any): "part_1_choice" | "part_2_true_false" | "part_3_short_answer" | "part_4_essay" {
+  const rawPt = String(q?.partType || "").trim().toLowerCase();
+  if (rawPt === "part_2_true_false" || rawPt.includes("true_false") || rawPt.includes("dung_sai") || (Array.isArray(q?.subStatements) && q.subStatements.length > 0)) {
+    return "part_2_true_false";
+  }
+  if (rawPt === "part_3_short_answer" || rawPt.includes("short_answer") || rawPt.includes("tra_loi_ngan") || Boolean(q?.shortAnswerKey)) {
+    return "part_3_short_answer";
+  }
+  if (rawPt === "part_4_essay" || rawPt.includes("essay") || rawPt.includes("tu_luan") || Boolean(q?.essayRubric)) {
+    return "part_4_essay";
+  }
+  return "part_1_choice";
+}
+
+function extractServerChoiceKey(rawAnswer: any): string {
+  const KEYS = ["A", "B", "C", "D"];
+  const s = String(rawAnswer || "").trim().toUpperCase();
+  if (KEYS.includes(s)) return s;
+  const directPrefix = s.match(/^([A-D])(?:[\.\)\:\s]|$)/);
+  if (directPrefix) return directPrefix[1];
+  const phraseMatch = s.match(/(?:ĐÁP\s*ÁN|PHƯƠNG\s*ÁN|LỰA\s*CHỌN|CHỌN)\s*[:\-]?\s*([A-D])\b/i);
+  if (phraseMatch) return phraseMatch[1].toUpperCase();
+  const anyKey = s.match(/\b([A-D])\b/);
+  if (anyKey) return anyKey[1];
+  return "A";
+}
+
+function stripChoicePrefixServer(text: string): string {
+  return String(text || "").replace(/^\s*[A-D]\s*[\.\)\:]\s+(?=\S)/, "").trim();
+}
+
+function balanceQuizAnswerDistributionServer(questions: any[], seedInput?: string, forceReshuffle = false): any[] {
   if (!Array.isArray(questions) || questions.length === 0) return questions || [];
   const KEYS = ["A", "B", "C", "D"];
   let h = 2166136261;
-  const seedStr = seedInput || String(Date.now());
+  const seedStr = seedInput || `${Date.now()}_${Math.random()}`;
   for (let i = 0; i < seedStr.length; i++) {
     h ^= seedStr.charCodeAt(i);
     h = Math.imul(h, 16777619);
@@ -2634,11 +2717,11 @@ function balanceQuizAnswerDistributionServer(questions: any[], seedInput?: strin
   };
   const hasPositionalRef = (q: any): boolean => {
     const optsText = (q.options || []).map((o: any) => (typeof o === "string" ? o : o?.text || "")).join(" ");
-    const combined = `${q.question || ""} ${optsText}`;
     return (
-      /cả\s+[A-D]\s*(?:,|và|&|lẫn)\s*[A-D]/i.test(combined) ||
+      /cả\s+[A-D]\s*(?:,|và|&|lẫn)\s*[A-D]/i.test(optsText) ||
       /\b(?:phương\s*án|đáp\s*án|câu|lựa\s*chọn)\s*[A-D]\b/i.test(optsText) ||
-      /tất\s*cả\s*(?:các)?\s*(?:phương\s*án|đáp\s*án|câu|ý)\s*(?:trên|nêu\s*trên)/i.test(optsText)
+      /tất\s*cả\s*(?:các)?\s*(?:phương\s*án|đáp\s*án|câu|ý)\s*(?:trên|nêu\s*trên)/i.test(optsText) ||
+      /cả\s*(?:2|3|4|hai|ba|bốn)\s*(?:phương\s*án|đáp\s*án|ý|câu)\s*(?:trên|nêu\s*trên)/i.test(optsText)
     );
   };
   const rewriteExpl = (expl: string, oldKey: string, newKey: string): string => {
@@ -2651,42 +2734,65 @@ function balanceQuizAnswerDistributionServer(questions: any[], seedInput?: strin
 
   const eligibleIndices: number[] = [];
   questions.forEach((q, idx) => {
-    const pt = q?.partType || (Array.isArray(q?.subStatements) && q.subStatements.length > 0 ? "part_2_true_false" : q?.shortAnswerKey ? "part_3_short_answer" : q?.essayRubric ? "part_4_essay" : "part_1_choice");
+    const pt = inferServerPartType(q);
     if (pt === "part_1_choice" && Array.isArray(q?.options) && q.options.length >= 4 && !hasPositionalRef(q)) {
       eligibleIndices.push(idx);
     }
   });
   if (eligibleIndices.length === 0) return questions;
 
-  const targets: string[] = [];
-  let prev = "";
-  let prevPrev = "";
-  while (targets.length < eligibleIndices.length) {
-    const block = shuffleArr(KEYS);
-    if (prev && prev === prevPrev && block[0] === prev) {
-      const sw = block.findIndex((k) => k !== prev);
-      if (sw > 0) [block[0], block[sw]] = [block[sw], block[0]];
+  const out = questions.map((q) => {
+    if (inferServerPartType(q) !== "part_1_choice" || !Array.isArray(q?.options) || q.options.length < 4) {
+      return { ...q };
     }
-    for (const k of block) {
-      if (targets.length >= eligibleIndices.length) break;
-      targets.push(k);
-      prevPrev = prev;
-      prev = k;
+    const cleanOpts = KEYS.map((k, i) => {
+      const found = q.options.find((o: any) => String(o?.key || "").trim().toUpperCase().replace(/[\.\)]$/, "") === k) || q.options[i];
+      const rawText = typeof found === "string" ? found : String(found?.text || `Phương án ${k}`);
+      return { key: k, text: stripChoicePrefixServer(rawText) || rawText };
+    });
+    return {
+      ...q,
+      partType: "part_1_choice",
+      options: cleanOpts,
+      correctAnswer: extractServerChoiceKey(q.correctAnswer),
+    };
+  });
+
+  // Check if distribution is already balanced across A, B, C, D
+  if (!forceReshuffle) {
+    const counts: Record<string, number> = { A: 0, B: 0, C: 0, D: 0 };
+    let streak = 1;
+    let prevK = "";
+    let streakBroken = false;
+    for (const qIdx of eligibleIndices) {
+      const k = out[qIdx].correctAnswer;
+      counts[k] = (counts[k] || 0) + 1;
+      if (k === prevK) {
+        streak++;
+        if (streak >= 3) streakBroken = true;
+      } else {
+        streak = 1;
+        prevK = k;
+      }
+    }
+    const n = eligibleIndices.length;
+    const minOk = Math.floor(n / 4);
+    const maxOk = Math.ceil(n / 4);
+    const balanced =
+      !streakBroken &&
+      (n === 1 ? out[eligibleIndices[0]].correctAnswer !== "A" : KEYS.every((k) => counts[k] >= minOk && counts[k] <= maxOk));
+    if (balanced) {
+      return out;
     }
   }
 
-  const out = questions.map((q) => ({ ...q }));
+  const targets = buildBalancedChoiceTargetsServer(eligibleIndices.length, seedStr);
   eligibleIndices.forEach((qIdx, pos) => {
     const q = out[qIdx];
     const targetKey = targets[pos];
-    const normOpts = KEYS.map((k, i) => {
-      const found = q.options.find((o: any) => String(o?.key || "").trim().toUpperCase() === k) || q.options[i];
-      return { key: k, text: typeof found === "string" ? found : String(found?.text || `Phương án ${k}`) };
-    });
-    const oldKeyRaw = String(q.correctAnswer || "A").trim().toUpperCase();
-    const oldKey = KEYS.includes(oldKeyRaw) ? oldKeyRaw : "A";
-    const correctItem = normOpts.find((o) => o.key === oldKey) || normOpts[0];
-    const distractors = shuffleArr(normOpts.filter((o) => o.key !== correctItem.key).map((o) => o.text));
+    const oldKey = extractServerChoiceKey(q.correctAnswer);
+    const correctItem = q.options.find((o: any) => o.key === oldKey) || q.options[0];
+    const distractors = shuffleArr(q.options.filter((o: any) => o.key !== correctItem.key).map((o: any) => o.text));
     let dc = 0;
     q.options = KEYS.map((k) => ({ key: k, text: k === targetKey ? correctItem.text : (distractors[dc++] ?? "") }));
     q.correctAnswer = targetKey;
@@ -2867,7 +2973,7 @@ Yêu cầu:
   });
 });
 
-// AI Ultra-Fast Matrix & Prompt Quiz Generation (Images, PDF, Word, TXT, or Direct Text Prompt)
+// AI Ultra-Fast Matrix & Prompt Quiz Generation (2-Phase Parallel Batched Engine)
 app.post("/api/ai/fast-matrix-quiz", async (req, res) => {
   const {
     prompt = "",
@@ -2890,7 +2996,6 @@ app.post("/api/ai/fast-matrix-quiz", async (req, res) => {
   const userSpecifiedCount = isAutoMatrix ? null : (Number(count) || 5);
   const numQuestions = hasUploadedFile || isAutoMatrix ? 22 : (userSpecifiedCount ? Math.min(Math.max(userSpecifiedCount, 1), 50) : 5);
   const rawUserPrompt = (prompt || "").trim();
-  // Guard against generic fallback titles leaking into matrix prompts
   const isGenericDefaultPrompt =
     hasUploadedFile &&
     (!rawUserPrompt ||
@@ -2901,8 +3006,8 @@ app.post("/api/ai/fast-matrix-quiz", async (req, res) => {
   try {
     const ai = getGeminiClient(customApiKey);
 
-    // 1. Tự động bóc tách text từ file PDF base64 trên server nếu chưa có text
-    if (matrixFile?.base64 && (!matrixFile?.text || matrixFile.text.trim().length < 50)) {
+    // 1. Bóc tách text PDF trên server nếu client chưa gửi đủ text
+    if (matrixFile?.base64 && (!matrixFile?.text || matrixFile.text.trim().length < 120)) {
       const isPdf = matrixFile.mimeType?.includes("pdf") || (matrixFile.fileName || "").toLowerCase().endsWith(".pdf");
       if (isPdf) {
         try {
@@ -2926,7 +3031,6 @@ app.post("/api/ai/fast-matrix-quiz", async (req, res) => {
           }
           if (extracted.trim().length > 30) {
             matrixFile.text = extracted;
-            console.log(`[Server AI] Bóc tách thành công ${extracted.length} ký tự từ PDF: ${matrixFile.fileName}`);
           }
         } catch (pdfErr: any) {
           console.warn("[Server AI] Không thể trích xuất text từ buffer PDF:", pdfErr?.message);
@@ -2934,131 +3038,263 @@ app.post("/api/ai/fast-matrix-quiz", async (req, res) => {
       }
     }
 
-    const isFunctionOnlyPrompt =
-      !hasUploadedFile &&
-      Boolean(userPrompt) &&
-      /(hàm số|đơn điệu|cực trị|khảo sát|tiệm cận|gtln|gtnn|giá trị lớn nhất|giá trị nhỏ nhất|bảng biến thiên|đồ thị)/i.test(userPrompt);
+    const matrixText = (matrixFile?.text || "").trim();
+    const hasRichExtractedText = matrixText.length >= 150;
+    const isImageUpload = Boolean(matrixFile?.mimeType?.startsWith("image/"));
+    // Chỉ đính kèm inlineData khi là file ảnh HOẶC PDF scan không bóc tách được text (giảm 5-15x độ trễ upload/OCR)
+    const shouldAttachBinary = Boolean(
+      matrixFile?.base64 &&
+      matrixFile?.mimeType &&
+      matrixFile.base64.length < 15_000_000 &&
+      (isImageUpload || !hasRichExtractedText)
+    );
+    const cleanInlinePart = shouldAttachBinary
+      ? {
+          inlineData: {
+            mimeType: matrixFile.mimeType,
+            data: matrixFile.base64.replace(/^data:.*?;base64,/, ""),
+          },
+        }
+      : null;
 
-    const systemInstruction = `Bạn là chuyên gia Khảo thí & Soạn đề kiểm tra chuẩn Chương trình GDPT 2018 Việt Nam (THPT/THCS).
-Nhiệm vụ tối thượng: ${
-      hasUploadedFile
-        ? `ĐỌC THẬT KỸ TỆP MA TRẬN / ĐỀ CƯƠNG ĐÍNH KÈM ("${matrixFile?.fileName || "ma trận"}") và TẠO ĐỀ KIỂM TRA BÁM SÁT 100% ĐÚNG NỘI DUNG, CHỦ ĐỀ, KHỐI LỚP (${grade}), DẠNG TOÁN VÀ SỐ LƯỢNG CÂU HỎI CỦA MA TRẬN/ĐỀ CƯƠNG ĐÓ.`
-        : `Tạo đề thi chuẩn xác bám sát 100% chủ đề được yêu cầu ("${userPrompt || `${subject} ${grade}`}"), môn ${subject}, khối ${grade}, mức độ ${difficulty}.`
-    }
+    type MatrixSlot = {
+      n: number;
+      partType: "part_1_choice" | "part_2_true_false" | "part_3_short_answer" | "part_4_essay";
+      level: string;
+      topic: string;
+      targetKey?: string;
+    };
 
-*** QUY TẮC BẮT BUỘC VỀ NỘI DUNG & CẤU TRÚC: ***
-${
-  hasUploadedFile
-    ? `1. NGUYÊN TẮC BÁM SÁT TỆP MA TRẬN / ĐỀ CƯƠNG ĐÍNH KÈM (SỐNG CÒN):
-   - TỆP ĐÍNH KÈM LÀ NGUỒN CHÂN LÝ DUY NHẤT: Đọc kỹ từng dòng, từng bảng ma trận, từng chuyên đề / đơn vị kiến thức / dạng bài / câu mẫu trong tệp "${matrixFile?.fileName || ""}".
-   - MỖI CÂU HỎI TẠO RA PHẢI TƯƠNG ỨNG ĐÚNG VỚI TỪNG CHỦ ĐỀ, ĐƠN VỊ KIẾN THỨC VÀ MỨC ĐỘ (Nhận biết / Thông hiểu / Vận dụng) CÓ TRONG MA TRẬN/ĐỀ CƯƠNG ĐÓ!
-   - TUYỆT ĐỐI KHÔNG ĐƯỢC tự ý mặc định lấy đề "Khảo sát hàm số Lớp 12" hay các chủ đề không có trong tệp! Ví dụ nếu tệp là ${grade} (như Lượng giác, Dãy số, Cấp số, Giới hạn, Hàm số liên tục, Mũ - Logarit, Hình không gian, Thống kê, Xác suất, Đạo hàm, v.v.) hoặc môn ${subject} thì 100% câu hỏi PHẢI đúng kiến thức ${grade} trong tệp!
-   - SỐ LƯỢNG CÂU HỎI VÀ CÁC PHẦN: Nếu tệp ma trận ghi rõ số câu cho từng phần (Phần I Trắc nghiệm 4 lựa chọn, Phần II Đúng/Sai, Phần III Trả lời ngắn, Phần IV Tự luận) thì TẠO ĐÚNG Y HỆT SỐ CÂU TỪNG PHẦN ĐÓ! Chỉ khi tệp không ghi rõ tổng số câu từng phần thì mới dùng cấu trúc mặc định chuẩn BGD 2025 (12 câu Phần I + 4 câu Phần II + 6 câu Phần III = 22 câu).${
-     userPrompt ? `\n   - Yêu cầu bổ sung của giáo viên: "${userPrompt}".` : ""
-   }`
-    : isFunctionOnlyPrompt
-      ? `1. Chủ đề yêu cầu về HÀM SỐ: Toàn bộ 100% các câu hỏi PHẢI thuộc về chủ đề "${userPrompt}". Không đưa Oxyz hay chương khác vào.`
-      : `1. Toàn bộ 100% câu hỏi PHẢI đúng chủ đề "${userPrompt || `${subject} ${grade}`}", môn ${subject}, khối ${grade}.`
-}
-${
-  !hasUploadedFile && isAutoMatrix
-    ? `2. CHẾ ĐỘ MA TRẬN CHUẨN BGD 2025: Tạo đủ 22 câu gồm 12 câu Phần I (part_1_choice), 4 câu Phần II Đúng/Sai (part_2_true_false, mỗi câu 4 ý a, b, c, d), và 6 câu Phần III Trả lời ngắn (part_3_short_answer) — tất cả thuộc đúng chủ đề "${userPrompt || `${subject} ${grade}`}".`
-    : !hasUploadedFile
-      ? `2. Tạo đúng ${numQuestions} câu hỏi trắc nghiệm chất lượng cao bám sát chủ đề "${userPrompt || `${subject} ${grade}`}".`
-      : ""
-}
+    let resolvedSubject = subject;
+    let resolvedGrade = grade;
+    let slots: MatrixSlot[] = [];
 
-ĐỊNH DẠNG JSON MỖI CÂU HỎI (BẮT BUỘC TRẢ VỀ MẢNG JSON THUẦN TÚY [ { ... } ]):
-1. Phần I (Trắc nghiệm 4 lựa chọn):
-   { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "C", "explanation": "Giải ngắn gọn 1-3 câu...", "timeLimit": ${timeLimit} }
-   (QUY TẮC ĐÁP ÁN PHẦN I: PHẢI phân bổ đều đáp án đúng qua đầy đủ A, B, C, D giữa các câu — tuyệt đối KHÔNG dồn vào A; phần explanation giải thích giá trị/công thức đúng, không ghi cứng "Đáp án A đúng").
-2. Phần II (Đúng / Sai, bắt buộc đủ 4 mệnh đề a, b, c, d):
-   { "id": "q2", "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "Giải ngắn gọn từng ý a, b, c, d...", "timeLimit": 60 }
-3. Phần III (Trả lời ngắn):
-   { "id": "q3", "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "explanation": "Giải ngắn gọn...", "timeLimit": 45 }
-4. Phần IV (Tự luận, nếu ma trận có tự luận):
-   { "id": "q4", "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "Thang điểm chi tiết...", "correctAnswer": "Đáp số / Hướng dẫn chấm", "options": [], "explanation": "Lời giải mẫu ngắn gọn...", "timeLimit": 120 }
+    const normalizeSlotPartType = (raw: any): MatrixSlot["partType"] => {
+      const s = String(raw || "").toLowerCase();
+      if (s.includes("2") || s.includes("true_false") || s.includes("dung_sai") || s.includes("đúng")) return "part_2_true_false";
+      if (s.includes("3") || s.includes("short") || s.includes("tra_loi_ngan") || s.includes("ngắn")) return "part_3_short_answer";
+      if (s.includes("4") || s.includes("essay") || s.includes("tu_luan") || s.includes("tự luận")) return "part_4_essay";
+      return "part_1_choice";
+    };
 
-QUY TẮC HIỂN THỊ CÔNG THỨC & HÌNH VẼ:
-- Mọi công thức Toán/Lý/Hóa bọc trong $...$ (dùng \\\\ trong chuỗi JSON). Véc-tơ dùng \\overrightarrow{AB}.
-- Nếu câu hỏi có Bảng biến thiên: thêm "diagramType": "variation_table", "diagramData": { "x": [...], "yPrime": [...], "yArrows": [{"start":"...","end":"...","dir":"up"|"down"}] }.
-- Nếu câu hỏi có Đồ thị hoặc "như hình vẽ": thêm "diagramType": "function_graph", "diagramData": { "graphType": "rational"|"cubic"|"biquadratic"|"quadratic"|"sine", "latex": "..." }.
-- Nếu câu hỏi có Bảng thống kê / số liệu: thêm "diagramType": "data_table", "diagramData": { "headers": [...], "rows": [[...]] }.
-- Viết "explanation" súc tích, rõ ý (2-3 câu) để phản hồi nhanh và đầy đủ toàn bộ đề thi không bị cắt ngang.`;
+    const buildDefaultBgdSlots = (scopeTopic: string): MatrixSlot[] => {
+      const t = scopeTopic || `${subject} ${grade}`;
+      const list: MatrixSlot[] = [];
+      const p1Levels = [
+        "Nhận biết", "Nhận biết", "Nhận biết", "Nhận biết",
+        "Nhận biết", "Nhận biết", "Thông hiểu", "Thông hiểu",
+        "Thông hiểu", "Thông hiểu", "Vận dụng", "Vận dụng",
+      ];
+      for (let i = 0; i < 12; i++) {
+        list.push({ n: i + 1, partType: "part_1_choice", level: p1Levels[i] || difficulty, topic: `${t} (dạng ${i + 1})` });
+      }
+      for (let i = 0; i < 4; i++) {
+        list.push({ n: 13 + i, partType: "part_2_true_false", level: i < 2 ? "Thông hiểu" : "Vận dụng", topic: `${t} - Mệnh đề Đúng/Sai #${i + 1}` });
+      }
+      for (let i = 0; i < 6; i++) {
+        list.push({ n: 17 + i, partType: "part_3_short_answer", level: i < 2 ? "Thông hiểu" : "Vận dụng", topic: `${t} - Bài toán trả lời ngắn #${i + 1}` });
+      }
+      return list;
+    };
 
-    const parts: any[] = [];
-    if (matrixFile?.base64 && matrixFile?.mimeType && matrixFile.base64.length < 15_000_000) {
-      const cleanBase64 = matrixFile.base64.replace(/^data:.*?;base64,/, "");
-      parts.push({
-        inlineData: {
-          mimeType: matrixFile.mimeType,
-          data: cleanBase64,
-        },
-      });
-    }
-
-    if (matrixFile?.text && matrixFile.text.trim().length > 0) {
-      parts.push({
-        text: `NỘI DUNG VĂN BẢN BÓC TÁCH TỪ TỆP MA TRẬN / ĐỀ CƯƠNG ("${matrixFile.fileName || "matrix"}"):\n"""\n${matrixFile.text.slice(0, 32000)}\n"""`,
-      });
-    }
-
+    // Phase 1: Bóc tách khung ma trận siêu nhanh (~1.2-2.5s) khi có file ma trận đính kèm
     if (hasUploadedFile) {
-      parts.push({
-        text: `Thông số lớp/môn: ${subject} - ${grade} - Mức độ: ${difficulty}.${
-          userPrompt ? `\nGhi chú thêm của giáo viên: "${userPrompt}"` : ""
-        }\nHãy phân tích kỹ tệp ma trận/đề cương đính kèm ở trên và tạo ĐÚNG các câu hỏi bám sát 100% nội dung ma trận/đề cương đó (KHÔNG tạo đề khác ngoài ma trận). Trả về mảng JSON thuần túy.`,
+      const planParts: any[] = [];
+      if (cleanInlinePart) planParts.push(cleanInlinePart);
+      if (matrixText) {
+        planParts.push({
+          text: `NỘI DUNG MA TRẬN / ĐỀ CƯƠNG ("${matrixFile?.fileName || "matrix"}"):\n"""\n${matrixText.slice(0, 16000)}\n"""`,
+        });
+      }
+      planParts.push({
+        text: `Đọc kỹ ma trận/đề cương trên (môn gợi ý: ${subject}, khối: ${grade}${userPrompt ? `, yêu cầu: ${userPrompt}` : ""}).
+Trả về ĐÚNG JSON khung danh sách từng câu hỏi cần tạo:
+{
+  "subject": "Tên môn học đúng trong tệp",
+  "grade": "Khối lớp đúng trong tệp (ví dụ: Lớp 11)",
+  "items": [
+    { "n": 1, "partType": "part_1_choice", "level": "Nhận biết", "topic": "Tên chủ đề/đơn vị kiến thức/dạng bài chính xác theo dòng ma trận (10-18 từ)" }
+  ]
+}
+Quy tắc:
+- Nếu tệp ghi rõ số câu Phần I (trắc nghiệm 4 lựa chọn: part_1_choice), Phần II (Đúng/Sai: part_2_true_false), Phần III (Trả lời ngắn: part_3_short_answer), Phần IV (Tự luận: part_4_essay) -> liệt kê ĐÚNG tổng số câu và loại câu từng phần đó (tối đa 36 câu).
+- Nếu tệp chỉ nêu chủ đề không ghi số câu -> lập 22 câu chuẩn BGD (12 part_1_choice, 4 part_2_true_false, 6 part_3_short_answer) bám 100% chuyên đề trong tệp.`,
       });
+
+      try {
+        const planRes = await generateWithGemini(ai, {
+          contents: [{ role: "user", parts: planParts }],
+          preferLiteModel: true,
+          timeoutMs: 18000,
+          maxAttempts: 1,
+          config: {
+            responseMimeType: "application/json",
+            systemInstruction: "Bạn là chuyên gia phân tích ma trận đề thi GDPT 2018. Chỉ xuất JSON ngắn gọn liệt kê chính xác từng vị trí câu hỏi trong ma trận, KHÔNG giải đề ở bước này.",
+          },
+        });
+        const parsedPlan = safeParseJsonWithLatex(planRes.text || "");
+        if (parsedPlan?.subject) resolvedSubject = String(parsedPlan.subject);
+        if (parsedPlan?.grade) resolvedGrade = String(parsedPlan.grade);
+        const rawItems = Array.isArray(parsedPlan?.items) ? parsedPlan.items : Array.isArray(parsedPlan) ? parsedPlan : [];
+        if (rawItems.length > 0) {
+          slots = rawItems.slice(0, 36).map((it: any, i: number) => ({
+            n: Number(it?.n) || i + 1,
+            partType: normalizeSlotPartType(it?.partType),
+            level: String(it?.level || difficulty),
+            topic: String(it?.topic || userPrompt || `${resolvedSubject} ${resolvedGrade}`).slice(0, 220),
+          }));
+        }
+      } catch (planErr: any) {
+        console.warn("[Fast Matrix Phase 1] Blueprint extraction fallback:", planErr?.message);
+      }
+
+      if (slots.length === 0) {
+        slots = buildDefaultBgdSlots(userPrompt || matrixFile?.fileName || `${resolvedSubject} ${resolvedGrade}`);
+      }
     } else if (isMatrixExplicit) {
-      parts.push({
-        text: `Soạn đề theo cấu trúc ma trận GDPT 2018 (12 câu Phần I, 4 câu Phần II Đúng/Sai, 6 câu Phần III Trả lời ngắn):\n- Chủ đề: "${userPrompt || `${subject} ${grade}`}"\n- Môn: ${subject} | Khối: ${grade} | Mức độ: ${difficulty}\nToàn bộ câu hỏi phải bám sát 100% chủ đề trên. Trả về mảng JSON thuần túy.`,
-      });
+      slots = buildDefaultBgdSlots(userPrompt || `${subject} ${grade}`);
     } else {
-      parts.push({
-        text: `Soạn đúng ${numQuestions} câu hỏi trắc nghiệm 4 lựa chọn:\n- Chủ đề: "${userPrompt || `${subject} ${grade}`}"\n- Môn: ${subject} | Khối: ${grade} | Mức độ: ${difficulty}\nTrả về mảng JSON thuần túy.`,
-      });
+      for (let i = 0; i < numQuestions; i++) {
+        slots.push({
+          n: i + 1,
+          partType: "part_1_choice",
+          level: difficulty,
+          topic: `${userPrompt || `${subject} ${grade}`} (câu ${i + 1})`,
+        });
+      }
     }
 
-    const timeoutMs = hasUploadedFile ? 75000 : 45000;
-    const response = await generateWithGemini(ai, {
-      contents: [{ role: "user", parts }],
-      config: {
-        responseMimeType: "application/json",
-        systemInstruction,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      },
-      timeoutMs,
+    // Gán trước chuỗi đáp án cân bằng A/B/C/D cho toàn bộ câu Phần I trước khi chia batch song song
+    const part1Slots = slots.filter((s) => s.partType === "part_1_choice");
+    const balancedTargets = buildBalancedChoiceTargetsServer(
+      part1Slots.length,
+      `${userPrompt || matrixFile?.fileName || resolvedGrade}_${Date.now()}`
+    );
+    part1Slots.forEach((s, idx) => {
+      s.targetKey = balancedTargets[idx];
     });
 
-    const rawText = (response.text || "").trim();
-    let parsed = safeParseJsonWithLatex(rawText);
-    if (!parsed) {
-      try { parsed = JSON.parse(rawText); } catch (_) {}
+    // Chia nhỏ thành các batch tối đa 6 câu chạy SONG SONG (Promise.all) để giảm từ ~50s xuống ~6-10s
+    const BATCH_SIZE = slots.length <= 8 ? slots.length : 6;
+    const batches: MatrixSlot[][] = [];
+    for (let i = 0; i < slots.length; i += BATCH_SIZE) {
+      batches.push(slots.slice(i, i + BATCH_SIZE));
     }
-    if (parsed && !Array.isArray(parsed) && (parsed as any).questions) {
-      parsed = (parsed as any).questions;
-    }
+
+    const compactFileContext = hasUploadedFile && matrixText
+      ? `\nNgữ cảnh trích từ tệp "${matrixFile?.fileName || ""}" (tham khảo đúng thuật ngữ/công thức/dạng toán):\n"""\n${matrixText.slice(0, 5000)}\n"""`
+      : "";
+
+    const batchSystemInstruction = `Bạn là Chuyên gia Khảo thí & Toán/Khoa học chuẩn GDPT 2018 (${resolvedSubject} - ${resolvedGrade}).
+QUY TẮC BẮT BUỘC:
+1. TÍNH TOÁN CHÍNH XÁC 100% trước khi xuất JSON. Không ra câu vô nghiệm/sai số liệu.
+2. VỚI CÂU PHẦN I (part_1_choice): Xuất trường "correctAnswer" TRƯỚC trường "options". Đặt ĐÚNG đáp án chính xác vào đúng chữ cái "targetKey" đã chỉ định cho mỗi câu (tuyệt đối không tự ý chuyển về A); 3 phương án còn lại là nhiễu hợp lý gần giống kết quả thật. KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
+3. VỚI CÂU PHẦN II (part_2_true_false): Đủ 4 ý a, b, c, d với tỷ lệ Đúng/Sai đa dạng tự nhiên (không phải câu nào cũng toàn Đúng).
+4. CÔNG THỨC TOÁN/LÝ/HÓA: Bọc trong $...$, dùng \\overrightarrow{AB} cho véctơ, escape \\\\ trong JSON.
+5. "explanation" súc tích 1-2 câu nêu rõ công thức & phép tính ra đáp số (KHÔNG viết cứng "Chọn đáp án A" hay tên chữ cái đáp án).
+6. Nếu có bảng biến thiên/đồ thị/bảng số liệu: gắn thêm diagramType + diagramData chuẩn JSON.`;
+
+    const runSingleBatch = async (batchSlots: MatrixSlot[], batchIdx: number): Promise<any[]> => {
+      const slotSpecs = batchSlots
+        .map((s) => {
+          const typeLabel =
+            s.partType === "part_1_choice"
+              ? `Phần I (part_1_choice) | Đáp án đúng BẮT BUỘC: "${s.targetKey || "B"}"`
+              : s.partType === "part_2_true_false"
+                ? `Phần II Đúng/Sai (part_2_true_false, đủ 4 ý a,b,c,d)`
+                : s.partType === "part_3_short_answer"
+                  ? `Phần III Trả lời ngắn (part_3_short_answer)`
+                  : `Phần IV Tự luận (part_4_essay)`;
+          return `- Câu số ${s.n}: ${typeLabel} | Mức độ: ${s.level} | Nội dung: ${s.topic}`;
+        })
+        .join("\n");
+
+      const batchParts: any[] = [];
+      if (cleanInlinePart) {
+        batchParts.push(cleanInlinePart);
+      }
+      batchParts.push({
+        text: `Hãy soạn ĐÚNG ${batchSlots.length} câu hỏi sau cho đề ${resolvedSubject} (${resolvedGrade}):
+${slotSpecs}
+${userPrompt ? `Yêu cầu chung của giáo viên: "${userPrompt}"` : ""}${compactFileContext}
+
+Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} phần tử theo đúng thứ tự:
+- Phần I: { "slotNumber": 1, "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "correctAnswer": "C", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "explanation": "...", "difficulty": "Nhận biết", "timeLimit": ${timeLimit} }
+- Phần II: { "slotNumber": 13, "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "...", "difficulty": "Thông hiểu", "timeLimit": 60 }
+- Phần III: { "slotNumber": 17, "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "explanation": "...", "difficulty": "Vận dụng", "timeLimit": 45 }
+- Phần IV: { "slotNumber": 23, "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "...", "correctAnswer": "Đáp số", "options": [], "explanation": "...", "difficulty": "Vận dụng", "timeLimit": 120 }`,
+      });
+
+      const parseBatchResponse = (rawText: string): any[] => {
+        let parsed = safeParseJsonWithLatex(rawText);
+        if (!parsed) {
+          try { parsed = JSON.parse(rawText); } catch (_) {}
+        }
+        if (parsed && !Array.isArray(parsed) && Array.isArray((parsed as any).questions)) {
+          parsed = (parsed as any).questions;
+        }
+        return Array.isArray(parsed) ? parsed : [];
+      };
+
+      try {
+        const resBatch = await generateWithGemini(ai, {
+          contents: [{ role: "user", parts: batchParts }],
+          timeoutMs: 28000,
+          maxAttempts: 1,
+          config: {
+            responseMimeType: "application/json",
+            systemInstruction: batchSystemInstruction,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
+        });
+        const items = parseBatchResponse((resBatch.text || "").trim());
+        if (items.length > 0) return items;
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        if (msg.includes("API_KEY_INVALID") || msg.includes("PERMISSION_DENIED") || msg.includes("API key should be set")) {
+          throw err;
+        }
+        console.warn(`[Fast Matrix Batch ${batchIdx + 1}] Primary failed (${msg.slice(0, 80)}), fast fallback retry...`);
+      }
+
+      // Retry nhanh 1 lần với flash-lite nếu batch bị nghẽn/timeout
+      const retryRes = await generateWithGemini(ai, {
+        contents: [{ role: "user", parts: batchParts }],
+        preferLiteModel: true,
+        timeoutMs: 20000,
+        maxAttempts: 1,
+        config: {
+          responseMimeType: "application/json",
+          systemInstruction: batchSystemInstruction,
+        },
+      });
+      return parseBatchResponse((retryRes.text || "").trim());
+    };
+
+    // Chạy song song toàn bộ các batch!
+    const batchResults = await Promise.all(
+      batches.map((b, bIdx) =>
+        runSingleBatch(b, bIdx).catch((err) => {
+          console.error(`[Fast Matrix Batch ${bIdx + 1}] Final failure:`, err?.message || err);
+          return [];
+        })
+      )
+    );
+
+    const parsed: any[] = batchResults.flat();
 
     if (Array.isArray(parsed) && parsed.length > 0) {
       const sanitized = parsed.map((q: any, idx: number) => {
-        const rawPartType = q.partType || "";
-        const isTrueFalse = rawPartType === "part_2_true_false" || (Array.isArray(q.subStatements) && q.subStatements.length > 0);
-        const isShortAnswer = rawPartType === "part_3_short_answer" || !!q.shortAnswerKey;
-        const isEssay = rawPartType === "part_4_essay" || !!q.essayRubric;
+        const inferred = inferServerPartType(q);
+        const isTrueFalse = inferred === "part_2_true_false";
+        const isShortAnswer = inferred === "part_3_short_answer";
+        const isEssay = inferred === "part_4_essay";
+        const partType = inferred;
 
-        let partType: "part_1_choice" | "part_2_true_false" | "part_3_short_answer" | "part_4_essay" = "part_1_choice";
         let partLabel = q.partLabel || "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn";
-
-        if (isTrueFalse) {
-          partType = "part_2_true_false";
-          partLabel = q.partLabel || "Phần II. Câu trắc nghiệm Đúng / Sai";
-        } else if (isShortAnswer) {
-          partType = "part_3_short_answer";
-          partLabel = q.partLabel || "Phần III. Câu trắc nghiệm trả lời ngắn";
-        } else if (isEssay) {
-          partType = "part_4_essay";
-          partLabel = q.partLabel || "Phần IV. Tự luận";
-        }
+        if (isTrueFalse) partLabel = q.partLabel || "Phần II. Câu trắc nghiệm Đúng / Sai";
+        else if (isShortAnswer) partLabel = q.partLabel || "Phần III. Câu trắc nghiệm trả lời ngắn";
+        else if (isEssay) partLabel = q.partLabel || "Phần IV. Tự luận";
 
         let subStatements: any[] | undefined = undefined;
         if (isTrueFalse) {
@@ -3091,8 +3327,8 @@ QUY TẮC HIỂN THỊ CÔNG THỨC & HÌNH VẼ:
         if (partType === "part_1_choice") {
           if (Array.isArray(q.options) && q.options.length >= 2) {
             options = q.options.map((opt: any, oIdx: number) => ({
-              key: opt.key || ["A", "B", "C", "D"][oIdx] || "A",
-              text: typeof opt === "string" ? opt : (opt.text || `Lựa chọn ${opt.key || oIdx + 1}`),
+              key: ["A", "B", "C", "D"][oIdx] || String(opt?.key || "A").trim().toUpperCase().replace(/[\.\)]$/, ""),
+              text: typeof opt === "string" ? stripChoicePrefixServer(opt) : stripChoicePrefixServer(opt.text || `Lựa chọn ${opt.key || oIdx + 1}`),
             }));
           } else {
             options = [
@@ -3108,6 +3344,14 @@ QUY TẮC HIỂN THỊ CÔNG THỨC & HÌNH VẼ:
         const finalDiagramType = q.diagramType || enriched.diagramType || undefined;
         const finalDiagramData = q.diagramData || enriched.diagramData || undefined;
 
+        const cleanCorrectAnswer = isTrueFalse
+          ? (subStatements ? subStatements.map((s) => `${s.label}:${s.correct ? "Đ" : "S"}`).join(", ") : String(q.correctAnswer || "a:Đ, b:S, c:Đ, d:S"))
+          : isShortAnswer
+            ? String(q.shortAnswerKey ?? q.correctAnswer ?? "")
+            : isEssay
+              ? String(q.correctAnswer || "Lời giải mẫu")
+              : extractServerChoiceKey(q.correctAnswer);
+
         return {
           id: q.id || `ai_fast_q_${Date.now()}_${idx + 1}`,
           question: q.question || `Câu hỏi ${idx + 1}`,
@@ -3115,15 +3359,15 @@ QUY TẮC HIỂN THỊ CÔNG THỨC & HÌNH VẼ:
           partLabel,
           options,
           subStatements,
-          shortAnswerKey: q.shortAnswerKey || (isShortAnswer ? (q.correctAnswer || "") : undefined),
+          shortAnswerKey: q.shortAnswerKey || (isShortAnswer ? cleanCorrectAnswer : undefined),
           essayRubric: q.essayRubric || (isEssay ? (q.explanation || "Hướng dẫn chấm theo barem điểm") : undefined),
-          correctAnswer: String(q.correctAnswer || (isShortAnswer ? q.shortAnswerKey : (isTrueFalse ? "a:Đ, b:S, c:Đ, d:S" : "A"))),
+          correctAnswer: cleanCorrectAnswer,
           explanation: q.explanation || "Lời giải chi tiết theo chuẩn sư phạm.",
           diagramType: finalDiagramType,
           diagramData: finalDiagramData,
           timeLimit: Number(q.timeLimit) || Number(timeLimit) || (isTrueFalse ? 60 : (isShortAnswer ? 45 : (isEssay ? 120 : 30))),
           difficulty: q.difficulty || difficulty,
-          subject,
+          subject: resolvedSubject,
         };
       });
 
@@ -3131,7 +3375,7 @@ QUY TẮC HIỂN THỊ CÔNG THỨC & HÌNH VẼ:
         success: true,
         questions: balanceQuizAnswerDistributionServer(
           normalizeQuizQuestionsMath(sanitized),
-          `${userPrompt || matrixFile?.fileName || grade}_${Date.now()}`
+          `${userPrompt || matrixFile?.fileName || resolvedGrade}_${Date.now()}`
         ),
       });
     }

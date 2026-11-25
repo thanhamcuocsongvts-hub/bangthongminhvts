@@ -83,6 +83,7 @@ import {
 import { FloatingSelectionToolbar } from './FloatingSelectionToolbar';
 import { cropCanvasRegion, recognizeHandwritingFast } from '../utils/textRecognitionService';
 import { recognizeHandwritingOneClick, analyzeStrokeGeometryLocally } from '../utils/handwritingRecognition';
+import { toggleCasioCalculator, useCasioGlobalState } from '../utils/casioEvents';
 import { directRecognizeHandwriting } from '../utils/geminiClient';
 import {
   filterPointJitter,
@@ -166,6 +167,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
 
   // Fullscreen state
   const [isFullBoard, setIsFullBoard] = useState<boolean>(isInitialFullScreen);
+  const casioState = useCasioGlobalState();
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('set-feature-fullscreen', { detail: { active: isFullBoard } }));
@@ -3320,7 +3322,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
     <div
       ref={containerRef}
       className={`relative w-full overflow-hidden transition-all duration-300 select-none flex ${
-        isFullBoard && !hasExternalSidePanel
+        isFullBoard && !hasExternalSidePanel && !casioState.isDocked
           ? 'fixed inset-0 z-[9990] h-dvh w-screen rounded-none'
           : 'h-full w-full min-h-[420px]'
       } ${getBackgroundClass()}`}
@@ -3378,6 +3380,20 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               >
                 <FolderOpen className="w-3.5 h-3.5" />
                 <span>Tài liệu</span>
+              </button>
+
+              {/* Casio 580 Quick Toggle on Mobile */}
+              <button
+                type="button"
+                onClick={() => toggleCasioCalculator('side_by_side')}
+                className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
+                  casioState.isOpen
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow'
+                    : 'bg-slate-900/90 text-cyan-300 border-white/20 hover:bg-slate-800'
+                }`}
+                title="Chèn / Tắt máy tính Casio 580"
+              >
+                <Calculator className="w-3.5 h-3.5" />
               </button>
 
               {/* Mobile Fullscreen toggle */}
@@ -3580,6 +3596,21 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
               </button>
             </div>
 
+            {/* Casio 580 Side-by-Side Toggle */}
+            <button
+              type="button"
+              onClick={() => toggleCasioCalculator('side_by_side')}
+              className={`px-2.5 py-1.5 rounded-2xl border text-xs font-black flex items-center gap-1.5 shadow-lg transition-all cursor-pointer ${
+                casioState.isOpen
+                  ? 'bg-cyan-500 text-slate-950 border-cyan-200 ring-2 ring-cyan-300/60'
+                  : 'bg-slate-900/85 hover:bg-slate-800 text-cyan-300 border-cyan-400/40'
+              }`}
+              title="Chèn / Tắt máy tính Casio fx-580VN X song song với bảng"
+            >
+              <Calculator className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">{casioState.isOpen ? 'Đang Chèn 580' : 'Casio 580'}</span>
+            </button>
+
             {/* 1-Click Clean Board / Immersive Mode */}
             <button
               onClick={() => {
@@ -3629,6 +3660,20 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
           >
             <ChevronDown className="w-3.5 h-3.5 text-emerald-400" />
             <span>Hiện Thanh Công Cụ</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => toggleCasioCalculator('side_by_side')}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-lg flex items-center gap-1.5 transition-all cursor-pointer hover:scale-105 active:scale-95 border ${
+              casioState.isOpen
+                ? 'bg-cyan-500 text-slate-950 border-cyan-200'
+                : 'bg-slate-900/90 hover:bg-slate-800 text-cyan-300 border-cyan-400/40'
+            }`}
+            title="Chèn / Tắt máy tính Casio fx-580VN X"
+          >
+            <Calculator className="w-3.5 h-3.5" />
+            <span>{casioState.isOpen ? 'Tắt 580' : 'Casio 580'}</span>
           </button>
 
           <button

@@ -4226,7 +4226,7 @@ export const CasioCalculatorModal: React.FC<{
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/90 animate-in fade-in duration-200 select-none overflow-y-auto">
+    <div className="fixed inset-0 z-[10060] flex items-center justify-center p-2 sm:p-4 bg-slate-950/90 animate-in fade-in duration-200 select-none overflow-y-auto">
       <div className="relative my-auto flex flex-col items-center">
         {/* Nút đóng nổi bật góc trên bên phải */}
         <button

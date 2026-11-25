@@ -64,6 +64,7 @@ import {
   Moon,
   Send,
   ClipboardList,
+  Calculator,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
@@ -96,6 +97,7 @@ import {
 } from '../utils/aiSpeechService';
 import { gameSounds } from '../utils/gameSoundEffects';
 import { db } from '../lib/firebase';
+import { toggleCasioCalculator, useCasioGlobalState } from '../utils/casioEvents';
 
 // Helper to retrieve the current logged-in teacher's active classes from props, active session or localStorage
 const getActiveTeacherClasses = (currentTeacher?: any, currentClassroom?: any): ClassRoom[] => {
@@ -960,6 +962,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   hasExternalSidePanel = false,
 }) => {
   const ownerTeacherId = useMemo(() => normalizeTeacherOwnerId(teacher?.id), [teacher?.id]);
+  const casioState = useCasioGlobalState();
   const teacherRoomPin = useMemo(() => getTeacherRoomPin(teacher?.id), [teacher?.id]);
   const liveStorageKeys = useMemo(() => getLiveExamStorageKeys(teacher?.id), [teacher?.id]);
   const isCurrentLessonOwned = useMemo(
@@ -1859,10 +1862,40 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       if (fileCategory === 'image') {
         previewUrl = URL.createObjectURL(file);
         base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
+          const img = new Image();
+          img.onload = () => {
+            try {
+              const maxDim = 1600;
+              let { width, height } = img;
+              if (width > maxDim || height > maxDim) {
+                const ratio = Math.min(maxDim / width, maxDim / height);
+                width = Math.round(width * ratio);
+                height = Math.round(height * ratio);
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, width, height);
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.82));
+                return;
+              }
+            } catch (_) {}
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          };
+          img.onerror = () => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          };
+          img.src = previewUrl!;
         });
       } else if (fileCategory === 'word') {
         const arrayBuffer = await file.arrayBuffer();
@@ -1898,13 +1931,15 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
           console.warn('PDF text extraction notice in LiveQuizHub:', pdfErr);
         }
 
-        // Đồng thời đọc base64 để AI nhìn trực tiếp bảng biểu & công thức toán trong PDF
-        base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+        // Chỉ đọc base64 PDF khi là PDF scan (không trích xuất đủ văn bản), tránh gửi file nặng làm chậm AI
+        if (!extractedText || extractedText.trim().length < 150) {
+          base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        }
       } else {
         extractedText = await file.text();
       }
@@ -1936,8 +1971,10 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     setGenerationTimeMs(null);
     setStatusMessage(
       uploadedFile
-        ? `⚡ Đang đọc ma trận "${uploadedFile.name}" & tạo câu hỏi bám sát nội dung ma trận...`
-        : '⚡ Đang phân tích yêu cầu & tạo câu hỏi trắc nghiệm siêu tốc...'
+        ? `⚡ Đang phân tích ma trận "${uploadedFile.name}" & tạo song song các phần câu hỏi...`
+        : isMatrixMode
+          ? '⚡ Đang tạo song song đề thi chuẩn ma trận & cân bằng đáp án A/B/C/D...'
+          : '⚡ Đang phân tích yêu cầu & tạo câu hỏi trắc nghiệm siêu tốc...'
     );
     const startTime = performance.now();
 
@@ -1967,15 +2004,22 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             : uploadedFile.type === 'pdf'
               ? 'application/pdf'
               : undefined);
+        const hasRichText = Boolean(uploadedFile.extractedText && uploadedFile.extractedText.trim().length >= 150);
         const canSendBase64 =
-          (uploadedFile.type === 'image' || uploadedFile.type === 'pdf') &&
           Boolean(uploadedFile.base64) &&
-          (uploadedFile.base64?.length || 0) < 13_000_000;
+          (uploadedFile.base64?.length || 0) < 13_000_000 &&
+          (uploadedFile.type === 'image' || (uploadedFile.type === 'pdf' && !hasRichText));
 
+        const base64Mime = uploadedFile.base64?.match(/^data:([^;]+);base64,/)?.[1];
         payload.matrixFile = {
           fileName: uploadedFile.name,
           ...(uploadedFile.extractedText ? { text: uploadedFile.extractedText } : {}),
-          ...(canSendBase64 ? { mimeType, base64: uploadedFile.base64 } : {}),
+          ...(canSendBase64
+            ? {
+                mimeType: base64Mime || mimeType,
+                base64: uploadedFile.base64,
+              }
+            : {}),
         };
       }
 
@@ -2674,6 +2718,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   ];
 
   const isScopedPresentationFS = isPresentationFullScreen && activeMode === 'presentation';
+  const hasActiveSidePanel = Boolean(hasExternalSidePanel || casioState.isDocked);
 
   return (
     <div
@@ -2681,7 +2726,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       id="live-quiz-viewport"
       className={
         isScopedPresentationFS
-          ? hasExternalSidePanel
+          ? hasActiveSidePanel
             ? 'relative w-full h-full flex flex-col bg-slate-950 rounded-none overflow-hidden border-0 shadow-none'
             : 'fixed inset-0 z-[9990] w-screen h-dvh flex flex-col bg-slate-950 rounded-none overflow-hidden border-0 shadow-none'
           : 'relative w-full h-full min-h-[420px] flex flex-col bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-md'
@@ -3244,12 +3289,12 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 {isGenerating ? (
                   <>
                     <Sparkles className="w-5 h-5 text-amber-300 animate-spin" />
-                    <span>Đang Bóc Tách & Tạo Câu Hỏi...</span>
+                    <span>Đang Xử Lý Song Song & Tạo Đề...</span>
                   </>
                 ) : (
                   <>
                     <Zap className="w-5 h-5 text-yellow-300" />
-                    <span>TẠO CÂU HỎI BẰNG AI SIÊU TỐC (2-3s)</span>
+                    <span>TẠO ĐỀ THEO MA TRẬN SIÊU TỐC</span>
                   </>
                 )}
               </button>
@@ -4706,6 +4751,21 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 </button>
               )}
 
+              {/* Nút Chèn / Bật tắt Máy Tính Casio 580 VN X ngay trong chế độ Trình Chiếu / Toàn Màn Hình */}
+              <button
+                type="button"
+                onClick={() => toggleCasioCalculator('side_by_side')}
+                className={`px-3 py-2 rounded-2xl border text-xs md:text-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  casioState.isOpen
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-200 shadow-lg font-black ring-2 ring-cyan-300/60'
+                    : currentBoardTheme.secondaryBtnClass
+                }`}
+                title="Chèn / Tắt máy tính Casio fx-580VN X song song khi trình chiếu"
+              >
+                <Calculator className={`w-4 h-4 ${casioState.isOpen ? 'text-slate-950' : 'text-cyan-500'}`} />
+                <span>{casioState.isOpen ? 'Đang Chèn 580' : 'Máy tính 580'}</span>
+              </button>
+
               {/* Nút Toàn Màn Hình / Thu Nhỏ chiếu Tivi 75 inch */}
               <button
                 onClick={() => {
@@ -4716,7 +4776,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   setShowBoardFontMenu(false);
                   if (nextVal) {
                     try {
-                      const targetEl = liveQuizViewportRef.current || document.documentElement;
+                      const targetEl = document.documentElement;
                       if (!document.fullscreenElement && targetEl.requestFullscreen) {
                         targetEl.requestFullscreen().catch(() => {});
                       }
