@@ -65,6 +65,7 @@ import {
   Send,
   ClipboardList,
   Calculator,
+  Wrench,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeSVG } from 'qrcode.react';
@@ -73,7 +74,7 @@ import JSZip from 'jszip';
 import * as pdfjsLib from 'pdfjs-dist';
 import { extractCleanPdfText } from '../utils/pdfTextExtractor';
 import { exportExamToWordDocx } from '../utils/docxExportService';
-import { QuizQuestion, RoomState, StudentSubmission, TextScale, ActiveStudent, ClassRoom } from '../types';
+import { QuizQuestion, QuizCritiqueItem, RoomState, StudentSubmission, TextScale, ActiveStudent, ClassRoom } from '../types';
 import { QuizRichContentRenderer } from './QuizRichContentRenderer';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
@@ -81,7 +82,14 @@ import { HomeworkAssignModal } from './HomeworkAssignModal';
 import { HomeworkTrackerView } from './HomeworkTrackerView';
 import { StudentHomeworkPortal } from './StudentHomeworkPortal';
 import { subscribeHomeworkAssignments } from '../utils/homeworkService';
-import { directFastMatrixQuiz, getGeminiApiKey, saveGeminiApiKey, isGeminiConfigured } from '../utils/geminiClient';
+import {
+  directFastMatrixQuiz,
+  directCritiqueQuiz,
+  sanitizeQuizQuestionMath,
+  getGeminiApiKey,
+  saveGeminiApiKey,
+  isGeminiConfigured,
+} from '../utils/geminiClient';
 import { balanceQuizAnswerDistribution } from '../utils/quizDistribution';
 import {
   getSpeechSpeedMultiplier,
@@ -1185,6 +1193,34 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
 
+  // AI Independent Exam Critique & Re-Solver State
+  const [critiqueResults, setCritiqueResults] = useState<QuizCritiqueItem[]>([]);
+  const [isCritiquing, setIsCritiquing] = useState<boolean>(false);
+  const [showCritiqueModal, setShowCritiqueModal] = useState<boolean>(false);
+  const [critiqueFilter, setCritiqueFilter] = useState<'issues' | 'all' | 'ok'>('issues');
+  const [critiqueTimeMs, setCritiqueTimeMs] = useState<number | null>(null);
+
+  const critiqueById = useMemo(() => {
+    const map = new Map<string, QuizCritiqueItem>();
+    critiqueResults.forEach((item) => map.set(item.questionId, item));
+    return map;
+  }, [critiqueResults]);
+
+  const critiqueStats = useMemo(() => {
+    const total = critiqueResults.length;
+    const issues = critiqueResults.filter((c) => c.status !== 'ok');
+    const okCount = total - issues.length;
+    const unappliedIssues = issues.filter((c) => !c.applied && !c.dismissed);
+    const appliedCount = issues.filter((c) => c.applied).length;
+    return {
+      total,
+      okCount,
+      issueCount: issues.length,
+      unappliedIssueCount: unappliedIssues.length,
+      appliedCount,
+    };
+  }, [critiqueResults]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Live room state
@@ -1363,6 +1399,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
         setGeneratedQuestions([]);
       }
       setLocalActiveIndex(0);
+      setCritiqueResults([]);
+      setCritiqueTimeMs(null);
     }
   }, [ownerTeacherId, liveStorageKeys.questionsKey, liveStorageKeys.titleKey]);
 
@@ -1971,6 +2009,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const handleGenerateFastQuiz = async () => {
     setIsGenerating(true);
     setGenerationTimeMs(null);
+    setCritiqueResults([]);
+    setCritiqueTimeMs(null);
     setStatusMessage(
       uploadedFile
         ? `⚡ Đang phân tích ma trận "${uploadedFile.name}" & tạo song song các phần câu hỏi...`
@@ -2195,6 +2235,165 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   // Delete a generated question
   const handleDeleteQuestion = (id: string) => {
     setGeneratedQuestions((prev) => prev.filter((q) => q.id !== id));
+    setCritiqueResults((prev) => prev.filter((c) => c.questionId !== id));
+  };
+
+  // Run independent AI critique & re-solve every generated question
+  const handleRunQuizCritique = async (targetQuestions: QuizQuestion[] = generatedQuestions) => {
+    if (!targetQuestions || targetQuestions.length === 0 || isCritiquing) return;
+    setIsCritiquing(true);
+    setCritiqueTimeMs(null);
+    const start = performance.now();
+    setStatusMessage(`🔍 Hội đồng AI đang phản biện và tự giải lại độc lập ${targetQuestions.length} câu hỏi...`);
+
+    try {
+      const clientApiKey = getGeminiApiKey();
+      let items: QuizCritiqueItem[] = [];
+      let serverErr = '';
+      let shouldTryDirect = false;
+
+      try {
+        const res = await fetch('/api/ai/critique-quiz', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(clientApiKey ? { 'x-gemini-api-key': clientApiKey } : {}),
+          },
+          body: JSON.stringify({
+            questions: targetQuestions,
+            subject: selectedSubject,
+            grade: selectedGrade,
+            apiKey: clientApiKey,
+          }),
+        });
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (res.ok && Array.isArray(data?.items) && data.items.length > 0) {
+            items = data.items;
+          } else {
+            serverErr = data?.error || '';
+            if ((res.status === 404 || res.status >= 500 || res.status === 403) && clientApiKey) {
+              shouldTryDirect = true;
+            }
+          }
+        } else {
+          shouldTryDirect = true;
+        }
+      } catch (netErr: any) {
+        shouldTryDirect = true;
+        serverErr = netErr?.message || '';
+      }
+
+      if (items.length === 0 && (shouldTryDirect || (!serverErr && clientApiKey))) {
+        items = await directCritiqueQuiz({
+          questions: targetQuestions,
+          subject: selectedSubject,
+          grade: selectedGrade,
+          apiKey: clientApiKey,
+        });
+      }
+
+      const elapsed = Math.round(performance.now() - start);
+      setCritiqueTimeMs(elapsed);
+
+      if (items.length > 0) {
+        setCritiqueResults(items);
+        const issueTotal = items.filter((it) => it.status !== 'ok').length;
+        setCritiqueFilter(issueTotal > 0 ? 'issues' : 'all');
+        setShowCritiqueModal(true);
+        if (issueTotal === 0) {
+          setStatusMessage(`✅ AI Phản Biện xong ${items.length} câu trong ${(elapsed / 1000).toFixed(1)}s: Toàn bộ đề và đáp án đều chuẩn xác!`);
+          gameSounds.playCorrectChime();
+        } else {
+          setStatusMessage(`⚠️ AI Phản Biện phát hiện ${issueTotal}/${items.length} câu cần xem xét & chỉnh sửa. Bấm "Áp dụng sửa" trong bảng phản biện.`);
+        }
+      } else {
+        throw new Error(serverErr || 'Chưa nhận được kết quả phản biện từ AI. Vui lòng kiểm tra Gemini API Key.');
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Không thể chạy AI Phản Biện lúc này.';
+      setStatusMessage(`⚠️ ${msg}`);
+    } finally {
+      setIsCritiquing(false);
+    }
+  };
+
+  const applyPatchToQuestion = (orig: QuizQuestion, critique: QuizCritiqueItem): QuizQuestion => {
+    const patch = critique.suggestedPatch;
+    if (!patch) return orig;
+    const next: QuizQuestion = {
+      ...orig,
+      ...(patch.question ? { question: patch.question } : {}),
+      ...(patch.options && patch.options.length > 0 ? { options: patch.options } : {}),
+      ...(patch.subStatements && patch.subStatements.length > 0 ? { subStatements: patch.subStatements } : {}),
+      ...(patch.shortAnswerKey !== undefined ? { shortAnswerKey: patch.shortAnswerKey } : {}),
+      ...(patch.correctAnswer ? { correctAnswer: patch.correctAnswer } : {}),
+      ...(patch.explanation ? { explanation: patch.explanation } : {}),
+    };
+    return sanitizeQuizQuestionMath(next) as QuizQuestion;
+  };
+
+  const syncPatchedQuestionsToLiveRoom = (updatedList: QuizQuestion[]) => {
+    const byId = new Map(updatedList.map((q) => [q.id, q]));
+    if (liveExamQuestions.some((lq) => byId.has(lq.id))) {
+      const nextLive = liveExamQuestions.map((lq) => byId.get(lq.id) || lq);
+      setLiveExamQuestions(nextLive);
+      try {
+        localStorage.setItem(liveStorageKeys.questionsKey, JSON.stringify(nextLive));
+      } catch (_) {}
+      if (onApplyQuestions) {
+        onApplyQuestions(nextLive, activeQuizTitle || promptTopic || `${selectedSubject} - ${selectedGrade}`);
+      }
+    }
+  };
+
+  const handleApplyCritiqueFix = (questionId: string) => {
+    const targetCritique = critiqueResults.find((c) => c.questionId === questionId);
+    if (!targetCritique || !targetCritique.suggestedPatch) return;
+
+    const nextGenerated = generatedQuestions.map((q) =>
+      q.id === questionId ? applyPatchToQuestion(q, targetCritique) : q
+    );
+    setGeneratedQuestions(nextGenerated);
+    syncPatchedQuestionsToLiveRoom(nextGenerated);
+    setCritiqueResults((prev) =>
+      prev.map((c) => (c.questionId === questionId ? { ...c, applied: true, dismissed: false } : c))
+    );
+    gameSounds.playCorrectChime();
+    setQuizToast(`Đã áp dụng bản sửa cho Câu ${targetCritique.questionIndex + 1}!`);
+    setTimeout(() => setQuizToast(null), 3000);
+  };
+
+  const handleDismissCritique = (questionId: string) => {
+    setCritiqueResults((prev) =>
+      prev.map((c) => (c.questionId === questionId ? { ...c, dismissed: true } : c))
+    );
+  };
+
+  const handleApplyAllCritiqueFixes = () => {
+    const pendingPatches = new Map<string, QuizCritiqueItem>();
+    critiqueResults.forEach((c) => {
+      if (c.status !== 'ok' && !c.applied && !c.dismissed && c.suggestedPatch) {
+        pendingPatches.set(c.questionId, c);
+      }
+    });
+    if (pendingPatches.size === 0) return;
+
+    const nextGenerated = generatedQuestions.map((q) => {
+      const c = pendingPatches.get(q.id);
+      return c ? applyPatchToQuestion(q, c) : q;
+    });
+    setGeneratedQuestions(nextGenerated);
+    syncPatchedQuestionsToLiveRoom(nextGenerated);
+    setCritiqueResults((prev) =>
+      prev.map((c) =>
+        pendingPatches.has(c.questionId) ? { ...c, applied: true, dismissed: false } : c
+      )
+    );
+    gameSounds.playVictoryFanfare();
+    setQuizToast(`Đã tự động cập nhật & sửa chuẩn ${pendingPatches.size} câu hỏi!`);
+    setTimeout(() => setQuizToast(null), 4000);
   };
 
   // Reveal results and trigger confetti if high score in live mode
@@ -2590,6 +2789,8 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     if (item.subject) setSelectedSubject(item.subject);
     if (item.grade) setSelectedGrade(item.grade);
     setLocalActiveIndex(0);
+    setCritiqueResults([]);
+    setCritiqueTimeMs(null);
     resetBoardQuestionInteractions();
     setShowSavedQuizzesModal(false);
 
@@ -3405,6 +3606,48 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
               {generatedQuestions.length > 0 && (
                 <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none w-full sm:w-auto">
                   <button
+                    type="button"
+                    onClick={() => {
+                      if (critiqueResults.length > 0 && !isCritiquing) {
+                        setShowCritiqueModal(true);
+                      } else {
+                        handleRunQuizCritique(generatedQuestions);
+                      }
+                    }}
+                    disabled={isCritiquing}
+                    className={`min-h-[38px] px-3 sm:px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-60 whitespace-nowrap shrink-0 ${
+                      critiqueResults.length > 0 && critiqueStats.unappliedIssueCount > 0
+                        ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                        : critiqueResults.length > 0
+                          ? 'bg-teal-600 hover:bg-teal-700 text-white'
+                          : 'bg-violet-600 hover:bg-violet-700 text-white'
+                    }`}
+                    title="AI giải lại toàn bộ đề từ đầu để kiểm tra sai đáp án, thiếu đáp án hoặc đề chưa rõ"
+                  >
+                    {isCritiquing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        <span>Đang phản biện...</span>
+                      </>
+                    ) : critiqueResults.length > 0 && critiqueStats.unappliedIssueCount > 0 ? (
+                      <>
+                        <ShieldAlert className="w-4 h-4 shrink-0" />
+                        <span>Phản Biện ({critiqueStats.unappliedIssueCount} lỗi)</span>
+                      </>
+                    ) : critiqueResults.length > 0 ? (
+                      <>
+                        <ShieldCheck className="w-4 h-4 shrink-0" />
+                        <span>Đã Kiểm Tra Chuẩn ✓</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4 shrink-0" />
+                        <span>AI Phản Biện Đề</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
                     onClick={handleExportToWordDocx}
                     disabled={isExportingDocx}
                     className="min-h-[38px] px-3 sm:px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50 whitespace-nowrap shrink-0"
@@ -3441,6 +3684,116 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
 
             {/* Questions List */}
             <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-3 sm:space-y-4">
+              {generatedQuestions.length > 0 && (
+                <div
+                  className={`p-3.5 sm:p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                    isCritiquing
+                      ? 'bg-violet-50 border-violet-200 text-violet-950'
+                      : critiqueResults.length === 0
+                        ? 'bg-gradient-to-r from-violet-50 to-indigo-50 border-violet-200/80 text-slate-900'
+                        : critiqueStats.unappliedIssueCount > 0
+                          ? 'bg-amber-50 border-amber-300 text-amber-950'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                  }`}
+                >
+                  <div className="flex items-start sm:items-center gap-2.5">
+                    {isCritiquing ? (
+                      <Loader2 className="w-5 h-5 text-violet-600 animate-spin shrink-0 mt-0.5 sm:mt-0" />
+                    ) : critiqueResults.length === 0 ? (
+                      <ShieldCheck className="w-5 h-5 text-violet-600 shrink-0 mt-0.5 sm:mt-0" />
+                    ) : critiqueStats.unappliedIssueCount > 0 ? (
+                      <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+                    ) : (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+                    )}
+                    <div className="text-xs leading-relaxed">
+                      {isCritiquing ? (
+                        <p className="font-bold">
+                          Hội đồng AI đang giải lại từng câu độc lập từ đầu để đối chiếu đáp án và tính chặt chẽ của đề...
+                        </p>
+                      ) : critiqueResults.length === 0 ? (
+                        <>
+                          <p className="font-extrabold text-slate-900">
+                            Kiểm Định Độ Chính Xác Đề Thi Bằng AI Phản Biện
+                          </p>
+                          <p className="text-slate-600">
+                            AI sẽ tự giải lại độc lập {generatedQuestions.length} câu từ đầu để phát hiện &amp; sửa câu sai đáp án, thiếu đáp án đúng hoặc đề chưa rõ.
+                          </p>
+                        </>
+                      ) : critiqueStats.unappliedIssueCount > 0 ? (
+                        <>
+                          <p className="font-extrabold text-amber-900">
+                            Phát hiện {critiqueStats.unappliedIssueCount} câu có vấn đề về đáp án / nội dung đề (trên {critiqueStats.total} câu)
+                          </p>
+                          <p className="text-amber-800">
+                            {critiqueStats.okCount + critiqueStats.appliedCount} câu đã chuẩn. Xem giải thích giải lại hoặc áp dụng sửa tự động ngay.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-extrabold text-emerald-900">
+                            Đã Rà Soát {critiqueStats.total}/{critiqueStats.total} Câu — Đề &amp; Đáp Án Chính Xác 100%
+                          </p>
+                          <p className="text-emerald-700">
+                            {critiqueStats.appliedCount > 0
+                              ? `Đã tự động sửa ${critiqueStats.appliedCount} câu lỗi. `
+                              : ''}
+                            Sẵn sàng trình chiếu, thi trực tiếp hoặc xuất Word.
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    {critiqueResults.length > 0 && critiqueStats.unappliedIssueCount > 0 && !isCritiquing && (
+                      <button
+                        type="button"
+                        onClick={handleApplyAllCritiqueFixes}
+                        className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
+                      >
+                        <Wrench className="w-3.5 h-3.5 shrink-0" />
+                        <span>Sửa Tất Cả ({critiqueStats.unappliedIssueCount} câu)</span>
+                      </button>
+                    )}
+                    {critiqueResults.length > 0 && !isCritiquing ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setShowCritiqueModal(true)}
+                          className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5 shrink-0" />
+                          <span>Xem Chi Tiết</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRunQuizCritique(generatedQuestions)}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl bg-violet-100 hover:bg-violet-200 text-violet-900 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                          <span>Rà lại</span>
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleRunQuizCritique(generatedQuestions)}
+                        disabled={isCritiquing}
+                        className="min-h-[38px] px-4 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-60"
+                      >
+                        {isCritiquing ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                        ) : (
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                        )}
+                        <span>{isCritiquing ? 'Đang phản biện...' : 'Chạy AI Phản Biện Đề'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {generatedQuestions.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8 bg-white rounded-3xl border border-slate-200 shadow-sm max-w-lg mx-auto my-auto">
                   <div className="w-16 h-16 rounded-3xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mb-4 shadow-xs">
@@ -3465,6 +3818,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 generatedQuestions.map((q, idx) => {
                   const prevQ = idx > 0 ? generatedQuestions[idx - 1] : null;
                   const isNewPart = !prevQ || (q.partLabel && q.partLabel !== prevQ.partLabel) || (q.partType && q.partType !== prevQ.partType);
+                  const critique = critiqueById.get(q.id);
 
                   return (
                     <React.Fragment key={q.id || idx}>
@@ -3495,7 +3849,11 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       )}
 
                       <div
-                        className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white border border-slate-200 shadow-xs hover:border-indigo-300 transition-all space-y-3 sm:space-y-4"
+                        className={`p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white border shadow-xs transition-all space-y-3 sm:space-y-4 ${
+                          critique && critique.status !== 'ok' && !critique.applied && !critique.dismissed
+                            ? 'border-amber-400 ring-2 ring-amber-200/70'
+                            : 'border-slate-200 hover:border-indigo-300'
+                        }`}
                       >
                         {/* Question Header */}
                         <div className="flex items-start justify-between gap-2">
@@ -3522,15 +3880,59 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                                 {q.maxScore} điểm
                               </span>
                             )}
+                            {critique && (
+                              critique.status === 'ok' ? (
+                                <span className="px-2.5 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>Đã giải lại: Chuẩn</span>
+                                </span>
+                              ) : critique.applied ? (
+                                <span className="px-2.5 py-0.5 rounded-lg bg-teal-50 border border-teal-200 text-teal-800 text-[11px] font-bold flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3 text-teal-600" />
+                                  <span>Đã sửa theo AI phản biện</span>
+                                </span>
+                              ) : !critique.dismissed ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCritiqueFilter('issues');
+                                    setShowCritiqueModal(true);
+                                  }}
+                                  className="px-2.5 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-800 text-[11px] font-black flex items-center gap-1 cursor-pointer transition-colors"
+                                >
+                                  <AlertTriangle className="w-3 h-3 text-rose-600" />
+                                  <span>
+                                    {critique.status === 'wrong_answer'
+                                      ? `Sai đáp án (Đúng: ${critique.verifiedCorrectAnswer})`
+                                      : critique.status === 'no_correct_option'
+                                        ? 'Không có đáp án đúng'
+                                        : 'Đề chưa rõ ràng'}
+                                  </span>
+                                </button>
+                              ) : null
+                            )}
                           </div>
 
-                          <button
-                            onClick={() => handleDeleteQuestion(q.id)}
-                            className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
-                            title="Xóa câu hỏi này"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {critique && critique.status !== 'ok' && !critique.applied && !critique.dismissed && critique.suggestedPatch && (
+                              <button
+                                type="button"
+                                onClick={() => handleApplyCritiqueFix(q.id)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer transition-colors"
+                                title="Áp dụng ngay đáp án/nội dung đã sửa từ AI phản biện"
+                              >
+                                <Wrench className="w-3 h-3" />
+                                <span className="hidden sm:inline">Áp dụng sửa</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteQuestion(q.id)}
+                              className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                              title="Xóa câu hỏi này"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Question Text & Diagram (Tự động vẽ đồ thị hàm số & hình minh họa thực tế chuẩn SGK) */}
@@ -6515,6 +6917,344 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
             isTeacherPreview={true}
             onExit={() => setPreviewHomeworkId('')}
           />
+        </div>
+      )}
+
+      {/* Modal: Hội Đồng AI Phản Biện & Rà Soát Đề */}
+      {showCritiqueModal && (
+        <div className="fixed inset-0 z-[115] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-5">
+          <div className="w-full max-w-4xl max-h-[92vh] bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 bg-gradient-to-r from-violet-50 via-white to-indigo-50 flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-violet-600 text-white flex items-center justify-center shadow-sm shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 truncate">
+                    AI Phản Biện &amp; Giải Lại Đề Độc Lập
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Tự giải lại từ đầu để phát hiện câu sai đáp án, thiếu đáp án đúng hoặc đề chưa rõ
+                    {critiqueTimeMs !== null ? ` • ${(critiqueTimeMs / 1000).toFixed(1)}s` : ''}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleRunQuizCritique(generatedQuestions)}
+                  disabled={isCritiquing}
+                  className="min-h-[36px] px-3 py-1.5 rounded-xl bg-violet-100 hover:bg-violet-200 text-violet-900 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-60"
+                >
+                  {isCritiquing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  <span>Phản biện lại</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCritiqueModal(false)}
+                  className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+                  aria-label="Đóng phản biện"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Summary KPIs & Filters */}
+            <div className="px-4 sm:px-6 py-3 border-b border-slate-200 bg-slate-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 font-bold">
+                  Tổng: {critiqueStats.total} câu
+                </span>
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  Chuẩn: {critiqueStats.okCount}
+                </span>
+                {critiqueStats.issueCount > 0 && (
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                    Phát hiện lỗi: {critiqueStats.issueCount}
+                  </span>
+                )}
+                {critiqueStats.appliedCount > 0 && (
+                  <span className="px-2.5 py-1 rounded-lg bg-teal-50 border border-teal-200 text-teal-800 font-bold">
+                    Đã sửa: {critiqueStats.appliedCount}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setCritiqueFilter('issues')}
+                  className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition-colors ${
+                    critiqueFilter === 'issues'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  Cần sửa ({critiqueStats.issueCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCritiqueFilter('all')}
+                  className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition-colors ${
+                    critiqueFilter === 'all'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  Tất cả ({critiqueStats.total})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCritiqueFilter('ok')}
+                  className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition-colors ${
+                    critiqueFilter === 'ok'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  Đã chuẩn ({critiqueStats.okCount})
+                </button>
+              </div>
+            </div>
+
+            {/* Review Items List */}
+            <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 bg-slate-100/70">
+              {(() => {
+                const visibleCritiques = critiqueResults.filter((c) => {
+                  if (critiqueFilter === 'issues') return c.status !== 'ok';
+                  if (critiqueFilter === 'ok') return c.status === 'ok';
+                  return true;
+                });
+
+                if (visibleCritiques.length === 0) {
+                  return (
+                    <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center space-y-2">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
+                      <h4 className="text-base font-black text-slate-900">
+                        {critiqueFilter === 'issues'
+                          ? 'Không phát hiện câu nào sai đáp án hoặc đề chưa rõ!'
+                          : 'Chưa có dữ liệu ở bộ lọc này.'}
+                      </h4>
+                      <p className="text-xs text-slate-500">
+                        AI đã tự giải độc lập toàn bộ {critiqueStats.total} câu và xác nhận khớp với đáp án trong đề.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return visibleCritiques.map((c) => {
+                  const origQ = generatedQuestions.find((q) => q.id === c.questionId) || generatedQuestions[c.questionIndex];
+                  if (!origQ) return null;
+
+                  const statusLabel =
+                    c.status === 'ok'
+                      ? 'Đề & Đáp án chuẩn xác'
+                      : c.applied
+                        ? 'Đã áp dụng bản sửa'
+                        : c.dismissed
+                          ? 'Đã bỏ qua gợi ý'
+                          : c.status === 'wrong_answer'
+                            ? 'Sai đáp án đang chấm'
+                            : c.status === 'no_correct_option'
+                              ? 'Thiếu đáp án đúng / Trùng đáp án'
+                              : 'Đề chưa rõ ràng / Thiếu dữ kiện';
+
+                  const statusStyle =
+                    c.status === 'ok'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : c.applied
+                        ? 'bg-teal-50 border-teal-200 text-teal-800'
+                        : c.dismissed
+                          ? 'bg-slate-100 border-slate-300 text-slate-600'
+                          : c.status === 'wrong_answer'
+                            ? 'bg-rose-50 border-rose-300 text-rose-800'
+                            : 'bg-amber-50 border-amber-300 text-amber-900';
+
+                  return (
+                    <div
+                      key={c.questionId}
+                      className={`p-4 sm:p-5 rounded-2xl bg-white border shadow-xs space-y-3 ${
+                        c.status !== 'ok' && !c.applied && !c.dismissed
+                          ? 'border-amber-300'
+                          : 'border-slate-200'
+                      }`}
+                    >
+                      {/* Top Row */}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-black">
+                            CÂU {c.questionIndex + 1}
+                          </span>
+                          <span className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 ${statusStyle}`}>
+                            {c.status === 'ok' || c.applied ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            ) : (
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            )}
+                            <span>{statusLabel}</span>
+                          </span>
+                        </div>
+
+                        {c.status !== 'ok' && !c.applied && c.suggestedPatch && (
+                          <div className="flex items-center gap-2">
+                            {!c.dismissed && (
+                              <button
+                                type="button"
+                                onClick={() => handleDismissCritique(c.questionId)}
+                                className="min-h-[36px] px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer transition-colors"
+                              >
+                                Giữ nguyên
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleApplyCritiqueFix(c.questionId)}
+                              className="min-h-[36px] px-3.5 py-1 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                            >
+                              <Wrench className="w-3.5 h-3.5 shrink-0" />
+                              <span>Áp dụng sửa câu này</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Question Preview */}
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-sm font-semibold text-slate-900">
+                        <MathFormulaRenderer content={origQ.question} />
+                      </div>
+
+                      {/* Critique Reason */}
+                      <div className="text-xs text-slate-700 leading-relaxed flex items-start gap-2">
+                        <Bot className="w-4 h-4 text-violet-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-extrabold text-slate-900">Nhận xét phản biện: </span>
+                          <MathFormulaRenderer content={c.reason} />
+                        </div>
+                      </div>
+
+                      {/* Side-by-side comparison when an issue has a suggested patch */}
+                      {c.status !== 'ok' && c.suggestedPatch && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                          <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-200 space-y-1.5">
+                            <div className="text-[11px] font-black uppercase text-rose-800">
+                              Hiện tại trong đề
+                            </div>
+                            <div className="text-xs font-bold text-rose-950">
+                              Đáp án đang lưu: <span className="px-1.5 py-0.5 rounded bg-rose-200/80 font-mono">{origQ.correctAnswer}</span>
+                            </div>
+                            {Array.isArray(origQ.options) && origQ.options.length > 0 && (
+                              <div className="space-y-1 text-xs text-slate-700">
+                                {origQ.options.map((opt) => (
+                                  <div key={opt.key} className={opt.key === origQ.correctAnswer ? 'font-bold text-rose-900' : ''}>
+                                    <span className="font-mono font-bold mr-1">{opt.key}.</span>
+                                    <MathFormulaRenderer content={opt.text} />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {Array.isArray(origQ.subStatements) && origQ.subStatements.length > 0 && (
+                              <div className="space-y-1 text-xs text-slate-700">
+                                {origQ.subStatements.map((sub, sIdx) => (
+                                  <div key={sIdx}>
+                                    <span className="font-mono font-bold mr-1">{sub.label || sub.key})</span>
+                                    <MathFormulaRenderer content={sub.statement || sub.text || ''} />
+                                    <span className="ml-1.5 font-bold">({sub.correct ?? sub.isCorrect ? 'Đúng' : 'Sai'})</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-1.5">
+                            <div className="text-[11px] font-black uppercase text-emerald-800">
+                              Đề xuất chuẩn sau giải lại
+                            </div>
+                            <div className="text-xs font-bold text-emerald-950">
+                              Đáp án đúng mới: <span className="px-1.5 py-0.5 rounded bg-emerald-200/90 font-mono">{c.suggestedPatch.correctAnswer || c.verifiedCorrectAnswer}</span>
+                            </div>
+                            {c.suggestedPatch.question && c.suggestedPatch.question !== origQ.question && (
+                              <div className="text-xs text-emerald-950 bg-white/80 p-2 rounded-lg border border-emerald-200">
+                                <span className="font-bold">Đề sửa lại: </span>
+                                <MathFormulaRenderer content={c.suggestedPatch.question} />
+                              </div>
+                            )}
+                            {Array.isArray(c.suggestedPatch.options) && c.suggestedPatch.options.length > 0 && (
+                              <div className="space-y-1 text-xs text-slate-800">
+                                {c.suggestedPatch.options.map((opt) => (
+                                  <div
+                                    key={opt.key}
+                                    className={opt.key === (c.suggestedPatch?.correctAnswer || c.verifiedCorrectAnswer) ? 'font-bold text-emerald-900' : ''}
+                                  >
+                                    <span className="font-mono font-bold mr-1">{opt.key}.</span>
+                                    <MathFormulaRenderer content={opt.text} />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {Array.isArray(c.suggestedPatch.subStatements) && c.suggestedPatch.subStatements.length > 0 && (
+                              <div className="space-y-1 text-xs text-slate-800">
+                                {c.suggestedPatch.subStatements.map((sub, sIdx) => (
+                                  <div key={sIdx}>
+                                    <span className="font-mono font-bold mr-1">{sub.label || sub.key})</span>
+                                    <MathFormulaRenderer content={sub.statement || sub.text || ''} />
+                                    <span className="ml-1.5 font-bold text-emerald-800">({sub.correct ?? sub.isCorrect ? 'Đúng' : 'Sai'})</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Independent Re-solved Steps */}
+                      <div className="p-3 rounded-xl bg-violet-50/60 border border-violet-200/80 text-xs text-slate-800 leading-relaxed">
+                        <div className="font-extrabold text-violet-900 mb-1 flex items-center justify-between">
+                          <span>Lời giải độc lập từ đầu:</span>
+                          <span className="px-2 py-0.5 rounded bg-violet-100 text-violet-900 font-mono font-bold">
+                            Đáp án xác nhận: {c.verifiedCorrectAnswer}
+                          </span>
+                        </div>
+                        <MathFormulaRenderer content={c.reSolvedSteps} />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-4 sm:px-6 py-3.5 border-t border-slate-200 bg-white flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="text-xs font-semibold text-slate-600">
+                {critiqueStats.unappliedIssueCount > 0
+                  ? `Còn ${critiqueStats.unappliedIssueCount} câu lỗi chưa áp dụng chỉnh sửa.`
+                  : 'Tất cả câu hỏi đã được kiểm tra hoặc cập nhật chuẩn xác.'}
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                {critiqueStats.unappliedIssueCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleApplyAllCritiqueFixes}
+                    className="min-h-[40px] px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs sm:text-sm flex items-center gap-1.5 shadow-sm cursor-pointer transition-all active:scale-95"
+                  >
+                    <Wrench className="w-4 h-4 shrink-0" />
+                    <span>Sửa Tất Cả {critiqueStats.unappliedIssueCount} Câu Lỗi</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowCritiqueModal(false)}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm cursor-pointer transition-colors"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

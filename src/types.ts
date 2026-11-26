@@ -453,3 +453,31 @@ export interface HomeworkSubmission {
   totalTimeSeconds: number;
   activityLog: HomeworkActivityEvent[];
 }
+
+export type CritiqueIssueType =
+  | 'ok'
+  | 'wrong_answer'
+  | 'no_correct_option'
+  | 'ambiguous';
+
+export interface QuizCritiqueSuggestedPatch {
+  question?: string;
+  options?: QuizOption[];
+  subStatements?: QuizQuestion['subStatements'];
+  shortAnswerKey?: string;
+  correctAnswer: string;
+  explanation: string;
+}
+
+export interface QuizCritiqueItem {
+  questionId: string;
+  questionIndex: number;
+  status: CritiqueIssueType;
+  reason: string;
+  reSolvedSteps: string;
+  verifiedCorrectAnswer: string;
+  suggestedPatch?: QuizCritiqueSuggestedPatch;
+  applied?: boolean;
+  dismissed?: boolean;
+}
+

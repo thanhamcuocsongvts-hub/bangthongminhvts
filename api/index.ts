@@ -288,6 +288,42 @@ function normalizeServerlessMathInText(text: string): string {
     .join('');
 }
 
+function stripServerlessChoicePrefix(text: string): string {
+  if (!text || typeof text !== 'string') return '';
+  return text.replace(/^\s*[A-D]\s*[\.\)\:]\s+(?=\S)/, '').trim();
+}
+
+function extractServerlessChoiceKey(raw: any): 'A' | 'B' | 'C' | 'D' {
+  const s = String(raw ?? 'A').trim().toUpperCase();
+  const m1 = s.match(/^(?:ĐÁP\s*ÁN|CHỌN|KEY|ANSWER)?\s*[:\-]?\s*\(?([A-D])\)?(?:\s|$|[\.\):])/);
+  if (m1) return m1[1] as 'A' | 'B' | 'C' | 'D';
+  const m2 = s.match(/\b([A-D])\b/);
+  if (m2) return m2[1] as 'A' | 'B' | 'C' | 'D';
+  return 'A';
+}
+
+function inferServerlessPartType(q: any): 'part_1_choice' | 'part_2_true_false' | 'part_3_short_answer' | 'part_4_essay' {
+  const rawPartType = String(q?.partType || '').toLowerCase();
+  if (rawPartType === 'part_2_true_false' || (Array.isArray(q?.subStatements) && q.subStatements.length > 0)) {
+    return 'part_2_true_false';
+  }
+  if (rawPartType === 'part_3_short_answer' || (q?.shortAnswerKey !== undefined && q?.shortAnswerKey !== null && String(q.shortAnswerKey).trim() !== '')) {
+    return 'part_3_short_answer';
+  }
+  if (rawPartType === 'part_4_essay' || (q?.essayRubric !== undefined && q?.essayRubric !== null && String(q.essayRubric).trim() !== '')) {
+    return 'part_4_essay';
+  }
+  return 'part_1_choice';
+}
+
+function rewriteServerlessExplanationLetter(explanation: string, oldKey: string, newKey: string): string {
+  if (!explanation || oldKey === newKey) return explanation;
+  return explanation
+    .replace(/(Đáp\s*án(?:\s*đúng)?\s*(?:là|:)?\s*)([A-D])\b/gi, `$1${newKey}`)
+    .replace(/(Chọn(?:\s*đáp\s*án|\s*câu|\s*phương\s*án)?\s*[:\-]?\s*)([A-D])\b/gi, `$1${newKey}`)
+    .replace(/(Vậy\s*chọn\s*)([A-D])\b/gi, `$1${newKey}`);
+}
+
 function balanceServerlessAnswerDistribution(questions: any[], seedInput: string): any[] {
   if (!Array.isArray(questions) || questions.length === 0) return questions || [];
   const KEYS = ['A', 'B', 'C', 'D'];
@@ -333,35 +369,32 @@ function balanceServerlessAnswerDistribution(questions: any[], seedInput: string
     const pos = eligibleIndices.indexOf(qIdx);
     if (pos === -1) return q;
     const targetKey = targets[pos];
-    const oldKey = String(q.correctAnswer || 'A').trim().toUpperCase().replace(/[^A-D]/g, '').slice(0, 1) || 'A';
-    const correctItem = q.options.find((o: any) => o.key === oldKey) || q.options[0];
-    const distractors = shuffleArr(q.options.filter((o: any) => o.key !== correctItem.key).map((o: any) => o.text));
+    const oldKey = extractServerlessChoiceKey(q.correctAnswer);
+    const correctItem = q.options.find((o: any) => String(o.key || '').trim().toUpperCase().replace(/[\.\)]$/, '') === oldKey) || q.options[0];
+    const distractors = shuffleArr(q.options.filter((o: any) => o !== correctItem).map((o: any) => o.text));
     let dc = 0;
     const nextOptions = KEYS.map((k) => ({ key: k, text: k === targetKey ? correctItem.text : (distractors[dc++] ?? '') }));
     return {
       ...q,
       options: nextOptions,
       correctAnswer: targetKey,
+      explanation: rewriteServerlessExplanationLetter(q.explanation || '', oldKey, targetKey),
     };
   });
 }
 
 function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, subject: string, timeLimit: number) {
-  const rawPartType = q.partType || '';
-  const isTrueFalse = rawPartType === 'part_2_true_false' || (Array.isArray(q.subStatements) && q.subStatements.length > 0);
-  const isShortAnswer = rawPartType === 'part_3_short_answer' || !!q.shortAnswerKey;
-  const isEssay = rawPartType === 'part_4_essay' || !!q.essayRubric;
+  const partType = inferServerlessPartType(q);
+  const isTrueFalse = partType === 'part_2_true_false';
+  const isShortAnswer = partType === 'part_3_short_answer';
+  const isEssay = partType === 'part_4_essay';
 
-  let partType: 'part_1_choice' | 'part_2_true_false' | 'part_3_short_answer' | 'part_4_essay' = 'part_1_choice';
   let partLabel = q.partLabel || 'Phần I. Câu trắc nghiệm nhiều phương án lựa chọn';
   if (isTrueFalse) {
-    partType = 'part_2_true_false';
     partLabel = q.partLabel || 'Phần II. Câu trắc nghiệm Đúng / Sai';
   } else if (isShortAnswer) {
-    partType = 'part_3_short_answer';
     partLabel = q.partLabel || 'Phần III. Câu trắc nghiệm trả lời ngắn';
   } else if (isEssay) {
-    partType = 'part_4_essay';
     partLabel = q.partLabel || 'Phần IV. Tự luận';
   }
 
@@ -386,10 +419,15 @@ function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, su
   let options: any[] = [];
   if (partType === 'part_1_choice') {
     options = Array.isArray(q.options) && q.options.length >= 2
-      ? q.options.map((opt: any, oIdx: number) => ({
-          key: opt.key || ['A', 'B', 'C', 'D'][oIdx] || 'A',
-          text: normalizeServerlessMathInText(typeof opt === 'string' ? opt : (opt.text || `Lựa chọn ${opt.key || oIdx + 1}`)),
-        }))
+      ? q.options.map((opt: any, oIdx: number) => {
+          const cleanKey = ['A', 'B', 'C', 'D'][oIdx] || String(opt?.key || 'A').trim().toUpperCase().replace(/[\.\)]$/, '');
+          const rawOptText = typeof opt === 'string' ? opt : (opt.text || `Lựa chọn ${cleanKey}`);
+          const cleaned = stripServerlessChoicePrefix(rawOptText) || rawOptText;
+          return {
+            key: cleanKey,
+            text: normalizeServerlessMathInText(cleaned),
+          };
+        })
       : [
           { key: 'A', text: 'Phương án A' },
           { key: 'B', text: 'Phương án B' },
@@ -401,7 +439,16 @@ function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, su
   const normalizedShortKey = typeof q.shortAnswerKey === 'string'
     ? normalizeServerlessMathInText(q.shortAnswerKey)
     : undefined;
-  const rawCorrect = String(q.correctAnswer || (isShortAnswer ? q.shortAnswerKey : (isTrueFalse ? 'a:Đ, b:S, c:Đ, d:S' : 'A')));
+  const rawCorrect = isTrueFalse
+    ? (subStatements && subStatements.length > 0
+        ? subStatements.map((s) => `${s.label}:${s.correct ? 'Đ' : 'S'}`).join(', ')
+        : String(q.correctAnswer || 'a:Đ, b:S, c:Đ, d:S'))
+    : isShortAnswer
+      ? normalizeServerlessMathInText(String(q.shortAnswerKey ?? q.correctAnswer ?? ''))
+      : isEssay
+        ? String(q.correctAnswer || 'Lời giải mẫu')
+        : extractServerlessChoiceKey(q.correctAnswer);
+
   return {
     id: q.id || `ai_fast_q_${Date.now()}_${idx + 1}`,
     question: normalizeServerlessMathInText(q.question || `Câu hỏi ${idx + 1}`),
@@ -409,9 +456,9 @@ function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, su
     partLabel,
     options,
     subStatements,
-    shortAnswerKey: normalizedShortKey || (isShortAnswer ? normalizeServerlessMathInText(rawCorrect) : undefined),
+    shortAnswerKey: normalizedShortKey || (isShortAnswer ? rawCorrect : undefined),
     essayRubric: q.essayRubric ? normalizeServerlessMathInText(String(q.essayRubric)) : (isEssay ? normalizeServerlessMathInText(q.explanation || 'Hướng dẫn chấm') : undefined),
-    correctAnswer: isShortAnswer ? normalizeServerlessMathInText(rawCorrect) : rawCorrect,
+    correctAnswer: rawCorrect,
     explanation: normalizeServerlessMathInText(q.explanation || 'Lời giải chi tiết theo chuẩn sư phạm.'),
     diagramType: q.diagramType,
     diagramData: q.diagramData,
@@ -878,7 +925,7 @@ TUYỆT ĐỐI KHÔNG mở đầu bằng 'Ảnh 1:', 'Hình 1:', 'Ảnh 1', 'Ima
     return res.status(200).json({ success: true, text: '' });
   }
 
-  // 2. Generate Quiz
+  // 2. Generate Quiz (Solve-First Accuracy Pipeline)
   if (url.includes('/api/ai/generate-quiz') && req.method === 'POST') {
     const { topic, subject = 'Toán học', grade = 'Lớp 12', count = 5, difficulty = 'Thông hiểu' } = req.body || {};
     const numQuestions = Math.min(Math.max(Number(count) || 5, 1), 20);
@@ -889,10 +936,18 @@ TUYỆT ĐỐI KHÔNG mở đầu bằng 'Ảnh 1:', 'Hình 1:', 'Ảnh 1', 'Ima
         try {
           const response = await ai.models.generateContent({
             model,
-            contents: `Soạn ${numQuestions} câu hỏi trắc nghiệm chất lượng cao về chủ đề: "${topic}". Môn: ${subject}, Khối: ${grade}, Mức độ: ${difficulty}.
-QUY TẮC: Toàn bộ công thức toán/lý/hóa dùng LaTeX chuẩn bọc trong $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ $\\\\overrightarrow{AB}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (TUYỆT ĐỐI KHÔNG viết ASCII vec(AB), frac(a,b), sqrt(x), <=, >=, oo); phân bố đều đáp án A, B, C, D.
-Trả về JSON array thuần túy: [{"id":"q1","correctAnswer":"C","question":"...","options":[{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}],"explanation":"...","timeLimit":30}]`,
-            config: buildServerlessModelConfig(model, { responseMimeType: 'application/json', temperature: 0.2 }),
+            contents: `Soạn ${numQuestions} câu hỏi trắc nghiệm chất lượng cao, CHÍNH XÁC TUYỆT ĐỐI về chủ đề: "${topic}". Môn: ${subject}, Khối: ${grade}, Mức độ: ${difficulty}.
+QUY TRÌNH GIẢI TRƯỚC - XUẤT ĐÁP ÁN SAU (BẮT BUỘC):
+1. Đọc kỹ đề ("question"), tính toán và giải hoàn chỉnh ra đáp số trong "explanation" TRƯỚC.
+2. Đặt kết quả tính được ở "explanation" vào một trong 4 phương án A/B/C/D của "options" (3 phương án còn lại là nhiễu hợp lý; KHÔNG ghi "A. ", "B. " vào "text").
+3. Sau khi đã có "options", kiểm tra lại đối chiếu để điền "correctAnswer" CHÍNH XÁC TUYỆT ĐỐI khớp với chữ cái chứa kết quả ở "explanation".
+4. Toàn bộ công thức toán/lý/hóa dùng LaTeX chuẩn bọc trong $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ $\\\\overrightarrow{AB}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (TUYỆT ĐỐI KHÔNG viết ASCII vec(AB), frac(a,b), sqrt(x), <=, >=, oo).
+Trả về JSON array thuần túy theo ĐÚNG THỨ TỰ FIELD sau:
+[{"id":"q1","question":"...","explanation":"Giải chi tiết ra kết quả...","options":[{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}],"correctAnswer":"B","timeLimit":30}]`,
+            config: buildServerlessModelConfig(model, {
+              responseMimeType: 'application/json',
+              thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+            }),
           });
           const parsed = safeParseServerlessJsonWithLatex(response.text || '[]');
           const rawQuestions = Array.isArray(parsed) ? parsed : parsed?.questions || [];
@@ -913,12 +968,11 @@ Trả về JSON array thuần túy: [{"id":"q1","correctAnswer":"C","question":"
       }
     }
 
-    // Guaranteed curriculum questions fallback
     const fallback = generateServerFallbackQuestions(topic, subject, numQuestions, difficulty);
     return res.status(200).json({ success: true, questions: fallback, fallback: true });
   }
 
-  // 3. Fast Matrix Quiz & Prompt Quiz (Used by LiveQuizHub / Trắc Nghiệm & Phân Tích)
+  // 3. Fast Matrix Quiz & Prompt Quiz (Solve-First 2-Phase Parallel Batched Engine)
   if (url.includes('/api/ai/fast-matrix-quiz') && req.method === 'POST') {
     const {
       prompt = '',
@@ -950,96 +1004,229 @@ Trả về JSON array thuần túy: [{"id":"q1","correctAnswer":"C","question":"
       });
     }
 
-    const systemInstruction = `Bạn là chuyên gia Khảo thí & Soạn đề kiểm tra chuẩn Chương trình GDPT 2018 Việt Nam (THPT/THCS).
-Nhiệm vụ tối thượng: ${
-      hasUploadedFile
-        ? `ĐỌC THẬT KỸ TỆP MA TRẬN / ĐỀ CƯƠNG ĐÍNH KÈM ("${matrixFile?.fileName || 'ma trận'}") và TẠO ĐỀ KIỂM TRA BÁM SÁT 100% ĐÚNG NỘI DUNG, CHỦ ĐỀ, KHỐI LỚP (${grade}), DẠNG TOÁN VÀ SỐ LƯỢNG CÂU HỎI CỦA MA TRẬN/ĐỀ CƯƠNG ĐÓ.`
-        : `Tạo đề thi chuẩn xác bám sát 100% chủ đề được yêu cầu ("${userPrompt || `${subject} ${grade}`}"), môn ${subject}, khối ${grade}, mức độ ${difficulty}.`
-    }
+    const matrixText = String(matrixFile?.text || '').trim();
+    const hasRichExtractedText = matrixText.length >= 150;
+    const isImageUpload = Boolean(matrixFile?.mimeType?.startsWith('image/'));
+    const shouldAttachBinary = Boolean(
+      matrixFile?.base64 &&
+        matrixFile?.mimeType &&
+        matrixFile.base64.length < 15_000_000 &&
+        (isImageUpload || !hasRichExtractedText)
+    );
+    const cleanInlinePart = shouldAttachBinary
+      ? {
+          inlineData: {
+            mimeType: matrixFile.mimeType,
+            data: matrixFile.base64.replace(/^data:.*?;base64,/, ''),
+          },
+        }
+      : null;
 
-*** QUY TẮC BẮT BUỘC VỀ NỘI DUNG & CẤU TRÚC: ***
-${
-  hasUploadedFile
-    ? `1. NGUYÊN TẮC BÁM SÁT TỆP MA TRẬN / ĐỀ CƯƠNG ĐÍNH KÈM:
-   - TỆP ĐÍNH KÈM LÀ NGUỒN CHÂN LÝ DUY NHẤT.
-   - TUYỆT ĐỐI KHÔNG tự ý mặc định lấy đề "Khảo sát hàm số Lớp 12" nếu ma trận không phải chủ đề đó. Phải bám sát 100% chủ đề, khối lớp (${grade}), mức độ và số câu từng phần trong tệp.${
-     userPrompt ? `\n   - Yêu cầu bổ sung của giáo viên: "${userPrompt}".` : ''
-   }`
-    : `1. Toàn bộ 100% câu hỏi PHẢI đúng chủ đề "${userPrompt || `${subject} ${grade}`}", môn ${subject}, khối ${grade}.`
+    type SLMatrixSlot = {
+      n: number;
+      partType: 'part_1_choice' | 'part_2_true_false' | 'part_3_short_answer' | 'part_4_essay';
+      level: string;
+      topic: string;
+    };
+
+    const normalizeSLPart = (raw: any): SLMatrixSlot['partType'] => {
+      const s = String(raw || '').toLowerCase();
+      if (s.includes('2') || s.includes('true_false') || s.includes('dung_sai') || s.includes('đúng')) return 'part_2_true_false';
+      if (s.includes('3') || s.includes('short') || s.includes('tra_loi_ngan') || s.includes('ngắn')) return 'part_3_short_answer';
+      if (s.includes('4') || s.includes('essay') || s.includes('tu_luan') || s.includes('tự luận')) return 'part_4_essay';
+      return 'part_1_choice';
+    };
+
+    const buildDefaultBgdSlots = (scopeTopic: string): SLMatrixSlot[] => {
+      const t = scopeTopic || `${subject} ${grade}`;
+      const list: SLMatrixSlot[] = [];
+      const p1Levels = [
+        'Nhận biết', 'Nhận biết', 'Nhận biết', 'Nhận biết',
+        'Nhận biết', 'Nhận biết', 'Thông hiểu', 'Thông hiểu',
+        'Thông hiểu', 'Thông hiểu', 'Vận dụng', 'Vận dụng',
+      ];
+      for (let i = 0; i < 12; i++) {
+        list.push({ n: i + 1, partType: 'part_1_choice', level: p1Levels[i] || difficulty, topic: `${t} (dạng ${i + 1})` });
+      }
+      for (let i = 0; i < 4; i++) {
+        list.push({ n: 13 + i, partType: 'part_2_true_false', level: i < 2 ? 'Thông hiểu' : 'Vận dụng', topic: `${t} - Mệnh đề Đúng/Sai #${i + 1}` });
+      }
+      for (let i = 0; i < 6; i++) {
+        list.push({ n: 17 + i, partType: 'part_3_short_answer', level: i < 2 ? 'Thông hiểu' : 'Vận dụng', topic: `${t} - Trả lời ngắn #${i + 1}` });
+      }
+      return list;
+    };
+
+    let resolvedSubject = subject;
+    let resolvedGrade = grade;
+    let slots: SLMatrixSlot[] = [];
+
+    if (hasUploadedFile) {
+      const planParts: any[] = [];
+      if (cleanInlinePart) planParts.push(cleanInlinePart);
+      if (matrixText) {
+        planParts.push({
+          text: `NỘI DUNG MA TRẬN / ĐỀ CƯƠNG ("${matrixFile?.fileName || 'matrix'}"):\n"""\n${matrixText.slice(0, 16000)}\n"""`,
+        });
+      }
+      planParts.push({
+        text: `Đọc kỹ ma trận/đề cương trên (môn gợi ý: ${subject}, khối: ${grade}${userPrompt ? `, yêu cầu: ${userPrompt}` : ''}).
+Trả về ĐÚNG JSON khung danh sách từng câu hỏi cần tạo:
+{
+  "subject": "Tên môn học đúng trong tệp",
+  "grade": "Khối lớp đúng trong tệp (ví dụ: Lớp 12)",
+  "items": [
+    { "n": 1, "partType": "part_1_choice", "level": "Nhận biết", "topic": "Tên chủ đề/dạng bài chính xác theo ma trận (10-18 từ)" }
+  ]
 }
-${
-  !hasUploadedFile && isAutoMatrix
-    ? `2. CHẾ ĐỘ MA TRẬN CHUẨN BGD 2025: Tạo đủ 22 câu gồm 12 câu Phần I (part_1_choice), 4 câu Phần II Đúng/Sai (part_2_true_false, mỗi câu 4 ý a, b, c, d), và 6 câu Phần III Trả lời ngắn (part_3_short_answer).`
-    : !hasUploadedFile
-      ? `2. Tạo đúng ${numQuestions} câu hỏi trắc nghiệm bám sát chủ đề "${userPrompt || `${subject} ${grade}`}".`
-      : ''
-}
-ĐỊNH DẠNG JSON MỖI CÂU HỎI (BẮT BUỘC TRẢ VỀ MẢNG JSON THUẦN TÚY [ { ... } ]):
-LƯU Ý TOÁN HỌC & ĐÁP ÁN: Toàn bộ công thức toán/lý/hóa dùng LaTeX chuẩn bọc trong $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k} (TUYỆT ĐỐI KHÔNG viết ASCII vec(AB), frac(a,b), sqrt(x), <=, >=, oo); phân bố đều đáp án đúng ở A, B, C, D (không dồn hết về A).
-1. Phần I: { "id": "q1", "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "correctAnswer": "C", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "explanation": "...", "timeLimit": ${timeLimit} }
-2. Phần II: { "id": "q2", "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "...", "timeLimit": 60 }
-3. Phần III: { "id": "q3", "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "explanation": "...", "timeLimit": 45 }
-4. Phần IV: { "id": "q4", "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "Thang điểm...", "correctAnswer": "Lời giải mẫu", "options": [], "explanation": "...", "timeLimit": 120 }`;
+Quy tắc:
+- Nếu tệp ghi rõ số câu Phần I (part_1_choice), Phần II (part_2_true_false), Phần III (part_3_short_answer), Phần IV (part_4_essay) -> liệt kê ĐÚNG tổng số câu và loại câu từng phần đó (tối đa 36 câu).
+- Nếu tệp chỉ nêu chủ đề -> lập 22 câu chuẩn BGD (12 part_1_choice, 4 part_2_true_false, 6 part_3_short_answer) bám 100% chuyên đề trong tệp.`,
+      });
 
-    let lastErr = '';
-
-    for (const model of SERVERLESS_TEXT_MODELS) {
       try {
-        const parts: any[] = [];
-        if (matrixFile?.base64 && matrixFile?.mimeType && matrixFile.base64.length < 15_000_000) {
-          const cleanB64 = matrixFile.base64.replace(/^data:.*?;base64,/, '');
-          parts.push({ inlineData: { mimeType: matrixFile.mimeType, data: cleanB64 } });
-        }
-        if (matrixFile?.text && matrixFile.text.trim().length > 0) {
-          parts.push({
-            text: `NỘI DUNG VĂN BẢN BÓC TÁCH TỪ TỆP MA TRẬN / ĐỀ CƯƠNG ("${matrixFile.fileName || 'matrix'}"):\n"""\n${matrixFile.text.slice(0, 32000)}\n"""`,
-          });
-        }
-
-        if (hasUploadedFile) {
-          parts.push({
-            text: `Thông số lớp/môn: ${subject} - ${grade} - Mức độ: ${difficulty}.${
-              userPrompt ? `\nGhi chú thêm của giáo viên: "${userPrompt}"` : ''
-            }\nHãy phân tích kỹ tệp ma trận/đề cương đính kèm ở trên và tạo ĐÚNG các câu hỏi bám sát 100% nội dung ma trận/đề cương đó. Trả về mảng JSON thuần túy.`,
-          });
-        } else if (isMatrixExplicit) {
-          parts.push({
-            text: `Soạn đề theo cấu trúc ma trận GDPT 2018 (12 câu Phần I, 4 câu Phần II, 6 câu Phần III):\n- Chủ đề: "${userPrompt || `${subject} ${grade}`}"\n- Môn: ${subject} | Khối: ${grade} | Mức độ: ${difficulty}`,
-          });
-        } else {
-          parts.push({
-            text: `Soạn đúng ${numQuestions} câu hỏi trắc nghiệm 4 lựa chọn:\n- Chủ đề: "${userPrompt || `${subject} ${grade}`}"\n- Môn: ${subject} | Khối: ${grade} | Mức độ: ${difficulty}`,
-          });
-        }
-
-        const response = await ai.models.generateContent({
-          model,
-          contents: [{ role: 'user', parts }],
-          config: buildServerlessModelConfig(model, {
+        const planRes = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: [{ role: 'user', parts: planParts }],
+          config: buildServerlessModelConfig('gemini-3.1-flash-lite', {
             responseMimeType: 'application/json',
-            systemInstruction,
+            systemInstruction: 'Bạn là chuyên gia phân tích ma trận đề thi GDPT 2018. Chỉ xuất JSON ngắn gọn liệt kê từng vị trí câu hỏi, KHÔNG giải đề ở bước này.',
           }),
         });
-
-        let parsed = safeParseServerlessJsonWithLatex(response.text || '');
-        if (parsed && !Array.isArray(parsed) && parsed.questions) {
-          parsed = parsed.questions;
+        const parsedPlan = safeParseServerlessJsonWithLatex(planRes.text || '');
+        if (parsedPlan?.subject) resolvedSubject = String(parsedPlan.subject);
+        if (parsedPlan?.grade) resolvedGrade = String(parsedPlan.grade);
+        const rawItems = Array.isArray(parsedPlan?.items)
+          ? parsedPlan.items
+          : Array.isArray(parsedPlan)
+            ? parsedPlan
+            : [];
+        if (rawItems.length > 0) {
+          slots = rawItems.slice(0, 36).map((it: any, i: number) => ({
+            n: Number(it?.n) || i + 1,
+            partType: normalizeSLPart(it?.partType),
+            level: String(it?.level || difficulty),
+            topic: String(it?.topic || userPrompt || `${resolvedSubject} ${resolvedGrade}`).slice(0, 220),
+          }));
         }
-
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const questions = balanceServerlessAnswerDistribution(
-            parsed.map((q: any, idx: number) =>
-              normalizeServerlessQuestion(q, idx, difficulty, subject, Number(timeLimit) || 30)
-            ),
-            `${userPrompt || matrixFile?.fileName || grade}_${Date.now()}`
-          );
-          return res.status(200).json({ success: true, questions });
+      } catch (planErr: any) {
+        const msg = planErr?.message || String(planErr);
+        if (isServerlessFatalAuthErr(msg)) {
+          return res.status(403).json({ success: false, error: 'Chưa cấu hình hoặc sai Gemini API Key.' });
         }
-      } catch (e: any) {
-        lastErr = e?.message || String(e);
-        console.warn(`[Vercel Serverless] Fast matrix quiz with ${model} failed:`, lastErr);
-        if (isServerlessFatalAuthErr(lastErr)) break;
+        console.warn('[Vercel Serverless Phase 1] Blueprint fallback:', msg);
       }
+      if (slots.length === 0) {
+        slots = buildDefaultBgdSlots(userPrompt || matrixFile?.fileName || `${resolvedSubject} ${resolvedGrade}`);
+      }
+    } else if (isMatrixExplicit) {
+      slots = buildDefaultBgdSlots(userPrompt || `${subject} ${grade}`);
+    } else {
+      for (let i = 0; i < numQuestions; i++) {
+        slots.push({
+          n: i + 1,
+          partType: 'part_1_choice',
+          level: difficulty,
+          topic: `${userPrompt || `${subject} ${grade}`} (câu ${i + 1})`,
+        });
+      }
+    }
+
+    const BATCH_SIZE = slots.length <= 8 ? slots.length : 6;
+    const batches: SLMatrixSlot[][] = [];
+    for (let i = 0; i < slots.length; i += BATCH_SIZE) {
+      batches.push(slots.slice(i, i + BATCH_SIZE));
+    }
+
+    const compactFileContext =
+      hasUploadedFile && matrixText
+        ? `\nNgữ cảnh trích từ tệp "${matrixFile?.fileName || ''}" (tham khảo đúng thuật ngữ/công thức/dạng toán):\n"""\n${matrixText.slice(0, 5000)}\n"""`
+        : '';
+
+    const batchSystemInstruction = `Bạn là Chuyên gia Khảo thí & Toán/Khoa học chuẩn GDPT 2018 (${resolvedSubject} - ${resolvedGrade}).
+QUY TRÌNH GIẢI TRƯỚC - XUẤT ĐÁP ÁN SAU (BẮT BUỘC ĐỂ ĐẢM BẢO CHÍNH XÁC 100%):
+1. Đề bài ("question") phải chặt chẽ, đủ dữ kiện, có DUY NHẤT 1 đáp số chính xác. KHÔNG ra câu vô nghiệm hoặc sai số liệu.
+2. TÍNH TOÁN & VIẾT LỜI GIẢI ("explanation") TRƯỚC: Thực hiện đầy đủ phép tính từng bước để tìm ra đáp số cuối cùng.
+3. VỚI CÂU PHẦN I (part_1_choice): Sau khi có đáp số ở "explanation", đặt ĐÚNG đáp số đó vào một trong 4 phương án A/B/C/D trong "options", tạo 3 phương án nhiễu hợp lý gần giống kết quả thật (không trùng lặp), rồi ĐỐI CHIẾU LẠI để ghi "correctAnswer" CHÍNH XÁC TUYỆT ĐỐI khớp với chữ cái chứa đáp số đúng (TUYỆT ĐỐI KHÔNG tự ý chọn bừa chữ cái không khớp lời giải; KHÔNG ghi "A. ", "B. " vào "text").
+4. VỚI CÂU PHẦN II (part_2_true_false): Mỗi ý a, b, c, d giải và kết luận "correct" (true/false) thật chuẩn xác; đặt "correctAnswer" khớp đúng từng ý (ví dụ "a:Đ, b:S, c:Đ, d:S").
+5. VỚI CÂU PHẦN III (part_3_short_answer): Kết quả ở "explanation" phải trùng khớp hoàn toàn với "shortAnswerKey" và "correctAnswer".
+6. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), <=, >=, oo.`;
+
+    const parseBatch = (raw: string): any[] => {
+      let parsed = safeParseServerlessJsonWithLatex(raw);
+      if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.questions)) {
+        parsed = parsed.questions;
+      }
+      return Array.isArray(parsed) ? parsed : [];
+    };
+
+    let lastErr = '';
+    const runBatch = async (batchSlots: SLMatrixSlot[], batchIdx: number): Promise<any[]> => {
+      const slotSpecs = batchSlots
+        .map((s) => {
+          const typeLabel =
+            s.partType === 'part_1_choice'
+              ? 'Phần I (part_1_choice, 4 lựa chọn A/B/C/D)'
+              : s.partType === 'part_2_true_false'
+                ? 'Phần II Đúng/Sai (part_2_true_false, đủ 4 ý a,b,c,d)'
+                : s.partType === 'part_3_short_answer'
+                  ? 'Phần III Trả lời ngắn (part_3_short_answer)'
+                  : 'Phần IV Tự luận (part_4_essay)';
+          return `- Câu số ${s.n}: ${typeLabel} | Mức độ: ${s.level} | Nội dung: ${s.topic}`;
+        })
+        .join('\n');
+
+      const batchParts: any[] = [];
+      if (cleanInlinePart) batchParts.push(cleanInlinePart);
+      batchParts.push({
+        text: `Hãy soạn ĐÚNG ${batchSlots.length} câu hỏi sau cho đề ${resolvedSubject} (${resolvedGrade}):
+${slotSpecs}
+${userPrompt ? `Yêu cầu chung của giáo viên: "${userPrompt}"` : ''}${compactFileContext}
+
+Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} phần tử theo ĐÚNG THỨ TỰ FIELD (giải trong "explanation" trước khi xuất "options" & "correctAnswer"):
+- Phần I: { "slotNumber": 1, "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "explanation": "Các bước giải chi tiết ra đáp số...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "C", "difficulty": "Nhận biết", "timeLimit": ${timeLimit} }
+- Phần II: { "slotNumber": 13, "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "explanation": "Phân tích từng ý a, b, c, d...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "difficulty": "Thông hiểu", "timeLimit": 60 }
+- Phần III: { "slotNumber": 17, "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "explanation": "Giải chi tiết ra kết quả...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "difficulty": "Vận dụng", "timeLimit": 45 }
+- Phần IV: { "slotNumber": 23, "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "explanation": "Lời giải chi tiết...", "essayRubric": "...", "correctAnswer": "Đáp số", "options": [], "difficulty": "Vận dụng", "timeLimit": 120 }`,
+      });
+
+      for (const model of SERVERLESS_TEXT_MODELS) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [{ role: 'user', parts: batchParts }],
+            config: buildServerlessModelConfig(model, {
+              responseMimeType: 'application/json',
+              systemInstruction: batchSystemInstruction,
+              thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+            }),
+          });
+          const items = parseBatch(response.text || '');
+          if (items.length > 0) return items;
+        } catch (err: any) {
+          lastErr = err?.message || String(err);
+          console.warn(`[Vercel Serverless Batch ${batchIdx + 1}] ${model} failed:`, lastErr);
+          if (isServerlessFatalAuthErr(lastErr)) throw err;
+        }
+      }
+      return [];
+    };
+
+    try {
+      const batchResults = await Promise.all(batches.map((b, idx) => runBatch(b, idx)));
+      const parsed = batchResults.flat();
+
+      if (parsed.length > 0) {
+        const questions = balanceServerlessAnswerDistribution(
+          parsed.map((q: any, idx: number) =>
+            normalizeServerlessQuestion(q, idx, difficulty, resolvedSubject, Number(timeLimit) || 30)
+          ),
+          `${userPrompt || matrixFile?.fileName || resolvedGrade}_${Date.now()}`
+        );
+        return res.status(200).json({ success: true, questions });
+      }
+    } catch (e: any) {
+      lastErr = e?.message || String(e);
     }
 
     const isAuth = isServerlessFatalAuthErr(lastErr);
@@ -1052,6 +1239,226 @@ LƯU Ý TOÁN HỌC & ĐÁP ÁN: Toàn bộ công thức toán/lý/hóa dùng La
           ? 'Hệ thống AI đang quá tải giới hạn lượt gọi (429). Vui lòng thử lại sau ít giây.'
           : `Không thể phân tích ma trận bằng AI (${lastErr ? lastErr.slice(0, 120) : 'phản hồi rỗng'}). Vui lòng thử lại.`,
     });
+  }
+
+  // 4. AI Independent Reflection & Critique (Re-solves every question from scratch)
+  if (url.includes('/api/ai/critique-quiz') && req.method === 'POST') {
+    const { questions = [], subject = 'Toán học', grade = 'Lớp 12' } = req.body || {};
+
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ success: false, error: 'Danh sách câu hỏi đang trống.' });
+    }
+    if (!ai) {
+      return res.status(403).json({ success: false, error: 'Chưa cấu hình Gemini API Key để phản biện đề.' });
+    }
+
+    try {
+      const BATCH_SIZE = 5;
+      const indexedQuestions = questions.slice(0, 50).map((q: any, idx: number) => ({
+        questionIndex: idx,
+        questionId: String(q?.id || `q_${idx + 1}`),
+        partType: inferServerlessPartType(q),
+        question: String(q?.question || ''),
+        options: Array.isArray(q?.options) ? q.options : [],
+        subStatements: Array.isArray(q?.subStatements) ? q.subStatements : undefined,
+        shortAnswerKey: q?.shortAnswerKey,
+        currentCorrectAnswer: String(q?.correctAnswer || ''),
+        currentExplanation: String(q?.explanation || ''),
+      }));
+
+      const batches: Array<typeof indexedQuestions> = [];
+      for (let i = 0; i < indexedQuestions.length; i += BATCH_SIZE) {
+        batches.push(indexedQuestions.slice(i, i + BATCH_SIZE));
+      }
+
+      const critiqueSystemInstruction = `Bạn là CHỦ TỊCH HỘI ĐỒNG PHẢN BIỆN & THẨM ĐỊNH ĐỀ THI ĐỘC LẬP (${subject} - ${grade}, chuẩn GDPT 2018).
+NHIỆM VỤ TỐI THƯỢNG: Đọc và TỰ GIẢI LẠI TỪNG CÂU HỎI TỪ CON SỐ 0. TUYỆT ĐỐI KHÔNG TIN TƯỞNG MÙ QUÁNG "currentCorrectAnswer" HAY "currentExplanation".
+
+QUY TRÌNH THẨM ĐỊNH TỪNG CÂU:
+1. Kiểm tra đề bài ("question"): Có thiếu giả thiết/điều kiện, sai số liệu, mập mờ câu chữ hoặc có thể hiểu nhiều nghĩa không?
+2. Tự giải độc lập từng bước từ đầu ("reSolvedSteps"), tính ra đáp số chuẩn xác 100%.
+3. Phân loại "status" CHÍNH XÁC vào 1 trong 4 giá trị:
+   - "ok": Đề bài rõ ràng, chặt chẽ; có đúng 1 đáp án duy nhất khớp với kết quả tự giải; và "currentCorrectAnswer" ĐÃ ĐÚNG 100% (với Phần II thì cả 4 ý a,b,c,d đều đúng chân trị).
+   - "wrong_answer": Đề bài rõ ràng, phương án đúng ĐÃ NẰM TRONG 4 phương án A/B/C/D, NHƯNG "currentCorrectAnswer" đang chấm NHẦM chữ cái khác (ví dụ giải ra A nhưng ứng dụng lưu B), HOẶC ý Đúng/Sai Phần II / đáp số Phần III đang gắn sai. Khi đó: giữ nguyên đề & options nếu đã chuẩn, chỉ trả về "suggestedPatch" sửa lại đúng "correctAnswer" (hoặc "subStatements"/"shortAnswerKey") và "explanation".
+   - "no_correct_option": Kết quả tự giải KHÔNG xuất hiện trong 4 phương án A/B/C/D, HOẶC có >= 2 phương án đúng/trùng lặp giá trị. Khi đó: trả về "suggestedPatch" cung cấp đủ 4 phương án "options" A, B, C, D phân biệt với đúng 1 đáp án đúng, kèm "correctAnswer" và "explanation".
+   - "ambiguous": Đề bài chưa rõ ràng, thiếu dữ kiện, sai công thức/số liệu dẫn tới vô nghiệm hoặc không xác định được đáp án duy nhất. Khi đó: trả về "suggestedPatch" viết lại "question" rõ ràng chặt chẽ (và sửa luôn "options"/"subStatements"/"shortAnswerKey", "correctAnswer", "explanation" tương ứng).
+4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA TRONG "reSolvedSteps", "reason", "suggestedPatch" DÙNG LATEX CHUẨN BỌC TRONG $...$ (escape \\\\ trong JSON, véctơ dùng \\\\overrightarrow{AB}, phân số \\\\frac{a}{b}). KHÔNG viết "A. ", "B. " vào "options[].text".
+5. Nếu "status" !== "ok", BẮT BUỘC phải có "suggestedPatch" đầy đủ và đã được kiểm tra khớp 100% giữa kết quả giải và "correctAnswer"!`;
+
+      const parseArr = (raw: string): any[] => {
+        let parsed = safeParseServerlessJsonWithLatex(raw);
+        if (!parsed) {
+          try { parsed = JSON.parse(raw); } catch (_) {}
+        }
+        if (parsed && !Array.isArray(parsed) && Array.isArray((parsed as any).items)) {
+          parsed = (parsed as any).items;
+        }
+        if (parsed && !Array.isArray(parsed) && Array.isArray((parsed as any).results)) {
+          parsed = (parsed as any).results;
+        }
+        return Array.isArray(parsed) ? parsed : [];
+      };
+
+      const runCritiqueBatch = async (batch: typeof indexedQuestions): Promise<any[]> => {
+        const prompt = `Hãy phản biện, giải lại độc lập từ đầu và thẩm định chính xác từng câu trong ${batch.length} câu sau:
+${JSON.stringify(batch)}
+
+Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batch.length} phần tử, mỗi phần tử có cấu trúc:
+{
+  "questionId": "...",
+  "questionIndex": 0,
+  "status": "ok" | "wrong_answer" | "no_correct_option" | "ambiguous",
+  "reason": "Nhận xét ngắn gọn rõ ràng (nếu lỗi ghi rõ lỗi gì, đáp án cũ sai ở đâu).",
+  "reSolvedSteps": "Các bước giải độc lập chi tiết ra đáp số chuẩn bằng LaTeX $...$.",
+  "verifiedCorrectAnswer": "A",
+  "suggestedPatch": {
+    "question": "(chỉ cần nếu sửa đề, hoặc giữ nguyên)",
+    "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}],
+    "subStatements": [],
+    "shortAnswerKey": "...",
+    "correctAnswer": "A",
+    "explanation": "Lời giải chuẩn xác khớp hoàn toàn đáp án..."
+  }
+}`;
+        let lastBatchErr: any;
+        for (const model of SERVERLESS_TEXT_MODELS) {
+          try {
+            const response = await ai.models.generateContent({
+              model,
+              contents: prompt,
+              config: buildServerlessModelConfig(model, {
+                responseMimeType: 'application/json',
+                systemInstruction: critiqueSystemInstruction,
+                thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+              }),
+            });
+            const items = parseArr((response.text || '').trim());
+            if (items.length > 0) return items;
+          } catch (err: any) {
+            lastBatchErr = err;
+            if (isServerlessFatalAuthErr(err?.message || String(err))) throw err;
+          }
+        }
+        if (lastBatchErr) throw lastBatchErr;
+        return [];
+      };
+
+      const batchResults = await Promise.all(
+        batches.map((b) =>
+          runCritiqueBatch(b).catch((err) => {
+            console.warn('[Vercel Serverless Critique Batch] Error:', err?.message || err);
+            return b.map((item) => ({
+              questionId: item.questionId,
+              questionIndex: item.questionIndex,
+              status: 'ok',
+              reason: 'Chưa phản biện được câu này do nghẽn mạng.',
+              reSolvedSteps: item.currentExplanation || '',
+              verifiedCorrectAnswer: item.currentCorrectAnswer,
+            }));
+          })
+        )
+      );
+
+      const flatRaw = batchResults.flat();
+      const byId = new Map<string, any>();
+      const byIdx = new Map<number, any>();
+      flatRaw.forEach((r: any) => {
+        if (r?.questionId) byId.set(String(r.questionId), r);
+        if (typeof r?.questionIndex === 'number') byIdx.set(r.questionIndex, r);
+      });
+
+      const sanitizedCritiques = indexedQuestions.map((orig) => {
+        const raw = byId.get(orig.questionId) || byIdx.get(orig.questionIndex) || {};
+        const validStatuses = new Set(['ok', 'wrong_answer', 'no_correct_option', 'ambiguous']);
+        let status = validStatuses.has(raw.status) ? raw.status : 'ok';
+        const reSolvedSteps = normalizeServerlessMathInText(String(raw.reSolvedSteps || orig.currentExplanation || ''));
+        const reason = normalizeServerlessMathInText(String(raw.reason || (status === 'ok' ? 'Đề rõ ràng và đáp án chính xác.' : 'Cần kiểm tra lại câu hỏi/đáp án.')));
+
+        let verifiedCorrectAnswer = String(raw.verifiedCorrectAnswer || orig.currentCorrectAnswer || 'A');
+        if (orig.partType === 'part_1_choice') {
+          verifiedCorrectAnswer = extractServerlessChoiceKey(verifiedCorrectAnswer);
+        } else if (orig.partType === 'part_3_short_answer') {
+          verifiedCorrectAnswer = normalizeServerlessMathInText(verifiedCorrectAnswer);
+        }
+
+        let suggestedPatch: any = undefined;
+        if (status !== 'ok' && raw.suggestedPatch && typeof raw.suggestedPatch === 'object') {
+          const patch = { ...raw.suggestedPatch };
+          const cleanPatch: any = {
+            explanation: normalizeServerlessMathInText(String(patch.explanation || reSolvedSteps || orig.currentExplanation)),
+            correctAnswer: String(patch.correctAnswer || verifiedCorrectAnswer),
+          };
+          if (typeof patch.question === 'string' && patch.question.trim()) {
+            cleanPatch.question = normalizeServerlessMathInText(patch.question.trim());
+          }
+          if (orig.partType === 'part_1_choice') {
+            const baseOpts = Array.isArray(patch.options) && patch.options.length >= 4 ? patch.options : orig.options;
+            if (Array.isArray(baseOpts) && baseOpts.length >= 4) {
+              cleanPatch.options = ['A', 'B', 'C', 'D'].map((k, oIdx) => {
+                const found = baseOpts.find((o: any) => String(o?.key || '').trim().toUpperCase().replace(/[\.\)]$/, '') === k) || baseOpts[oIdx];
+                const txt = typeof found === 'string' ? found : String(found?.text || `Phương án ${k}`);
+                return { key: k, text: normalizeServerlessMathInText(stripServerlessChoicePrefix(txt) || txt) };
+              });
+            }
+            cleanPatch.correctAnswer = extractServerlessChoiceKey(cleanPatch.correctAnswer || verifiedCorrectAnswer);
+            verifiedCorrectAnswer = cleanPatch.correctAnswer;
+          } else if (orig.partType === 'part_2_true_false') {
+            const baseSubs = Array.isArray(patch.subStatements) && patch.subStatements.length > 0 ? patch.subStatements : orig.subStatements;
+            if (Array.isArray(baseSubs) && baseSubs.length > 0) {
+              cleanPatch.subStatements = baseSubs.map((s: any, sIdx: number) => {
+                const label = s.label || s.key || ['a', 'b', 'c', 'd'][sIdx] || `ý ${sIdx + 1}`;
+                const statement = normalizeServerlessMathInText(s.statement || s.text || '');
+                const correct = typeof s.correct === 'boolean' ? s.correct : Boolean(s.isCorrect);
+                return { id: s.id || `sub_${orig.questionIndex}_${sIdx}`, key: label, label, statement, text: statement, correct, isCorrect: correct };
+              });
+              cleanPatch.correctAnswer = cleanPatch.subStatements.map((s: any) => `${s.label}:${s.correct ? 'Đ' : 'S'}`).join(', ');
+              verifiedCorrectAnswer = cleanPatch.correctAnswer;
+            }
+          } else if (orig.partType === 'part_3_short_answer') {
+            const shortVal = normalizeServerlessMathInText(String(patch.shortAnswerKey ?? patch.correctAnswer ?? verifiedCorrectAnswer));
+            cleanPatch.shortAnswerKey = shortVal;
+            cleanPatch.correctAnswer = shortVal;
+            verifiedCorrectAnswer = shortVal;
+          }
+
+          if (
+            status === 'wrong_answer' &&
+            orig.partType === 'part_1_choice' &&
+            cleanPatch.correctAnswer === extractServerlessChoiceKey(orig.currentCorrectAnswer) &&
+            !cleanPatch.question
+          ) {
+            status = 'ok';
+          } else {
+            suggestedPatch = cleanPatch;
+          }
+        } else if (status !== 'ok') {
+          suggestedPatch = {
+            correctAnswer: verifiedCorrectAnswer,
+            explanation: reSolvedSteps || orig.currentExplanation,
+          };
+        }
+
+        return {
+          questionId: orig.questionId,
+          questionIndex: orig.questionIndex,
+          status,
+          reason,
+          reSolvedSteps,
+          verifiedCorrectAnswer,
+          ...(suggestedPatch ? { suggestedPatch } : {}),
+        };
+      });
+
+      return res.status(200).json({ success: true, items: sanitizedCritiques });
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      return res.status(isServerlessFatalAuthErr(msg) ? 403 : 502).json({
+        success: false,
+        error: isServerlessFatalAuthErr(msg)
+          ? 'Chưa cấu hình hoặc sai Gemini API Key.'
+          : `Không thể phản biện đề lúc này (${msg.slice(0, 120)}).`,
+      });
+    }
   }
 
   return res.status(404).json({ error: 'Endpoint not found on serverless router' });

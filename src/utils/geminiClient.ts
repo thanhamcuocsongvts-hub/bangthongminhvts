@@ -1,8 +1,7 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { QuizQuestion } from '../types';
+import { QuizQuestion, QuizCritiqueItem, CritiqueIssueType } from '../types';
 import {
   balanceQuizAnswerDistribution,
-  buildBalancedChoiceTargets,
   extractChoiceKey,
   inferPartType,
   stripLeadingChoicePrefix,
@@ -345,36 +344,30 @@ export async function directGenerateQuiz(params: {
   if (!ai) return [];
 
   const { topic, subject = 'Toán học', grade = 'Lớp 12', count = 5, difficulty = 'Thông hiểu' } = params;
-  const preAssignedTargets = buildBalancedChoiceTargets(count, `${topic}_${Date.now()}`);
-  const targetSequenceHint = preAssignedTargets.map((k, idx) => `Câu ${idx + 1}: ${k}`).join(', ');
 
   const prompt = `Bạn là Chuyên gia Soạn Đề Thi Trắc Nghiệm Sư Phạm Chuẩn Bộ Giáo Dục Việt Nam.
-Hãy tạo đúng ${count} câu hỏi trắc nghiệm chất lượng cao về chủ đề: "${topic}".
+Hãy tạo đúng ${count} câu hỏi trắc nghiệm chất lượng cao, CHÍNH XÁC TUYỆT ĐỐI về chủ đề: "${topic}".
 Môn học: ${subject}, Khối lớp: ${grade}, Mức độ: ${difficulty}.
 
-YÊU CẦU ĐẶC BIỆT & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
-1. Mỗi câu hỏi gồm đúng 4 lựa chọn (A, B, C, D). KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
-2. Đáp án đúng "correctAnswer" PHẢI TUÂN THỦ THỨ TỰ PHÂN BỔ: [${targetSequenceHint}]. Xuất trường "correctAnswer" TRƯỚC trường "options" và đặt phương án đúng vào đúng chữ cái đã chỉ định cho mỗi câu.
-3. Có phần giải thích ngắn gọn (1-2 câu), chuẩn xác công thức/kết quả đúng (không viết cứng "Đáp án A đúng").
-4. MỌI CÔNG THỨC TOÁN, LÝ, HÓA, BIỂU THỨC BẮT BUỘC DÙNG LATEX CHUẨN BỌC TRONG $...$ (escape \\\\ trong JSON):
-   - Phân số dùng $\\\\frac{a}{b}$, căn thức dùng $\\\\sqrt{x}$ hoặc $\\\\sqrt[3]{x}$, số mũ nhiều ký tự bọc ngoặc $x^{10}, e^{-x}$, chỉ số $C_{12}^3, u_{n+1}$, tập hợp $\\\\mathbb{R} \\\\setminus \\\\{1\\\\}$, giới hạn $\\\\lim_{x \\to +\\\\infty}$, tích phân $\\\\int_{a}^{b} f(x)dx$, góc $\\\\widehat{ABC}$, $60^{\\\\circ}$.
-   - TUYỆT ĐỐI KHÔNG viết kiểu ASCII như frac(a,b), sqrt(x), (x+1)/(x-2), 2^(x+1), <=, >=, !=, oo, hay ký tự unicode ², ³, √.
-5. ĐẶC BIỆT VỚI KÝ HIỆU VÉC-TƠ:
-   - BẮT BUỘC dùng $\\\\overrightarrow{AB}$, $\\\\overrightarrow{BC}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{AA'}$, $\\\\overrightarrow{AC'}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (TUYỆT ĐỐI KHÔNG viết vec(AB), vec(a), i - 2j + 3k hay \\vec{AB}).
-   - Nếu phương án A, B, C, D chứa công thức, phân số, véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\\\frac{2x+1}{x-1}$" hoặc "text": "$\\\\overrightarrow{a} = \\\\overrightarrow{i} - 2\\\\overrightarrow{j} + 3\\\\overrightarrow{k}$").
-6. BẮT BUỘC chỉ trả về định dạng JSON thuần túy (không bọc trong markdown code block, không giải thích ngoài lề):
+QUY TRÌNH GIẢI TRƯỚC - XUẤT ĐÁP ÁN SAU (BẮT BUỘC):
+1. Viết đề bài ("question") chặt chẽ, đủ dữ kiện, có DUY NHẤT 1 đáp số đúng.
+2. TÍNH TOÁN & VIẾT LỜI GIẢI ("explanation") TRƯỚC: giải chi tiết ra đáp số chuẩn xác (1-2 câu súc tích, không viết cứng chữ cái kiểu "Chọn đáp án A").
+3. Đặt đúng đáp số vừa giải vào 1 trong 4 phương án A, B, C, D của "options"; 3 phương án còn lại là nhiễu hợp lý gần giống kết quả thật. KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
+4. Sau khi đã có "options", ĐỐI CHIẾU LẠI để điền "correctAnswer" CHÍNH XÁC TUYỆT ĐỐI khớp với chữ cái chứa kết quả ở "explanation".
+5. MỌI CÔNG THỨC TOÁN, LÝ, HÓA, BIỂU THỨC BẮT BUỘC DÙNG LATEX CHUẨN BỌC TRONG $...$ (escape \\\\ trong JSON): phân số $\\\\frac{a}{b}$, căn thức $\\\\sqrt{x}$, số mũ $x^{10}$, chỉ số $C_{12}^3, u_{n+1}$, tập hợp $\\\\mathbb{R} \\\\setminus \\\\{1\\\\}$, giới hạn $\\\\lim_{x \\to +\\\\infty}$, tích phân $\\\\int_{a}^{b} f(x)dx$, góc $\\\\widehat{ABC}$, $60^{\\\\circ}$, véctơ $\\\\overrightarrow{AB}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (TUYỆT ĐỐI KHÔNG viết vec(AB), frac(a,b), sqrt(x), <=, >=, !=, oo).
+6. Chỉ trả về mảng JSON thuần túy theo ĐÚNG THỨ TỰ FIELD sau:
 [
   {
     "id": "q1",
-    "correctAnswer": "${preAssignedTargets[0] || 'C'}",
     "question": "Nội dung câu hỏi...",
+    "explanation": "Các bước giải chi tiết ra đáp số chuẩn...",
     "options": [
       { "key": "A", "text": "Phương án A" },
       { "key": "B", "text": "Phương án B" },
       { "key": "C", "text": "Phương án C" },
       { "key": "D", "text": "Phương án D" }
     ],
-    "explanation": "Giải thích ngắn gọn công thức/kết quả đúng...",
+    "correctAnswer": "B",
     "timeLimit": 30
   }
 ]`;
@@ -386,6 +379,7 @@ YÊU CẦU ĐẶC BIỆT & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
         contents: prompt,
         config: buildSafeModelConfig(model, {
           responseMimeType: 'application/json',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
         }),
       });
 
@@ -397,8 +391,24 @@ YÊU CẦU ĐẶC BIỆT & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
         resList = parsed.questions;
       }
       if (resList.length > 0) {
+        const sanitized = resList.map((q: any, idx: number) => {
+          const cleanOptions = Array.isArray(q?.options)
+            ? q.options.map((opt: any, oIdx: number) => ({
+                key: ['A', 'B', 'C', 'D'][oIdx] || String(opt?.key || 'A').trim().toUpperCase().replace(/[\.\)]$/, ''),
+                text: typeof opt === 'string'
+                  ? stripLeadingChoicePrefix(opt)
+                  : stripLeadingChoicePrefix(opt?.text || `Lựa chọn ${oIdx + 1}`),
+              }))
+            : [];
+          return sanitizeQuizQuestionMath({
+            ...q,
+            id: q?.id || `q_${Date.now()}_${idx + 1}`,
+            options: cleanOptions,
+            correctAnswer: extractChoiceKey(q?.correctAnswer),
+          });
+        });
         return balanceQuizAnswerDistribution(
-          resList.map((q) => sanitizeQuizQuestionMath(q)),
+          sanitized,
           `${topic}_${Date.now()}`
         );
       }
@@ -680,16 +690,6 @@ Quy tắc:
     }
   }
 
-  // Pre-assign balanced A/B/C/D targets across all Part I slots
-  const part1Slots = slots.filter((s) => s.partType === 'part_1_choice');
-  const balancedTargets = buildBalancedChoiceTargets(
-    part1Slots.length,
-    `${userPrompt || matrixFile?.fileName || resolvedGrade}_${Date.now()}`
-  );
-  part1Slots.forEach((s, idx) => {
-    s.targetKey = balancedTargets[idx];
-  });
-
   // Chunk into concurrent batches of max 6 questions
   const BATCH_SIZE = slots.length <= 8 ? slots.length : 6;
   const batches: ClientMatrixSlot[][] = [];
@@ -703,12 +703,13 @@ Quy tắc:
       : '';
 
   const batchSystemInstruction = `Bạn là Chuyên gia Khảo thí & Toán/Khoa học chuẩn GDPT 2018 (${resolvedSubject} - ${resolvedGrade}).
-QUY TẮC BẮT BUỘC:
-1. TÍNH TOÁN CHÍNH XÁC 100% trước khi xuất JSON. Không ra câu vô nghiệm/sai số liệu.
-2. VỚI CÂU PHẦN I (part_1_choice): Xuất trường "correctAnswer" TRƯỚC trường "options". Đặt ĐÚNG đáp án chính xác vào đúng chữ cái "targetKey" đã chỉ định cho mỗi câu (tuyệt đối không tự ý chuyển về A); 3 phương án còn lại là nhiễu hợp lý gần giống kết quả thật. KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
-3. VỚI CÂU PHẦN II (part_2_true_false): Đủ 4 ý a, b, c, d với tỷ lệ Đúng/Sai đa dạng tự nhiên.
-4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.
-5. "explanation" súc tích 1-2 câu nêu rõ công thức & phép tính ra đáp số (KHÔNG viết cứng "Chọn đáp án A" hay tên chữ cái đáp án).`;
+QUY TRÌNH GIẢI TRƯỚC - XUẤT ĐÁP ÁN SAU (BẮT BUỘC ĐỂ ĐẢM BẢO CHÍNH XÁC 100%):
+1. Đề bài ("question") phải chặt chẽ, đủ dữ kiện, có DUY NHẤT 1 đáp số chính xác. KHÔNG ra câu vô nghiệm hoặc sai số liệu.
+2. TÍNH TOÁN & VIẾT LỜI GIẢI ("explanation") TRƯỚC: Thực hiện đầy đủ phép tính từng bước để tìm ra đáp số cuối cùng.
+3. VỚI CÂU PHẦN I (part_1_choice): Sau khi có đáp số ở "explanation", đặt ĐÚNG đáp số đó vào một trong 4 phương án A/B/C/D của "options", tạo 3 phương án nhiễu hợp lý gần giống kết quả thật (không trùng lặp), rồi ĐỐI CHIẾU LẠI để ghi "correctAnswer" CHÍNH XÁC TUYỆT ĐỐI khớp với chữ cái chứa đáp số đúng (KHÔNG viết cứng tên chữ cái trong lời giải; KHÔNG ghi "A. ", "B. " vào "text").
+4. VỚI CÂU PHẦN II (part_2_true_false): Đủ 4 ý a, b, c, d với kết luận Đúng/Sai chuẩn xác; đặt "correctAnswer" khớp đúng từng ý (ví dụ "a:Đ, b:S, c:Đ, d:S").
+5. VỚI CÂU PHẦN III (part_3_short_answer): Kết quả ở "explanation" phải trùng khớp hoàn toàn với "shortAnswerKey" và "correctAnswer".
+6. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.`;
 
   const parseBatch = (raw: string): any[] => {
     let parsed = safeParseClientJsonWithLatex(raw);
@@ -725,7 +726,7 @@ QUY TẮC BẮT BUỘC:
       .map((s) => {
         const typeLabel =
           s.partType === 'part_1_choice'
-            ? `Phần I (part_1_choice) | Đáp án đúng BẮT BUỘC: "${s.targetKey || 'B'}"`
+            ? 'Phần I (part_1_choice, 4 lựa chọn A/B/C/D)'
             : s.partType === 'part_2_true_false'
               ? 'Phần II Đúng/Sai (part_2_true_false, đủ 4 ý a,b,c,d)'
               : s.partType === 'part_3_short_answer'
@@ -742,11 +743,11 @@ QUY TẮC BẮT BUỘC:
 ${slotSpecs}
 ${userPrompt ? `Yêu cầu chung của giáo viên: "${userPrompt}"` : ''}${compactFileContext}
 
-Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} phần tử theo đúng thứ tự:
-- Phần I: { "slotNumber": 1, "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "correctAnswer": "C", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "explanation": "...", "difficulty": "Nhận biết", "timeLimit": ${timeLimit} }
-- Phần II: { "slotNumber": 13, "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "...", "difficulty": "Thông hiểu", "timeLimit": 60 }
-- Phần III: { "slotNumber": 17, "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "explanation": "...", "difficulty": "Vận dụng", "timeLimit": 45 }
-- Phần IV: { "slotNumber": 23, "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "...", "correctAnswer": "Đáp số", "options": [], "explanation": "...", "difficulty": "Vận dụng", "timeLimit": 120 }`,
+Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} phần tử theo ĐÚNG THỨ TỰ FIELD (giải trong "explanation" trước khi xuất "options" & "correctAnswer"):
+- Phần I: { "slotNumber": 1, "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "explanation": "Các bước giải chi tiết ra đáp số...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "C", "difficulty": "Nhận biết", "timeLimit": ${timeLimit} }
+- Phần II: { "slotNumber": 13, "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "explanation": "Phân tích từng ý a, b, c, d...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "difficulty": "Thông hiểu", "timeLimit": 60 }
+- Phần III: { "slotNumber": 17, "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "explanation": "Giải chi tiết ra kết quả...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "difficulty": "Vận dụng", "timeLimit": 45 }
+- Phần IV: { "slotNumber": 23, "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "explanation": "Lời giải chi tiết...", "essayRubric": "...", "correctAnswer": "Đáp số", "options": [], "difficulty": "Vận dụng", "timeLimit": 120 }`,
     });
 
     try {
@@ -757,9 +758,10 @@ Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} ph�
           config: buildSafeModelConfig(PRIMARY_CLIENT_MODELS[0], {
             responseMimeType: 'application/json',
             systemInstruction: batchSystemInstruction,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
           }),
         }),
-        28000
+        36000
       );
       const items = parseBatch(resPrimary.text || '');
       if (items.length > 0) return items;
@@ -779,7 +781,7 @@ Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} ph�
             systemInstruction: batchSystemInstruction,
           }),
         }),
-        20000
+        22000
       );
       return parseBatch(resLite.text || '');
     } catch (liteErr: any) {
@@ -880,5 +882,230 @@ Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} ph�
       ? 'Gemini API Key không hợp lệ hoặc chưa được cấp quyền. Vui lòng kiểm tra lại API Key.'
       : `Không thể phân tích ma trận bằng AI (${lastErr ? lastErr.slice(0, 120) : 'phản hồi rỗng'}). Vui lòng thử lại.`
   );
+}
+
+/**
+ * Direct client-side AI Independent Reflection & Critique fallback:
+ * Re-solves every question from scratch to detect wrong answers, missing options, or ambiguous statements.
+ */
+export async function directCritiqueQuiz(params: {
+  questions: QuizQuestion[];
+  subject?: string;
+  grade?: string;
+  apiKey?: string;
+}): Promise<QuizCritiqueItem[]> {
+  const ai = createDirectGeminiClient(params.apiKey);
+  if (!ai) {
+    throw new Error('Chưa cấu hình Gemini API Key để phản biện đề.');
+  }
+
+  const { questions, subject = 'Toán học', grade = 'Lớp 12' } = params;
+  const BATCH_SIZE = 5;
+  const indexedQuestions = questions.slice(0, 50).map((q, idx) => ({
+    questionIndex: idx,
+    questionId: String(q?.id || `q_${idx + 1}`),
+    partType: inferPartType(q),
+    question: String(q?.question || ''),
+    options: Array.isArray(q?.options) ? q.options : [],
+    subStatements: Array.isArray(q?.subStatements) ? q.subStatements : undefined,
+    shortAnswerKey: q?.shortAnswerKey,
+    currentCorrectAnswer: String(q?.correctAnswer || ''),
+    currentExplanation: String(q?.explanation || ''),
+  }));
+
+  const batches: Array<typeof indexedQuestions> = [];
+  for (let i = 0; i < indexedQuestions.length; i += BATCH_SIZE) {
+    batches.push(indexedQuestions.slice(i, i + BATCH_SIZE));
+  }
+
+  const critiqueSystemInstruction = `Bạn là CHỦ TỊCH HỘI ĐỒNG PHẢN BIỆN & THẨM ĐỊNH ĐỀ THI ĐỘC LẬP (${subject} - ${grade}, chuẩn GDPT 2018).
+NHIỆM VỤ TỐI THƯỢNG: Đọc và TỰ GIẢI LẠI TỪNG CÂU HỎI TỪ CON SỐ 0. TUYỆT ĐỐI KHÔNG TIN TƯỞNG MÙ QUÁNG "currentCorrectAnswer" HAY "currentExplanation".
+
+QUY TRÌNH THẨM ĐỊNH TỪNG CÂU:
+1. Kiểm tra đề bài ("question"): Có thiếu giả thiết/điều kiện, sai số liệu, mập mờ câu chữ hoặc có thể hiểu nhiều nghĩa không?
+2. Tự giải độc lập từng bước từ đầu ("reSolvedSteps"), tính ra đáp số chuẩn xác 100%.
+3. Phân loại "status" CHÍNH XÁC vào 1 trong 4 giá trị:
+   - "ok": Đề bài rõ ràng, chặt chẽ; có đúng 1 đáp án duy nhất khớp với kết quả tự giải; và "currentCorrectAnswer" ĐÃ ĐÚNG 100% (với Phần II thì cả 4 ý a,b,c,d đều đúng chân trị).
+   - "wrong_answer": Đề bài rõ ràng, phương án đúng ĐÃ NẰM TRONG 4 phương án A/B/C/D, NHƯNG "currentCorrectAnswer" đang chấm NHẦM chữ cái khác (ví dụ giải ra A nhưng ứng dụng lưu B), HOẶC ý Đúng/Sai Phần II / đáp số Phần III đang gắn sai. Khi đó: giữ nguyên đề & options nếu đã chuẩn, chỉ trả về "suggestedPatch" sửa lại đúng "correctAnswer" (hoặc "subStatements"/"shortAnswerKey") và "explanation".
+   - "no_correct_option": Kết quả tự giải KHÔNG xuất hiện trong 4 phương án A/B/C/D, HOẶC có >= 2 phương án đúng/trùng lặp giá trị. Khi đó: trả về "suggestedPatch" cung cấp đủ 4 phương án "options" A, B, C, D phân biệt với đúng 1 đáp án đúng, kèm "correctAnswer" và "explanation".
+   - "ambiguous": Đề bài chưa rõ ràng, thiếu dữ kiện, sai công thức/số liệu dẫn tới vô nghiệm hoặc không xác định được đáp án duy nhất. Khi đó: trả về "suggestedPatch" viết lại "question" rõ ràng chặt chẽ (và sửa luôn "options"/"subStatements"/"shortAnswerKey", "correctAnswer", "explanation" tương ứng).
+4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA TRONG "reSolvedSteps", "reason", "suggestedPatch" DÙNG LATEX CHUẨN BỌC TRONG $...$ (escape \\\\ trong JSON, véctơ dùng \\\\overrightarrow{AB}, phân số \\\\frac{a}{b}). KHÔNG viết "A. ", "B. " vào "options[].text".
+5. Nếu "status" !== "ok", BẮT BUỘC phải có "suggestedPatch" đầy đủ và đã được kiểm tra khớp 100% giữa kết quả giải và "correctAnswer"!`;
+
+  const parseArr = (raw: string): any[] => {
+    let parsed = safeParseClientJsonWithLatex(raw);
+    if (parsed && !Array.isArray(parsed) && Array.isArray((parsed as any).items)) {
+      parsed = (parsed as any).items;
+    }
+    if (parsed && !Array.isArray(parsed) && Array.isArray((parsed as any).results)) {
+      parsed = (parsed as any).results;
+    }
+    return Array.isArray(parsed) ? parsed : [];
+  };
+
+  const runBatch = async (batch: typeof indexedQuestions): Promise<any[]> => {
+    const prompt = `Hãy phản biện, giải lại độc lập từ đầu và thẩm định chính xác từng câu trong ${batch.length} câu sau:
+${JSON.stringify(batch)}
+
+Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batch.length} phần tử, mỗi phần tử có cấu trúc:
+{
+  "questionId": "...",
+  "questionIndex": 0,
+  "status": "ok" | "wrong_answer" | "no_correct_option" | "ambiguous",
+  "reason": "Nhận xét ngắn gọn rõ ràng (nếu lỗi ghi rõ lỗi gì, đáp án cũ sai ở đâu).",
+  "reSolvedSteps": "Các bước giải độc lập chi tiết ra đáp số chuẩn bằng LaTeX $...$.",
+  "verifiedCorrectAnswer": "A",
+  "suggestedPatch": {
+    "question": "(chỉ cần nếu sửa đề, hoặc giữ nguyên)",
+    "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}],
+    "subStatements": [],
+    "shortAnswerKey": "...",
+    "correctAnswer": "A",
+    "explanation": "Lời giải chuẩn xác khớp hoàn toàn đáp án..."
+  }
+}`;
+
+    for (const model of PRIMARY_CLIENT_MODELS) {
+      try {
+        const res = await generateClientWithTimeout(
+          ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: buildSafeModelConfig(model, {
+              responseMimeType: 'application/json',
+              systemInstruction: critiqueSystemInstruction,
+              thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+            }),
+          }),
+          45000
+        );
+        const items = parseArr((res.text || '').trim());
+        if (items.length > 0) return items;
+      } catch (err: any) {
+        if (isFatalAuthError(err?.message || String(err))) throw err;
+      }
+    }
+    return [];
+  };
+
+  const batchResults = await Promise.all(
+    batches.map((b) =>
+      runBatch(b).catch((err) => {
+        if (isFatalAuthError(err?.message || String(err))) throw err;
+        return b.map((item) => ({
+          questionId: item.questionId,
+          questionIndex: item.questionIndex,
+          status: 'ok',
+          reason: 'Chưa phản biện được câu này do nghẽn mạng.',
+          reSolvedSteps: item.currentExplanation || '',
+          verifiedCorrectAnswer: item.currentCorrectAnswer,
+        }));
+      })
+    )
+  );
+
+  const flatRaw = batchResults.flat();
+  const byId = new Map<string, any>();
+  const byIdx = new Map<number, any>();
+  flatRaw.forEach((r: any) => {
+    if (r?.questionId) byId.set(String(r.questionId), r);
+    if (typeof r?.questionIndex === 'number') byIdx.set(r.questionIndex, r);
+  });
+
+  const validStatuses = new Set<CritiqueIssueType>(['ok', 'wrong_answer', 'no_correct_option', 'ambiguous']);
+
+  return indexedQuestions.map((orig): QuizCritiqueItem => {
+    const raw = byId.get(orig.questionId) || byIdx.get(orig.questionIndex) || {};
+    let status: CritiqueIssueType = validStatuses.has(raw.status) ? raw.status : 'ok';
+    const reSolvedSteps = normalizeMathInText(String(raw.reSolvedSteps || orig.currentExplanation || ''));
+    const reason = normalizeMathInText(
+      String(raw.reason || (status === 'ok' ? 'Đề rõ ràng và đáp án chính xác.' : 'Cần kiểm tra lại câu hỏi/đáp án.'))
+    );
+
+    let verifiedCorrectAnswer = String(raw.verifiedCorrectAnswer || orig.currentCorrectAnswer || 'A');
+    if (orig.partType === 'part_1_choice') {
+      verifiedCorrectAnswer = extractChoiceKey(verifiedCorrectAnswer);
+    } else if (orig.partType === 'part_3_short_answer') {
+      verifiedCorrectAnswer = normalizeMathInText(verifiedCorrectAnswer);
+    }
+
+    let suggestedPatch: QuizCritiqueItem['suggestedPatch'] = undefined;
+    if (status !== 'ok' && raw.suggestedPatch && typeof raw.suggestedPatch === 'object') {
+      const patch = { ...raw.suggestedPatch };
+      const cleanPatch: NonNullable<QuizCritiqueItem['suggestedPatch']> = {
+        explanation: normalizeMathInText(String(patch.explanation || reSolvedSteps || orig.currentExplanation)),
+        correctAnswer: String(patch.correctAnswer || verifiedCorrectAnswer),
+      };
+      if (typeof patch.question === 'string' && patch.question.trim()) {
+        cleanPatch.question = normalizeMathInText(patch.question.trim());
+      }
+      if (orig.partType === 'part_1_choice') {
+        const baseOpts = Array.isArray(patch.options) && patch.options.length >= 4 ? patch.options : orig.options;
+        if (Array.isArray(baseOpts) && baseOpts.length >= 4) {
+          cleanPatch.options = (['A', 'B', 'C', 'D'] as const).map((k, oIdx) => {
+            const found =
+              baseOpts.find((o: any) => String(o?.key || '').trim().toUpperCase().replace(/[\.\)]$/, '') === k) ||
+              baseOpts[oIdx];
+            const txt = typeof found === 'string' ? found : String(found?.text || `Phương án ${k}`);
+            return { key: k, text: normalizeMathInText(stripLeadingChoicePrefix(txt) || txt) };
+          });
+        }
+        cleanPatch.correctAnswer = extractChoiceKey(cleanPatch.correctAnswer || verifiedCorrectAnswer);
+        verifiedCorrectAnswer = cleanPatch.correctAnswer;
+      } else if (orig.partType === 'part_2_true_false') {
+        const baseSubs =
+          Array.isArray(patch.subStatements) && patch.subStatements.length > 0 ? patch.subStatements : orig.subStatements;
+        if (Array.isArray(baseSubs) && baseSubs.length > 0) {
+          cleanPatch.subStatements = baseSubs.map((s: any, sIdx: number) => {
+            const label = s.label || s.key || ['a', 'b', 'c', 'd'][sIdx] || `ý ${sIdx + 1}`;
+            const statement = normalizeMathInText(s.statement || s.text || '');
+            const correct = typeof s.correct === 'boolean' ? s.correct : Boolean(s.isCorrect);
+            return {
+              id: s.id || `sub_${orig.questionIndex}_${sIdx}`,
+              key: label,
+              label,
+              statement,
+              text: statement,
+              correct,
+              isCorrect: correct,
+            };
+          });
+          cleanPatch.correctAnswer = cleanPatch.subStatements.map((s) => `${s.label}:${s.correct ? 'Đ' : 'S'}`).join(', ');
+          verifiedCorrectAnswer = cleanPatch.correctAnswer;
+        }
+      } else if (orig.partType === 'part_3_short_answer') {
+        const shortVal = normalizeMathInText(String(patch.shortAnswerKey ?? patch.correctAnswer ?? verifiedCorrectAnswer));
+        cleanPatch.shortAnswerKey = shortVal;
+        cleanPatch.correctAnswer = shortVal;
+        verifiedCorrectAnswer = shortVal;
+      }
+
+      if (
+        status === 'wrong_answer' &&
+        orig.partType === 'part_1_choice' &&
+        cleanPatch.correctAnswer === extractChoiceKey(orig.currentCorrectAnswer) &&
+        !cleanPatch.question
+      ) {
+        status = 'ok';
+      } else {
+        suggestedPatch = cleanPatch;
+      }
+    } else if (status !== 'ok') {
+      suggestedPatch = {
+        correctAnswer: verifiedCorrectAnswer,
+        explanation: reSolvedSteps || orig.currentExplanation,
+      };
+    }
+
+    return {
+      questionId: orig.questionId,
+      questionIndex: orig.questionIndex,
+      status,
+      reason,
+      reSolvedSteps,
+      verifiedCorrectAnswer,
+      ...(suggestedPatch ? { suggestedPatch } : {}),
+    };
+  });
 }
 

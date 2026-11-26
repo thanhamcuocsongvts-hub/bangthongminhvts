@@ -2468,54 +2468,47 @@ function generateFullMatrixExamCurriculum(subject: string = "Toán học", grade
 
 // AI Generate Quiz from Document Content or Custom Topic
 app.post("/api/ai/generate-quiz", async (req, res) => {
-  const { content, topic, count = 5, subject = "Toán học", difficulty = "Thông hiểu", grade = "Lớp 12", scopeConstraint } = req.body;
+  const { content, topic, count = 5, subject = "Toán học", difficulty = "Thông hiểu", grade = "Lớp 12", scopeConstraint, apiKey: bodyApiKey = "" } = req.body;
+  const customApiKey =
+    (req.headers["x-gemini-api-key"] as string) ||
+    (typeof bodyApiKey === "string" ? bodyApiKey : "");
   const rawTopic = (topic || content || "Hàm số và đồ thị").trim();
   const targetTopic = rawTopic.replace(/^(?:Chủ\s*đề|Môn|Khối\s*lớp|Số\s*lượng\s*câu\s*hỏi|Mức\s*độ)[\:\s\-]+/gi, "").trim() || "Hàm số và đồ thị";
   const numQuestions = Math.min(Math.max(Number(count) || 5, 1), 20);
 
   try {
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(customApiKey);
 
     const scopeInstruction = scopeConstraint && scopeConstraint.trim()
       ? `\n- PHẠM VI KIẾN THỨC BẮT BUỘC THEO YÊU CẦU CỦA GIÁO VIÊN: "${scopeConstraint.trim()}". Toàn bộ các câu hỏi BẮT BUỘC phải nằm chính xác trong phạm vi này, tuyệt đối không hỏi lan man ngoài phạm vi!`
       : '';
 
-    const preAssignedTargets = buildBalancedChoiceTargetsServer(
-      numQuestions,
-      `${targetTopic}_${Date.now()}`
-    );
-    const targetSequenceHint = preAssignedTargets
-      .map((k, idx) => `Câu ${idx + 1}: ${k}`)
-      .join(', ');
-
     const prompt = `Bạn là chuyên gia biên soạn đề thi khảo thí trắc nghiệm hàng đầu Việt Nam theo bộ Sách giáo khoa Kết nối tri thức, Cánh Diều, Chân trời sáng tạo.
-Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm khách quan 4 lựa chọn (A, B, C, D) chất lượng cao, đúng 100% chuyên môn sư phạm:
+Hãy biên soạn đúng ${numQuestions} câu hỏi trắc nghiệm khách quan 4 lựa chọn (A, B, C, D) chất lượng cao, ĐỘ CHÍNH XÁC TOÁN/KHOA HỌC TUYỆT ĐỐI 100%:
 - Chủ đề / Trọng tâm bài học: "${targetTopic}"
 - Phân môn: ${subject}
 - Khối lớp: ${grade}
 - Mức độ tư duy: ${difficulty}${scopeInstruction}
 
-QUY TẮC BẮT BUỘC & CHUẨN HÓA KÝ HIỆU TOÁN HỌC SGK GDPT 2018:
-1. KHÔNG VIẾT CÂU HỎI CHUNG CHUNG như "Định nghĩa cốt lõi...", "Khi tìm hiểu về...". Phải đưa ra bài toán, hàm số, phương trình, công thức, hiện tượng khoa học hoặc câu hỏi thực tế cụ thể!
-2. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC DÙNG LATEX CHUẨN BỌC TRONG $ ... $ (Ví dụ: $y = x^3 - 3x^2 + 1$, $x \\in (0; 2)$, $\\overrightarrow{F} = m\\overrightarrow{a}$, $\\text{C}_2\\text{H}_5\\text{OH}$):
-   - Phân số dùng $\\\\frac{a}{b}$, căn thức $\\\\sqrt{x}$ / $\\\\sqrt[3]{x}$, mũ/chỉ số nhiều ký tự bọc ngoặc $x^{10}, e^{-x}, C_{12}^3, u_{n+1}$, tập hợp $\\\\mathbb{R} \\\\setminus \\\\{1\\\\}$, giới hạn $\\\\lim_{x \\to +\\\\infty}$, tích phân $\\\\int_{a}^{b} f(x)dx$, góc $\\\\widehat{ABC}$, $60^{\\\\circ}$.
-   - TUYỆT ĐỐI KHÔNG viết kiểu ASCII như frac(a,b), sqrt(x), (x+1)/(x-2), 2^(x+1), <=, >=, !=, oo, hay ký tự unicode ², ³, √.
-   - ĐẶC BIỆT KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng $\\\\overrightarrow{AB}$, $\\\\overrightarrow{BC}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{AA'}$, $\\\\overrightarrow{AC'}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (TUYỆT ĐỐI KHÔNG viết vec(AB), vec(a), i - 2j + 3k hay \\vec{AB}).
-   - Nếu phương án A, B, C, D chứa công thức, phân số, véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$ (ví dụ: "text": "$\\\\frac{2x+1}{x-1}$" hoặc "text": "$\\\\overrightarrow{a} = \\\\overrightarrow{i} - 2\\\\overrightarrow{j} + 3\\\\overrightarrow{k}$").
-3. Bốn phương án A, B, C, D phải rõ ràng, độc lập và có độ phân tán tốt. KHÔNG ghi tiền tố "A. ", "B. " vào trong trường "text".
-4. ĐÁP ÁN ĐÚNG PHÂN BỔ BẮT BUỘC THEO THỨ TỰ: [${targetSequenceHint}]. Xuất trường "correctAnswer" TRƯỚC trường "options" và đặt đúng phương án chuẩn vào vị trí chữ cái đã chỉ định cho từng câu; kèm "explanation" súc tích 1-2 câu nêu công thức/kết quả đúng (không viết cứng "Đáp án A đúng").
-5. "timeLimit" là số giây (từ 20 đến 60).
-6. TRONG CHUỖI JSON: MỌI DẤU GẠCH CHÉO LATEX BẮT BUỘC VIẾT THÀNH HAI DẤU GẠCH CHÉO \\\\ (ví dụ \\\\frac, \\\\sqrt, \\\\Delta) để JSON hợp lệ 100%!
-7. ĐẶC BIỆT KHI SOẠN BÀI TOÁN CÓ BẢNG BIẾN THIÊN, BẢNG XÉT DẤU HOẶC ĐỒ THỊ HÀM SỐ:
-   - Nếu câu hỏi có Bảng biến thiên: Thêm "diagramType": "variation_table" và "diagramData": { "title": "Bảng biến thiên của hàm số", "x": ["-\\infty", "-1", "1", "+\\infty"], "yPrime": ["+", "0", "-", "0", "+"], "yArrows": [{"start": "-\\infty", "end": "3", "dir": "up"}, {"start": "3", "end": "-1", "dir": "down"}, {"start": "-1", "end": "+\\infty", "dir": "up"}] }
-   - Nếu câu hỏi có Bảng xét dấu: Thêm "diagramType": "sign_table" và "diagramData": { "title": "Bảng xét dấu của đạo hàm f'(x)", "x": ["-\\infty", "0", "2", "+\\infty"], "rows": [{"label": "f'(x)", "signs": ["-", "0", "+", "0", "-"]}] }
-   - Nếu câu hỏi có Đồ thị: Thêm "diagramType": "function_graph" và "diagramData": { "title": "Đồ thị hàm số y = f(x)", "graphType": "cubic", "equation": "y = x^3 - 3x + 1", "latex": "y = x^3 - 3x + 1", "extrema": [{"x": -1, "y": 3}, {"x": 1, "y": -1}] }. Ứng dụng tích hợp thư viện Desmos API vẽ đồ thị tương tác pan/zoom trực tiếp từ công thức LaTeX này!
+QUY TẮC BẮT BUỘC VỀ ĐỘ CHÍNH XÁC & CHUẨN HÓA KÝ HIỆU (SGK GDPT 2018):
+1. QUY TRÌNH GIẢI TRƯỚC - XUẤT ĐÁP ÁN SAU (TUYỆT ĐỐI TUÂN THỦ THỨ TỰ TRƯỜNG JSON):
+   - Bước 1 ("question"): Viết đề bài rõ ràng, đầy đủ giả thiết, đơn trị, chỉ có đúng 1 cách hiểu và 1 đáp số duy nhất. KHÔNG viết câu hỏi chung chung như "Định nghĩa cốt lõi...".
+   - Bước 2 ("explanation"): TỰ GIẢI TỪNG BƯỚC TỪ ĐẦU, tính ra đáp số cuối cùng chính xác 100% (KHÔNG viết cứng chữ cái A/B/C/D trong lời giải).
+   - Bước 3 ("options"): Viết 4 phương án A, B, C, D độc lập, KHÔNG trùng nhau. BẮT BUỘC phải có ĐÚNG 1 phương án khớp 100% với đáp số vừa tính ở "explanation", 3 phương án nhiễu còn lại PHẢI khác giá trị đáp số đúng. KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
+   - Bước 4 ("correctAnswer"): Xuất SAU CÙNG, ghi đúng 1 chữ cái ("A", "B", "C" hoặc "D") tương ứng chính xác tuyệt đối với phương án đúng trong "options"! (Hệ thống sẽ tự động đảo trộn đều A/B/C/D sau khi xuất xong).
+2. MỌI KÝ HIỆU TOÁN HỌC, VẬT LÝ, HÓA HỌC BẮT BUỘC DÙNG LATEX CHUẨN BỌC TRONG $ ... $:
+   - Phân số dùng $\\\\frac{a}{b}$, căn thức $\\\\sqrt{x}$ / $\\\\sqrt[3]{x}$, mũ/chỉ số bọc ngoặc $x^{10}, e^{-x}, C_{12}^3, u_{n+1}$, tập hợp $\\\\mathbb{R} \\\\setminus \\\\{1\\\\}$, giới hạn $\\\\lim_{x \\to +\\\\infty}$, tích phân $\\\\int_{a}^{b} f(x)dx$, góc $\\\\widehat{ABC}$, $60^{\\\\circ}$.
+   - TUYỆT ĐỐI KHÔNG viết ASCII như frac(a,b), sqrt(x), (x+1)/(x-2), 2^(x+1), <=, >=, !=, oo, hay ký tự unicode ², ³, √.
+   - KÝ HIỆU VÉC-TƠ: BẮT BUỘC dùng $\\\\overrightarrow{AB}$, $\\\\overrightarrow{BC}$, $\\\\overrightarrow{a}$, $\\\\overrightarrow{i}$, $\\\\overrightarrow{j}$, $\\\\overrightarrow{k}$ (KHÔNG viết vec(AB), vec(a), hay \\vec{AB}).
+   - Nếu phương án A, B, C, D chứa công thức, phân số, véc-tơ hay đẳng thức, BẮT BUỘC bọc trong $...$.
+3. "timeLimit" là số giây (từ 20 đến 60).
+4. TRONG CHUỖI JSON: MỌI DẤU GẠCH CHÉO LATEX BẮT BUỘC VIẾT THÀNH HAI DẤU GẠCH CHÉO \\\\ (ví dụ \\\\frac, \\\\sqrt, \\\\Delta).
+5. ĐẶC BIỆT KHI SOẠN BẢNG BIẾN THIÊN / BẢNG XÉT DẤU / ĐỒ THỊ: gắn thêm diagramType + diagramData chuẩn JSON.
 
-Trả về định dạng JSON array hợp lệ:
+Trả về định dạng JSON array hợp lệ theo ĐÚNG thứ tự trường (question -> explanation -> options -> correctAnswer):
 [
   {
     "id": "q1",
-    "correctAnswer": "${preAssignedTargets[0] || "B"}",
     "question": "Cho hàm số $y = f(x)$ có bảng biến thiên như hình bên dưới. Hàm số đã cho đồng biến trên khoảng nào?",
     "diagramType": "variation_table",
     "diagramData": {
@@ -2528,13 +2521,14 @@ Trả về định dạng JSON array hợp lệ:
         { "start": "-2", "end": "+\\infty", "dir": "up" }
       ]
     },
+    "explanation": "Từ bảng biến thiên, ta thấy $y' > 0$ trên $(-\\infty; -1)$ và $(1; +\\infty)$, do đó hàm số đồng biến trên khoảng $(-\\infty; -1)$.",
     "options": [
       { "key": "A", "text": "$(-1; 1)$" },
       { "key": "B", "text": "$(-\\infty; -1)$" },
       { "key": "C", "text": "$(-1; 2)$" },
       { "key": "D", "text": "$(0; 1)$" }
     ],
-    "explanation": "Từ bảng biến thiên, ta thấy $y' > 0$ trên $(-\\infty; -1)$ và $(1; +\\infty)$, do đó hàm số đồng biến trên khoảng $(-\\infty; -1)$.",
+    "correctAnswer": "B",
     "timeLimit": 35,
     "difficulty": "${difficulty}"
   }
@@ -2542,11 +2536,12 @@ Trả về định dạng JSON array hợp lệ:
 
     const response = await generateWithGemini(ai, {
       contents: prompt,
-      timeoutMs: 28000,
+      timeoutMs: 32000,
       maxAttempts: 2,
       config: {
         responseMimeType: "application/json",
-        systemInstruction: "Bạn là chuyên gia khảo thí ra đề trắc nghiệm chuẩn Bộ GD&ĐT Việt Nam. Luôn xuất đúng JSON array với câu hỏi cụ thể, tính toán chính xác, đặt correctAnswer đúng chữ cái được giao, công thức KaTeX đẹp, dùng double backslash \\\\ trong JSON.",
+        systemInstruction: "Bạn là chuyên gia khảo thí ra đề trắc nghiệm chuẩn Bộ GD&ĐT Việt Nam. Luôn giải toán từng bước trước rồi mới đặt options và correctAnswer khớp tuyệt đối với kết quả vừa tính, công thức KaTeX đẹp, dùng double backslash \\\\ trong JSON.",
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
       },
     });
 
@@ -3167,17 +3162,7 @@ Quy tắc:
       }
     }
 
-    // Gán trước chuỗi đáp án cân bằng A/B/C/D cho toàn bộ câu Phần I trước khi chia batch song song
-    const part1Slots = slots.filter((s) => s.partType === "part_1_choice");
-    const balancedTargets = buildBalancedChoiceTargetsServer(
-      part1Slots.length,
-      `${userPrompt || matrixFile?.fileName || resolvedGrade}_${Date.now()}`
-    );
-    part1Slots.forEach((s, idx) => {
-      s.targetKey = balancedTargets[idx];
-    });
-
-    // Chia nhỏ thành các batch tối đa 6 câu chạy SONG SONG (Promise.all) để giảm từ ~50s xuống ~6-10s
+    // Chia nhỏ thành các batch tối đa 6 câu chạy SONG SONG (Promise.all) để vừa nhanh vừa giải chính xác từng câu
     const BATCH_SIZE = slots.length <= 8 ? slots.length : 6;
     const batches: MatrixSlot[][] = [];
     for (let i = 0; i < slots.length; i += BATCH_SIZE) {
@@ -3189,12 +3174,14 @@ Quy tắc:
       : "";
 
     const batchSystemInstruction = `Bạn là Chuyên gia Khảo thí & Toán/Khoa học chuẩn GDPT 2018 (${resolvedSubject} - ${resolvedGrade}).
-QUY TẮC BẮT BUỘC:
-1. TÍNH TOÁN CHÍNH XÁC 100% trước khi xuất JSON. Không ra câu vô nghiệm/sai số liệu.
-2. VỚI CÂU PHẦN I (part_1_choice): Xuất trường "correctAnswer" TRƯỚC trường "options". Đặt ĐÚNG đáp án chính xác vào đúng chữ cái "targetKey" đã chỉ định cho mỗi câu (tuyệt đối không tự ý chuyển về A); 3 phương án còn lại là nhiễu hợp lý gần giống kết quả thật. KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
-3. VỚI CÂU PHẦN II (part_2_true_false): Đủ 4 ý a, b, c, d với tỷ lệ Đúng/Sai đa dạng tự nhiên (không phải câu nào cũng toàn Đúng).
-4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.
-5. "explanation" súc tích 1-2 câu nêu rõ công thức & phép tính ra đáp số (KHÔNG viết cứng "Chọn đáp án A" hay tên chữ cái đáp án).
+QUY TẮC TỐI THƯỢNG VỀ ĐỘ CHÍNH XÁC:
+1. GIẢI TRƯỚC - ĐẶT ĐÁP ÁN SAU (BẮT BUỘC ĐÚNG THỨ TỰ TRƯỜNG JSON):
+   - Với Phần I (part_1_choice): Xuất "question" -> "explanation" (tự giải từng bước, tính ra đáp số cuối cùng chính xác 100%, KHÔNG ghi cứng "chọn A/B/C/D") -> "options" (4 phương án A, B, C, D phân biệt rõ, KHÔNG trùng nhau, có ĐÚNG 1 phương án khớp 100% đáp số vừa giải) -> "correctAnswer" (xuất SAU CÙNG, đúng 1 chữ cái A/B/C/D khớp với phương án đúng trong options; hệ thống sẽ tự đảo đều A/B/C/D sau).
+   - TUYỆT ĐỐI KHÔNG xuất sai lệch giữa kết quả giải trong "explanation", nội dung "options" và chữ cái "correctAnswer".
+2. ĐỀ BÀI RÕ RÀNG & ĐẦY ĐỦ GIẢ THIẾT: Không thiếu điều kiện, không mập mờ, không có câu vô nghiệm hoặc có >1 đáp án đúng. KHÔNG ghi tiền tố "A. ", "B. " vào trong "text".
+3. VỚI CÂU PHẦN II (part_2_true_false): Giải kiểm chứng từng mệnh đề a, b, c, d trước rồi mới gán "correct": true/false chuẩn xác; đặt "correctAnswer" khớp 100% dạng "a:Đ, b:S, ...".
+4. VỚI CÂU PHẦN III (part_3_short_answer): Tự giải cẩn thận, "shortAnswerKey" và "correctAnswer" phải khớp 100% cùng một đáp số duy nhất.
+5. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.
 6. Nếu có bảng biến thiên/đồ thị/bảng số liệu: gắn thêm diagramType + diagramData chuẩn JSON.`;
 
     const runSingleBatch = async (batchSlots: MatrixSlot[], batchIdx: number): Promise<any[]> => {
@@ -3202,7 +3189,7 @@ QUY TẮC BẮT BUỘC:
         .map((s) => {
           const typeLabel =
             s.partType === "part_1_choice"
-              ? `Phần I (part_1_choice) | Đáp án đúng BẮT BUỘC: "${s.targetKey || "B"}"`
+              ? `Phần I Trắc nghiệm 4 lựa chọn (part_1_choice)`
               : s.partType === "part_2_true_false"
                 ? `Phần II Đúng/Sai (part_2_true_false, đủ 4 ý a,b,c,d)`
                 : s.partType === "part_3_short_answer"
@@ -3221,11 +3208,11 @@ QUY TẮC BẮT BUỘC:
 ${slotSpecs}
 ${userPrompt ? `Yêu cầu chung của giáo viên: "${userPrompt}"` : ""}${compactFileContext}
 
-Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} phần tử theo đúng thứ tự:
-- Phần I: { "slotNumber": 1, "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "correctAnswer": "C", "question": "...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "explanation": "...", "difficulty": "Nhận biết", "timeLimit": ${timeLimit} }
-- Phần II: { "slotNumber": 13, "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "explanation": "...", "difficulty": "Thông hiểu", "timeLimit": 60 }
-- Phần III: { "slotNumber": 17, "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "explanation": "...", "difficulty": "Vận dụng", "timeLimit": 45 }
-- Phần IV: { "slotNumber": 23, "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "essayRubric": "...", "correctAnswer": "Đáp số", "options": [], "explanation": "...", "difficulty": "Vận dụng", "timeLimit": 120 }`,
+Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} phần tử theo đúng thứ tự (lưu ý viết "question" -> "explanation" -> "options"/"subStatements" -> "correctAnswer" SAU CÙNG để tự kiểm chứng đáp án chính xác 100%):
+- Phần I: { "slotNumber": 1, "partType": "part_1_choice", "partLabel": "Phần I. Câu trắc nghiệm nhiều phương án lựa chọn", "question": "...", "explanation": "Giải từng bước chi tiết ra đáp số...", "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}], "correctAnswer": "B", "difficulty": "Nhận biết", "timeLimit": ${timeLimit} }
+- Phần II: { "slotNumber": 13, "partType": "part_2_true_false", "partLabel": "Phần II. Câu trắc nghiệm Đúng / Sai", "question": "...", "explanation": "Chứng minh từng ý a,b,c,d...", "subStatements": [{"label":"a","statement":"...","correct":true},{"label":"b","statement":"...","correct":false},{"label":"c","statement":"...","correct":true},{"label":"d","statement":"...","correct":false}], "correctAnswer": "a:Đ, b:S, c:Đ, d:S", "options": [], "difficulty": "Thông hiểu", "timeLimit": 60 }
+- Phần III: { "slotNumber": 17, "partType": "part_3_short_answer", "partLabel": "Phần III. Câu trắc nghiệm trả lời ngắn", "question": "...", "explanation": "Giải chi tiết từng bước ra đáp số...", "shortAnswerKey": "2,5", "correctAnswer": "2,5", "options": [], "difficulty": "Vận dụng", "timeLimit": 45 }
+- Phần IV: { "slotNumber": 23, "partType": "part_4_essay", "partLabel": "Phần IV. Tự luận", "question": "...", "explanation": "Lời giải chi tiết...", "essayRubric": "...", "correctAnswer": "Đáp số", "options": [], "difficulty": "Vận dụng", "timeLimit": 120 }`,
       });
 
       const parseBatchResponse = (rawText: string): any[] => {
@@ -3242,12 +3229,12 @@ Chỉ trả về mảng JSON thuần túy gồm đúng ${batchSlots.length} ph�
       try {
         const resBatch = await generateWithGemini(ai, {
           contents: [{ role: "user", parts: batchParts }],
-          timeoutMs: 28000,
+          timeoutMs: 36000,
           maxAttempts: 1,
           config: {
             responseMimeType: "application/json",
             systemInstruction: batchSystemInstruction,
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
           },
         });
         const items = parseBatchResponse((resBatch.text || "").trim());
@@ -3448,17 +3435,16 @@ Hãy tạo thêm đúng ${extraCount} MÃ ĐỀ TƯƠNG ĐƯƠNG (cùng chuyên 
 
 QUY TẮC BẮT BUỘC:
 1. Mỗi mã đề phải giữ nguyên đủ ${compactSource.length} câu theo đúng thứ tự partType tương ứng đề gốc.
-2. Tính toán lại chính xác 100% đáp án đúng và lời giải chi tiết cho số liệu mới.
-3. Với câu Phần I (part_1_choice), phân bổ ĐỀU đáp án đúng qua cả A, B, C, D (tuyệt đối không dồn vào A).
-4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.
-5. Trả về đúng JSON object: { "variants": [ { "questions": [...] }, ... ] } gồm đúng ${extraCount} phần tử trong mảng "variants".`;
+2. GIẢI TỪNG BƯỚC ĐỘC LẬP trước rồi mới xuất "options" và đặt "correctAnswer" SAU CÙNG khớp 100% với đáp án đúng vừa tính (tuyệt đối không lệch đáp án so với lời giải). Hệ thống sẽ tự trộn đều A/B/C/D sau.
+3. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.
+4. Trả về đúng JSON object: { "variants": [ { "questions": [...] }, ... ] } gồm đúng ${extraCount} phần tử trong mảng "variants".`;
 
     const response = await generateWithGemini(ai, {
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        systemInstruction: "Bạn là chuyên gia tạo các mã đề thi tương đương chuẩn GDPT 2018. Luôn xuất đúng JSON object với công thức chuẩn KaTeX và đáp án cân bằng A/B/C/D.",
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: "Bạn là chuyên gia tạo các mã đề thi tương đương chuẩn GDPT 2018. Luôn giải chính xác từng câu trước khi xuất options và correctAnswer, công thức chuẩn KaTeX.",
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
       },
       timeoutMs: 75000,
     });
@@ -3500,6 +3486,232 @@ QUY TẮC BẮT BUỘC:
     success: false,
     error: "AI tạm thời chưa tạo được đề tương tự mới.",
   });
+});
+
+// AI Independent Reflection & Critique: Re-solves every question from scratch to catch wrong answers, missing options, or ambiguous wording
+app.post("/api/ai/critique-quiz", async (req, res) => {
+  const {
+    questions = [],
+    subject = "Toán học",
+    grade = "Lớp 12",
+    apiKey: bodyApiKey = "",
+  } = req.body || {};
+
+  if (!Array.isArray(questions) || questions.length === 0) {
+    return res.status(400).json({ success: false, error: "Danh sách câu hỏi đang trống." });
+  }
+
+  const customApiKey =
+    (req.headers["x-gemini-api-key"] as string) ||
+    (typeof bodyApiKey === "string" ? bodyApiKey : "");
+
+  try {
+    const ai = getGeminiClient(customApiKey);
+    const BATCH_SIZE = 5;
+    const indexedQuestions = questions.slice(0, 50).map((q: any, idx: number) => ({
+      questionIndex: idx,
+      questionId: String(q?.id || `q_${idx + 1}`),
+      partType: inferServerPartType(q),
+      question: String(q?.question || ""),
+      options: Array.isArray(q?.options) ? q.options : [],
+      subStatements: Array.isArray(q?.subStatements) ? q.subStatements : undefined,
+      shortAnswerKey: q?.shortAnswerKey,
+      currentCorrectAnswer: String(q?.correctAnswer || ""),
+      currentExplanation: String(q?.explanation || ""),
+    }));
+
+    const batches: Array<typeof indexedQuestions> = [];
+    for (let i = 0; i < indexedQuestions.length; i += BATCH_SIZE) {
+      batches.push(indexedQuestions.slice(i, i + BATCH_SIZE));
+    }
+
+    const critiqueSystemInstruction = `Bạn là CHỦ TỊCH HỘI ĐỒNG PHẢN BIỆN & THẨM ĐỊNH ĐỀ THI ĐỘC LẬP (${subject} - ${grade}, chuẩn GDPT 2018).
+NHIỆM VỤ TỐI THƯỢNG: Đọc và TỰ GIẢI LẠI TỪNG CÂU HỎI TỪ CON SỐ 0. TUYỆT ĐỐI KHÔNG TIN TƯỞNG MÙ QUÁNG "currentCorrectAnswer" HAY "currentExplanation".
+
+QUY TRÌNH THẨM ĐỊNH TỪNG CÂU:
+1. Kiểm tra đề bài ("question"): Có thiếu giả thiết/điều kiện, sai số liệu, mập mờ câu chữ hoặc có thể hiểu nhiều nghĩa không?
+2. Tự giải độc lập từng bước từ đầu ("reSolvedSteps"), tính ra đáp số chuẩn xác 100%.
+3. Phân loại "status" CHÍNH XÁC vào 1 trong 4 giá trị:
+   - "ok": Đề bài rõ ràng, chặt chẽ; có đúng 1 đáp án duy nhất khớp với kết quả tự giải; và "currentCorrectAnswer" ĐÃ ĐÚNG 100% (với Phần II thì cả 4 ý a,b,c,d đều đúng chân trị).
+   - "wrong_answer": Đề bài rõ ràng, phương án đúng ĐÃ NẰM TRONG 4 phương án A/B/C/D, NHƯNG "currentCorrectAnswer" đang chấm NHẦM chữ cái khác (ví dụ giải ra A nhưng ứng dụng lưu B), HOẶC ý Đúng/Sai Phần II / đáp số Phần III đang gắn sai. Khi đó: giữ nguyên đề & options nếu đã chuẩn, chỉ trả về "suggestedPatch" sửa lại đúng "correctAnswer" (hoặc "subStatements"/"shortAnswerKey") và "explanation".
+   - "no_correct_option": Kết quả tự giải KHÔNG xuất hiện trong 4 phương án A/B/C/D, HOẶC có >= 2 phương án đúng/trùng lặp giá trị. Khi đó: trả về "suggestedPatch" cung cấp đủ 4 phương án "options" A, B, C, D phân biệt với đúng 1 đáp án đúng, kèm "correctAnswer" và "explanation".
+   - "ambiguous": Đề bài chưa rõ ràng, thiếu dữ kiện, sai công thức/số liệu dẫn tới vô nghiệm hoặc không xác định được đáp án duy nhất. Khi đó: trả về "suggestedPatch" viết lại "question" rõ ràng chặt chẽ (và sửa luôn "options"/"subStatements"/"shortAnswerKey", "correctAnswer", "explanation" tương ứng).
+4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA TRONG "reSolvedSteps", "reason", "suggestedPatch" DÙNG LATEX CHUẨN BỌC TRONG $...$ (escape \\\\ trong JSON, véctơ dùng \\\\overrightarrow{AB}, phân số \\\\frac{a}{b}). KHÔNG viết "A. ", "B. " vào "options[].text".
+5. Nếu "status" !== "ok", BẮT BUỘC phải có "suggestedPatch" đầy đủ và đã được kiểm tra khớp 100% giữa kết quả giải và "correctAnswer"!`;
+
+    const runCritiqueBatch = async (batch: typeof indexedQuestions): Promise<any[]> => {
+      const prompt = `Hãy phản biện, giải lại độc lập từ đầu và thẩm định chính xác từng câu trong ${batch.length} câu sau:
+${JSON.stringify(batch)}
+
+Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batch.length} phần tử, mỗi phần tử có cấu trúc:
+{
+  "questionId": "...",
+  "questionIndex": 0,
+  "status": "ok" | "wrong_answer" | "no_correct_option" | "ambiguous",
+  "reason": "Nhận xét ngắn gọn rõ ràng (nếu lỗi ghi rõ lỗi gì, đáp án cũ sai ở đâu).",
+  "reSolvedSteps": "Các bước giải độc lập chi tiết ra đáp số chuẩn bằng LaTeX $...$.",
+  "verifiedCorrectAnswer": "A",
+  "suggestedPatch": {
+    "question": "(chỉ cần nếu sửa đề, hoặc giữ nguyên)",
+    "options": [{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}],
+    "subStatements": [],
+    "shortAnswerKey": "...",
+    "correctAnswer": "A",
+    "explanation": "Lời giải chuẩn xác khớp hoàn toàn đáp án..."
+  }
+}
+(Lưu ý: nếu status là "ok" có thể bỏ qua suggestedPatch hoặc để null; nếu status !== "ok" BẮT BUỘC có suggestedPatch hợp lệ).`;
+
+      const parseArr = (raw: string): any[] => {
+        let parsed = safeParseJsonWithLatex(raw);
+        if (!parsed) {
+          try { parsed = JSON.parse(raw); } catch (_) {}
+        }
+        if (parsed && !Array.isArray(parsed) && Array.isArray((parsed as any).items)) {
+          parsed = (parsed as any).items;
+        }
+        if (parsed && !Array.isArray(parsed) && Array.isArray((parsed as any).results)) {
+          parsed = (parsed as any).results;
+        }
+        return Array.isArray(parsed) ? parsed : [];
+      };
+
+      const resBatch = await generateWithGemini(ai, {
+        contents: prompt,
+        timeoutMs: 45000,
+        maxAttempts: 2,
+        config: {
+          responseMimeType: "application/json",
+          systemInstruction: critiqueSystemInstruction,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        },
+      });
+      return parseArr((resBatch.text || "").trim());
+    };
+
+    const batchResults = await Promise.all(
+      batches.map((b) =>
+        runCritiqueBatch(b).catch((err) => {
+          console.warn("[Critique Quiz Batch] Error:", err?.message || err);
+          return b.map((item) => ({
+            questionId: item.questionId,
+            questionIndex: item.questionIndex,
+            status: "ok",
+            reason: "Chưa phản biện được câu này do nghẽn mạng.",
+            reSolvedSteps: item.currentExplanation || "",
+            verifiedCorrectAnswer: item.currentCorrectAnswer,
+          }));
+        })
+      )
+    );
+
+    const flatRaw = batchResults.flat();
+    const byId = new Map<string, any>();
+    const byIdx = new Map<number, any>();
+    flatRaw.forEach((r: any) => {
+      if (r?.questionId) byId.set(String(r.questionId), r);
+      if (typeof r?.questionIndex === "number") byIdx.set(r.questionIndex, r);
+    });
+
+    const sanitizedCritiques = indexedQuestions.map((orig) => {
+      const raw = byId.get(orig.questionId) || byIdx.get(orig.questionIndex) || {};
+      const validStatuses = new Set(["ok", "wrong_answer", "no_correct_option", "ambiguous"]);
+      let status = validStatuses.has(raw.status) ? raw.status : "ok";
+      const reSolvedSteps = normalizeMathInText(String(raw.reSolvedSteps || orig.currentExplanation || ""));
+      const reason = normalizeMathInText(String(raw.reason || (status === "ok" ? "Đề rõ ràng và đáp án chính xác." : "Cần kiểm tra lại câu hỏi/đáp án.")));
+
+      let verifiedCorrectAnswer = String(raw.verifiedCorrectAnswer || orig.currentCorrectAnswer || "A");
+      if (orig.partType === "part_1_choice") {
+        verifiedCorrectAnswer = extractServerChoiceKey(verifiedCorrectAnswer);
+      } else if (orig.partType === "part_3_short_answer") {
+        verifiedCorrectAnswer = normalizeMathInText(verifiedCorrectAnswer);
+      }
+
+      let suggestedPatch: any = undefined;
+      if (status !== "ok" && raw.suggestedPatch && typeof raw.suggestedPatch === "object") {
+        const patch = { ...raw.suggestedPatch };
+        const cleanPatch: any = {
+          explanation: normalizeMathInText(String(patch.explanation || reSolvedSteps || orig.currentExplanation)),
+          correctAnswer: String(patch.correctAnswer || verifiedCorrectAnswer),
+        };
+        if (typeof patch.question === "string" && patch.question.trim()) {
+          cleanPatch.question = normalizeMathInText(patch.question.trim());
+        }
+        if (orig.partType === "part_1_choice") {
+          const baseOpts = Array.isArray(patch.options) && patch.options.length >= 4 ? patch.options : orig.options;
+          if (Array.isArray(baseOpts) && baseOpts.length >= 4) {
+            cleanPatch.options = ["A", "B", "C", "D"].map((k, oIdx) => {
+              const found = baseOpts.find((o: any) => String(o?.key || "").trim().toUpperCase().replace(/[\.\)]$/, "") === k) || baseOpts[oIdx];
+              const txt = typeof found === "string" ? found : String(found?.text || `Phương án ${k}`);
+              return { key: k, text: normalizeMathInText(stripChoicePrefixServer(txt) || txt) };
+            });
+          }
+          cleanPatch.correctAnswer = extractServerChoiceKey(cleanPatch.correctAnswer || verifiedCorrectAnswer);
+          verifiedCorrectAnswer = cleanPatch.correctAnswer;
+        } else if (orig.partType === "part_2_true_false") {
+          const baseSubs = Array.isArray(patch.subStatements) && patch.subStatements.length > 0 ? patch.subStatements : orig.subStatements;
+          if (Array.isArray(baseSubs) && baseSubs.length > 0) {
+            cleanPatch.subStatements = baseSubs.map((s: any, sIdx: number) => {
+              const label = s.label || s.key || ["a", "b", "c", "d"][sIdx] || `ý ${sIdx + 1}`;
+              const statement = normalizeMathInText(s.statement || s.text || "");
+              const correct = typeof s.correct === "boolean" ? s.correct : Boolean(s.isCorrect);
+              return { id: s.id || `sub_${orig.questionIndex}_${sIdx}`, key: label, label, statement, text: statement, correct, isCorrect: correct };
+            });
+            cleanPatch.correctAnswer = cleanPatch.subStatements.map((s: any) => `${s.label}:${s.correct ? "Đ" : "S"}`).join(", ");
+            verifiedCorrectAnswer = cleanPatch.correctAnswer;
+          }
+        } else if (orig.partType === "part_3_short_answer") {
+          const shortVal = normalizeMathInText(String(patch.shortAnswerKey ?? patch.correctAnswer ?? verifiedCorrectAnswer));
+          cleanPatch.shortAnswerKey = shortVal;
+          cleanPatch.correctAnswer = shortVal;
+          verifiedCorrectAnswer = shortVal;
+        }
+
+        // Guard against false-positive wrong_answer if letter & text weren't actually changed
+        if (
+          status === "wrong_answer" &&
+          orig.partType === "part_1_choice" &&
+          cleanPatch.correctAnswer === extractServerChoiceKey(orig.currentCorrectAnswer) &&
+          !cleanPatch.question
+        ) {
+          status = "ok";
+        } else {
+          suggestedPatch = cleanPatch;
+        }
+      } else if (status !== "ok") {
+        // Build fallback patch if model omitted suggestedPatch object
+        suggestedPatch = {
+          correctAnswer: verifiedCorrectAnswer,
+          explanation: reSolvedSteps || orig.currentExplanation,
+        };
+      }
+
+      return {
+        questionId: orig.questionId,
+        questionIndex: orig.questionIndex,
+        status,
+        reason,
+        reSolvedSteps,
+        verifiedCorrectAnswer,
+        ...(suggestedPatch ? { suggestedPatch } : {}),
+      };
+    });
+
+    return res.json({ success: true, items: sanitizedCritiques });
+  } catch (error: any) {
+    const errMsg = error?.message || String(error);
+    console.error("[Critique Quiz] Error:", errMsg);
+    const isAuthErr =
+      errMsg.includes("API_KEY_INVALID") ||
+      errMsg.includes("PERMISSION_DENIED") ||
+      errMsg.includes("API key should be set");
+    return res.status(isAuthErr ? 403 : 502).json({
+      success: false,
+      error: isAuthErr
+        ? "Chưa cấu hình hoặc sai Gemini API Key."
+        : `Không thể phản biện đề lúc này (${errMsg.slice(0, 120)}).`,
+    });
+  }
 });
 
 // AI On-Demand Specific Extraction (Formulas, Exercises, Definitions, Summary, or Custom Query)
