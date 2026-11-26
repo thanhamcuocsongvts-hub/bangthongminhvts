@@ -69,6 +69,205 @@ export function stripLeadingChoicePrefix(text: string): string {
   return String(text || '').replace(/^\s*[A-D]\s*[\.\)\:]\s+(?=\S)/, '').trim();
 }
 
+/**
+ * Safely evaluates simple arithmetic / LaTeX numeric expressions (fractions, radicals, pi, e)
+ * without using eval/Function.
+ */
+export function tryEvaluateSimpleMathNumber(rawExpr: string): number | null {
+  let expr = String(rawExpr || '').trim();
+  if (!expr) return null;
+  expr = expr
+    .replace(/^\$\$|\$\$$/g, '')
+    .replace(/^\$|\$$/g, '')
+    .replace(/^\\\(|\\\)$/g, '')
+    .replace(/^\\\[|\\\]$/g, '')
+    .replace(/\\text\s*\{[^}]*\}/g, '')
+    .replace(/\\mathrm\s*\{[^}]*\}/g, '')
+    .replace(/\\(?:left|right)\s*/g, '')
+    .replace(/\\(?:d|t|c)?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '(($1)/($2))')
+    .replace(/\\(?:d|t|c)?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '(($1)/($2))')
+    .replace(/\\sqrt\s*\{([^{}]+)\}/g, 'sqrt($1)')
+    .replace(/√\s*\(([^()]+)\)/g, 'sqrt($1)')
+    .replace(/√\s*(\d+(?:[.,]\d+)?)/g, 'sqrt($1)')
+    .replace(/\\(?:cdot|times)/g, '*')
+    .replace(/[×·]/g, '*')
+    .replace(/\\div|÷|:/g, '/')
+    .replace(/\\pi\b|π/g, 'pi')
+    .replace(/,/g, '.')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, '');
+
+  if (!expr || expr.length > 80) return null;
+
+  let pos = 0;
+  const peek = () => expr[pos] || '';
+
+  const parseNumberOrIdent = (): number | null => {
+    if (expr.startsWith('sqrt(', pos)) {
+      pos += 5;
+      const inner = parseExpr();
+      if (inner === null || expr[pos] !== ')' || inner < 0) return null;
+      pos++;
+      return Math.sqrt(inner);
+    }
+    if (expr.startsWith('pi', pos)) {
+      pos += 2;
+      return Math.PI;
+    }
+    if (peek() === 'e' && (pos + 1 >= expr.length || !/[a-zA-Z]/.test(expr[pos + 1]))) {
+      pos += 1;
+      return Math.E;
+    }
+    const m = expr.slice(pos).match(/^\d+(?:\.\d+)?/);
+    if (!m) return null;
+    pos += m[0].length;
+    return Number(m[0]);
+  };
+
+  const parsePrimary = (): number | null => {
+    if (peek() === '(') {
+      pos++;
+      const val = parseExpr();
+      if (val === null || expr[pos] !== ')') return null;
+      pos++;
+      return val;
+    }
+    return parseNumberOrIdent();
+  };
+
+  const parseUnary = (): number | null => {
+    if (peek() === '+') {
+      pos++;
+      return parseUnary();
+    }
+    if (peek() === '-') {
+      pos++;
+      const v = parseUnary();
+      return v === null ? null : -v;
+    }
+    return parsePrimary();
+  };
+
+  const parseTerm = (): number | null => {
+    let left = parseUnary();
+    if (left === null) return null;
+    while (pos < expr.length) {
+      const ch = peek();
+      if (ch === '*' || ch === '/') {
+        pos++;
+        const right = parseUnary();
+        if (right === null) return null;
+        if (ch === '/') {
+          if (Math.abs(right) < 1e-12) return null;
+          left /= right;
+        } else {
+          left *= right;
+        }
+      } else if (ch === '(' || expr.startsWith('sqrt(', pos) || expr.startsWith('pi', pos)) {
+        const right = parseUnary();
+        if (right === null) return null;
+        left *= right;
+      } else {
+        break;
+      }
+    }
+    return left;
+  };
+
+  const parseExpr = (): number | null => {
+    let left = parseTerm();
+    if (left === null) return null;
+    while (pos < expr.length) {
+      const ch = peek();
+      if (ch === '+' || ch === '-') {
+        pos++;
+        const right = parseTerm();
+        if (right === null) return null;
+        left = ch === '+' ? left + right : left - right;
+      } else {
+        break;
+      }
+    }
+    return left;
+  };
+
+  const result = parseExpr();
+  if (result === null || pos !== expr.length || !Number.isFinite(result)) return null;
+  return result;
+}
+
+export function formatPlainShortAnswerKey(
+  raw: string,
+  questionText?: string
+): { key: string; roundedWithDecimals?: number } {
+  let s = String(raw || '').trim();
+  if (!s) return { key: '' };
+
+  s = s
+    .replace(/^\$\$|\$\$$/g, '')
+    .replace(/^\$|\$$/g, '')
+    .replace(/^\\\(|\\\)$/g, '')
+    .replace(/^\\\[|\\\]$/g, '')
+    .replace(/\\text\s*\{([^}]*)\}/g, '$1')
+    .replace(/\\mathrm\s*\{([^}]*)\}/g, '$1')
+    .trim();
+
+  if (/^[+-]?\d+(?:[.,]\d+)?$/.test(s)) {
+    return { key: s.replace('.', ',') };
+  }
+
+  const qLower = String(questionText || '').toLowerCase();
+  const hasExplicitRounding = /làm\s*tròn|hàng\s*phần|chữ\s*số\s*thập\s*phân|hàng\s*đơn\s*vị/.test(qLower);
+  let decimals = 2;
+  if (/hàng\s*phần\s*nghìn|3\s*chữ\s*số\s*thập\s*phân|0[.,]001/.test(qLower)) decimals = 3;
+  else if (/hàng\s*phần\s*trăm|2\s*chữ\s*số\s*thập\s*phân|0[.,]01/.test(qLower)) decimals = 2;
+  else if (/hàng\s*phần\s*mười|1\s*chữ\s*số\s*thập\s*phân|0[.,]1/.test(qLower)) decimals = 1;
+  else if (/hàng\s*đơn\s*vị|số\s*nguyên\s*gần\s*nhất/.test(qLower)) decimals = 0;
+
+  const numeric = tryEvaluateSimpleMathNumber(s);
+  if (numeric !== null && Number.isFinite(numeric)) {
+    if (Math.abs(numeric - Math.round(numeric)) < 1e-9) {
+      return { key: String(Math.round(numeric) || 0) };
+    }
+    if (!hasExplicitRounding) {
+      for (let d = 1; d <= 3; d++) {
+        const f = Math.pow(10, d);
+        if (Math.abs(numeric * f - Math.round(numeric * f)) < 1e-7) {
+          const val = Math.round(numeric * f) / f;
+          return { key: String(val === 0 ? 0 : val).replace('.', ',') };
+        }
+      }
+    }
+    const factor = Math.pow(10, decimals);
+    const rounded = Math.round((numeric + Number.EPSILON) * factor) / factor;
+    const formatted = Number.isInteger(rounded)
+      ? String(rounded)
+      : rounded.toFixed(decimals).replace(/0+$/, '').replace(/\.$/, '');
+    const normalized = (formatted === '-0' ? '0' : formatted).replace('.', ',');
+    return {
+      key: normalized,
+      roundedWithDecimals: hasExplicitRounding ? undefined : decimals,
+    };
+  }
+
+  return { key: s };
+}
+
+export function ensurePart3RoundingPrompt(questionText: string, roundedWithDecimals?: number): string {
+  const q = String(questionText || '').trim();
+  if (!q || roundedWithDecimals === undefined) return q;
+  if (/làm\s*tròn|hàng\s*phần|chữ\s*số\s*thập\s*phân|hàng\s*đơn\s*vị/i.test(q)) return q;
+  const suffix =
+    roundedWithDecimals === 3
+      ? ' (kết quả làm tròn đến hàng phần nghìn)'
+      : roundedWithDecimals === 1
+      ? ' (kết quả làm tròn đến hàng phần mười)'
+      : roundedWithDecimals === 0
+      ? ' (kết quả làm tròn đến hàng đơn vị)'
+      : ' (kết quả làm tròn đến hàng phần trăm)';
+  return `${q}${suffix}`;
+}
+
 export function buildBalancedChoiceTargets(
   count: number,
   seedInput?: number | string
@@ -373,6 +572,17 @@ export function pickStudentVariantAssignment(
   }
 
   if (mode === 'shuffle_original') {
+    const fixedVariantCount = Math.min(20, Math.max(1, Number(assignment.variantCount || 1)));
+    if (fixedVariantCount > 1) {
+      const studentHash = hashStringToSeed(`${assignment.id}:${studentKey.trim().toLowerCase()}`);
+      const code = String(101 + (studentHash % fixedVariantCount));
+      const fixedSeed = (hashStringToSeed(`${assignment.id}:fixed_shuffle_${code}`) % 1_900_000_000) + 101;
+      return {
+        variantCode: code,
+        variantLabel: `Mã đề ${code}`,
+        shuffleSeed: fixedSeed,
+      };
+    }
     const displayCode = String(101 + (shuffleSeed % 98));
     return {
       variantCode: displayCode,
@@ -423,7 +633,8 @@ export function resolveStudentOnlineExam(
     resolvedLabel = found.label || `Mã đề ${found.code}`;
   } else if (mode === 'shuffle_original') {
     resolvedCode = variantCode || '101';
-    resolvedLabel = `Đề trộn #${resolvedCode}`;
+    const fixedVariantCount = Math.min(20, Math.max(1, Number(assignment.variantCount || 1)));
+    resolvedLabel = fixedVariantCount > 1 ? `Mã đề ${resolvedCode}` : `Đề trộn #${resolvedCode}`;
   }
 
   const effectiveSeed = typeof shuffleSeed === 'number' && shuffleSeed > 0 ? shuffleSeed : 0;

@@ -383,6 +383,175 @@ function balanceServerlessAnswerDistribution(questions: any[], seedInput: string
   });
 }
 
+function tryEvaluateSimpleMathNumberServerless(rawExpr: string): number | null {
+  let expr = String(rawExpr || '').trim();
+  if (!expr) return null;
+  expr = expr
+    .replace(/^\$\$|\$\$$/g, '')
+    .replace(/^\$|\$$/g, '')
+    .replace(/^\\\(|\\\)$/g, '')
+    .replace(/^\\\[|\\\]$/g, '')
+    .replace(/\\text\s*\{[^}]*\}/g, '')
+    .replace(/\\mathrm\s*\{[^}]*\}/g, '')
+    .replace(/\\(?:left|right)\s*/g, '')
+    .replace(/\\(?:d|t|c)?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '(($1)/($2))')
+    .replace(/\\(?:d|t|c)?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '(($1)/($2))')
+    .replace(/\\sqrt\s*\{([^{}]+)\}/g, 'sqrt($1)')
+    .replace(/√\s*\(([^()]+)\)/g, 'sqrt($1)')
+    .replace(/√\s*(\d+(?:[.,]\d+)?)/g, 'sqrt($1)')
+    .replace(/\\(?:cdot|times)/g, '*')
+    .replace(/[×·]/g, '*')
+    .replace(/\\div|÷|:/g, '/')
+    .replace(/\\pi\b|π/g, 'pi')
+    .replace(/,/g, '.')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, '');
+  if (!expr || expr.length > 80) return null;
+  let pos = 0;
+  const peek = () => expr[pos] || '';
+  const parseNum = (): number | null => {
+    if (expr.startsWith('sqrt(', pos)) {
+      pos += 5;
+      const inner = parseExpr();
+      if (inner === null || expr[pos] !== ')' || inner < 0) return null;
+      pos++;
+      return Math.sqrt(inner);
+    }
+    if (expr.startsWith('pi', pos)) {
+      pos += 2;
+      return Math.PI;
+    }
+    if (peek() === 'e' && (pos + 1 >= expr.length || !/[a-zA-Z]/.test(expr[pos + 1]))) {
+      pos += 1;
+      return Math.E;
+    }
+    const m = expr.slice(pos).match(/^\d+(?:\.\d+)?/);
+    if (!m) return null;
+    pos += m[0].length;
+    return Number(m[0]);
+  };
+  const parsePrimary = (): number | null => {
+    if (peek() === '(') {
+      pos++;
+      const v = parseExpr();
+      if (v === null || expr[pos] !== ')') return null;
+      pos++;
+      return v;
+    }
+    return parseNum();
+  };
+  const parseUnary = (): number | null => {
+    if (peek() === '+') { pos++; return parseUnary(); }
+    if (peek() === '-') { pos++; const v = parseUnary(); return v === null ? null : -v; }
+    return parsePrimary();
+  };
+  const parseTerm = (): number | null => {
+    let left = parseUnary();
+    if (left === null) return null;
+    while (pos < expr.length) {
+      const ch = peek();
+      if (ch === '*' || ch === '/') {
+        pos++;
+        const right = parseUnary();
+        if (right === null) return null;
+        if (ch === '/') {
+          if (Math.abs(right) < 1e-12) return null;
+          left /= right;
+        } else {
+          left *= right;
+        }
+      } else if (ch === '(' || expr.startsWith('sqrt(', pos) || expr.startsWith('pi', pos)) {
+        const right = parseUnary();
+        if (right === null) return null;
+        left *= right;
+      } else {
+        break;
+      }
+    }
+    return left;
+  };
+  const parseExpr = (): number | null => {
+    let left = parseTerm();
+    if (left === null) return null;
+    while (pos < expr.length) {
+      const ch = peek();
+      if (ch === '+' || ch === '-') {
+        pos++;
+        const right = parseTerm();
+        if (right === null) return null;
+        left = ch === '+' ? left + right : left - right;
+      } else {
+        break;
+      }
+    }
+    return left;
+  };
+  const res = parseExpr();
+  return res !== null && pos === expr.length && Number.isFinite(res) ? res : null;
+}
+
+function formatPlainShortAnswerKeyServerless(raw: string, questionText?: string): { key: string; roundedWithDecimals?: number } {
+  let s = String(raw || '').trim();
+  if (!s) return { key: '' };
+  s = s
+    .replace(/^\$\$|\$\$$/g, '')
+    .replace(/^\$|\$$/g, '')
+    .replace(/^\\\(|\\\)$/g, '')
+    .replace(/^\\\[|\\\]$/g, '')
+    .replace(/\\text\s*\{([^}]*)\}/g, '$1')
+    .replace(/\\mathrm\s*\{([^}]*)\}/g, '$1')
+    .trim();
+  if (/^[+-]?\d+(?:[.,]\d+)?$/.test(s)) {
+    return { key: s.replace('.', ',') };
+  }
+  const qLower = String(questionText || '').toLowerCase();
+  const hasExplicitRounding = /làm\s*tròn|hàng\s*phần|chữ\s*số\s*thập\s*phân|hàng\s*đơn\s*vị/.test(qLower);
+  let decimals = 2;
+  if (/hàng\s*phần\s*nghìn|3\s*chữ\s*số\s*thập\s*phân|0[.,]001/.test(qLower)) decimals = 3;
+  else if (/hàng\s*phần\s*trăm|2\s*chữ\s*số\s*thập\s*phân|0[.,]01/.test(qLower)) decimals = 2;
+  else if (/hàng\s*phần\s*mười|1\s*chữ\s*số\s*thập\s*phân|0[.,]1/.test(qLower)) decimals = 1;
+  else if (/hàng\s*đơn\s*vị|số\s*nguyên\s*gần\s*nhất/.test(qLower)) decimals = 0;
+
+  const numeric = tryEvaluateSimpleMathNumberServerless(s);
+  if (numeric !== null && Number.isFinite(numeric)) {
+    if (Math.abs(numeric - Math.round(numeric)) < 1e-9) {
+      return { key: String(Math.round(numeric) || 0) };
+    }
+    if (!hasExplicitRounding) {
+      for (let d = 1; d <= 3; d++) {
+        const f = Math.pow(10, d);
+        if (Math.abs(numeric * f - Math.round(numeric * f)) < 1e-7) {
+          const val = Math.round(numeric * f) / f;
+          return { key: String(val === 0 ? 0 : val).replace('.', ',') };
+        }
+      }
+    }
+    const factor = Math.pow(10, decimals);
+    const rounded = Math.round((numeric + Number.EPSILON) * factor) / factor;
+    const formatted = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(decimals).replace(/0+$/, '').replace(/\.$/, '');
+    return {
+      key: (formatted === '-0' ? '0' : formatted).replace('.', ','),
+      roundedWithDecimals: hasExplicitRounding ? undefined : decimals,
+    };
+  }
+  return { key: s };
+}
+
+function ensurePart3RoundingServerless(questionText: string, roundedWithDecimals?: number): string {
+  const q = String(questionText || '').trim();
+  if (!q || roundedWithDecimals === undefined) return q;
+  if (/làm\s*tròn|hàng\s*phần|chữ\s*số\s*thập\s*phân|hàng\s*đơn\s*vị/i.test(q)) return q;
+  const suffix =
+    roundedWithDecimals === 3
+      ? ' (kết quả làm tròn đến hàng phần nghìn)'
+      : roundedWithDecimals === 1
+      ? ' (kết quả làm tròn đến hàng phần mười)'
+      : roundedWithDecimals === 0
+      ? ' (kết quả làm tròn đến hàng đơn vị)'
+      : ' (kết quả làm tròn đến hàng phần trăm)';
+  return `${q}${suffix}`;
+}
+
 function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, subject: string, timeLimit: number) {
   const partType = inferServerlessPartType(q);
   const isTrueFalse = partType === 'part_2_true_false';
@@ -436,27 +605,33 @@ function normalizeServerlessQuestion(q: any, idx: number, difficulty: string, su
         ];
   }
 
-  const normalizedShortKey = typeof q.shortAnswerKey === 'string'
-    ? normalizeServerlessMathInText(q.shortAnswerKey)
-    : undefined;
-  const rawCorrect = isTrueFalse
+  let normalizedQuestion = normalizeServerlessMathInText(q.question || `Câu hỏi ${idx + 1}`);
+  let finalShortKey: string | undefined = typeof q.shortAnswerKey === 'string' ? normalizeServerlessMathInText(q.shortAnswerKey) : undefined;
+  let rawCorrect = isTrueFalse
     ? (subStatements && subStatements.length > 0
         ? subStatements.map((s) => `${s.label}:${s.correct ? 'Đ' : 'S'}`).join(', ')
         : String(q.correctAnswer || 'a:Đ, b:S, c:Đ, d:S'))
-    : isShortAnswer
-      ? normalizeServerlessMathInText(String(q.shortAnswerKey ?? q.correctAnswer ?? ''))
-      : isEssay
-        ? String(q.correctAnswer || 'Lời giải mẫu')
-        : extractServerlessChoiceKey(q.correctAnswer);
+    : isEssay
+      ? String(q.correctAnswer || 'Lời giải mẫu')
+      : extractServerlessChoiceKey(q.correctAnswer);
+
+  if (isShortAnswer) {
+    const formatted = formatPlainShortAnswerKeyServerless(String(q.shortAnswerKey ?? q.correctAnswer ?? ''), normalizedQuestion);
+    if (formatted.roundedWithDecimals !== undefined) {
+      normalizedQuestion = ensurePart3RoundingServerless(normalizedQuestion, formatted.roundedWithDecimals);
+    }
+    finalShortKey = formatted.key;
+    rawCorrect = formatted.key;
+  }
 
   return {
     id: q.id || `ai_fast_q_${Date.now()}_${idx + 1}`,
-    question: normalizeServerlessMathInText(q.question || `Câu hỏi ${idx + 1}`),
+    question: normalizedQuestion,
     partType,
     partLabel,
     options,
     subStatements,
-    shortAnswerKey: normalizedShortKey || (isShortAnswer ? rawCorrect : undefined),
+    shortAnswerKey: finalShortKey || (isShortAnswer ? rawCorrect : undefined),
     essayRubric: q.essayRubric ? normalizeServerlessMathInText(String(q.essayRubric)) : (isEssay ? normalizeServerlessMathInText(q.explanation || 'Hướng dẫn chấm') : undefined),
     correctAnswer: rawCorrect,
     explanation: normalizeServerlessMathInText(q.explanation || 'Lời giải chi tiết theo chuẩn sư phạm.'),
@@ -1149,7 +1324,7 @@ QUY TRÌNH GIẢI TRƯỚC - XUẤT ĐÁP ÁN SAU (BẮT BUỘC ĐỂ ĐẢM B�
 2. TÍNH TOÁN & VIẾT LỜI GIẢI ("explanation") TRƯỚC: Thực hiện đầy đủ phép tính từng bước để tìm ra đáp số cuối cùng.
 3. VỚI CÂU PHẦN I (part_1_choice): Sau khi có đáp số ở "explanation", đặt ĐÚNG đáp số đó vào một trong 4 phương án A/B/C/D trong "options", tạo 3 phương án nhiễu hợp lý gần giống kết quả thật (không trùng lặp), rồi ĐỐI CHIẾU LẠI để ghi "correctAnswer" CHÍNH XÁC TUYỆT ĐỐI khớp với chữ cái chứa đáp số đúng (TUYỆT ĐỐI KHÔNG tự ý chọn bừa chữ cái không khớp lời giải; KHÔNG ghi "A. ", "B. " vào "text").
 4. VỚI CÂU PHẦN II (part_2_true_false): Mỗi ý a, b, c, d giải và kết luận "correct" (true/false) thật chuẩn xác; đặt "correctAnswer" khớp đúng từng ý (ví dụ "a:Đ, b:S, c:Đ, d:S").
-5. VỚI CÂU PHẦN III (part_3_short_answer): Kết quả ở "explanation" phải trùng khớp hoàn toàn với "shortAnswerKey" và "correctAnswer".
+5. VỚI CÂU PHẦN III (part_3_short_answer - Chuẩn phiếu trả lời ngắn BGD 2025): Kết quả cuối cùng PHẢI là 1 giá trị số duy nhất (tối đa 4-5 ký tự gồm dấu trừ/dấu phẩy, ví dụ "12", "-4", "2,5", "0,87"). Nếu kết quả ra phân số thập phân vô hạn (1/3, 7/6...), chứa căn thức (\\\\sqrt{2}, \\\\sqrt{3}...), $\\\\pi$, $e$, $\\\\ln$... BẮT BUỘC ghi rõ yêu cầu làm tròn ngay cuối đề bài "question" (ví dụ: "(kết quả làm tròn đến hàng phần trăm)" hoặc "(kết quả làm tròn đến hàng phần mười)"); đồng thời "shortAnswerKey" và "correctAnswer" CHỈ ĐƯỢC chứa số thập phân đã làm tròn bằng dấu phẩy (ví dụ "0,87" hoặc "-1,33"), TUYỆT ĐỐI KHÔNG để ký hiệu LaTeX ($...$, \\\\frac, \\\\sqrt) hay phân số trong "shortAnswerKey".
 6. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), <=, >=, oo.`;
 
     const parseBatch = (raw: string): any[] => {
@@ -1281,7 +1456,7 @@ QUY TRÌNH THẨM ĐỊNH TỪNG CÂU:
    - "ok": Đề bài rõ ràng, chặt chẽ; có đúng 1 đáp án duy nhất khớp với kết quả tự giải; và "currentCorrectAnswer" ĐÃ ĐÚNG 100% (với Phần II thì cả 4 ý a,b,c,d đều đúng chân trị).
    - "wrong_answer": Đề bài rõ ràng, phương án đúng ĐÃ NẰM TRONG 4 phương án A/B/C/D, NHƯNG "currentCorrectAnswer" đang chấm NHẦM chữ cái khác (ví dụ giải ra A nhưng ứng dụng lưu B), HOẶC ý Đúng/Sai Phần II / đáp số Phần III đang gắn sai. Khi đó: giữ nguyên đề & options nếu đã chuẩn, chỉ trả về "suggestedPatch" sửa lại đúng "correctAnswer" (hoặc "subStatements"/"shortAnswerKey") và "explanation".
    - "no_correct_option": Kết quả tự giải KHÔNG xuất hiện trong 4 phương án A/B/C/D, HOẶC có >= 2 phương án đúng/trùng lặp giá trị. Khi đó: trả về "suggestedPatch" cung cấp đủ 4 phương án "options" A, B, C, D phân biệt với đúng 1 đáp án đúng, kèm "correctAnswer" và "explanation".
-   - "ambiguous": Đề bài chưa rõ ràng, thiếu dữ kiện, sai công thức/số liệu dẫn tới vô nghiệm hoặc không xác định được đáp án duy nhất. Khi đó: trả về "suggestedPatch" viết lại "question" rõ ràng chặt chẽ (và sửa luôn "options"/"subStatements"/"shortAnswerKey", "correctAnswer", "explanation" tương ứng).
+   - "ambiguous": Đề bài chưa rõ ràng, thiếu dữ kiện, sai công thức/số liệu dẫn tới vô nghiệm hoặc không xác định được đáp án duy nhất. Với câu Phần III (part_3_short_answer): nếu đáp số là phân số vô hạn, căn thức, $\\\\pi, e$ mà đề CHƯA ghi yêu cầu làm tròn (hàng phần mười / phần trăm), HOẶC "shortAnswerKey" đang chứa LaTeX/phân số/căn thay vì số thập phân gọn, cũng ĐÁNH DẤU "ambiguous" và trả về "suggestedPatch" thêm yêu cầu làm tròn vào cuối "question" + quy đổi "shortAnswerKey" và "correctAnswer" thành số thập phân đã làm tròn chuẩn (ví dụ "0,87").
 4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA TRONG "reSolvedSteps", "reason", "suggestedPatch" DÙNG LATEX CHUẨN BỌC TRONG $...$ (escape \\\\ trong JSON, véctơ dùng \\\\overrightarrow{AB}, phân số \\\\frac{a}{b}). KHÔNG viết "A. ", "B. " vào "options[].text".
 5. Nếu "status" !== "ok", BẮT BUỘC phải có "suggestedPatch" đầy đủ và đã được kiểm tra khớp 100% giữa kết quả giải và "correctAnswer"!`;
 
@@ -1378,7 +1553,11 @@ Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batch.length} phần tử, 
         if (orig.partType === 'part_1_choice') {
           verifiedCorrectAnswer = extractServerlessChoiceKey(verifiedCorrectAnswer);
         } else if (orig.partType === 'part_3_short_answer') {
-          verifiedCorrectAnswer = normalizeServerlessMathInText(verifiedCorrectAnswer);
+          const targetQText =
+            typeof raw?.suggestedPatch?.question === 'string' && raw.suggestedPatch.question.trim()
+              ? raw.suggestedPatch.question
+              : orig.question;
+          verifiedCorrectAnswer = formatPlainShortAnswerKeyServerless(verifiedCorrectAnswer, targetQText).key;
         }
 
         let suggestedPatch: any = undefined;
@@ -1415,10 +1594,16 @@ Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batch.length} phần tử, 
               verifiedCorrectAnswer = cleanPatch.correctAnswer;
             }
           } else if (orig.partType === 'part_3_short_answer') {
-            const shortVal = normalizeServerlessMathInText(String(patch.shortAnswerKey ?? patch.correctAnswer ?? verifiedCorrectAnswer));
-            cleanPatch.shortAnswerKey = shortVal;
-            cleanPatch.correctAnswer = shortVal;
-            verifiedCorrectAnswer = shortVal;
+            const formattedShort = formatPlainShortAnswerKeyServerless(
+              String(patch.shortAnswerKey ?? patch.correctAnswer ?? verifiedCorrectAnswer),
+              cleanPatch.question || orig.question
+            );
+            if (formattedShort.roundedWithDecimals !== undefined) {
+              cleanPatch.question = ensurePart3RoundingServerless(cleanPatch.question || orig.question, formattedShort.roundedWithDecimals);
+            }
+            cleanPatch.shortAnswerKey = formattedShort.key;
+            cleanPatch.correctAnswer = formattedShort.key;
+            verifiedCorrectAnswer = formattedShort.key;
           }
 
           if (
@@ -1457,6 +1642,183 @@ Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batch.length} phần tử, 
         error: isServerlessFatalAuthErr(msg)
           ? 'Chưa cấu hình hoặc sai Gemini API Key.'
           : `Không thể phản biện đề lúc này (${msg.slice(0, 120)}).`,
+      });
+    }
+  }
+
+  // 5. Generate Similar Isomorphic Online Exam Variants (Adaptive 4-question batches)
+  if (url.includes('/api/ai/generate-exam-variants') && req.method === 'POST') {
+    const {
+      questions = [],
+      variantCount = 2,
+      distinctCount,
+      subject = 'Toán học',
+      grade = 'Lớp 12',
+      title = 'Đề kiểm tra online',
+    } = req.body || {};
+
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: 'Danh sách câu hỏi gốc đang trống.' });
+    }
+    if (!ai) {
+      return res.status(403).json({ success: false, error: 'Chưa cấu hình Gemini API Key.' });
+    }
+
+    const requestedSets = Number(distinctCount) || (Math.min(20, Math.max(2, Number(variantCount) || 2)) - 1);
+    const extraCount = Math.min(3, Math.max(1, requestedSets));
+
+    try {
+      const compactSource = questions.slice(0, 36).map((q: any, i: number) => ({
+        idx: i + 1,
+        partType: inferServerlessPartType(q),
+        question: q.question,
+        options: q.options,
+        subStatements: q.subStatements,
+        shortAnswerKey: q.shortAnswerKey,
+        correctAnswer: q.correctAnswer,
+      }));
+
+      const BATCH_SIZE = 4;
+      const batches: Array<typeof compactSource> = [];
+      for (let i = 0; i < compactSource.length; i += BATCH_SIZE) {
+        batches.push(compactSource.slice(i, i + BATCH_SIZE));
+      }
+
+      const parseArr = (rawText: string): any[] => {
+        let parsed = safeParseServerlessJsonWithLatex(rawText);
+        if (!parsed) {
+          try { parsed = JSON.parse(rawText); } catch (_) {}
+        }
+        if (parsed && !Array.isArray(parsed)) {
+          if (Array.isArray((parsed as any).questions)) parsed = (parsed as any).questions;
+          else if (Array.isArray((parsed as any).items)) parsed = (parsed as any).items;
+        }
+        return Array.isArray(parsed) ? parsed : [];
+      };
+
+      let hydrogenBusy = false;
+
+      const runVariantBatch = async (setIdx: number, batchItems: typeof compactSource): Promise<any[]> => {
+        const prompt = `Bạn là Chuyên gia Khảo thí Bộ GD&ĐT Việt Nam.
+Hãy tạo BỘ CÂU HỎI TƯƠNG ĐƯƠNG #${setIdx + 2} cho đề "${title}" (${subject} - ${grade}) từ ${batchItems.length} câu gốc sau:
+${JSON.stringify(batchItems)}
+
+QUY TẮC BẮT BUỘC:
+1. PHẢI BIẾN ĐỔI ĐỀ (KHÔNG CHÉP NGUYÊN VĂN ĐỀ GỐC): Giữ nguyên dạng toán/kiến thức và độ khó, NHƯNG thay đổi số liệu, hệ số, biểu thức hàm số hoặc giả thiết tương đương.
+2. GIẢI TRƯỚC - XUẤT ĐÁP ÁN SAU (ĐÚNG THỨ TỰ FIELD JSON):
+   - "idx": giữ nguyên đúng số idx từ câu gốc.
+   - "question": đề bài mới với số liệu mới.
+   - "explanation": Giải ngắn gọn súc tích (1-3 câu) từ đầu theo số liệu mới ra đúng đáp số (KHÔNG ghi cứng chữ cái đáp án).
+   - "options" (cho part_1_choice): 4 phương án A/B/C/D phân biệt (KHÔNG ghi "A. " vào text), có ĐÚNG 1 phương án khớp kết quả vừa giải.
+   - "subStatements" (cho part_2_true_false): đủ 4 ý a, b, c, d với "correct": true/false chuẩn theo số liệu mới.
+   - "shortAnswerKey" (cho part_3_short_answer): 1 con số duy nhất (tối đa 4-5 ký tự, ví dụ "12", "2,5", "-0,87"). Nếu ra phân số vô hạn, căn thức, $\\\\pi, e$... BẮT BUỘC thêm yêu cầu làm tròn vào cuối "question" như "(kết quả làm tròn đến hàng phần trăm)" hoặc "(hàng phần mười)" và chỉ xuất số thập phân đã làm tròn bằng dấu phẩy vào "shortAnswerKey" & "correctAnswer" (KHÔNG để LaTeX hay phân số trong shortAnswerKey).
+   - "correctAnswer": xuất SAU CÙNG, khớp tuyệt đối 100% với đáp số vừa giải.
+3. Công thức toán/lý/hóa dùng LaTeX chuẩn bọc trong $...$, véctơ dùng \\\\overrightarrow{AB}, escape \\\\ trong JSON.
+Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batchItems.length} phần tử.`;
+
+        const candidateModels = hydrogenBusy
+          ? (['gemini-3.1-flash-lite', 'gemini-4-hydrogen'] as const)
+          : SERVERLESS_TEXT_MODELS;
+
+        for (const model of candidateModels) {
+          try {
+            const resp = await Promise.race([
+              ai.models.generateContent({
+                model,
+                contents: prompt,
+                config: buildServerlessModelConfig(model, {
+                  responseMimeType: 'application/json',
+                  systemInstruction: 'Bạn là chuyên gia tạo đề thi tương đương chuẩn GDPT 2018. Luôn đổi mới số liệu/hàm số và tự giải chính xác từng bước trước khi xuất options và correctAnswer.',
+                  thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+                }),
+              }),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`Timeout for ${model}`)), 35000)
+              ),
+            ]);
+            const items = parseArr((resp.text || '').trim());
+            if (items.length > 0) return items;
+          } catch (err: any) {
+            const msg = err?.message || String(err);
+            if (isServerlessFatalAuthErr(msg)) throw err;
+            if (model.startsWith('gemini-4') && (msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('high demand'))) {
+              hydrogenBusy = true;
+            }
+          }
+        }
+        return [];
+      };
+
+      const tasks: Array<{ setIdx: number; batch: typeof compactSource }> = [];
+      for (let s = 0; s < extraCount; s++) {
+        for (const batch of batches) {
+          tasks.push({ setIdx: s, batch });
+        }
+      }
+
+      const collectedBySet: any[][] = Array.from({ length: extraCount }, () => []);
+      const CONCURRENCY = 4;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < tasks.length) {
+          const t = tasks[cursor++];
+          const items = await runVariantBatch(t.setIdx, t.batch);
+          if (items.length > 0) collectedBySet[t.setIdx].push(...items);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker()));
+
+      const cleanedVariants: any[] = [];
+      for (let vIdx = 0; vIdx < extraCount; vIdx++) {
+        const rawItems = collectedBySet[vIdx];
+        if (!rawItems || rawItems.length === 0) continue;
+
+        const byIdx = new Map<number, any>();
+        rawItems.forEach((item: any, arrIdx: number) => {
+          const n = Number(item?.idx);
+          if (Number.isFinite(n) && n >= 1 && n <= compactSource.length) {
+            byIdx.set(n - 1, item);
+          } else if (!byIdx.has(arrIdx)) {
+            byIdx.set(arrIdx, item);
+          }
+        });
+
+        const normQs = compactSource.map((origQ, qIdx) => {
+          const raw = byIdx.get(qIdx) || rawItems[qIdx];
+          if (!raw || typeof raw !== 'object' || !raw.question) {
+            return normalizeServerlessQuestion(questions[qIdx], qIdx, String(questions[qIdx]?.difficulty || 'Thông hiểu'), subject, Number(questions[qIdx]?.timeLimit || 30));
+          }
+          return normalizeServerlessQuestion(
+            {
+              ...questions[qIdx],
+              ...raw,
+              partType: inferServerlessPartType(origQ),
+              partLabel: raw.partLabel || questions[qIdx]?.partLabel,
+            },
+            qIdx,
+            String(raw.difficulty || questions[qIdx]?.difficulty || 'Thông hiểu'),
+            subject,
+            Number(raw.timeLimit || questions[qIdx]?.timeLimit || 30)
+          );
+        });
+
+        cleanedVariants.push({
+          code: String(102 + vIdx),
+          questions: balanceServerlessAnswerDistribution(normQs, `sl_var_${vIdx}_${Date.now()}`),
+        });
+      }
+
+      if (cleanedVariants.length > 0) {
+        return res.status(200).json({ success: true, variants: cleanedVariants, usedAI: true });
+      }
+      return res.status(502).json({ success: false, error: 'AI tạm thời chưa tạo được đề tương tự mới.' });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      return res.status(isServerlessFatalAuthErr(msg) ? 403 : 502).json({
+        success: false,
+        error: isServerlessFatalAuthErr(msg)
+          ? 'Chưa cấu hình hoặc sai Gemini API Key.'
+          : `Không thể tạo đề tương tự lúc này (${msg.slice(0, 120)}).`,
       });
     }
   }

@@ -2,7 +2,9 @@ import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { QuizQuestion, QuizCritiqueItem, CritiqueIssueType } from '../types';
 import {
   balanceQuizAnswerDistribution,
+  ensurePart3RoundingPrompt,
   extractChoiceKey,
+  formatPlainShortAnswerKey,
   inferPartType,
   stripLeadingChoicePrefix,
 } from './quizDistribution';
@@ -297,14 +299,22 @@ export function sanitizeQuizQuestionMath(q: any): any {
   const cleanQ = { ...q };
   cleanQ.question = normalizeMathInText(cleanQ.question);
   cleanQ.explanation = normalizeMathInText(cleanQ.explanation);
-  if (typeof cleanQ.shortAnswerKey === 'string') {
+  const isShortAnswer = inferPartType(cleanQ) === 'part_3_short_answer';
+  if (isShortAnswer) {
+    const rawKey = String(cleanQ.shortAnswerKey ?? cleanQ.correctAnswer ?? '');
+    const formatted = formatPlainShortAnswerKey(rawKey, cleanQ.question);
+    if (formatted.key) {
+      cleanQ.shortAnswerKey = formatted.key;
+      cleanQ.correctAnswer = formatted.key;
+      if (formatted.roundedWithDecimals !== undefined) {
+        cleanQ.question = ensurePart3RoundingPrompt(cleanQ.question, formatted.roundedWithDecimals);
+      }
+    }
+  } else if (typeof cleanQ.shortAnswerKey === 'string') {
     cleanQ.shortAnswerKey = normalizeMathInText(cleanQ.shortAnswerKey);
   }
   if (typeof cleanQ.essayRubric === 'string') {
     cleanQ.essayRubric = normalizeMathInText(cleanQ.essayRubric);
-  }
-  if (cleanQ.partType === 'part_3_short_answer' && typeof cleanQ.correctAnswer === 'string') {
-    cleanQ.correctAnswer = normalizeMathInText(cleanQ.correctAnswer);
   }
 
   if (Array.isArray(cleanQ.options)) {
@@ -708,7 +718,7 @@ QUY TRÌNH GIẢI TRƯỚC - XUẤT ĐÁP ÁN SAU (BẮT BUỘC ĐỂ ĐẢM B�
 2. TÍNH TOÁN & VIẾT LỜI GIẢI ("explanation") TRƯỚC: Thực hiện đầy đủ phép tính từng bước để tìm ra đáp số cuối cùng.
 3. VỚI CÂU PHẦN I (part_1_choice): Sau khi có đáp số ở "explanation", đặt ĐÚNG đáp số đó vào một trong 4 phương án A/B/C/D của "options", tạo 3 phương án nhiễu hợp lý gần giống kết quả thật (không trùng lặp), rồi ĐỐI CHIẾU LẠI để ghi "correctAnswer" CHÍNH XÁC TUYỆT ĐỐI khớp với chữ cái chứa đáp số đúng (KHÔNG viết cứng tên chữ cái trong lời giải; KHÔNG ghi "A. ", "B. " vào "text").
 4. VỚI CÂU PHẦN II (part_2_true_false): Đủ 4 ý a, b, c, d với kết luận Đúng/Sai chuẩn xác; đặt "correctAnswer" khớp đúng từng ý (ví dụ "a:Đ, b:S, c:Đ, d:S").
-5. VỚI CÂU PHẦN III (part_3_short_answer): Kết quả ở "explanation" phải trùng khớp hoàn toàn với "shortAnswerKey" và "correctAnswer".
+5. VỚI CÂU PHẦN III (part_3_short_answer - Chuẩn phiếu trả lời ngắn BGD 2025): Kết quả cuối cùng PHẢI là 1 giá trị số duy nhất (tối đa 4-5 ký tự gồm dấu trừ/dấu phẩy, ví dụ "12", "-4", "2,5", "0,87"). Nếu kết quả ra phân số thập phân vô hạn (1/3, 7/6...), chứa căn thức (\\\\sqrt{2}, \\\\sqrt{3}...), $\\\\pi$, $e$, $\\\\ln$... BẮT BUỘC ghi rõ yêu cầu làm tròn ngay cuối đề bài "question" (ví dụ: "(kết quả làm tròn đến hàng phần trăm)" hoặc "(kết quả làm tròn đến hàng phần mười)"); đồng thời "shortAnswerKey" và "correctAnswer" CHỈ ĐƯỢC chứa số thập phân đã làm tròn bằng dấu phẩy (ví dụ "0,87" hoặc "-1,33"), TUYỆT ĐỐI KHÔNG để ký hiệu LaTeX ($...$, \\\\frac, \\\\sqrt) hay phân số trong "shortAnswerKey".
 6. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA DÙNG LATEX CHUẨN BỌC 100% TRONG $...$ (escape \\\\ trong JSON): phân số \\\\frac{a}{b}, căn thức \\\\sqrt{x}, mũ/chỉ số bọc ngoặc x^{n+1}, C_n^k, tích phân \\\\int_a^b, giới hạn \\\\lim_{x \\to +\\\\infty}, tập hợp \\\\mathbb{R} \\\\setminus \\\\{1\\\\}, góc \\\\widehat{ABC}, độ ^{\\\\circ}, véctơ \\\\overrightarrow{AB}, \\\\overrightarrow{a}, \\\\overrightarrow{i}, \\\\overrightarrow{j}, \\\\overrightarrow{k}. TUYỆT ĐỐI KHÔNG viết ASCII như vec(AB), frac(a,b), sqrt(x), (a+b)/(c+d), <=, >=, oo.`;
 
   const parseBatch = (raw: string): any[] => {
@@ -928,7 +938,7 @@ QUY TRÌNH THẨM ĐỊNH TỪNG CÂU:
    - "ok": Đề bài rõ ràng, chặt chẽ; có đúng 1 đáp án duy nhất khớp với kết quả tự giải; và "currentCorrectAnswer" ĐÃ ĐÚNG 100% (với Phần II thì cả 4 ý a,b,c,d đều đúng chân trị).
    - "wrong_answer": Đề bài rõ ràng, phương án đúng ĐÃ NẰM TRONG 4 phương án A/B/C/D, NHƯNG "currentCorrectAnswer" đang chấm NHẦM chữ cái khác (ví dụ giải ra A nhưng ứng dụng lưu B), HOẶC ý Đúng/Sai Phần II / đáp số Phần III đang gắn sai. Khi đó: giữ nguyên đề & options nếu đã chuẩn, chỉ trả về "suggestedPatch" sửa lại đúng "correctAnswer" (hoặc "subStatements"/"shortAnswerKey") và "explanation".
    - "no_correct_option": Kết quả tự giải KHÔNG xuất hiện trong 4 phương án A/B/C/D, HOẶC có >= 2 phương án đúng/trùng lặp giá trị. Khi đó: trả về "suggestedPatch" cung cấp đủ 4 phương án "options" A, B, C, D phân biệt với đúng 1 đáp án đúng, kèm "correctAnswer" và "explanation".
-   - "ambiguous": Đề bài chưa rõ ràng, thiếu dữ kiện, sai công thức/số liệu dẫn tới vô nghiệm hoặc không xác định được đáp án duy nhất. Khi đó: trả về "suggestedPatch" viết lại "question" rõ ràng chặt chẽ (và sửa luôn "options"/"subStatements"/"shortAnswerKey", "correctAnswer", "explanation" tương ứng).
+   - "ambiguous": Đề bài chưa rõ ràng, thiếu dữ kiện, sai công thức/số liệu dẫn tới vô nghiệm hoặc không xác định được đáp án duy nhất. Với câu Phần III (part_3_short_answer): nếu đáp số là phân số vô hạn, căn thức, $\\\\pi, e$ mà đề CHƯA ghi yêu cầu làm tròn (hàng phần mười / phần trăm), HOẶC "shortAnswerKey" đang chứa LaTeX/phân số/căn thay vì số thập phân gọn, cũng ĐÁNH DẤU "ambiguous" và trả về "suggestedPatch" thêm yêu cầu làm tròn vào cuối "question" + quy đổi "shortAnswerKey" và "correctAnswer" thành số thập phân đã làm tròn chuẩn (ví dụ "0,87").
 4. TOÀN BỘ CÔNG THỨC TOÁN/LÝ/HÓA TRONG "reSolvedSteps", "reason", "suggestedPatch" DÙNG LATEX CHUẨN BỌC TRONG $...$ (escape \\\\ trong JSON, véctơ dùng \\\\overrightarrow{AB}, phân số \\\\frac{a}{b}). KHÔNG viết "A. ", "B. " vào "options[].text".
 5. Nếu "status" !== "ok", BẮT BUỘC phải có "suggestedPatch" đầy đủ và đã được kiểm tra khớp 100% giữa kết quả giải và "correctAnswer"!`;
 
@@ -1026,7 +1036,11 @@ Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batch.length} phần tử, 
     if (orig.partType === 'part_1_choice') {
       verifiedCorrectAnswer = extractChoiceKey(verifiedCorrectAnswer);
     } else if (orig.partType === 'part_3_short_answer') {
-      verifiedCorrectAnswer = normalizeMathInText(verifiedCorrectAnswer);
+      const targetQText =
+        typeof raw?.suggestedPatch?.question === 'string' && raw.suggestedPatch.question.trim()
+          ? raw.suggestedPatch.question
+          : orig.question;
+      verifiedCorrectAnswer = formatPlainShortAnswerKey(verifiedCorrectAnswer, targetQText).key;
     }
 
     let suggestedPatch: QuizCritiqueItem['suggestedPatch'] = undefined;
@@ -1074,10 +1088,16 @@ Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batch.length} phần tử, 
           verifiedCorrectAnswer = cleanPatch.correctAnswer;
         }
       } else if (orig.partType === 'part_3_short_answer') {
-        const shortVal = normalizeMathInText(String(patch.shortAnswerKey ?? patch.correctAnswer ?? verifiedCorrectAnswer));
-        cleanPatch.shortAnswerKey = shortVal;
-        cleanPatch.correctAnswer = shortVal;
-        verifiedCorrectAnswer = shortVal;
+        const formattedShort = formatPlainShortAnswerKey(
+          String(patch.shortAnswerKey ?? patch.correctAnswer ?? verifiedCorrectAnswer),
+          cleanPatch.question || orig.question
+        );
+        if (formattedShort.roundedWithDecimals !== undefined) {
+          cleanPatch.question = ensurePart3RoundingPrompt(cleanPatch.question || orig.question, formattedShort.roundedWithDecimals);
+        }
+        cleanPatch.shortAnswerKey = formattedShort.key;
+        cleanPatch.correctAnswer = formattedShort.key;
+        verifiedCorrectAnswer = formattedShort.key;
       }
 
       if (

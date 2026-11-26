@@ -1436,9 +1436,12 @@ export const StudentHomeworkPortal: React.FC<StudentHomeworkPortalProps> = ({
                           type="text"
                           value={typeof ans === 'string' ? ans : ''}
                           onChange={(e) => handleTextAnswerChange(q, idx, e.target.value)}
-                          placeholder="Ví dụ: 12 hoặc 2,5"
+                          placeholder="Ví dụ: 12 hoặc 2,5 hoặc -0,87"
                           className="w-full sm:max-w-sm px-4 py-3 rounded-xl bg-white border-2 border-slate-300 focus:border-indigo-600 text-base font-mono font-black text-slate-900 outline-none"
                         />
+                        <p className="text-[11px] font-medium text-slate-500 leading-snug">
+                          Chỉ nhập số nguyên hoặc số thập phân (dùng dấu phẩy hoặc dấu chấm). Nếu đề yêu cầu làm tròn (hàng phần mười / phần trăm), hãy ghi đúng số chữ số thập phân đó.
+                        </p>
                       </div>
                     ) : partType === 'part_4_essay' ? (
                       <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">

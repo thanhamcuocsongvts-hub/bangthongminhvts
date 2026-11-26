@@ -15,6 +15,7 @@ import { signInAnonymously } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import { isQuotaError, markFirestoreQuotaExhausted } from './firebaseSafe';
 import { normalizeTeacherOwnerId } from './teacherPrivacy';
+import { tryEvaluateSimpleMathNumber } from './quizDistribution';
 import {
   ClassRoom,
   HomeworkActivityEvent,
@@ -354,7 +355,7 @@ export async function createHomeworkAssignment(
     antiCheatMode === 'variants_and_shuffle' &&
     Array.isArray(params.variants) &&
     params.variants.length > 0
-      ? params.variants.slice(0, 6).map((v, vIdx) => ({
+      ? params.variants.slice(0, 20).map((v, vIdx) => ({
           id: String(v.id || `var_${101 + vIdx}`).slice(0, 64),
           code: String(v.code || String(101 + vIdx)).slice(0, 32),
           label: String(v.label || `Mã đề ${101 + vIdx}`).slice(0, 80),
@@ -363,7 +364,9 @@ export async function createHomeworkAssignment(
       : undefined;
   const variantCount =
     antiCheatMode === 'variants_and_shuffle'
-      ? Math.min(6, Math.max(2, normalizedVariants?.length || Number(params.variantCount || 2)))
+      ? Math.min(20, Math.max(2, normalizedVariants?.length || Number(params.variantCount || 2)))
+      : antiCheatMode === 'shuffle_original'
+      ? Math.min(20, Math.max(1, Number(params.variantCount || 1)))
       : 1;
 
   const assignment: HomeworkAssignment = sanitizeForFirestore({
@@ -611,6 +614,8 @@ function normalizeShortText(val: string): string {
   return String(val || '')
     .trim()
     .toLowerCase()
+    .replace(/^\$\$|\$\$$/g, '')
+    .replace(/^\$|\$$/g, '')
     .replace(/,/g, '.')
     .replace(/\s+/g, ' ');
 }
@@ -620,10 +625,15 @@ function isShortAnswerEqual(studentVal: string, expectedVal: string): boolean {
   const e = normalizeShortText(expectedVal);
   if (!s || !e) return false;
   if (s === e) return true;
-  const sNum = Number(s);
-  const eNum = Number(e);
+  const sNum = Number(s.replace(/\s+/g, ''));
+  const eNum = Number(e.replace(/\s+/g, ''));
   if (Number.isFinite(sNum) && Number.isFinite(eNum)) {
-    return Math.abs(sNum - eNum) < 1e-4;
+    return Math.abs(sNum - eNum) < 1e-3;
+  }
+  const sEval = tryEvaluateSimpleMathNumber(studentVal);
+  const eEval = tryEvaluateSimpleMathNumber(expectedVal);
+  if (sEval !== null && eEval !== null) {
+    return Math.abs(sEval - eEval) < 1e-3;
   }
   return false;
 }

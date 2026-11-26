@@ -20,6 +20,8 @@ import {
   ShieldCheck,
   Layers,
   Loader2,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
@@ -37,6 +39,7 @@ import {
 import { generateOnlineExamVariants } from '../utils/examVariantsService';
 import { gameSounds } from '../utils/gameSoundEffects';
 import { normalizeTeacherOwnerId } from '../utils/teacherPrivacy';
+import { MathFormulaRenderer } from './MathFormulaRenderer';
 
 interface HomeworkAssignModalProps {
   isOpen: boolean;
@@ -83,18 +86,36 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
   const [antiCheatMode, setAntiCheatMode] = useState<OnlineExamAntiCheatMode>('shuffle_original');
   const [shuffleQuestions, setShuffleQuestions] = useState<boolean>(true);
   const [shuffleOptions, setShuffleOptions] = useState<boolean>(true);
-  const [variantCount, setVariantCount] = useState<number>(3);
+  const [variantCount, setVariantCount] = useState<number>(4);
+  const [variantCountInput, setVariantCountInput] = useState<string>('4');
   const [note, setNote] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [savingStepText, setSavingStepText] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [createdAssignment, setCreatedAssignment] = useState<HomeworkAssignment | null>(null);
+  const [variantMeta, setVariantMeta] = useState<{
+    usedAI: boolean;
+    aiVariantSetsCount: number;
+    totalVariantCount: number;
+    notice?: string;
+  } | null>(null);
+  const [showVariantPreview, setShowVariantPreview] = useState<boolean>(false);
+  const [previewVariantIdx, setPreviewVariantIdx] = useState<number>(0);
   const [copied, setCopied] = useState<boolean>(false);
+
+  const applyVariantCount = (rawVal: number) => {
+    const clamped = Math.min(20, Math.max(2, Math.round(rawVal) || 2));
+    setVariantCount(clamped);
+    setVariantCountInput(String(clamped));
+  };
 
   useEffect(() => {
     if (isOpen) {
       setTitle(defaultTitle || `Đề online ${subject}`);
       setCreatedAssignment(null);
+      setVariantMeta(null);
+      setShowVariantPreview(false);
+      setPreviewVariantIdx(0);
       setErrorMsg('');
       setCopied(false);
       setSavingStepText('');
@@ -129,15 +150,21 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
 
     setIsSaving(true);
     try {
+      const effectiveVariantCount = Math.min(20, Math.max(2, Number(variantCountInput) || variantCount || 2));
+      applyVariantCount(effectiveVariantCount);
+
       const resolvedTitle = title.trim() || `Đề online ${subject}`;
       const resolvedGrade = selectedClass?.grade || grade;
       let generatedVariants: OnlineExamVariant[] | undefined;
 
       if (antiCheatMode === 'variants_and_shuffle') {
-        setSavingStepText(`Đang tạo ${variantCount} mã đề tương tự & trộn câu hỏi...`);
+        const aiSetsCount = Math.min(3, effectiveVariantCount - 1);
+        setSavingStepText(
+          `AI đang biến đổi số liệu (${aiSetsCount} bộ tương đương) & trộn ${effectiveVariantCount} mã đề...`
+        );
         const variantRes = await generateOnlineExamVariants({
           questions,
-          variantCount,
+          variantCount: effectiveVariantCount,
           subject,
           grade: resolvedGrade,
           title: resolvedTitle,
@@ -145,6 +172,14 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
           shuffleOptions,
         });
         generatedVariants = variantRes.variants;
+        setVariantMeta({
+          usedAI: variantRes.usedAI,
+          aiVariantSetsCount: variantRes.aiVariantSetsCount,
+          totalVariantCount: variantRes.totalVariantCount,
+          notice: variantRes.notice,
+        });
+      } else {
+        setVariantMeta(null);
       }
 
       setSavingStepText('Đang phát hành link Đề online...');
@@ -163,7 +198,7 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
         antiCheatMode,
         shuffleQuestions: antiCheatMode !== 'none' ? shuffleQuestions : false,
         shuffleOptions: antiCheatMode !== 'none' ? shuffleOptions : false,
-        variantCount: antiCheatMode === 'variants_and_shuffle' ? variantCount : 1,
+        variantCount: antiCheatMode !== 'none' ? effectiveVariantCount : 1,
         variants: generatedVariants,
         dueDate: dueDate || undefined,
         note: note.trim() || undefined,
@@ -253,29 +288,92 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
                 {createdAssignment.antiCheatMode === 'variants_and_shuffle' &&
                   createdAssignment.variants &&
                   createdAssignment.variants.length > 0 && (
-                    <div className="pt-1 flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[11px] font-black text-indigo-800 flex items-center gap-1">
-                        <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                        Chống quay cóp:
-                      </span>
-                      {createdAssignment.variants.map((v) => (
-                        <span
-                          key={v.id}
-                          className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-900 border border-indigo-200 font-mono text-[11px] font-black"
+                    <div className="pt-1.5 space-y-2">
+                      {variantMeta?.notice && (
+                        <div
+                          className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 ${
+                            variantMeta.usedAI
+                              ? 'bg-emerald-100/80 text-emerald-900 border-emerald-300'
+                              : 'bg-amber-50 text-amber-900 border-amber-300'
+                          }`}
                         >
-                          {v.label}
+                          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                          <span>{variantMeta.notice}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[11px] font-black text-indigo-800 flex items-center gap-1">
+                          <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                          {createdAssignment.variants.length} mã đề đã phát hành:
                         </span>
-                      ))}
+                        {createdAssignment.variants.map((v, vIdx) => (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => {
+                              setShowVariantPreview(true);
+                              setPreviewVariantIdx(vIdx);
+                            }}
+                            className={`px-2 py-0.5 rounded-md border font-mono text-[11px] font-black transition-colors cursor-pointer ${
+                              showVariantPreview && previewVariantIdx === vIdx
+                                ? 'bg-indigo-600 text-white border-indigo-700'
+                                : 'bg-indigo-100 text-indigo-900 border-indigo-200 hover:bg-indigo-200'
+                            }`}
+                          >
+                            {v.label}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setShowVariantPreview((p) => !p)}
+                          className="ml-auto px-2.5 py-0.5 rounded-md bg-white border border-slate-300 text-[11px] font-bold text-slate-700 hover:bg-slate-100 cursor-pointer flex items-center gap-1"
+                        >
+                          <Eye className="w-3 h-3 text-indigo-600" />
+                          <span>{showVariantPreview ? 'Ẩn xem thử' : 'Xem thử đề'}</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 {createdAssignment.antiCheatMode === 'shuffle_original' && (
                   <div className="pt-1 text-[11px] font-bold text-indigo-800 flex items-center gap-1.5">
                     <Shuffle className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Chống quay cóp: Tự động xáo trộn thứ tự câu hỏi &amp; đáp án riêng cho từng học sinh.</span>
+                    <span>
+                      {(createdAssignment.variantCount || 1) > 1
+                        ? `Chống quay cóp: Đã chia thành ${createdAssignment.variantCount} mã đề trộn (Mã 101–${100 + (createdAssignment.variantCount || 1)}) khác thứ tự câu & đáp án.`
+                        : 'Chống quay cóp: Tự động xáo trộn thứ tự câu hỏi & đáp án riêng cho từng học sinh.'}
+                    </span>
                   </div>
                 )}
               </div>
             </div>
+
+            {showVariantPreview &&
+              createdAssignment.variants &&
+              createdAssignment.variants[previewVariantIdx] && (
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-indigo-200 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-indigo-950">
+                      Xem nhanh {createdAssignment.variants[previewVariantIdx].label} (3 câu đầu)
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-500">
+                      Bấm vào từng mã đề ở trên để đối chiếu
+                    </span>
+                  </div>
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {createdAssignment.variants[previewVariantIdx].questions.slice(0, 3).map((pq, qIdx) => (
+                      <div key={pq.id || qIdx} className="p-2.5 rounded-xl bg-white border border-slate-200 text-xs text-slate-800">
+                        <div className="font-bold text-indigo-900 mb-1">Câu {qIdx + 1}:</div>
+                        <div className="leading-relaxed">
+                          <MathFormulaRenderer content={pq.question} />
+                        </div>
+                        <div className="mt-1 text-[11px] font-bold text-emerald-700">
+                          Đáp án: {pq.shortAnswerKey || pq.correctAnswer}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             {/* Share Link Box */}
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
@@ -666,29 +764,73 @@ export const HomeworkAssignModal: React.FC<HomeworkAssignModalProps> = ({
 
                 {antiCheatMode !== 'none' && (
                   <div className="pt-2 border-t border-indigo-200/70 space-y-2.5">
-                    {antiCheatMode === 'variants_and_shuffle' && (
-                      <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-xs font-bold text-slate-800">
-                          Số mã đề phát hành (Mã 101, 102...):
+                          Số lượng mã đề cần trộn (Mã 101 – {100 + variantCount}):
                         </span>
-                        <div className="flex items-center gap-1.5">
-                          {[2, 3, 4].map((cnt) => (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {[2, 4, 6, 8].map((cnt) => (
                             <button
                               key={cnt}
                               type="button"
-                              onClick={() => setVariantCount(cnt)}
-                              className={`px-3 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                              onClick={() => applyVariantCount(cnt)}
+                              className={`px-2.5 min-h-[34px] rounded-lg text-xs font-black transition-all cursor-pointer whitespace-nowrap ${
                                 variantCount === cnt
                                   ? 'bg-emerald-600 text-white shadow-xs'
                                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                               }`}
                             >
-                              {cnt} mã đề
+                              {cnt} mã
                             </button>
                           ))}
+                          <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-slate-50 ml-1">
+                            <button
+                              type="button"
+                              onClick={() => applyVariantCount(variantCount - 1)}
+                              disabled={variantCount <= 2}
+                              aria-label="Giảm số mã đề"
+                              className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-200 disabled:opacity-40 cursor-pointer"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <input
+                              type="number"
+                              min={2}
+                              max={20}
+                              value={variantCountInput}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setVariantCountInput(val);
+                                const parsed = Number(val);
+                                if (Number.isFinite(parsed) && parsed >= 2 && parsed <= 20) {
+                                  setVariantCount(Math.round(parsed));
+                                }
+                              }}
+                              onBlur={() => applyVariantCount(Number(variantCountInput) || variantCount)}
+                              aria-label="Nhập số lượng mã đề cần trộn"
+                              className="w-12 h-8 text-center text-xs font-black text-slate-900 bg-white border-x border-slate-300 outline-none tabular-nums"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => applyVariantCount(variantCount + 1)}
+                              disabled={variantCount >= 20}
+                              aria-label="Tăng số mã đề"
+                              className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-200 disabled:opacity-40 cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    )}
+                      <p className="text-[11px] font-medium text-slate-600 leading-snug">
+                        {antiCheatMode === 'variants_and_shuffle'
+                          ? variantCount <= 4
+                            ? `AI sẽ biến đổi số liệu/hàm số tạo ${variantCount - 1} bộ câu hỏi tương đương hoàn toàn mới (kèm đề gốc = ${variantCount} bộ), sau đó trộn thứ tự câu và đáp án.`
+                            : `AI sẽ tạo 3 bộ câu hỏi đổi số hoàn toàn mới (kèm đề gốc = 4 bộ nền) rồi xáo trộn thứ tự câu & đáp án để phát hành đủ ${variantCount} mã đề riêng (tối đa 20 mã đề).`
+                          : `Hệ thống tự động chia đều học sinh vào ${variantCount} mã đề (101–${100 + variantCount}) với thứ tự câu và đáp án được xáo trộn khác nhau.`}
+                      </p>
+                    </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <label className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-slate-200 cursor-pointer">
