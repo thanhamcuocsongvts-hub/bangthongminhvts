@@ -864,6 +864,101 @@ class SoundSynthesizer {
       whiteNoise.start(now);
     } catch (_) {}
   }
+
+  /**
+   * Sound 20: Hiệu ứng mở màn Trình Chiếu Phương Pháp (Sôi động, truyền cảm hứng)
+   */
+  public playStageIntro() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [
+        { f: 523.25, t: 0.0, d: 0.14 },  // C5
+        { f: 659.25, t: 0.09, d: 0.14 }, // E5
+        { f: 783.99, t: 0.18, d: 0.16 }, // G5
+        { f: 1046.5, t: 0.28, d: 0.45 }, // C6
+      ];
+      notes.forEach((n) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(n.f, now + n.t);
+        gain.gain.setValueAtTime(0.01, now + n.t);
+        gain.gain.linearRampToValueAtTime(0.2, now + n.t + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.002, now + n.t + n.d);
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(now + n.t);
+        osc.stop(now + n.t + n.d + 0.04);
+      });
+    } catch (_) {}
+  }
+
+  /**
+   * Sound 21: Chuyển Slide mượt mà, tươi vui
+   */
+  public playSlideTransition() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [587.33, 880.0]; // D5 -> A5
+      notes.forEach((freq, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        const t = now + idx * 0.055;
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.14, t);
+        gain.gain.exponentialRampToValueAtTime(0.002, t + 0.22);
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(t);
+        osc.stop(t + 0.24);
+      });
+    } catch (_) {}
+  }
+
+  /**
+   * Sound 22: Mở từng bước giải với cao độ tăng dần theo tiến độ bài học
+   */
+  public playStepPop(stepIdx: number = 0) {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const scale = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5];
+      const baseFreq = scale[Math.abs(stepIdx) % scale.length];
+      const now = this.ctx.currentTime;
+
+      const osc1 = this.ctx.createOscillator();
+      const osc2 = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(baseFreq, now);
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(baseFreq * 1.5, now + 0.05);
+
+      gain.gain.setValueAtTime(0.16, now);
+      gain.gain.exponentialRampToValueAtTime(0.002, now + 0.26);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc1.start(now);
+      osc1.stop(now + 0.14);
+      osc2.start(now + 0.05);
+      osc2.stop(now + 0.28);
+    } catch (_) {}
+  }
 }
 
 export const gameSounds = new SoundSynthesizer();

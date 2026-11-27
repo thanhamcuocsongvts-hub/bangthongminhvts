@@ -106,6 +106,21 @@ import {
 import { gameSounds } from '../utils/gameSoundEffects';
 import { db } from '../lib/firebase';
 import { toggleCasioCalculator, useCasioGlobalState } from '../utils/casioEvents';
+import {
+  getSavedSlideTransition,
+  getSavedSlideTransitionsEnabled,
+  getSavedSlideTransitionSpeed,
+  getSlideTransitionClass,
+  getTransitionOption,
+  saveSlideTransition,
+  saveSlideTransitionsEnabled,
+  saveSlideTransitionSpeed,
+  SLIDE_TRANSITION_OPTIONS,
+  SLIDE_TRANSITION_SPEED_OPTIONS,
+  SlideDirection,
+  SlideTransitionMode,
+  SlideTransitionSpeed,
+} from '../utils/slideTransitions';
 
 // Helper to retrieve the current logged-in teacher's active classes from props, active session or localStorage
 const getActiveTeacherClasses = (currentTeacher?: any, currentClassroom?: any): ClassRoom[] => {
@@ -1037,6 +1052,17 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
   const [showBoardThemeMenu, setShowBoardThemeMenu] = useState<boolean>(false);
   const [showBoardFontMenu, setShowBoardFontMenu] = useState<boolean>(false);
   const [showBoardVoiceMenu, setShowBoardVoiceMenu] = useState<boolean>(false);
+  const [boardTransitionMode, setBoardTransitionMode] = useState<SlideTransitionMode>(() =>
+    getSavedSlideTransition('smartboard_quiz_slide_transition', 'slide')
+  );
+  const [boardTransitionSpeed, setBoardTransitionSpeed] = useState<SlideTransitionSpeed>(() =>
+    getSavedSlideTransitionSpeed('smooth')
+  );
+  const [boardTransitionsEnabled, setBoardTransitionsEnabled] = useState<boolean>(() =>
+    getSavedSlideTransitionsEnabled(true)
+  );
+  const [boardSlideDirection, setBoardSlideDirection] = useState<SlideDirection>('next');
+  const [showBoardTransitionMenu, setShowBoardTransitionMenu] = useState<boolean>(false);
   const [activeQuizTitle, setActiveQuizTitle] = useState<string>(() => {
     try {
       return localStorage.getItem(liveStorageKeys.titleKey) || '';
@@ -1082,6 +1108,47 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
       localStorage.setItem('smartboard_presentation_layout', layout);
     } catch (_) {}
   };
+  const handleSelectBoardTransition = (mode: SlideTransitionMode) => {
+    setBoardTransitionMode(mode);
+    if (!boardTransitionsEnabled) {
+      setBoardTransitionsEnabled(true);
+      saveSlideTransitionsEnabled(true);
+    }
+    setShowBoardTransitionMenu(false);
+    saveSlideTransition('smartboard_quiz_slide_transition', mode);
+    try {
+      gameSounds.playSlideTransition();
+    } catch (_) {}
+  };
+  const handleSelectBoardTransitionSpeed = (speed: SlideTransitionSpeed) => {
+    setBoardTransitionSpeed(speed);
+    if (!boardTransitionsEnabled) {
+      setBoardTransitionsEnabled(true);
+      saveSlideTransitionsEnabled(true);
+    }
+    saveSlideTransitionSpeed(speed);
+  };
+  const handleToggleBoardTransitionsEnabled = () => {
+    const next = !boardTransitionsEnabled;
+    setBoardTransitionsEnabled(next);
+    saveSlideTransitionsEnabled(next);
+  };
+  useEffect(() => {
+    const syncSpeed = (e: Event) => {
+      const next = (e as CustomEvent<SlideTransitionSpeed>).detail;
+      if (next) setBoardTransitionSpeed(next);
+    };
+    const syncEnabled = (e: Event) => {
+      const next = (e as CustomEvent<boolean>).detail;
+      if (typeof next === 'boolean') setBoardTransitionsEnabled(next);
+    };
+    window.addEventListener('smartboard_slide_speed_changed', syncSpeed);
+    window.addEventListener('smartboard_slide_enabled_changed', syncEnabled);
+    return () => {
+      window.removeEventListener('smartboard_slide_speed_changed', syncSpeed);
+      window.removeEventListener('smartboard_slide_enabled_changed', syncEnabled);
+    };
+  }, []);
   const aiCallingTimerRef = useRef<any>(null);
   const lastManualQuizLaunchAtRef = useRef<number>(0);
   const boardAiSpeechStateRef = useRef<'idle' | 'calling' | 'speaking'>('idle');
@@ -2429,6 +2496,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     const maxIdx = Math.max(0, questions.length - 1);
     if (prev < maxIdx) {
       const nextIndex = prev + 1;
+      setBoardSlideDirection('next');
       activeIndexRef.current = nextIndex;
       setLocalActiveIndex(nextIndex);
       resetBoardQuestionInteractions();
@@ -2442,6 +2510,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
     const prev = activeIndexRef.current;
     if (prev > 0) {
       const prevIndex = prev - 1;
+      setBoardSlideDirection('prev');
       activeIndexRef.current = prevIndex;
       setLocalActiveIndex(prevIndex);
       resetBoardQuestionInteractions();
@@ -4873,6 +4942,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       setShowBoardFontMenu((v) => !v);
                       setShowBoardThemeMenu(false);
                       setShowBoardVoiceMenu(false);
+                      setShowBoardTransitionMenu(false);
                     }}
                     className="px-2.5 py-2 border-x border-current/15 font-bold text-xs md:text-sm flex items-center gap-1.5 hover:bg-black/10 transition-colors cursor-pointer whitespace-nowrap"
                     title={`Chọn Font chữ (${currentBoardFont.name}) & Cỡ chữ (${boardFontSize}px)`}
@@ -5035,6 +5105,126 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                 )}
               </div>
 
+              {/* Chọn Hiệu Ứng Chuyển Slide Nhanh */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBoardTransitionMenu((v) => !v);
+                    setShowBoardThemeMenu(false);
+                    setShowBoardVoiceMenu(false);
+                    setShowBoardFontMenu(false);
+                  }}
+                  className={`px-3 py-2 rounded-2xl border font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${currentBoardTheme.secondaryBtnClass}`}
+                  title={
+                    boardTransitionsEnabled
+                      ? `Hiệu ứng chuyển câu: ${getTransitionOption(boardTransitionMode).label}`
+                      : 'Hiệu ứng chuyển câu đang tắt'
+                  }
+                >
+                  <Sparkles className={`w-4 h-4 shrink-0 ${boardTransitionsEnabled ? 'text-amber-500' : 'opacity-45'}`} />
+                  <span className="hidden xl:inline">
+                    {boardTransitionsEnabled ? getTransitionOption(boardTransitionMode).shortLabel : 'Tắt hiệu ứng'}
+                  </span>
+                  <span className="xl:hidden">{boardTransitionsEnabled ? 'Hiệu ứng' : 'Đang tắt'}</span>
+                  <ChevronDown className="w-3.5 h-3.5 opacity-80" />
+                </button>
+
+                {showBoardTransitionMenu && (
+                  <div
+                    className={`absolute right-0 mt-2 w-72 rounded-2xl border p-3 z-50 space-y-2 ${currentBoardTheme.popoverClass}`}
+                  >
+                    <div className="flex items-center justify-between pb-1.5 border-b border-current/15">
+                      <span className="text-xs font-black uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Hiệu ứng chuyển câu</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowBoardTransitionMenu(false)}
+                        className="p-1 rounded-lg hover:bg-black/15 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleBoardTransitionsEnabled}
+                      className={`w-full px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                        boardTransitionsEnabled
+                          ? currentBoardTheme.isLight
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                            : 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200'
+                          : currentBoardTheme.secondaryBtnClass
+                      }`}
+                    >
+                      <span>{boardTransitionsEnabled ? 'Đang bật hiệu ứng' : 'Đã tắt hiệu ứng (êm mắt)'}</span>
+                      <span
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold ${
+                          boardTransitionsEnabled ? 'bg-emerald-500 text-white' : 'bg-slate-600 text-white'
+                        }`}
+                      >
+                        {boardTransitionsEnabled ? 'BẬT' : 'TẮT'}
+                      </span>
+                    </button>
+
+                    <div className={`space-y-1.5 ${!boardTransitionsEnabled ? 'opacity-55' : ''}`}>
+                      {SLIDE_TRANSITION_OPTIONS.map((eff) => {
+                        const isSel = boardTransitionsEnabled && boardTransitionMode === eff.id;
+                        return (
+                          <button
+                            key={eff.id}
+                            type="button"
+                            onClick={() => handleSelectBoardTransition(eff.id)}
+                            className={`w-full text-left px-3 py-2 rounded-xl border text-xs transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                              isSel
+                                ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-sm'
+                                : currentBoardTheme.isLight
+                                ? 'bg-slate-50 hover:bg-indigo-50 border-slate-200 text-slate-800'
+                                : 'bg-white/5 hover:bg-white/15 border-white/15 text-white'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="font-bold truncate">{eff.label}</div>
+                              <div className={`text-[10px] truncate ${isSel ? 'text-slate-800' : 'opacity-70'}`}>
+                                {eff.description}
+                              </div>
+                            </div>
+                            {isSel && <Check className="w-4 h-4 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className={`pt-2 border-t border-current/15 space-y-1.5 ${!boardTransitionsEnabled ? 'opacity-55' : ''}`}>
+                      <div className="text-[11px] font-bold opacity-80">Tốc độ chuyển câu:</div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {SLIDE_TRANSITION_SPEED_OPTIONS.map((sp) => {
+                          const isSel = boardTransitionSpeed === sp.id;
+                          return (
+                            <button
+                              key={sp.id}
+                              type="button"
+                              onClick={() => handleSelectBoardTransitionSpeed(sp.id)}
+                              className={`px-2 py-1.5 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                                isSel
+                                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-sm'
+                                  : currentBoardTheme.isLight
+                                  ? 'bg-slate-50 hover:bg-indigo-50 border-slate-200 text-slate-800'
+                                  : 'bg-white/5 hover:bg-white/15 border-white/15 text-white'
+                              }`}
+                              title={sp.label}
+                            >
+                              {sp.shortLabel}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Chọn Giao Diện Slide PowerPoint & Bố Cục */}
               <div className="relative">
                 <button
@@ -5043,6 +5233,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                     setShowBoardThemeMenu((v) => !v);
                     setShowBoardVoiceMenu(false);
                     setShowBoardFontMenu(false);
+                    setShowBoardTransitionMenu(false);
                   }}
                   className={`px-3 py-2 rounded-2xl border font-bold text-xs md:text-sm flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${currentBoardTheme.secondaryBtnClass}`}
                   title="Chọn giao diện Slide PowerPoint & bố cục trình chiếu"
@@ -5106,6 +5297,70 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                               <div className={`text-[10px] truncate ${isSel ? 'text-slate-800' : 'opacity-70'}`}>
                                 {lay.sub}
                               </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Slide Transition Effect Picker inside Theme Modal */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[11px] font-bold uppercase tracking-wider opacity-75">
+                          Hiệu ứng chuyển tiếp câu hỏi:
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleToggleBoardTransitionsEnabled}
+                          className={`px-2.5 py-0.5 rounded-lg border text-[11px] font-bold cursor-pointer transition-colors ${
+                            boardTransitionsEnabled
+                              ? 'bg-emerald-500 text-white border-emerald-400'
+                              : currentBoardTheme.secondaryBtnClass
+                          }`}
+                        >
+                          {boardTransitionsEnabled ? 'Đang bật' : 'Đang tắt'}
+                        </button>
+                      </div>
+                      <div className={`flex flex-wrap gap-1.5 ${!boardTransitionsEnabled ? 'opacity-55' : ''}`}>
+                        {SLIDE_TRANSITION_OPTIONS.map((eff) => {
+                          const isSel = boardTransitionsEnabled && boardTransitionMode === eff.id;
+                          return (
+                            <button
+                              key={eff.id}
+                              type="button"
+                              onClick={() => handleSelectBoardTransition(eff.id)}
+                              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                                isSel
+                                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-sm'
+                                  : currentBoardTheme.isLight
+                                  ? 'bg-slate-50 hover:bg-indigo-50 border-slate-200 text-slate-800'
+                                  : 'bg-white/5 hover:bg-white/15 border-white/15 text-white'
+                              }`}
+                              title={eff.description}
+                            >
+                              {eff.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className={`flex flex-wrap items-center gap-1.5 pt-1 ${!boardTransitionsEnabled ? 'opacity-55' : ''}`}>
+                        <span className="text-[11px] font-bold opacity-75 mr-1">Tốc độ:</span>
+                        {SLIDE_TRANSITION_SPEED_OPTIONS.map((sp) => {
+                          const isSel = boardTransitionSpeed === sp.id;
+                          return (
+                            <button
+                              key={sp.id}
+                              type="button"
+                              onClick={() => handleSelectBoardTransitionSpeed(sp.id)}
+                              className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                                isSel
+                                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-sm'
+                                  : currentBoardTheme.isLight
+                                  ? 'bg-slate-50 hover:bg-indigo-50 border-slate-200 text-slate-800'
+                                  : 'bg-white/5 hover:bg-white/15 border-white/15 text-white'
+                              }`}
+                            >
+                              {sp.label}
                             </button>
                           );
                         })}
@@ -5237,6 +5492,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   setShowBoardThemeMenu(false);
                   setShowBoardVoiceMenu(false);
                   setShowBoardFontMenu(false);
+                  setShowBoardTransitionMenu(false);
                   if (nextVal) {
                     try {
                       const targetEl = document.documentElement;
@@ -5362,13 +5618,14 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                   </div>
                 )}
 
-                {/* Slide Body Wrapper (Supports Classic Stack, Split 16:9, and Focus Theater Layouts) */}
+                {/* Slide Body Wrapper (Supports Classic Stack, Split 16:9, and Focus Theater Layouts + Slide Transitions) */}
                 <div
-                  className={
+                  key={`${currentQ.id || activeIndex}_${boardTransitionMode}`}
+                  className={`${
                     boardLayout === 'split'
                       ? 'grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-start flex-1'
                       : 'space-y-5 flex-1 flex flex-col justify-center'
-                  }
+                  } ${getSlideTransitionClass(boardTransitionMode, boardSlideDirection, boardTransitionsEnabled)}`}
                 >
                   {/* 1. Clear & Prominent Question Card (ĐỀ BÀI) */}
                   <div className={boardLayout === 'split' ? 'lg:col-span-6' : 'w-full'}>
@@ -5872,6 +6129,7 @@ export const LiveQuizHub: React.FC<LiveQuizHubProps> = ({
                       <button
                         key={q.id || idx}
                         onClick={() => {
+                          setBoardSlideDirection(idx < activeIndex ? 'prev' : 'next');
                           setLocalActiveIndex(idx);
                           onControlRoom(idx, true);
                           resetBoardQuestionInteractions();

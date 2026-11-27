@@ -33,6 +33,22 @@ import { exportOriginalLessonFile } from '../utils/exportUtils';
 import { MathFormulaRenderer } from './MathFormulaRenderer';
 import { decodeXmlEntities, convertOmmlToLatex } from '../utils/fileParser';
 import { toggleCasioCalculator, useCasioGlobalState } from '../utils/casioEvents';
+import {
+  getSavedSlideTransition,
+  getSavedSlideTransitionsEnabled,
+  getSavedSlideTransitionSpeed,
+  getSlideTransitionClass,
+  getTransitionOption,
+  getTransitionSpeedMs,
+  saveSlideTransition,
+  saveSlideTransitionsEnabled,
+  saveSlideTransitionSpeed,
+  SLIDE_TRANSITION_OPTIONS,
+  SLIDE_TRANSITION_SPEED_OPTIONS,
+  SlideDirection,
+  SlideTransitionMode,
+  SlideTransitionSpeed,
+} from '../utils/slideTransitions';
 
 /**
  * Ensures all text in PPTX rendered DOM has high contrast and is completely visible.
@@ -133,9 +149,18 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
   const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
   const [blackoutMode, setBlackoutMode] = useState<'none' | 'black' | 'white'>('none');
   const [showControls, setShowControls] = useState<boolean>(true);
-  const [slideTransition, setSlideTransition] = useState<'slide' | 'fade' | 'zoom'>('slide');
-  const [slideDirection, setSlideDirection] = useState<'next' | 'prev'>('next');
+  const [slideTransition, setSlideTransition] = useState<SlideTransitionMode>(() =>
+    getSavedSlideTransition('smartboard_ppt_slide_transition', 'slide')
+  );
+  const [transitionSpeed, setTransitionSpeed] = useState<SlideTransitionSpeed>(() =>
+    getSavedSlideTransitionSpeed('smooth')
+  );
+  const [transitionsEnabled, setTransitionsEnabled] = useState<boolean>(() =>
+    getSavedSlideTransitionsEnabled(true)
+  );
+  const [slideDirection, setSlideDirection] = useState<SlideDirection>('next');
   const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
+  const [showTransitionMenu, setShowTransitionMenu] = useState<boolean>(false);
   const [showTransitionToast, setShowTransitionToast] = useState<string | null>(null);
 
   // Sync slides data when lesson changes
@@ -445,21 +470,53 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
     if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }, []);
 
-  // Toggle transition style with toast confirmation
-  const toggleSlideTransition = useCallback(() => {
-    const order: Array<'slide' | 'fade' | 'zoom'> = ['slide', 'fade', 'zoom'];
-    const currentIdx = order.indexOf(slideTransition);
-    const nextTransition = order[(currentIdx + 1) % order.length];
+  // Select or cycle transition style with toast confirmation
+  const handleSelectTransition = useCallback((nextTransition: SlideTransitionMode) => {
     setSlideTransition(nextTransition);
+    if (!transitionsEnabled) {
+      setTransitionsEnabled(true);
+      saveSlideTransitionsEnabled(true);
+    }
+    saveSlideTransition('smartboard_ppt_slide_transition', nextTransition);
+    setShowTransitionMenu(false);
+    const opt = getTransitionOption(nextTransition);
+    setShowTransitionToast(`Hiệu ứng: ${opt.label}`);
+    setTimeout(() => setShowTransitionToast(null), 1800);
+  }, [transitionsEnabled]);
 
-    const labels = {
-      slide: 'Hiệu ứng: Trượt Mượt (Slide)',
-      fade: 'Hiệu ứng: Mờ Dần Êm Ái (Fade)',
-      zoom: 'Hiệu ứng: Thu Phóng Sư Phạm (Zoom)',
+  const handleSelectTransitionSpeed = useCallback((speed: SlideTransitionSpeed) => {
+    setTransitionSpeed(speed);
+    if (!transitionsEnabled) {
+      setTransitionsEnabled(true);
+      saveSlideTransitionsEnabled(true);
+    }
+    saveSlideTransitionSpeed(speed);
+  }, [transitionsEnabled]);
+
+  const handleToggleTransitionsEnabled = useCallback(() => {
+    const next = !transitionsEnabled;
+    setTransitionsEnabled(next);
+    saveSlideTransitionsEnabled(next);
+    setShowTransitionToast(next ? 'Đã bật hiệu ứng chuyển slide' : 'Đã tắt hiệu ứng chuyển slide');
+    setTimeout(() => setShowTransitionToast(null), 1800);
+  }, [transitionsEnabled]);
+
+  useEffect(() => {
+    const syncSpeed = (e: Event) => {
+      const next = (e as CustomEvent<SlideTransitionSpeed>).detail;
+      if (next) setTransitionSpeed(next);
     };
-    setShowTransitionToast(labels[nextTransition]);
-    setTimeout(() => setShowTransitionToast(null), 2000);
-  }, [slideTransition]);
+    const syncEnabled = (e: Event) => {
+      const next = (e as CustomEvent<boolean>).detail;
+      if (typeof next === 'boolean') setTransitionsEnabled(next);
+    };
+    window.addEventListener('smartboard_slide_speed_changed', syncSpeed);
+    window.addEventListener('smartboard_slide_enabled_changed', syncEnabled);
+    return () => {
+      window.removeEventListener('smartboard_slide_speed_changed', syncSpeed);
+      window.removeEventListener('smartboard_slide_enabled_changed', syncEnabled);
+    };
+  }, []);
 
   // Handle slide change with smooth professional transitions
   const goToSlide = useCallback(
@@ -469,7 +526,11 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
 
       const direction = index > currentSlideIndex ? 'next' : 'prev';
       setSlideDirection(direction);
-      setIsTransitioning(true);
+      if (transitionsEnabled) {
+        setIsTransitioning(true);
+      } else {
+        setIsTransitioning(false);
+      }
 
       // If in pptx-preview mode, control previewer
       if (renderEngine === 'pptx-preview' && previewerInstanceRef.current) {
@@ -485,11 +546,14 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
       setCurrentSlideIndex(index);
       clearCanvas();
 
-      setTimeout(() => {
-        setIsTransitioning(false);
-      }, 320);
+      if (transitionsEnabled) {
+        const delayMs = getTransitionSpeedMs(transitionSpeed);
+        setTimeout(() => {
+          setIsTransitioning(false);
+        }, delayMs);
+      }
     },
-    [currentSlideIndex, renderEngine, totalSlides, clearCanvas]
+    [currentSlideIndex, renderEngine, totalSlides, clearCanvas, transitionSpeed, transitionsEnabled]
   );
 
   const nextSlide = useCallback(() => {
@@ -759,39 +823,41 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
         {/* ENGINE 1: NATIVE OPENXML DOM RENDERER (pptx-preview) */}
         <div
           ref={pptxMountRef}
-          className={`w-full h-full flex items-center justify-center transition-all duration-300 ease-out ${
+          className={`w-full h-full flex items-center justify-center transition-all ease-in-out ${
             renderEngine === 'pptx-preview' ? 'opacity-100' : 'hidden opacity-0 pointer-events-none'
           } ${
-            isTransitioning
+            isTransitioning && transitionsEnabled
               ? slideTransition === 'fade'
-                ? 'opacity-0 scale-100'
+                ? 'opacity-15 scale-100'
                 : slideTransition === 'zoom'
-                ? 'opacity-25 scale-95'
+                ? 'opacity-25 scale-98'
+                : slideTransition === 'rise'
+                ? 'opacity-25 translate-y-3'
+                : slideTransition === 'flip'
+                ? slideDirection === 'next'
+                  ? 'opacity-25 scale-99 [transform:perspective(2000px)_rotateY(4deg)_translateX(8px)]'
+                  : 'opacity-25 scale-99 [transform:perspective(2000px)_rotateY(-4deg)_translateX(-8px)]'
                 : slideDirection === 'next'
-                ? '-translate-x-12 opacity-20'
-                : 'translate-x-12 opacity-20'
-              : 'opacity-100 translate-x-0 scale-100'
+                ? '-translate-x-3.5 opacity-25'
+                : 'translate-x-3.5 opacity-25'
+              : 'opacity-100 translate-x-0 translate-y-0 scale-100 [transform:none]'
           }`}
           style={{
             maxHeight: '100%',
             maxWidth: '100%',
+            transitionDuration: transitionsEnabled ? `${getTransitionSpeedMs(transitionSpeed)}ms` : '0ms',
           }}
         />
 
         {/* ENGINE 2: SMART-DECK HIGH-CONTRAST VECTOR PRESENTATION (Optimized for 75" TV) */}
         {renderEngine === 'smart-deck' && (
           <div
-            className={`w-full h-full max-w-6xl max-h-[90vh] aspect-video m-auto bg-gradient-to-br from-slate-900 via-indigo-950/90 to-slate-950 rounded-2xl border border-indigo-500/30 p-8 md:p-14 shadow-2xl flex flex-col justify-between relative transition-all duration-300 ease-out ${
-              isTransitioning
-                ? slideTransition === 'fade'
-                  ? 'opacity-0 scale-100'
-                  : slideTransition === 'zoom'
-                  ? 'opacity-0 scale-90'
-                  : slideDirection === 'next'
-                  ? '-translate-x-16 opacity-0'
-                  : 'translate-x-16 opacity-0'
-                : 'opacity-100 translate-x-0 scale-100'
-            }`}
+            key={`smart_deck_${currentSlideIndex}_${slideTransition}`}
+            className={`w-full h-full max-w-6xl max-h-[90vh] aspect-video m-auto bg-gradient-to-br from-slate-900 via-indigo-950/90 to-slate-950 rounded-2xl border border-indigo-500/30 p-8 md:p-14 shadow-2xl flex flex-col justify-between relative ${getSlideTransitionClass(
+              slideTransition,
+              slideDirection,
+              transitionsEnabled
+            )}`}
           >
             {/* Slide Header */}
             <div>
@@ -1048,21 +1114,96 @@ export const PPTXViewer: React.FC<PPTXViewerProps> = ({
           <Moon className="w-5 h-5" />
         </button>
 
-        {/* Slide Transition Selector (Fade / Slide / Zoom) */}
-        <button
-          onClick={toggleSlideTransition}
-          className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-          title="Đổi hiệu ứng chuyển trang khi bấm Next/Prev (Trượt / Fade Mờ Dần / Zoom)"
-        >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span className="hidden sm:inline">
-            {slideTransition === 'fade'
-              ? 'Hiệu ứng: Fade'
-              : slideTransition === 'zoom'
-              ? 'Hiệu ứng: Zoom'
-              : 'Hiệu ứng: Trượt'}
-          </span>
-        </button>
+        {/* Slide Transition Selector (Slide / Fade / Zoom / Rise / Flip 3D) */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowTransitionMenu((v) => !v)}
+            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap shrink-0"
+            title="Chọn hiệu ứng chuyển slide (Trượt / Fade / Zoom / Nâng cảnh / Lật 3D)"
+          >
+            <Sparkles className={`w-4 h-4 shrink-0 ${transitionsEnabled ? 'text-amber-400' : 'opacity-45'}`} />
+            <span className="hidden sm:inline">
+              {transitionsEnabled
+                ? `Hiệu ứng: ${getTransitionOption(slideTransition).shortLabel}`
+                : 'Hiệu ứng: Đang tắt'}
+            </span>
+          </button>
+
+          {showTransitionMenu && (
+            <div className="absolute bottom-full right-0 mb-2 w-64 rounded-2xl border border-slate-700 bg-slate-900/95 text-white p-2.5 shadow-2xl backdrop-blur-md z-50 space-y-1.5">
+              <div className="text-[11px] font-bold text-amber-300 px-2 py-1 border-b border-slate-800">
+                Hiệu ứng chuyển slide PPT
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleTransitionsEnabled}
+                className={`w-full px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                  transitionsEnabled
+                    ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200'
+                    : 'bg-slate-800 border-slate-700 text-slate-300'
+                }`}
+              >
+                <span>{transitionsEnabled ? 'Đang bật hiệu ứng' : 'Đã tắt hiệu ứng'}</span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
+                    transitionsEnabled ? 'bg-emerald-500 text-white' : 'bg-slate-600 text-white'
+                  }`}
+                >
+                  {transitionsEnabled ? 'BẬT' : 'TẮT'}
+                </span>
+              </button>
+              <div className={`space-y-1 ${!transitionsEnabled ? 'opacity-55' : ''}`}>
+                {SLIDE_TRANSITION_OPTIONS.map((eff) => {
+                  const active = transitionsEnabled && slideTransition === eff.id;
+                  return (
+                    <button
+                      key={eff.id}
+                      type="button"
+                      onClick={() => handleSelectTransition(eff.id)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs transition-colors flex items-center justify-between gap-2 cursor-pointer ${
+                        active
+                          ? 'bg-amber-400 text-slate-950 font-bold'
+                          : 'hover:bg-slate-800 text-slate-200'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold truncate">{eff.label}</div>
+                        <div className={`text-[10px] truncate ${active ? 'text-slate-800' : 'text-slate-400'}`}>
+                          {eff.description}
+                        </div>
+                      </div>
+                      {active && <Check className="w-3.5 h-3.5 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className={`pt-1.5 mt-1 border-t border-slate-800 space-y-1 ${!transitionsEnabled ? 'opacity-55' : ''}`}>
+                <div className="text-[10px] font-bold text-slate-400 px-1">Tốc độ hiệu ứng:</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {SLIDE_TRANSITION_SPEED_OPTIONS.map((sp) => {
+                    const active = transitionSpeed === sp.id;
+                    return (
+                      <button
+                        key={sp.id}
+                        type="button"
+                        onClick={() => handleSelectTransitionSpeed(sp.id)}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                          active
+                            ? 'bg-amber-400 text-slate-950'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                        }`}
+                        title={sp.label}
+                      >
+                        {sp.shortLabel}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Engine switcher toggle */}
         <button

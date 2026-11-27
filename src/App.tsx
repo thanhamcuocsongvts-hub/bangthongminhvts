@@ -19,6 +19,7 @@ import { PPTPresentationMode } from './components/PPTPresentationMode';
 import { DocumentReaderView } from './components/DocumentReaderView';
 import { TouchWhiteboard } from './components/TouchWhiteboard';
 import { LiveQuizHub } from './components/LiveQuizHub';
+import { TeachingMethodHub } from './components/TeachingMethodHub';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ClassGradebook } from './components/ClassGradebook';
 import { DocumentLibrary } from './components/DocumentLibrary';
@@ -1621,7 +1622,7 @@ export default function App() {
           <div
             style={isFeatureFullscreen && isCasioDockedActive ? { transform: 'translateZ(0)' } : undefined}
             className={`flex-1 min-w-0 min-h-0 h-full relative ${
-              activeTab === 'whiteboard' || activeTab === 'reader' || activeTab === 'quiz' || activeTab === 'games'
+              activeTab === 'whiteboard' || activeTab === 'reader' || activeTab === 'quiz' || activeTab === 'methods' || activeTab === 'games'
                 ? 'overflow-hidden'
                 : 'overflow-y-auto'
             }`}
@@ -1843,6 +1844,74 @@ export default function App() {
                   } catch (e) {
                     console.warn('Sync room error', e);
                   }
+                }}
+              />
+            )}
+
+            {/* Tab: Phương Pháp Giảng Dạy & Giải Bài Toán */}
+            {activeTab === 'methods' && (
+              <TeachingMethodHub
+                teacher={activeTeacher || null}
+                currentLesson={currentLesson}
+                hasExternalSidePanel={isCasioDockedActive}
+                onOpenCasioCalculator={handleOpenCasioButton}
+                onSendExercisesToQuiz={async (newQuestions, quizTitle) => {
+                  lastRoomMutationAtRef.current = Date.now();
+                  const resolvedTitle = quizTitle || currentLesson.title;
+                  setRoomState((prev) => ({
+                    ...(prev || {
+                      pin: teacherRoomPin,
+                      title: resolvedTitle,
+                      submissions: {},
+                      isLive: true,
+                      activeQuestionIndex: 0,
+                      startedAt: new Date().toISOString(),
+                      activeStudents: [],
+                      questions: [],
+                    }),
+                    pin: teacherRoomPin,
+                    title: resolvedTitle,
+                    questions: newQuestions,
+                    activeQuestionIndex: 0,
+                    isLive: true,
+                  }));
+                  try {
+                    localStorage.setItem(teacherLiveStorageKeys.questionsKey, JSON.stringify(newQuestions));
+                    localStorage.setItem(teacherLiveStorageKeys.titleKey, resolvedTitle);
+                  } catch (_) {}
+                  try {
+                    const roomRef = doc(db, 'rooms', teacherRoomPin);
+                    safeSetDoc(roomRef, {
+                      pin: teacherRoomPin,
+                      teacherId: normalizeTeacherOwnerId(activeTeacher?.id),
+                      title: resolvedTitle,
+                      questions: newQuestions,
+                      activeQuestionIndex: 0,
+                      isLive: true,
+                      updatedAt: new Date().toISOString(),
+                    }, { merge: true }).catch(() => {});
+                  } catch (_) {}
+                  try {
+                    const postRes = await fetch('/api/rooms', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        pin: teacherRoomPin,
+                        title: resolvedTitle,
+                        questions: newQuestions,
+                      }),
+                    });
+                    if (postRes.ok) {
+                      const postData = await postRes.json();
+                      if (postData?.room) {
+                        lastRoomMutationAtRef.current = Date.now();
+                        setRoomState(postData.room);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('Sync room error', e);
+                  }
+                  setActiveTab('quiz');
                 }}
               />
             )}
@@ -2281,14 +2350,14 @@ export default function App() {
           <button
             onClick={() => window.dispatchEvent(new CustomEvent('open-mobile-more-sheet'))}
             className={`flex-1 min-h-[54px] flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer active:scale-95 ${
-              activeTab === 'reader' || activeTab === 'games' || activeTab === 'embed'
+              activeTab === 'reader' || activeTab === 'games' || activeTab === 'embed' || activeTab === 'methods'
                 ? 'text-indigo-600 font-black'
                 : 'text-slate-400 hover:text-slate-600 font-semibold'
             }`}
           >
             <div
               className={`px-3 py-1 rounded-xl transition-colors ${
-                activeTab === 'reader' || activeTab === 'games' || activeTab === 'embed'
+                activeTab === 'reader' || activeTab === 'games' || activeTab === 'embed' || activeTab === 'methods'
                   ? 'bg-indigo-50 shadow-xs'
                   : ''
               }`}

@@ -1823,5 +1823,268 @@ Trả về ĐÚNG 1 mảng JSON thuần túy gồm ${batchItems.length} phần t
     }
   }
 
+  // 6. Generate Structured Teaching Method (Phương Pháp Giảng Dạy)
+  if (url.includes('/api/ai/generate-teaching-method') && req.method === 'POST') {
+    const {
+      prompt: rawPrompt = '',
+      subject = 'Toán học',
+      grade = 'Lớp 12',
+      targetLevel = 'Chuẩn SGK (Thông hiểu - Vận dụng)',
+      exerciseCount = 4,
+      mode = 'full',
+      methodMode = 'by_type',
+      textbookLesson = '',
+      fastMode = false,
+      existingMethod = null,
+    } = req.body || {};
+
+    const cleanLesson = String(textbookLesson || '').trim();
+    const trimmedPrompt = String(rawPrompt || '').trim() || cleanLesson;
+    if (!trimmedPrompt && mode !== 'more_exercises') {
+      return res.status(400).json({ success: false, error: 'Vui lòng chọn bài học SGK hoặc nhập yêu cầu nội dung cần lập phương pháp giảng dạy.' });
+    }
+    if (!ai) {
+      return res.status(403).json({ success: false, error: 'Chưa cấu hình Gemini API Key.' });
+    }
+
+    const parseJsonObjectRobust = (rawText: string): any => {
+      if (!rawText) return null;
+      const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const candidates: string[] = [cleaned];
+      const startObj = cleaned.indexOf('{');
+      const endObj = cleaned.lastIndexOf('}');
+      if (startObj !== -1 && endObj > startObj) {
+        candidates.push(cleaned.slice(startObj, endObj + 1));
+      }
+      for (const candidate of candidates) {
+        const escaped = escapeUnescapedLatexInJsonServerless(candidate);
+        for (const variant of [escaped, candidate]) {
+          try {
+            const parsed = JSON.parse(variant);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              return parsed;
+            }
+          } catch (_) {}
+        }
+      }
+      return null;
+    };
+
+    const parseJsonArrayRobust = (rawText: string): any[] => {
+      const parsed = safeParseServerlessJsonWithLatex(rawText);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as any).exercises)) {
+        return (parsed as any).exercises;
+      }
+      return [];
+    };
+
+    const normMath = (val: any): string => (val === null || val === undefined ? '' : normalizeServerlessMathInText(String(val)));
+    const count = Math.min(Math.max(Number(exerciseCount) || 4, 2), 6);
+
+    const callModelWithFallback = async (promptText: string, systemInstruction: string, timeoutMs: number) => {
+      const modelsOrder = fastMode
+        ? (['gemini-3.1-flash-lite', 'gemini-4-hydrogen'] as const)
+        : SERVERLESS_TEXT_MODELS;
+      let lastErr: any = null;
+      for (const model of modelsOrder) {
+        try {
+          return await Promise.race([
+            ai.models.generateContent({
+              model,
+              contents: promptText,
+              config: buildServerlessModelConfig(model, {
+                responseMimeType: 'application/json',
+                systemInstruction,
+                thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+              }),
+            }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${Math.round(timeoutMs / 1000)}s for ${model}`)), timeoutMs)),
+          ]);
+        } catch (err: any) {
+          lastErr = err;
+          if (isServerlessFatalAuthErr(err?.message || String(err))) throw err;
+        }
+      }
+      throw lastErr || new Error('All models failed');
+    };
+
+    try {
+      if (mode === 'more_exercises' && existingMethod) {
+        const existingProblems = Array.isArray(existingMethod.exercises)
+          ? existingMethod.exercises.map((e: any) => e.problem).slice(0, 8)
+          : [];
+        const morePrompt = `Bạn là chuyên gia sư phạm môn ${subject} (${grade}) theo chương trình GDPT 2018 (bộ SGK Kết nối tri thức với cuộc sống).
+Dựa trên phương pháp: "${existingMethod.title || trimmedPrompt}"
+Các bước giải chuẩn: ${JSON.stringify((existingMethod.steps || []).map((s: any) => s.title))}
+Các công thức trọng tâm: ${JSON.stringify((existingMethod.formulas || []).map((f: any) => `${f.name}: ${f.expression}`))}
+Các bài đã có (KHÔNG ĐƯỢC TRÙNG LẶP): ${JSON.stringify(existingProblems)}
+
+Hãy tạo thêm ĐÚNG ${count} BÀI TẬP TƯƠNG TỰ MỚI cho học sinh luyện tập, thay đổi hoàn toàn số liệu/hàm số/ngữ cảnh, phân mức độ từ Cơ bản -> Thông hiểu -> Vận dụng.
+QUY TẮC BẮT BUỘC:
+1. Giải chính xác từng bài trước rồi mới viết "shortAnswer".
+2. Mọi công thức toán/lý/hóa bọc trong $...$, escape \\\\ trong JSON.
+3. Trả về ĐÚNG 1 mảng JSON gồm ${count} phần tử:
+[
+  {
+    "level": "Cơ bản | Thông hiểu | Vận dụng",
+    "problem": "Đề bài đầy đủ...",
+    "hint": "Gợi ý hướng đi theo các bước đã học (1-2 câu)...",
+    "solutionSteps": "Lời giải chi tiết từng bước từ đầu đến cuối...",
+    "shortAnswer": "Đáp số cuối cùng gọn, chính xác 100%"
+  }
+]`;
+
+        const resp = await callModelWithFallback(
+          morePrompt,
+          'Bạn là giáo viên giỏi chuyên môn. Tự giải cẩn thận từng bước trước khi xuất đáp án để đảm bảo độ chính xác tuyệt đối.',
+          24000
+        );
+        const arr = parseJsonArrayRobust((resp.text || '').trim());
+        if (arr.length === 0) {
+          return res.status(502).json({ success: false, error: 'AI chưa trả về được danh sách bài tập tương tự mới.' });
+        }
+        const startIdx = Array.isArray(existingMethod.exercises) ? existingMethod.exercises.length : 0;
+        const exercises = arr.map((ex: any, i: number) => ({
+          id: `ex_${Date.now()}_${i + 1}`,
+          index: startIdx + i + 1,
+          level: String(ex.level || (i === 0 ? 'Cơ bản' : i === arr.length - 1 ? 'Vận dụng' : 'Thông hiểu')),
+          problem: normMath(ex.problem || ''),
+          hint: normMath(ex.hint || ''),
+          solutionSteps: normMath(ex.solutionSteps || ''),
+          shortAnswer: normMath(ex.shortAnswer || ''),
+        }));
+        return res.status(200).json({ success: true, exercises });
+      }
+
+      const isTextbookMode = methodMode === 'by_textbook';
+      const textbookContext = isTextbookMode
+        ? `\nCHẾ ĐỘ BIÊN SOẠN: THEO BÀI HỌC SGK "KẾT NỐI TRI THỨC VỚI CUỘC SỐNG" (CHƯƠNG TRÌNH GDPT 2018).
+- Bài học SGK mục tiêu: "${cleanLesson || trimmedPrompt}" (${subject} - ${grade}).
+${rawPrompt && rawPrompt.trim() && rawPrompt.trim() !== cleanLesson ? `- Yêu cầu/trọng tâm bổ sung từ giáo viên: "${rawPrompt.trim()}".\n` : ''}- BẮT BUỘC bám sát cấu trúc, định nghĩa, định lý, ký hiệu và thuật ngữ chuẩn của bộ SGK Kết nối tri thức với cuộc sống (GDPT 2018).`
+        : `\nCHẾ ĐỘ BIÊN SOẠN: THEO DẠNG BÀI / YÊU CẦU CỤ THỂ CỦA GIÁO VIÊN (${subject} - ${grade}, chuẩn GDPT 2018).
+- Nội dung/Đề bài yêu cầu: "${trimmedPrompt}"
+- Nếu yêu cầu có chứa một đề bài cụ thể thì Ví dụ 1 BẮT BUỘC giải chính xác bài toán đó theo đúng trình tự các bước ở mục steps.`;
+
+      const fullPrompt = `Bạn là Chuyên gia Sư phạm hàng đầu Việt Nam (${subject} - ${grade}, Chương trình GDPT 2018 - bộ SGK Kết nối tri thức với cuộc sống).
+${textbookContext}
+Mức độ mục tiêu: ${targetLevel}
+
+Hãy biên soạn BỘ PHƯƠNG PHÁP GIẢNG DẠY súc tích, chuẩn mực, chính xác 100% để trình chiếu giảng trực tiếp gồm:
+1. Tổng quan nhận diện dạng bài & những sai lầm học sinh hay mắc.
+2. Trình tự các bước giải tổng quát (3 đến 5 bước rõ ràng, kèm công thức áp dụng và lưu ý).
+3. Hệ thống công thức / định lý trọng tâm (2 đến 5 công thức chuẩn).
+4. Ví dụ minh họa (1 ví dụ tiêu biểu giải chi tiết từng bước khớp hoàn toàn với trình tự ở mục 2, kèm mẹo kiểm tra bằng Casio fx-580VN X nếu phù hợp).
+5. Đúng ${count} BÀI TẬP TƯƠNG TỰ tự luyện (từ Cơ bản đến Thông hiểu, Vận dụng), mỗi bài có gợi ý ngắn, lời giải từng bước súc tích và đáp số cuối cùng chính xác 100%.
+
+QUY TẮC KỸ THUẬT BẮT BUỘC:
+- Mọi công thức Toán/Lý/Hóa/Sinh dùng LaTeX chuẩn SGK Việt Nam bọc trong $...$ (vectơ dùng \\overrightarrow{AB}, phân số \\frac{a}{b}). Trong JSON phải escape dấu \\ thành \\\\.
+- Tự tính toán cẩn thận từ đầu đến cuối trước khi xuất đáp số.
+- Trả về ĐÚNG 1 đối tượng JSON hợp lệ theo mẫu:
+{
+  "title": "Tên phương pháp / Bài học ngắn gọn",
+  "recognitionSigns": "Dấu hiệu nhận biết dạng bài (hoặc trọng tâm kiến thức bài học SGK)...",
+  "learningObjective": "Mục tiêu kiến thức & kỹ năng...",
+  "commonMistakes": ["Sai lầm hay gặp 1...", "Sai lầm hay gặp 2..."],
+  "steps": [
+    { "stepNumber": 1, "title": "Tên bước 1", "actionGuide": "Hướng dẫn thực hiện (1-3 câu)...", "formula": "$...$", "keyNote": "Mẹo nhớ / bẫy..." }
+  ],
+  "formulas": [
+    { "name": "Tên công thức", "expression": "$...$", "condition": "Điều kiện áp dụng..." }
+  ],
+  "examples": [
+    {
+      "title": "Ví dụ minh họa 1",
+      "problem": "Đề bài ví dụ...",
+      "stepByStepSolution": [ { "stepLabel": "Bước 1", "content": "...", "resultFormula": "$...$" } ],
+      "finalAnswer": "Đáp số cuối cùng...",
+      "teacherTip": "Mẹo giảng hoặc kiểm tra bằng Casio fx-580VN X..."
+    }
+  ],
+  "exercises": [
+    { "level": "Cơ bản", "problem": "Đề bài...", "hint": "Gợi ý...", "solutionSteps": "Lời giải chi tiết...", "shortAnswer": "Đáp số" }
+  ]
+}`;
+
+      const resp = await callModelWithFallback(
+        fullPrompt,
+        'Bạn là Chuyên gia Khảo thí & Sư phạm Bộ GD&ĐT (SGK Kết nối tri thức 2018). Trả về đúng 1 JSON object hợp lệ, công thức LaTeX chuẩn SGK và lời giải chính xác tuyệt đối.',
+        24000
+      );
+      const parsed = parseJsonObjectRobust((resp.text || '').trim());
+      if (!parsed) {
+        return res.status(502).json({ success: false, error: 'AI chưa trả về đúng định dạng phương pháp giảng dạy.' });
+      }
+      const now = new Date().toISOString();
+      const methodPlan = {
+        id: `method_${Date.now()}`,
+        title: normMath(parsed.title || cleanLesson || trimmedPrompt.slice(0, 120)),
+        prompt: isTextbookMode && cleanLesson
+          ? `${cleanLesson}${rawPrompt && rawPrompt.trim() && rawPrompt.trim() !== cleanLesson ? ` — ${rawPrompt.trim()}` : ''} (SGK Kết nối tri thức)`
+          : trimmedPrompt,
+        subject,
+        grade,
+        targetLevel,
+        recognitionSigns: normMath(parsed.recognitionSigns || ''),
+        learningObjective: normMath(parsed.learningObjective || ''),
+        commonMistakes: Array.isArray(parsed.commonMistakes) ? parsed.commonMistakes.map((m: any) => normMath(m)).filter(Boolean) : [],
+        steps: Array.isArray(parsed.steps)
+          ? parsed.steps.map((s: any, idx: number) => ({
+              stepNumber: Number(s.stepNumber) || idx + 1,
+              title: normMath(s.title || `Bước ${idx + 1}`),
+              actionGuide: normMath(s.actionGuide || s.description || ''),
+              formula: normMath(s.formula || ''),
+              keyNote: normMath(s.keyNote || ''),
+            }))
+          : [],
+        formulas: Array.isArray(parsed.formulas)
+          ? parsed.formulas.map((f: any) => ({
+              name: normMath(f.name || 'Công thức trọng tâm'),
+              expression: normMath(f.expression || f.formula || ''),
+              condition: normMath(f.condition || ''),
+            }))
+          : [],
+        examples: Array.isArray(parsed.examples)
+          ? parsed.examples.map((ex: any, idx: number) => ({
+              title: normMath(ex.title || `Ví dụ minh họa ${idx + 1}`),
+              problem: normMath(ex.problem || ''),
+              stepByStepSolution: Array.isArray(ex.stepByStepSolution)
+                ? ex.stepByStepSolution.map((st: any, sIdx: number) => ({
+                    stepLabel: normMath(st.stepLabel || `Bước ${sIdx + 1}`),
+                    content: normMath(st.content || ''),
+                    resultFormula: normMath(st.resultFormula || ''),
+                  }))
+                : [],
+              finalAnswer: normMath(ex.finalAnswer || ''),
+              teacherTip: normMath(ex.teacherTip || ''),
+            }))
+          : [],
+        exercises: Array.isArray(parsed.exercises)
+          ? parsed.exercises.map((ex: any, idx: number) => ({
+              id: `ex_${Date.now()}_${idx + 1}`,
+              index: idx + 1,
+              level: String(ex.level || (idx === 0 ? 'Cơ bản' : idx === parsed.exercises.length - 1 ? 'Vận dụng' : 'Thông hiểu')),
+              problem: normMath(ex.problem || ''),
+              hint: normMath(ex.hint || ''),
+              solutionSteps: normMath(ex.solutionSteps || ''),
+              shortAnswer: normMath(ex.shortAnswer || ''),
+            }))
+          : [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      return res.status(200).json({ success: true, method: methodPlan });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      return res.status(isServerlessFatalAuthErr(msg) ? 403 : 502).json({
+        success: false,
+        error: isServerlessFatalAuthErr(msg)
+          ? 'Chưa cấu hình hoặc sai Gemini API Key.'
+          : `Không thể tạo phương pháp giảng dạy lúc này (${msg.slice(0, 120)}).`,
+      });
+    }
+  }
+
   return res.status(404).json({ error: 'Endpoint not found on serverless router' });
 }
+

@@ -155,6 +155,7 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
 }) => {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageDirection, setPageDirection] = useState<'next' | 'prev'>('next');
   const [pageInputVal, setPageInputVal] = useState<string>('1');
   const [isEditingPage, setIsEditingPage] = useState<boolean>(false);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -524,6 +525,9 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
   // Jump to a specific page
   const handleJumpToPage = (target: number) => {
     const validPage = Math.min(numPages, Math.max(1, target));
+    if (validPage !== currentPage) {
+      setPageDirection(validPage < currentPage ? 'prev' : 'next');
+    }
     setCurrentPage(validPage);
     setPageInputVal(String(validPage));
     setIsEditingPage(false);
@@ -1035,7 +1039,10 @@ export const PDFCanvasViewer: React.FC<PDFCanvasViewerProps> = ({
         {viewMode === 'single' ? (
           <div className="relative my-auto flex flex-col items-center transition-transform duration-100 ease-out select-text">
             <div
-              className="rounded-xl shadow-2xl bg-white overflow-hidden relative select-text"
+              key={`pdf_single_${currentPage}_${rotation}`}
+              className={`rounded-xl shadow-2xl bg-white overflow-hidden relative select-text ${
+                pageDirection === 'prev' ? 'animate-slide-tr-left' : 'animate-slide-tr-right'
+              }`}
               style={{
                 boxShadow: '0 20px 50px rgba(0,0,0,0.85)',
                 width: `${pageWidth}px`,

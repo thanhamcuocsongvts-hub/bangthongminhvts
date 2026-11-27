@@ -481,3 +481,59 @@ export interface QuizCritiqueItem {
   dismissed?: boolean;
 }
 
+export interface TeachingMethodStep {
+  stepNumber: number;
+  title: string;
+  actionGuide: string;
+  formula?: string;
+  keyNote?: string;
+}
+
+export interface TeachingMethodFormula {
+  name: string;
+  expression: string;
+  condition?: string;
+}
+
+export interface TeachingMethodExampleStep {
+  stepLabel: string;
+  content: string;
+  resultFormula?: string;
+}
+
+export interface TeachingMethodExample {
+  title: string;
+  problem: string;
+  stepByStepSolution: TeachingMethodExampleStep[];
+  finalAnswer: string;
+  teacherTip?: string;
+}
+
+export interface TeachingMethodExercise {
+  id: string;
+  index: number;
+  level: string;
+  problem: string;
+  hint?: string;
+  solutionSteps: string;
+  shortAnswer: string;
+}
+
+export interface TeachingMethodPlan {
+  id: string;
+  teacherId?: string;
+  title: string;
+  prompt: string;
+  subject: string;
+  grade: string;
+  targetLevel: string;
+  recognitionSigns: string;
+  learningObjective: string;
+  commonMistakes: string[];
+  steps: TeachingMethodStep[];
+  formulas: TeachingMethodFormula[];
+  examples: TeachingMethodExample[];
+  exercises: TeachingMethodExercise[];
+  createdAt: string;
+  updatedAt: string;
+}

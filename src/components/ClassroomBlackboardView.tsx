@@ -323,6 +323,7 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
   const [cornerDocTab, setCornerDocTab] = useState<'original' | 'slides' | 'content' | 'ai_extract'>('original');
   const [cornerDocSize, setCornerDocSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [cornerDocSlideIdx, setCornerDocSlideIdx] = useState<number>(0);
+  const [cornerDocSlideDirection, setCornerDocSlideDirection] = useState<'next' | 'prev'>('next');
   const [isCornerDocMinimized, setIsCornerDocMinimized] = useState<boolean>(false);
   const [cornerDocZoom, setCornerDocZoom] = useState<number>(100);
 
@@ -4073,43 +4074,54 @@ export const ClassroomBlackboardView: React.FC<ClassroomBlackboardViewProps> = (
                       </span>
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => setCornerDocSlideIdx((prev) => Math.max(0, prev - 1))}
+                          onClick={() => {
+                            setCornerDocSlideDirection('prev');
+                            setCornerDocSlideIdx((prev) => Math.max(0, prev - 1));
+                          }}
                           disabled={cornerDocSlideIdx === 0}
-                          className="p-1 rounded bg-white/10 disabled:opacity-30 hover:bg-white/20"
+                          className="p-1 rounded bg-white/10 disabled:opacity-30 hover:bg-white/20 cursor-pointer"
                         >
                           <ChevronLeft className="w-3 h-3" />
                         </button>
                         <button
-                          onClick={() =>
+                          onClick={() => {
+                            setCornerDocSlideDirection('next');
                             setCornerDocSlideIdx((prev) =>
                               Math.min(currentLesson.slides.length - 1, prev + 1)
-                            )
-                          }
+                            );
+                          }}
                           disabled={cornerDocSlideIdx === currentLesson.slides.length - 1}
-                          className="p-1 rounded bg-white/10 disabled:opacity-30 hover:bg-white/20"
+                          className="p-1 rounded bg-white/10 disabled:opacity-30 hover:bg-white/20 cursor-pointer"
                         >
                           <ChevronRight className="w-3 h-3" />
                         </button>
                       </div>
                     </div>
 
-                    <div>
-                      <h4 className="font-black text-amber-300 text-xs mb-1">
-                        {currentLesson.slides[cornerDocSlideIdx].title}
-                      </h4>
-                      <p className="text-[11px] text-slate-300 whitespace-pre-line leading-relaxed">
-                        {currentLesson.slides[cornerDocSlideIdx].content}
-                      </p>
-                    </div>
-
-                    {currentLesson.slides[cornerDocSlideIdx].formula && (
-                      <div className="p-2 rounded-xl bg-indigo-950/90 border border-indigo-400/40 text-center font-mono text-emerald-300">
-                        <MathFormulaRenderer
-                          content={currentLesson.slides[cornerDocSlideIdx].formula!}
-                          isBlock
-                        />
+                    <div
+                      key={cornerDocSlideIdx}
+                      className={`space-y-2 ${
+                        cornerDocSlideDirection === 'prev' ? 'animate-slide-tr-left' : 'animate-slide-tr-right'
+                      }`}
+                    >
+                      <div>
+                        <h4 className="font-black text-amber-300 text-xs mb-1">
+                          {currentLesson.slides[cornerDocSlideIdx].title}
+                        </h4>
+                        <p className="text-[11px] text-slate-300 whitespace-pre-line leading-relaxed">
+                          {currentLesson.slides[cornerDocSlideIdx].content}
+                        </p>
                       </div>
-                    )}
+
+                      {currentLesson.slides[cornerDocSlideIdx].formula && (
+                        <div className="p-2 rounded-xl bg-indigo-950/90 border border-indigo-400/40 text-center font-mono text-emerald-300">
+                          <MathFormulaRenderer
+                            content={currentLesson.slides[cornerDocSlideIdx].formula!}
+                            isBlock
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 

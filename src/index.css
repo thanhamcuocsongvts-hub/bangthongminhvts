@@ -241,4 +241,272 @@
   font-family: 'Charm', 'Dancing Script', 'Caveat', cursive, sans-serif;
 }
 
+/* Additional Curated Presentation Templates */
+.blueprint-stem-bg {
+  background-color: #07192f;
+  background-size: 64px 64px, 64px 64px, 16px 16px, 16px 16px, 100% 100%;
+  background-image:
+    linear-gradient(to right, rgba(56, 189, 248, 0.14) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.14) 1px, transparent 1px),
+    linear-gradient(to right, rgba(56, 189, 248, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.05) 1px, transparent 1px),
+    radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.18) 0%, rgba(7, 25, 47, 0.96) 75%);
+}
+
+.olympia-arena-bg {
+  background-color: #091128;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(245, 158, 11, 0.18) 0%, transparent 65%),
+    radial-gradient(ellipse 65% 50% at 50% 100%, rgba(37, 99, 235, 0.22) 0%, transparent 70%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 48px 48px, 48px 48px;
+}
+
+.editorial-ivory-bg {
+  background-color: #faf6ef;
+  background-image:
+    radial-gradient(rgba(180, 83, 9, 0.07) 1px, transparent 0),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(244, 236, 222, 0.55) 100%);
+  background-size: 28px 28px, 100% 100%;
+}
+
+.sakura-pastel-bg {
+  background-color: #fffaf5;
+  background-image:
+    radial-gradient(circle at 12% 18%, rgba(251, 146, 60, 0.12) 0%, transparent 42%),
+    radial-gradient(circle at 88% 82%, rgba(20, 184, 166, 0.11) 0%, transparent 45%);
+}
+
+.swiss-minimal-bg {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.botanical-emerald-bg {
+  background-color: #eef6f1;
+  background-image:
+    radial-gradient(circle at 15% 15%, rgba(16, 185, 129, 0.13) 0%, transparent 45%),
+    radial-gradient(circle at 85% 85%, rgba(217, 119, 6, 0.09) 0%, transparent 42%);
+}
+
+/* Step-by-Step Presentation Stage Animations (Compositor-only transform & opacity, ultra-calm eye-friendly pacing) */
+@keyframes method-slide-in-right {
+  0% {
+    opacity: 0.25;
+    transform: translate3d(14px, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes method-slide-in-left {
+  0% {
+    opacity: 0.25;
+    transform: translate3d(-14px, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes method-slide-zoom-in {
+  0% {
+    opacity: 0.25;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes method-slide-rise-in {
+  0% {
+    opacity: 0.25;
+    transform: translate3d(0, 12px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes method-step-reveal {
+  0% {
+    opacity: 0.25;
+    transform: translate3d(0, 6px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.animate-method-slide-right {
+  animation: method-slide-in-right var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-method-slide-left {
+  animation: method-slide-in-left var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-method-slide-zoom {
+  animation: method-slide-zoom-in var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-method-slide-rise {
+  animation: method-slide-rise-in var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-method-step-reveal {
+  animation: method-step-reveal var(--slide-step-duration, 950ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-method-slide-right,
+  .animate-method-slide-left,
+  .animate-method-slide-zoom,
+  .animate-method-slide-rise,
+  .animate-method-step-reveal,
+  .animate-slide-tr-fade,
+  .animate-slide-tr-right,
+  .animate-slide-tr-left,
+  .animate-slide-tr-zoom,
+  .animate-slide-tr-rise,
+  .animate-slide-tr-flip-next,
+  .animate-slide-tr-flip-prev {
+    animation: none !important;
+  }
+}
+
+html[data-slide-transitions="off"] .animate-method-slide-right,
+html[data-slide-transitions="off"] .animate-method-slide-left,
+html[data-slide-transitions="off"] .animate-method-slide-zoom,
+html[data-slide-transitions="off"] .animate-method-slide-rise,
+html[data-slide-transitions="off"] .animate-method-step-reveal,
+html[data-slide-transitions="off"] .animate-slide-tr-fade,
+html[data-slide-transitions="off"] .animate-slide-tr-right,
+html[data-slide-transitions="off"] .animate-slide-tr-left,
+html[data-slide-transitions="off"] .animate-slide-tr-zoom,
+html[data-slide-transitions="off"] .animate-slide-tr-rise,
+html[data-slide-transitions="off"] .animate-slide-tr-flip-next,
+html[data-slide-transitions="off"] .animate-slide-tr-flip-prev {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Unified Slide Transitions Suite across all Presentation Views (Compositor-only, ultra-slow & eye-comfortable) */
+@keyframes slide-tr-fade-in {
+  0% {
+    opacity: 0.15;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-tr-in-right {
+  0% {
+    opacity: 0.25;
+    transform: translate3d(14px, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes slide-tr-in-left {
+  0% {
+    opacity: 0.25;
+    transform: translate3d(-14px, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes slide-tr-zoom-in {
+  0% {
+    opacity: 0.2;
+    transform: scale(0.978);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-tr-rise-in {
+  0% {
+    opacity: 0.2;
+    transform: translate3d(0, 12px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes slide-tr-flip-next {
+  0% {
+    opacity: 0.25;
+    transform: perspective(2000px) rotateY(4deg) translate3d(8px, 0, 0) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(2000px) rotateY(0deg) translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes slide-tr-flip-prev {
+  0% {
+    opacity: 0.25;
+    transform: perspective(2000px) rotateY(-4deg) translate3d(-8px, 0, 0) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(2000px) rotateY(0deg) translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.animate-slide-tr-fade {
+  animation: slide-tr-fade-in var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-slide-tr-right {
+  animation: slide-tr-in-right var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-slide-tr-left {
+  animation: slide-tr-in-left var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-slide-tr-zoom {
+  animation: slide-tr-zoom-in var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-slide-tr-rise {
+  animation: slide-tr-rise-in var(--slide-tr-duration, 1400ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-slide-tr-flip-next {
+  transform-origin: center center;
+  animation: slide-tr-flip-next var(--slide-tr-flip-duration, 1600ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+.animate-slide-tr-flip-prev {
+  transform-origin: center center;
+  animation: slide-tr-flip-prev var(--slide-tr-flip-duration, 1600ms) cubic-bezier(0.42, 0, 0.2, 1) both;
+}
+
+
 

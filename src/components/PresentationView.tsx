@@ -42,6 +42,20 @@ import { TeacherFileManager } from './TeacherFileManager';
 import { ScopeConstraintModal, ScopeActionType } from './ScopeConstraintModal';
 import { parseUploadedFileToLesson } from '../utils/fileParser';
 import { toggleCasioCalculator, useCasioGlobalState } from '../utils/casioEvents';
+import {
+  getSavedSlideTransition,
+  getSavedSlideTransitionsEnabled,
+  getSavedSlideTransitionSpeed,
+  getSlideTransitionClass,
+  saveSlideTransition,
+  saveSlideTransitionsEnabled,
+  saveSlideTransitionSpeed,
+  SLIDE_TRANSITION_OPTIONS,
+  SLIDE_TRANSITION_SPEED_OPTIONS,
+  SlideDirection,
+  SlideTransitionMode,
+  SlideTransitionSpeed,
+} from '../utils/slideTransitions';
 
 interface PresentationViewProps {
   lesson: LessonDoc;
@@ -110,6 +124,16 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
       return 'swiss_white';
     }
   });
+  const [slideTransitionMode, setSlideTransitionMode] = useState<SlideTransitionMode>(() =>
+    getSavedSlideTransition('smartboard_doc_slide_transition', 'slide')
+  );
+  const [slideTransitionSpeed, setSlideTransitionSpeed] = useState<SlideTransitionSpeed>(() =>
+    getSavedSlideTransitionSpeed('smooth')
+  );
+  const [slideTransitionsEnabled, setSlideTransitionsEnabled] = useState<boolean>(() =>
+    getSavedSlideTransitionsEnabled(true)
+  );
+  const [slideDirection, setSlideDirection] = useState<SlideDirection>('next');
 
   const DOC_SLIDE_FONTS = [
     { id: 'be_vietnam', name: 'Be Vietnam Pro', family: "'Be Vietnam Pro', sans-serif" },
@@ -235,6 +259,44 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
     setSlideThemeId(id);
     try { localStorage.setItem('smartboard_doc_slide_theme', id); } catch (_) {}
   };
+  const updateSlideTransition = (mode: SlideTransitionMode) => {
+    setSlideTransitionMode(mode);
+    if (!slideTransitionsEnabled) {
+      setSlideTransitionsEnabled(true);
+      saveSlideTransitionsEnabled(true);
+    }
+    saveSlideTransition('smartboard_doc_slide_transition', mode);
+  };
+  const updateSlideTransitionSpeed = (speed: SlideTransitionSpeed) => {
+    setSlideTransitionSpeed(speed);
+    if (!slideTransitionsEnabled) {
+      setSlideTransitionsEnabled(true);
+      saveSlideTransitionsEnabled(true);
+    }
+    saveSlideTransitionSpeed(speed);
+  };
+  const toggleSlideTransitionsEnabled = () => {
+    const next = !slideTransitionsEnabled;
+    setSlideTransitionsEnabled(next);
+    saveSlideTransitionsEnabled(next);
+  };
+
+  useEffect(() => {
+    const syncSpeed = (e: Event) => {
+      const next = (e as CustomEvent<SlideTransitionSpeed>).detail;
+      if (next) setSlideTransitionSpeed(next);
+    };
+    const syncEnabled = (e: Event) => {
+      const next = (e as CustomEvent<boolean>).detail;
+      if (typeof next === 'boolean') setSlideTransitionsEnabled(next);
+    };
+    window.addEventListener('smartboard_slide_speed_changed', syncSpeed);
+    window.addEventListener('smartboard_slide_enabled_changed', syncEnabled);
+    return () => {
+      window.removeEventListener('smartboard_slide_speed_changed', syncSpeed);
+      window.removeEventListener('smartboard_slide_enabled_changed', syncEnabled);
+    };
+  }, []);
 
   // File Upload states
   const [isUploadingFile, setIsUploadingFile] = useState<boolean>(false);
@@ -302,11 +364,31 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             document.exitFullscreen?.().catch(() => {});
           }
         }
+      } else if (presentationMode === 'slides' && !isOverlayAnnotation) {
+        if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+          e.preventDefault();
+          setCurrentSlideIndex((prev) => {
+            if (prev < (lesson.slides?.length || 0) - 1) {
+              setSlideDirection('next');
+              return prev + 1;
+            }
+            return prev;
+          });
+        } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+          e.preventDefault();
+          setCurrentSlideIndex((prev) => {
+            if (prev > 0) {
+              setSlideDirection('prev');
+              return prev - 1;
+            }
+            return prev;
+          });
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOverlayAnnotation, isSplitMode, isFullscreen]);
+  }, [isOverlayAnnotation, isSplitMode, isFullscreen, presentationMode, lesson.slides]);
 
   const togglePresentationFullscreen = () => {
     const el = document.documentElement;
@@ -457,12 +539,14 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
 
   const nextSlide = () => {
     if (currentSlideIndex < slides.length - 1) {
+      setSlideDirection('next');
       setCurrentSlideIndex((prev) => prev + 1);
     }
   };
 
   const prevSlide = () => {
     if (currentSlideIndex > 0) {
+      setSlideDirection('prev');
       setCurrentSlideIndex((prev) => prev - 1);
     }
   };
@@ -866,6 +950,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
               <button
                 key={s.id || idx}
                 onClick={() => {
+                  setSlideDirection(idx < currentSlideIndex ? 'prev' : 'next');
                   setCurrentSlideIndex(idx);
                   setShowThumbnails(false);
                 }}
@@ -979,6 +1064,52 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
                         <div className="h-4 w-px bg-current opacity-20" />
 
                         <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={toggleSlideTransitionsEnabled}
+                            className={`px-2 py-0.5 rounded-lg border font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                              slideTransitionsEnabled
+                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                                : 'bg-slate-500/15 border-current/25 opacity-75'
+                            }`}
+                            title={slideTransitionsEnabled ? 'Bấm để tắt hiệu ứng chuyển slide' : 'Bấm để bật lại hiệu ứng chuyển slide'}
+                          >
+                            <Sparkles className={`w-3 h-3 ${slideTransitionsEnabled ? 'text-amber-500' : 'opacity-50'}`} />
+                            <span>{slideTransitionsEnabled ? 'Hiệu ứng: Bật' : 'Hiệu ứng: Tắt'}</span>
+                          </button>
+                          {slideTransitionsEnabled && (
+                            <>
+                              <select
+                                value={slideTransitionMode}
+                                onChange={(e) => updateSlideTransition(e.target.value as SlideTransitionMode)}
+                                className="bg-transparent font-bold outline-none cursor-pointer text-xs"
+                                title="Chọn hiệu ứng chuyển slide (Fade / Trượt / Zoom / Nâng cảnh / Lật 3D)"
+                              >
+                                {SLIDE_TRANSITION_OPTIONS.map((opt) => (
+                                  <option key={opt.id} value={opt.id} className="text-slate-900 bg-white">
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={slideTransitionSpeed}
+                                onChange={(e) => updateSlideTransitionSpeed(e.target.value as SlideTransitionSpeed)}
+                                className="bg-transparent font-semibold outline-none cursor-pointer text-xs opacity-90 border-l border-current/20 pl-1.5"
+                                title="Tốc độ hiệu ứng chuyển slide"
+                              >
+                                {SLIDE_TRANSITION_SPEED_OPTIONS.map((sp) => (
+                                  <option key={sp.id} value={sp.id} className="text-slate-900 bg-white">
+                                    {sp.shortLabel}
+                                  </option>
+                                ))}
+                              </select>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="h-4 w-px bg-current opacity-20" />
+
+                        <div className="flex items-center gap-1.5">
                           <Palette className="w-3.5 h-3.5 opacity-75" />
                           {Object.entries(DOC_SLIDE_THEMES).map(([id, theme]) => {
                             const active = slideThemeId === id;
@@ -1001,89 +1132,100 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
                       </div>
                     </div>
 
-                    <h1
-                      className={`font-black tracking-tight leading-tight ${activeSlideTheme.titleClass}`}
-                      style={{ fontSize: `${Math.round(slideFontSize * 1.68)}px` }}
-                    >
-                      {currentSlide.title}
-                    </h1>
-
-                    {currentSlide.subtitle && (
-                      <p
-                        className={`font-semibold ${activeSlideTheme.subtitleClass}`}
-                        style={{ fontSize: `${Math.round(slideFontSize * 1.1)}px` }}
-                      >
-                        {currentSlide.subtitle}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Main Content & Formula Display */}
-                  <div className="space-y-6 flex-1">
-                    {/* Formula Callout if exists */}
-                    {currentSlide.formula && (
-                      <div className={`p-5 rounded-2xl border-2 shadow-sm overflow-hidden ${activeSlideTheme.formulaCardClass}`}>
-                        <div className={`text-xs uppercase font-black tracking-wider mb-1.5 ${activeSlideTheme.formulaTitleClass}`}>
-                          Công thức / Định lý trọng tâm
-                        </div>
-                        <div
-                          className="font-bold py-1"
-                          style={{ fontSize: `${Math.round(slideFontSize * 1.15)}px` }}
-                        >
-                          <MathFormulaRenderer content={currentSlide.formula} isBlock={true} />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Formatted Content Paragraphs / Bullets */}
                     <div
-                      className={`space-y-4 leading-relaxed ${activeSlideTheme.bodyClass}`}
-                      style={{ fontSize: `${slideFontSize}px` }}
+                      key={`${currentSlide.id || currentSlideIndex}_${slideTransitionMode}`}
+                      className={`space-y-6 flex-1 flex flex-col justify-between ${getSlideTransitionClass(
+                        slideTransitionMode,
+                        slideDirection,
+                        slideTransitionsEnabled
+                      )}`}
                     >
-                      {currentSlide.content.split('\n').map((line, lIdx) => {
-                        if (!line.trim()) return null;
-                        const isBullet = line.trim().startsWith('•') || line.trim().startsWith('-');
-                        const cleanLine = line.replace(/^[•\-]\s*/, '');
-                        return (
-                          <div key={lIdx} className={`flex items-start gap-3 ${isBullet ? 'pl-2' : ''}`}>
-                            {isBullet && (
-                              <div className={`w-2.5 h-2.5 rounded-full mt-2.5 shrink-0 shadow-xs ${activeSlideTheme.bulletDotClass}`} />
-                            )}
-                            <div className="flex-1">
-                              <MathFormulaRenderer content={cleanLine} />
+                      <div className="space-y-3">
+                        <h1
+                          className={`font-black tracking-tight leading-tight ${activeSlideTheme.titleClass}`}
+                          style={{ fontSize: `${Math.round(slideFontSize * 1.68)}px` }}
+                        >
+                          {currentSlide.title}
+                        </h1>
+
+                        {currentSlide.subtitle && (
+                          <p
+                            className={`font-semibold ${activeSlideTheme.subtitleClass}`}
+                            style={{ fontSize: `${Math.round(slideFontSize * 1.1)}px` }}
+                          >
+                            {currentSlide.subtitle}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Main Content & Formula Display */}
+                      <div className="space-y-6 flex-1">
+                        {/* Formula Callout if exists */}
+                        {currentSlide.formula && (
+                          <div className={`p-5 rounded-2xl border-2 shadow-sm overflow-hidden ${activeSlideTheme.formulaCardClass}`}>
+                            <div className={`text-xs uppercase font-black tracking-wider mb-1.5 ${activeSlideTheme.formulaTitleClass}`}>
+                              Công thức / Định lý trọng tâm
+                            </div>
+                            <div
+                              className="font-bold py-1"
+                              style={{ fontSize: `${Math.round(slideFontSize * 1.15)}px` }}
+                            >
+                              <MathFormulaRenderer content={currentSlide.formula} isBlock={true} />
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
+                        )}
 
-                    {/* Key Takeaway Banner */}
-                    {currentSlide.keyTakeaway && (
-                      <div className={`mt-6 p-5 rounded-2xl border shadow-xs flex items-start gap-4 ${activeSlideTheme.takeawayCardClass}`}>
-                        <CheckCircle2 className="w-7 h-7 text-emerald-500 shrink-0 mt-0.5" />
-                        <div>
-                          <div className={`text-xs uppercase tracking-widest font-black mb-1 ${activeSlideTheme.takeawayTitleClass}`}>
-                            Ghi nhớ cốt lõi
+                        {/* Formatted Content Paragraphs / Bullets */}
+                        <div
+                          className={`space-y-4 leading-relaxed ${activeSlideTheme.bodyClass}`}
+                          style={{ fontSize: `${slideFontSize}px` }}
+                        >
+                          {currentSlide.content.split('\n').map((line, lIdx) => {
+                            if (!line.trim()) return null;
+                            const isBullet = line.trim().startsWith('•') || line.trim().startsWith('-');
+                            const cleanLine = line.replace(/^[•\-]\s*/, '');
+                            return (
+                              <div key={lIdx} className={`flex items-start gap-3 ${isBullet ? 'pl-2' : ''}`}>
+                                {isBullet && (
+                                  <div className={`w-2.5 h-2.5 rounded-full mt-2.5 shrink-0 shadow-xs ${activeSlideTheme.bulletDotClass}`} />
+                                )}
+                                <div className="flex-1">
+                                  <MathFormulaRenderer content={cleanLine} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Key Takeaway Banner */}
+                        {currentSlide.keyTakeaway && (
+                          <div className={`mt-6 p-5 rounded-2xl border shadow-xs flex items-start gap-4 ${activeSlideTheme.takeawayCardClass}`}>
+                            <CheckCircle2 className="w-7 h-7 text-emerald-500 shrink-0 mt-0.5" />
+                            <div>
+                              <div className={`text-xs uppercase tracking-widest font-black mb-1 ${activeSlideTheme.takeawayTitleClass}`}>
+                                Ghi nhớ cốt lõi
+                              </div>
+                              <div
+                                className={`font-semibold leading-relaxed ${activeSlideTheme.takeawayTextClass}`}
+                                style={{ fontSize: `${Math.max(16, Math.round(slideFontSize * 0.96))}px` }}
+                              >
+                                {currentSlide.keyTakeaway}
+                              </div>
+                            </div>
                           </div>
-                          <div
-                            className={`font-semibold leading-relaxed ${activeSlideTheme.takeawayTextClass}`}
-                            style={{ fontSize: `${Math.max(16, Math.round(slideFontSize * 0.96))}px` }}
-                          >
-                            {currentSlide.keyTakeaway}
-                          </div>
+                        )}
+                      </div>
+
+                      {/* Slide Footer */}
+                      <div className={`pt-5 mt-2 border-t flex items-center justify-between text-xs md:text-sm ${activeSlideTheme.footerClass}`}>
+                        <div className="flex items-center gap-2">
+                          <BookOpen className="w-4 h-4 opacity-75" />
+                          <span>Giáo viên: {lesson.author}</span>
+                        </div>
+                        <div className="font-mono opacity-75">
+                          Tivi 75&quot; Chế độ Trình Chiếu Slide
                         </div>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Slide Footer */}
-                  <div className={`pt-5 mt-2 border-t flex items-center justify-between text-xs md:text-sm ${activeSlideTheme.footerClass}`}>
-                    <div className="flex items-center gap-2">
-                      <BookOpen className="w-4 h-4 opacity-75" />
-                      <span>Giáo viên: {lesson.author}</span>
-                    </div>
-                    <div className="font-mono opacity-75">
-                      Tivi 75&quot; Chế độ Trình Chiếu Slide
                     </div>
                   </div>
                 </div>
@@ -1122,7 +1264,10 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             {slides.map((_, idx) => (
               <button
                 key={idx}
-                onClick={() => setCurrentSlideIndex(idx)}
+                onClick={() => {
+                  setSlideDirection(idx < currentSlideIndex ? 'prev' : 'next');
+                  setCurrentSlideIndex(idx);
+                }}
                 className={`h-3.5 rounded-full transition-all cursor-pointer ${
                   currentSlideIndex === idx
                     ? 'w-10 bg-indigo-500 shadow-sm'

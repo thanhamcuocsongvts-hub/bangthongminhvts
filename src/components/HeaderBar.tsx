@@ -5,7 +5,7 @@ import {
   FolderOpen, ShieldCheck, KeyRound, RefreshCw, LogOut, 
   LogIn, Dices, Type, ChevronDown, Smartphone, Menu, X,
   GraduationCap, Sparkles, Zap, Sprout, Gamepad2, Presentation,
-  Calculator, Layers
+  Calculator, Layers, Compass
 } from 'lucide-react';
 import { TextScale, TeacherProfile } from '../types';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
@@ -16,6 +16,7 @@ export type ActiveTab =
   | 'documents'
   | 'reader'
   | 'quiz'
+  | 'methods'
   | 'games'
   | 'embed';
 
@@ -110,6 +111,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     { id: 'documents', label: 'Lưu Trữ', shortLabel: 'Lưu Trữ', icon: <FolderOpen className="w-4 h-4 text-amber-400" />, desc: 'Kho Lưu Trữ & Đồng Bộ Cloud (PDF, Word, PPTX, Excel ≤ 25MB)' },
     { id: 'reader', label: 'Tài Liệu', shortLabel: 'Tài Liệu', icon: <BookOpen className="w-4 h-4 text-sky-400" />, desc: 'Đọc tài liệu gốc & trích xuất kiến thức AI' },
     { id: 'quiz', label: 'Tạo Đề', shortLabel: 'Tạo Đề', icon: <CheckSquare className="w-4 h-4 text-emerald-400" />, desc: 'Tạo đề AI, giao đề online, trình chiếu & phòng thi trực tiếp' },
+    { id: 'methods', label: 'Phương Pháp', shortLabel: 'Phương Pháp', icon: <Compass className="w-4 h-4 text-teal-400" />, desc: 'Tạo trình tự các bước giải, công thức, ví dụ minh họa & bài tập tương tự' },
     { id: 'games', label: 'Trò Chơi', shortLabel: 'Trò Chơi', icon: <Gamepad2 className="w-4 h-4 text-rose-400" />, desc: 'Game tương tác học tập, ôn luyện kiến thức' },
     { id: 'embed', label: 'Nhúng Web', shortLabel: 'Nhúng Web', icon: <Globe className="w-4 h-4 text-purple-400" />, desc: 'Video bài giảng YouTube & mô phỏng thí nghiệm' },
   ];
@@ -308,6 +310,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                                tab.id === 'documents' ? 'Kho & đồng bộ' :
                                tab.id === 'reader' ? 'Đọc & trích xuất' :
                                tab.id === 'quiz' ? 'AI & ma trận' :
+                               tab.id === 'methods' ? 'Các bước & ví dụ' :
                                tab.id === 'games' ? 'Ôn tập vui nhộn' : 'GeoGebra & PhET'}
                             </div>
                           </div>
@@ -753,8 +756,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 
       {/* 2. CENTER: DÀN TRỰC TIẾP TRÊN 1 HÀNG DUY NHẤT (flex-nowrap, justify-center, BỎ HOÀN TOÀN THANH TRƯỢT NGANG) */}
       <nav className="flex items-center flex-nowrap justify-center gap-1 xl:gap-1.5 bg-slate-800/80 p-1 rounded-2xl border border-slate-700/60 min-w-0">
-        {/* 7 Tabs chính */}
-        {tabs.slice(0, 7).map((tab) => {
+        {/* Các mục chính trên 1 hàng */}
+        {tabs.filter((t) => t.id !== 'embed').map((tab) => {
           const isActive = activeTab === tab.id;
           const isWhiteboard = tab.id === 'whiteboard';
           return (
